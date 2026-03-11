@@ -217,6 +217,14 @@ void DeckFeatureLayerVisualization::pointFeatureIdsRaw(SharedUint8Array& out) co
     writeVectorToSharedBuffer(out, aggregateBuffers_.pointFeatureIds);
 }
 
+void DeckFeatureLayerVisualization::pointBillboardsRaw(SharedUint8Array& out) const {
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pointBillboards);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pointBillboards);
+}
+
 void DeckFeatureLayerVisualization::pathPositionsRaw(SharedUint8Array& out) const {
     if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
         writeVectorToSharedBuffer(out, lowFiBuffers->pathPositions);
@@ -255,6 +263,14 @@ void DeckFeatureLayerVisualization::pathFeatureIdsRaw(SharedUint8Array& out) con
         return;
     }
     writeVectorToSharedBuffer(out, aggregateBuffers_.pathFeatureIds);
+}
+
+void DeckFeatureLayerVisualization::pathBillboardsRaw(SharedUint8Array& out) const {
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathBillboards);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathBillboards);
 }
 
 void DeckFeatureLayerVisualization::pathDashArrayRaw(SharedUint8Array& out) const {
@@ -326,6 +342,14 @@ void DeckFeatureLayerVisualization::arrowFeatureIdsRaw(SharedUint8Array& out) co
         return;
     }
     writeVectorToSharedBuffer(out, aggregateBuffers_.arrowFeatureIds);
+}
+
+void DeckFeatureLayerVisualization::arrowBillboardsRaw(SharedUint8Array& out) const {
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->arrowBillboards);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.arrowBillboards);
 }
 
 NativeJsValue DeckFeatureLayerVisualization::mergedPointFeatures() const
@@ -549,6 +573,7 @@ JsValue DeckFeatureLayerVisualization::makeMergedPointPointParams(
         {"color", rgbaBytesFromColor(color)},
         {"outlineColor", rgbaBytesFromColor(rule.outlineColor())},
         {"outlineWidth", JsValue(rule.outlineWidth())},
+        {"billboard", JsValue(resolvePointBillboard(rule))},
     });
 }
 
@@ -561,6 +586,7 @@ JsValue DeckFeatureLayerVisualization::makeMergedPointIconParams(
     auto result = makeMergedPointPointParams(xyzPos, rule, tileFeatureId, evalFun);
     result.set("width", JsValue(rule.width()));
     result.set("height", JsValue(rule.width()));
+    result.set("billboard", JsValue(resolveIconBillboard(rule)));
     if (rule.hasIconUrl()) {
         result.set("image", JsValue(rule.iconUrl(evalFun)));
     }
@@ -584,6 +610,7 @@ JsValue DeckFeatureLayerVisualization::makeMergedPointLabelParams(
         {"outlineColor", rgbaBytesFromColor(rule.labelOutlineColor())},
         {"outlineWidth", JsValue(rule.labelOutlineWidth())},
         {"scale", JsValue(rule.labelScale())},
+        {"billboard", JsValue(resolveLabelBillboard(rule))},
     });
     if (auto const& pixelOffset = rule.labelPixelOffset()) {
         result.set("pixelOffset", JsValue::List({
@@ -602,6 +629,7 @@ void DeckFeatureLayerVisualization::appendPointGeometry(
 {
     auto const color = rule.color(evalFun);
     auto const radius = std::max(0.0f, rule.width() * 0.5f);
+    auto const billboard = resolvePointBillboard(rule);
     auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
     auto appendToBuffers = [&](GeometryBuffers& buffers)
     {
@@ -616,6 +644,7 @@ void DeckFeatureLayerVisualization::appendPointGeometry(
 
         buffers.pointRadii.push_back(radius);
         buffers.pointFeatureIds.push_back(selectableFeatureId);
+        buffers.pointBillboards.push_back(billboard ? 1U : 0U);
     };
 
     if (emitToAggregateForCurrentFeatureLod()) {
@@ -692,6 +721,7 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
     bool enableDash)
 {
     const auto color = rule.color(evalFun);
+    auto const billboard = resolvePathBillboard(rule);
     auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
     auto const dashed = enableDash && rule.isDashed();
     auto const dashLength = static_cast<float>(std::max(1, rule.dashLength()));
@@ -711,6 +741,7 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
         buffers.pathWidths.push_back(width);
 
         buffers.pathFeatureIds.push_back(selectableFeatureId);
+        buffers.pathBillboards.push_back(billboard ? 1U : 0U);
 
         if (dashed) {
             buffers.pathDashArray.push_back(dashLength);
@@ -746,6 +777,7 @@ void DeckFeatureLayerVisualization::appendArrowGeometry(
     }
 
     auto const color = rule.color(evalFun);
+    auto const billboard = resolvePathBillboard(rule);
     auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
     auto const normalizedWidth = std::max(1.0f, width);
     auto appendToBuffers = [&](GeometryBuffers& buffers)
@@ -764,6 +796,7 @@ void DeckFeatureLayerVisualization::appendArrowGeometry(
 
         buffers.arrowWidths.push_back(normalizedWidth);
         buffers.arrowFeatureIds.push_back(selectableFeatureId);
+        buffers.arrowBillboards.push_back(billboard ? 1U : 0U);
     };
 
     if (emitToAggregateForCurrentFeatureLod()) {
@@ -835,6 +868,26 @@ void DeckFeatureLayerVisualization::appendArrowHeadForSegment(
     };
 
     appendArrowGeometry({left, tip, right}, rule, tileFeatureId, width, evalFun);
+}
+
+bool DeckFeatureLayerVisualization::resolvePointBillboard(FeatureStyleRule const& rule)
+{
+    return rule.billboard().value_or(false);
+}
+
+bool DeckFeatureLayerVisualization::resolvePathBillboard(FeatureStyleRule const& rule)
+{
+    return rule.billboard().value_or(false);
+}
+
+bool DeckFeatureLayerVisualization::resolveIconBillboard(FeatureStyleRule const& rule)
+{
+    return rule.billboard().value_or(true);
+}
+
+bool DeckFeatureLayerVisualization::resolveLabelBillboard(FeatureStyleRule const& rule)
+{
+    return rule.billboard().value_or(true);
 }
 
 std::uint8_t DeckFeatureLayerVisualization::toColorByte(float value)

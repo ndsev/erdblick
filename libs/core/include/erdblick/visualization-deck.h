@@ -44,12 +44,14 @@ public:
     void pointColorsRaw(SharedUint8Array& out) const;
     void pointRadiiRaw(SharedUint8Array& out) const;
     void pointFeatureIdsRaw(SharedUint8Array& out) const;
+    void pointBillboardsRaw(SharedUint8Array& out) const;
 
     void pathPositionsRaw(SharedUint8Array& out) const;
     void pathStartIndicesRaw(SharedUint8Array& out) const;
     void pathColorsRaw(SharedUint8Array& out) const;
     void pathWidthsRaw(SharedUint8Array& out) const;
     void pathFeatureIdsRaw(SharedUint8Array& out) const;
+    void pathBillboardsRaw(SharedUint8Array& out) const;
     void pathDashArrayRaw(SharedUint8Array& out) const;
     void pathDashOffsetsRaw(SharedUint8Array& out) const;
     void pathCoordinateOriginRaw(SharedUint8Array& out) const;
@@ -58,6 +60,7 @@ public:
     void arrowColorsRaw(SharedUint8Array& out) const;
     void arrowWidthsRaw(SharedUint8Array& out) const;
     void arrowFeatureIdsRaw(SharedUint8Array& out) const;
+    void arrowBillboardsRaw(SharedUint8Array& out) const;
     [[nodiscard]] NativeJsValue mergedPointFeatures() const;
     [[nodiscard]] NativeJsValue externalRelationReferences() const;
     void processResolvedExternalReferences(NativeJsValue const& resolvedReferences);
@@ -127,6 +130,10 @@ private:
         uint32_t tileFeatureId,
         float width,
         BoundEvalFun& evalFun);
+    [[nodiscard]] static bool resolvePointBillboard(FeatureStyleRule const& rule);
+    [[nodiscard]] static bool resolvePathBillboard(FeatureStyleRule const& rule);
+    [[nodiscard]] static bool resolveIconBillboard(FeatureStyleRule const& rule);
+    [[nodiscard]] static bool resolveLabelBillboard(FeatureStyleRule const& rule);
     static std::uint8_t toColorByte(float value);
     [[nodiscard]] bool lowFiBundleModeEnabled() const;
     [[nodiscard]] bool emitToAggregateForCurrentFeatureLod() const;
@@ -136,11 +143,13 @@ private:
         std::vector<uint8_t> pointColors;
         std::vector<float> pointRadii;
         std::vector<uint32_t> pointFeatureIds;
+        std::vector<uint8_t> pointBillboards;
         std::vector<float> pathPositions;
         std::vector<uint32_t> pathStartIndices;
         std::vector<uint8_t> pathColors;
         std::vector<float> pathWidths;
         std::vector<uint32_t> pathFeatureIds;
+        std::vector<uint8_t> pathBillboards;
         std::vector<float> pathDashArray;
         std::vector<float> pathDashOffsets;
         std::vector<float> arrowPositions;
@@ -148,6 +157,7 @@ private:
         std::vector<uint8_t> arrowColors;
         std::vector<float> arrowWidths;
         std::vector<uint32_t> arrowFeatureIds;
+        std::vector<uint8_t> arrowBillboards;
     };
     [[nodiscard]] static bool hasGeometry(GeometryBuffers const& buffers);
     [[nodiscard]] const GeometryBuffers* selectedLowFiBuffers() const;

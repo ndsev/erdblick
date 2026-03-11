@@ -35,12 +35,14 @@ export interface DeckTileRenderBuffers {
     pointColors: Uint8Array;
     pointRadii: Float32Array;
     pointFeatureIds: Uint32Array;
+    pointBillboards: Uint8Array;
     coordinateOrigin: Float64Array;
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
     featureIds: Uint32Array;
+    billboards: Uint8Array;
     dashArrays: Float32Array;
     dashOffsets: Float32Array;
     arrowPositions: Float32Array;
@@ -48,6 +50,7 @@ export interface DeckTileRenderBuffers {
     arrowColors: Uint8Array;
     arrowWidths: Float32Array;
     arrowFeatureIds: Uint32Array;
+    arrowBillboards: Uint8Array;
     lowFiBundles: DeckLowFiBundleBuffers[];
     mergedPointFeatures: Record<string, any[]>;
     workerTimings?: DeckWorkerTimings;
@@ -59,11 +62,13 @@ export interface DeckLowFiBundleBuffers {
     pointColors: Uint8Array;
     pointRadii: Float32Array;
     pointFeatureIds: Uint32Array;
+    pointBillboards: Uint8Array;
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
     featureIds: Uint32Array;
+    billboards: Uint8Array;
     dashArrays: Float32Array;
     dashOffsets: Float32Array;
     arrowPositions: Float32Array;
@@ -71,6 +76,7 @@ export interface DeckLowFiBundleBuffers {
     arrowColors: Uint8Array;
     arrowWidths: Float32Array;
     arrowFeatureIds: Uint32Array;
+    arrowBillboards: Uint8Array;
 }
 
 export interface DeckRenderWorkerSettings {
@@ -214,12 +220,14 @@ export class DeckRenderWorkerPool {
             pointColors: this.toUint8Array(result.pointColors),
             pointRadii: this.toFloat32Array(result.pointRadii),
             pointFeatureIds: this.toUint32Array(result.pointFeatureIds),
+            pointBillboards: this.toUint8Array(result.pointBillboards),
             coordinateOrigin: this.toFloat64Array(result.coordinateOrigin),
             positions: this.toFloat32Array(result.positions),
             startIndices: this.toUint32Array(result.startIndices),
             colors: this.toUint8Array(result.colors),
             widths: this.toFloat32Array(result.widths),
             featureIds: this.toUint32Array(result.featureIds),
+            billboards: this.toUint8Array(result.billboards),
             dashArrays: this.toFloat32Array(result.dashArrays),
             dashOffsets: this.toFloat32Array(result.dashOffsets),
             arrowPositions: this.toFloat32Array(result.arrowPositions),
@@ -227,24 +235,28 @@ export class DeckRenderWorkerPool {
             arrowColors: this.toUint8Array(result.arrowColors),
             arrowWidths: this.toFloat32Array(result.arrowWidths),
             arrowFeatureIds: this.toUint32Array(result.arrowFeatureIds),
+            arrowBillboards: this.toUint8Array(result.arrowBillboards),
             lowFiBundles: (result.lowFiBundles ?? []).map((bundle) => ({
                 lod: Number.isFinite(bundle.lod) ? Math.max(0, Math.min(7, Math.floor(bundle.lod))) : 0,
                 pointPositions: this.toFloat32Array(bundle.pointPositions),
                 pointColors: this.toUint8Array(bundle.pointColors),
                 pointRadii: this.toFloat32Array(bundle.pointRadii),
                 pointFeatureIds: this.toUint32Array(bundle.pointFeatureIds),
+                pointBillboards: this.toUint8Array(bundle.pointBillboards),
                 positions: this.toFloat32Array(bundle.positions),
                 startIndices: this.toUint32Array(bundle.startIndices),
                 colors: this.toUint8Array(bundle.colors),
                 widths: this.toFloat32Array(bundle.widths),
                 featureIds: this.toUint32Array(bundle.featureIds),
+                billboards: this.toUint8Array(bundle.billboards),
                 dashArrays: this.toFloat32Array(bundle.dashArrays),
                 dashOffsets: this.toFloat32Array(bundle.dashOffsets),
                 arrowPositions: this.toFloat32Array(bundle.arrowPositions),
                 arrowStartIndices: this.toUint32Array(bundle.arrowStartIndices),
                 arrowColors: this.toUint8Array(bundle.arrowColors),
                 arrowWidths: this.toFloat32Array(bundle.arrowWidths),
-                arrowFeatureIds: this.toUint32Array(bundle.arrowFeatureIds)
+                arrowFeatureIds: this.toUint32Array(bundle.arrowFeatureIds),
+                arrowBillboards: this.toUint8Array(bundle.arrowBillboards)
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
             workerTimings: result.timings

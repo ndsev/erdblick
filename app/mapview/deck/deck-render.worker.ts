@@ -206,12 +206,14 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         const pointColors = readRawBytes(deckVisu, "pointColorsRaw");
         const pointRadii = readRawBytes(deckVisu, "pointRadiiRaw");
         const pointFeatureIds = readRawBytes(deckVisu, "pointFeatureIdsRaw");
+        const pointBillboards = readRawBytes(deckVisu, "pointBillboardsRaw");
         const coordinateOrigin = readRawBytes(deckVisu, "pathCoordinateOriginRaw");
         const positions = readRawBytes(deckVisu, "pathPositionsRaw");
         const startIndices = readRawBytes(deckVisu, "pathStartIndicesRaw");
         const colors = readRawBytes(deckVisu, "pathColorsRaw");
         const widths = readRawBytes(deckVisu, "pathWidthsRaw");
         const featureIds = readRawBytes(deckVisu, "pathFeatureIdsRaw");
+        const billboards = readRawBytes(deckVisu, "pathBillboardsRaw");
         const dashArrays = readRawBytes(deckVisu, "pathDashArrayRaw");
         const dashOffsets = readRawBytes(deckVisu, "pathDashOffsetsRaw");
         const arrowPositions = readRawBytes(deckVisu, "arrowPositionsRaw");
@@ -219,6 +221,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         const arrowColors = readRawBytes(deckVisu, "arrowColorsRaw");
         const arrowWidths = readRawBytes(deckVisu, "arrowWidthsRaw");
         const arrowFeatureIds = readRawBytes(deckVisu, "arrowFeatureIdsRaw");
+        const arrowBillboards = readRawBytes(deckVisu, "arrowBillboardsRaw");
         const lowFiBundles = readLowFiBundles(deckVisu);
         const mergedPointFeatures = deckVisu.mergedPointFeatures() as Record<string, any[]>;
         const renderMs = performance.now() - renderStart;
@@ -232,12 +235,14 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
             pointColors: pointColors.buffer as ArrayBuffer,
             pointRadii: pointRadii.buffer as ArrayBuffer,
             pointFeatureIds: pointFeatureIds.buffer as ArrayBuffer,
+            pointBillboards: pointBillboards.buffer as ArrayBuffer,
             coordinateOrigin: coordinateOrigin.buffer as ArrayBuffer,
             positions: positions.buffer as ArrayBuffer,
             startIndices: startIndices.buffer as ArrayBuffer,
             colors: colors.buffer as ArrayBuffer,
             widths: widths.buffer as ArrayBuffer,
             featureIds: featureIds.buffer as ArrayBuffer,
+            billboards: billboards.buffer as ArrayBuffer,
             dashArrays: dashArrays.buffer as ArrayBuffer,
             dashOffsets: dashOffsets.buffer as ArrayBuffer,
             arrowPositions: arrowPositions.buffer as ArrayBuffer,
@@ -245,6 +250,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
             arrowColors: arrowColors.buffer as ArrayBuffer,
             arrowWidths: arrowWidths.buffer as ArrayBuffer,
             arrowFeatureIds: arrowFeatureIds.buffer as ArrayBuffer,
+            arrowBillboards: arrowBillboards.buffer as ArrayBuffer,
             lowFiBundles,
             mergedPointFeatures,
             timings: {
@@ -272,12 +278,14 @@ function emptyResultBuffers() {
         pointColors: new ArrayBuffer(0),
         pointRadii: new ArrayBuffer(0),
         pointFeatureIds: new ArrayBuffer(0),
+        pointBillboards: new ArrayBuffer(0),
         coordinateOrigin: new ArrayBuffer(0),
         positions: new ArrayBuffer(0),
         startIndices: new ArrayBuffer(0),
         colors: new ArrayBuffer(0),
         widths: new ArrayBuffer(0),
         featureIds: new ArrayBuffer(0),
+        billboards: new ArrayBuffer(0),
         dashArrays: new ArrayBuffer(0),
         dashOffsets: new ArrayBuffer(0),
         arrowPositions: new ArrayBuffer(0),
@@ -285,6 +293,7 @@ function emptyResultBuffers() {
         arrowColors: new ArrayBuffer(0),
         arrowWidths: new ArrayBuffer(0),
         arrowFeatureIds: new ArrayBuffer(0),
+        arrowBillboards: new ArrayBuffer(0),
         lowFiBundles: [] as DeckLowFiBundleResult[],
         mergedPointFeatures: {} as Record<string, any[]>
     };
@@ -320,18 +329,21 @@ addEventListener("message", async ({data}) => {
                 bundle.pointColors,
                 bundle.pointRadii,
                 bundle.pointFeatureIds,
+                bundle.pointBillboards,
                 bundle.positions,
                 bundle.startIndices,
                 bundle.colors,
                 bundle.widths,
                 bundle.featureIds,
+                bundle.billboards,
                 bundle.dashArrays,
                 bundle.dashOffsets,
                 bundle.arrowPositions,
                 bundle.arrowStartIndices,
                 bundle.arrowColors,
                 bundle.arrowWidths,
-                bundle.arrowFeatureIds
+                bundle.arrowFeatureIds,
+                bundle.arrowBillboards
             );
         }
         // @ts-expect-error: transfer list accepts ArrayBuffer entries extracted from the typed result payload.
@@ -340,12 +352,14 @@ addEventListener("message", async ({data}) => {
             result.pointColors,
             result.pointRadii,
             result.pointFeatureIds,
+            result.pointBillboards,
             result.coordinateOrigin,
             result.positions,
             result.startIndices,
             result.colors,
             result.widths,
             result.featureIds,
+            result.billboards,
             result.dashArrays,
             result.dashOffsets,
             result.arrowPositions,
@@ -353,6 +367,7 @@ addEventListener("message", async ({data}) => {
             result.arrowColors,
             result.arrowWidths,
             result.arrowFeatureIds,
+            result.arrowBillboards,
             ...lowFiBundleTransfers
         ]);
     } catch (error) {

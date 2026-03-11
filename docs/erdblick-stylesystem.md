@@ -69,6 +69,7 @@ options:
 | `color` / `color-expression` | Solid color or Simfil expression for meshes/lines/polygons. Accepts CSS colors or RGBA arrays. |
 | `opacity` | Convenience alpha override for `color`. |
 | `width` | Width in pixels (lines/points) or meters (meshes). |
+| `billboard` | Optional `true`/`false` override for camera-facing rendering. When omitted, erdblick keeps the primitive-specific default (for example paths stay world-oriented, while labels/icons stay billboarded). |
 | `flat` | Clamp geometry to ground, ignoring heights. |
 | `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
 | `near-far-scale` | `[near, nearValue, far, farValue]` scaling curve. |

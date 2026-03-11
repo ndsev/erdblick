@@ -13,6 +13,24 @@ class DeckStub implements DeckLike {
     }
 }
 
+function makeStyle(overrides: Record<string, unknown> = {}): any {
+    return {
+        name: () => "test-style",
+        isDeleted: () => false,
+        hasExplicitLowFidelityRules: () => false,
+        hasRelationRules: () => false,
+        ...overrides
+    };
+}
+
+function attachDeckVisualizationStatics<T extends (...args: never[]) => unknown>(ctor: T): T {
+    return Object.assign(ctor, {
+        GEOMETRY_OUTPUT_ALL: () => 0,
+        GEOMETRY_OUTPUT_NON_POINTS_ONLY: () => 1,
+        GEOMETRY_OUTPUT_POINTS_ONLY: () => 2
+    });
+}
+
 describe("DeckTileVisualization", () => {
     it("upserts and removes path layers via DeckLayerRegistry", async () => {
         const deck = new DeckStub();
@@ -22,14 +40,11 @@ describe("DeckTileVisualization", () => {
             layerName: "Lane",
             tileId: 42n,
             hasData: () => true,
+            highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -44,10 +59,11 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.renderWasm = async () => ({
+        visu.renderWasm = async () => [{
             length: 1,
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
+            billboard: false,
             featureIds: [null],
             featureIdsByVertex: [null, null],
             attributes: {
@@ -68,7 +84,7 @@ describe("DeckTileVisualization", () => {
                     size: 2
                 }
             }
-        });
+        }];
 
         const rendered = await visu.render({
             renderer: "deck",
@@ -99,14 +115,11 @@ describe("DeckTileVisualization", () => {
             layerName: "Lane",
             tileId: 42n,
             hasData: () => true,
+            highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -122,8 +135,9 @@ describe("DeckTileVisualization", () => {
         ) as any;
 
         visu.renderWasm = async function() {
-            this.latestArrowLayerData = {
+            this.latestArrowLayerData = [{
                 length: 1,
+                billboard: false,
                 coordinateOrigin: [11, 48, 0],
                 startIndices: new Uint32Array([0, 3]),
                 featureIds: [123],
@@ -154,11 +168,12 @@ describe("DeckTileVisualization", () => {
                         size: 2
                     }
                 }
-            };
-            return {
+            }];
+            return [{
                 length: 1,
                 coordinateOrigin: [11, 48, 0] as [number, number, number],
                 startIndices: new Uint32Array([0, 2]),
+                billboard: false,
                 featureIds: [123],
                 featureIdsByVertex: [123, 123],
                 attributes: {
@@ -179,7 +194,7 @@ describe("DeckTileVisualization", () => {
                         size: 2
                     }
                 }
-            };
+            }];
         };
 
         const rendered = await visu.render({
@@ -205,13 +220,10 @@ describe("DeckTileVisualization", () => {
             tileId: 42n,
             numFeatures: 0,
             hasData: () => hasData,
+            highestLoadedStage: () => 0,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -226,8 +238,16 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.renderWasm = async () => null;
-        visu.renderWasmOnMainThread = async () => null;
+        visu.renderWasm = async () => [];
+        visu.renderWasmOnMainThread = async () => ({
+            pathLayerData: [],
+            pointLayerData: [],
+            arrowLayerData: [],
+            lowFiBundles: [],
+            mergedPointFeatures: null,
+            vertexCount: 0,
+            workerTimings: null
+        });
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
@@ -253,12 +273,9 @@ describe("DeckTileVisualization", () => {
             highestLoadedStage: () => 2,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false,
+        const style = makeStyle({
             minimumStage: () => 0
-        } as any;
+        });
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -273,10 +290,11 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.renderWasm = async () => ({
+        visu.renderWasm = async () => [{
             length: 1,
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
+            billboard: false,
             featureIds: [null],
             featureIdsByVertex: [null, null],
             attributes: {
@@ -297,7 +315,7 @@ describe("DeckTileVisualization", () => {
                     size: 2
                 }
             }
-        });
+        }];
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
@@ -316,12 +334,9 @@ describe("DeckTileVisualization", () => {
             highestLoadedStage: () => highestLoadedStage,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false,
+        const style = makeStyle({
             minimumStage: () => 0
-        } as any;
+        });
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -336,10 +351,11 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.renderWasm = async () => ({
+        visu.renderWasm = async () => [{
             length: 1,
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
+            billboard: false,
             featureIds: [null],
             featureIdsByVertex: [null, null],
             attributes: {
@@ -360,7 +376,7 @@ describe("DeckTileVisualization", () => {
                     size: 2
                 }
             }
-        });
+        }];
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
@@ -380,11 +396,7 @@ describe("DeckTileVisualization", () => {
             numFeatures: 0,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -399,8 +411,16 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.renderWasm = async () => null;
-        visu.renderWasmOnMainThread = async () => null;
+        visu.renderWasm = async () => [];
+        visu.renderWasmOnMainThread = async () => ({
+            pathLayerData: [],
+            pointLayerData: [],
+            arrowLayerData: [],
+            lowFiBundles: [],
+            mergedPointFeatures: null,
+            vertexCount: 0,
+            workerTimings: null
+        });
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         registry.flush();
@@ -417,14 +437,11 @@ describe("DeckTileVisualization", () => {
             layerName: "Lane",
             tileId: 42n,
             hasData: () => true,
+            highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -439,7 +456,7 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.renderWasm = async () => null;
+        visu.renderWasm = async () => [];
 
         await visu.render({
             renderer: "deck",
@@ -461,14 +478,11 @@ describe("DeckTileVisualization", () => {
             layerName: "Lane",
             tileId: 42n,
             hasData: () => true,
+            highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
@@ -489,7 +503,7 @@ describe("DeckTileVisualization", () => {
                 renderMs: 7.25,
                 totalMs: 11.75
             };
-            return null;
+            return [];
         };
 
         await visu.render({
@@ -516,11 +530,7 @@ describe("DeckTileVisualization", () => {
             hasData: () => true,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -549,23 +559,25 @@ describe("DeckTileVisualization", () => {
             ]),
             widths: new Float32Array([3, 7]),
             featureIds: new Uint32Array([101, 202]),
+            billboards: new Uint8Array([0, 0]),
             dashArrays: new Float32Array([6, 2, 1, 0]),
             dashOffsets: new Float32Array([0, 0])
         });
 
-        expect(pathData).toBeTruthy();
-        expect(pathData!.featureIds).toEqual([101, 202]);
-        expect(pathData!.featureIdsByVertex).toEqual([101, 101, 202, 202]);
-        expect(Array.from(pathData!.attributes.instanceColors.value.slice(0, 8))).toEqual([
+        expect(pathData).toHaveLength(1);
+        expect(pathData[0].billboard).toBe(false);
+        expect(pathData[0].featureIds).toEqual([101, 202]);
+        expect(pathData[0].featureIdsByVertex).toEqual([101, 101, 202, 202]);
+        expect(Array.from(pathData[0].attributes.instanceColors.value.slice(0, 8))).toEqual([
             255, 228, 181, 255,
             255, 228, 181, 255
         ]);
-        expect(Array.from(pathData!.attributes.instanceColors.value.slice(8, 16))).toEqual([
+        expect(Array.from(pathData[0].attributes.instanceColors.value.slice(8, 16))).toEqual([
             1, 2, 3, 4,
             1, 2, 3, 4
         ]);
-        expect(Array.from(pathData!.attributes.instanceStrokeWidths.value)).toEqual([3, 3, 7, 7]);
-        expect(Array.from(pathData!.attributes.instanceDashArrays.value)).toEqual([
+        expect(Array.from(pathData[0].attributes.instanceStrokeWidths.value)).toEqual([3, 3, 7, 7]);
+        expect(Array.from(pathData[0].attributes.instanceDashArrays.value)).toEqual([
             6, 2, 6, 2,
             1, 0, 1, 0
         ]);
@@ -579,11 +591,7 @@ describe("DeckTileVisualization", () => {
             hasData: () => true,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -647,11 +655,7 @@ describe("DeckTileVisualization", () => {
             hasData: () => true,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false
-        } as any;
+        const style = makeStyle();
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -676,16 +680,18 @@ describe("DeckTileVisualization", () => {
                 32, 196, 255, 200
             ]),
             radii: new Float32Array([4, 6]),
-            featureIds: new Uint32Array([101, 0xffffffff])
+            featureIds: new Uint32Array([101, 0xffffffff]),
+            billboards: new Uint8Array([0, 0])
         });
 
-        expect(pointData).toBeTruthy();
-        expect(pointData!.length).toBe(2);
-        expect(pointData!.coordinateOrigin).toEqual([11, 48, 0]);
-        expect(pointData!.featureIds).toEqual([101, null]);
-        expect(Array.from(pointData!.attributes.getPosition.value)).toEqual([0, 0, 0, 10, 20, 0]);
-        expect(Array.from(pointData!.attributes.getFillColor.value)).toEqual([255, 128, 0, 255, 32, 196, 255, 200]);
-        expect(Array.from(pointData!.attributes.getRadius.value)).toEqual([4, 6]);
+        expect(pointData).toHaveLength(1);
+        expect(pointData[0].billboard).toBe(false);
+        expect(pointData[0].length).toBe(2);
+        expect(pointData[0].coordinateOrigin).toEqual([11, 48, 0]);
+        expect(pointData[0].featureIds).toEqual([101, null]);
+        expect(Array.from(pointData[0].attributes.getPosition.value)).toEqual([0, 0, 0, 10, 20, 0]);
+        expect(Array.from(pointData[0].attributes.getFillColor.value)).toEqual([255, 128, 0, 255, 32, 196, 255, 200]);
+        expect(Array.from(pointData[0].attributes.getRadius.value)).toEqual([4, 6]);
     });
 
     it("treats a switch to an empty low-fi bundle selection as pending", () => {
@@ -698,12 +704,9 @@ describe("DeckTileVisualization", () => {
             highestLoadedStage: () => 0,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false,
+        const style = makeStyle({
             hasExplicitLowFidelityRules: () => true
-        } as any;
+        });
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -736,12 +739,9 @@ describe("DeckTileVisualization", () => {
             highestLoadedStage: () => 0,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false,
+        const style = makeStyle({
             hasExplicitLowFidelityRules: () => true
-        } as any;
+        });
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -786,12 +786,9 @@ describe("DeckTileVisualization", () => {
             highestLoadedStage: () => 1,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false,
+        const style = makeStyle({
             hasExplicitLowFidelityRules: () => true
-        } as any;
+        });
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -809,7 +806,7 @@ describe("DeckTileVisualization", () => {
         visu.activeRenderedLowFiLods = [0];
         visu.clearMergedPointVisualizations = vi.fn();
         visu.applyLayerDataToRegistry = vi.fn();
-        visu.renderWasm = async () => null;
+        visu.renderWasm = async () => [];
 
         const rendered = await visu.render({
             renderer: "deck",
@@ -833,12 +830,9 @@ describe("DeckTileVisualization", () => {
             highestLoadedStage: () => 1,
             stats: new Map<string, number[]>()
         } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false,
-            hasRelationRules: () => false,
+        const style = makeStyle({
             hasExplicitLowFidelityRules: () => true
-        } as any;
+        });
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
@@ -868,9 +862,11 @@ describe("DeckTileVisualization", () => {
             addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
             run: vi.fn(),
             mergedPointFeatures: () => ({}),
+            externalRelationReferences: () => [],
+            processResolvedExternalReferences: vi.fn(),
             delete: vi.fn()
         };
-        const deckVisualizationCtor = vi.fn(() => fakeDeckVisualization);
+        const deckVisualizationCtor = attachDeckVisualizationStatics(vi.fn(() => fakeDeckVisualization));
         const previousDeckVisualizationCtor = (coreLib as any).DeckFeatureLayerVisualization;
         const previousPeekMany = FeatureTile.peekMany;
         (coreLib as any).DeckFeatureLayerVisualization = deckVisualizationCtor;
@@ -890,11 +886,9 @@ describe("DeckTileVisualization", () => {
         FeatureTile.peekMany = vi.fn();
 
         try {
-            const style = {
-                name: () => "test-style",
-                isDeleted: () => false,
+            const style = makeStyle({
                 hasRelationRules: () => true
-            } as any;
+            });
             const pointMergeService = new PointMergeService();
             const visu = new DeckTileVisualization(
                 0,
@@ -945,7 +939,9 @@ describe("DeckTileVisualization", () => {
             }),
             delete: vi.fn()
         };
-        const deckVisualizationCtor = vi.fn().mockImplementation(() => deckVisualization);
+        const deckVisualizationCtor = attachDeckVisualizationStatics(
+            vi.fn().mockImplementation(() => deckVisualization)
+        );
         const previousDeckVisualizationCtor = (coreLib as any).DeckFeatureLayerVisualization;
         const previousPeekMany = FeatureTile.peekMany;
         (coreLib as any).DeckFeatureLayerVisualization = deckVisualizationCtor;
@@ -973,11 +969,9 @@ describe("DeckTileVisualization", () => {
         });
 
         try {
-            const style = {
-                name: () => "test-style",
-                isDeleted: () => false,
+            const style = makeStyle({
                 hasRelationRules: () => true
-            } as any;
+            });
             const pointMergeService = new PointMergeService();
             const relationExternalTileLoader = vi.fn(async () => ({
                 responses: [[{

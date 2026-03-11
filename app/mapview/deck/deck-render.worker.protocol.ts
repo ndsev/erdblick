@@ -48,11 +48,13 @@ export interface DeckLowFiBundleResult {
     pointColors: ArrayBuffer;
     pointRadii: ArrayBuffer;
     pointFeatureIds: ArrayBuffer;
+    pointBillboards: ArrayBuffer;
     positions: ArrayBuffer;
     startIndices: ArrayBuffer;
     colors: ArrayBuffer;
     widths: ArrayBuffer;
     featureIds: ArrayBuffer;
+    billboards: ArrayBuffer;
     dashArrays: ArrayBuffer;
     dashOffsets: ArrayBuffer;
     arrowPositions: ArrayBuffer;
@@ -60,6 +62,7 @@ export interface DeckLowFiBundleResult {
     arrowColors: ArrayBuffer;
     arrowWidths: ArrayBuffer;
     arrowFeatureIds: ArrayBuffer;
+    arrowBillboards: ArrayBuffer;
 }
 
 export interface DeckTileRenderResult {
@@ -71,12 +74,14 @@ export interface DeckTileRenderResult {
     pointColors: ArrayBuffer;
     pointRadii: ArrayBuffer;
     pointFeatureIds: ArrayBuffer;
+    pointBillboards: ArrayBuffer;
     coordinateOrigin: ArrayBuffer;
     positions: ArrayBuffer;
     startIndices: ArrayBuffer;
     colors: ArrayBuffer;
     widths: ArrayBuffer;
     featureIds: ArrayBuffer;
+    billboards: ArrayBuffer;
     dashArrays: ArrayBuffer;
     dashOffsets: ArrayBuffer;
     arrowPositions: ArrayBuffer;
@@ -84,6 +89,7 @@ export interface DeckTileRenderResult {
     arrowColors: ArrayBuffer;
     arrowWidths: ArrayBuffer;
     arrowFeatureIds: ArrayBuffer;
+    arrowBillboards: ArrayBuffer;
     lowFiBundles: DeckLowFiBundleResult[];
     mergedPointFeatures: Record<string, any[]>;
     timings?: DeckWorkerTimings;

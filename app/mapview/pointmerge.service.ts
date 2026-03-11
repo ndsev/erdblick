@@ -22,6 +22,7 @@ interface DeckMergedPoint {
     outlineColor: DeckColor;
     outlineWidth: number;
     pixelSize: number;
+    billboard: boolean;
 }
 
 interface DeckMergedIcon {
@@ -32,6 +33,7 @@ interface DeckMergedIcon {
     width: number;
     height: number;
     color: DeckColor;
+    billboard: boolean;
 }
 
 interface DeckMergedLabel {
@@ -44,6 +46,7 @@ interface DeckMergedLabel {
     outlineWidth: number;
     scale: number;
     pixelOffset: [number, number];
+    billboard: boolean;
 }
 
 /**
@@ -71,9 +74,9 @@ export class MergedPointsTile {
 
     features: Map<PositionHash, MergedPointVisualization> = new Map<PositionHash, MergedPointVisualization>;
     readonly viewIndex: number
-    private deckPointLayerKey: string | null = null;
-    private deckIconLayerKey: string | null = null;
-    private deckLabelLayerKey: string | null = null;
+    private readonly deckPointLayerKeys = new Set<string>();
+    private readonly deckIconLayerKeys = new Set<string>();
+    private readonly deckLabelLayerKeys = new Set<string>();
 
     constructor(
         public readonly tileId: bigint,  // NW tile ID
@@ -154,9 +157,9 @@ export class MergedPointsTile {
 
         this.removeDeck(scene);
 
-        const points: DeckMergedPoint[] = [];
-        const icons: DeckMergedIcon[] = [];
-        const labels: DeckMergedLabel[] = [];
+        const pointsByBillboard = new Map<boolean, DeckMergedPoint[]>();
+        const iconsByBillboard = new Map<boolean, DeckMergedIcon[]>();
+        const labelsByBillboard = new Map<boolean, DeckMergedLabel[]>();
 
         for (const feature of this.features.values()) {
             const id = feature.featureIds;
@@ -175,27 +178,35 @@ export class MergedPointsTile {
                 if (typeof params.image === "string" && params.image.length > 0) {
                     const width = Number(params.width ?? params.pixelSize ?? 12);
                     const height = Number(params.height ?? params.pixelSize ?? 12);
-                    icons.push({
+                    const billboard = params.billboard !== false;
+                    const bucket = iconsByBillboard.get(billboard) ?? [];
+                    bucket.push({
                         id,
                         idTileKeys,
                         position,
                         image: params.image,
                         width: Number.isFinite(width) && width > 0 ? width : 12,
                         height: Number.isFinite(height) && height > 0 ? height : 12,
-                        color
+                        color,
+                        billboard
                     });
+                    iconsByBillboard.set(billboard, bucket);
                 } else {
                     const pixelSize = Number(params.pixelSize ?? 6);
                     const outlineWidth = Number(params.outlineWidth ?? 0);
-                    points.push({
+                    const billboard = params.billboard === true;
+                    const bucket = pointsByBillboard.get(billboard) ?? [];
+                    bucket.push({
                         id,
                         idTileKeys,
                         position,
                         color,
                         outlineColor: this.toDeckColor(params.outlineColor, [0, 0, 0, 0]),
                         outlineWidth: Number.isFinite(outlineWidth) && outlineWidth > 0 ? outlineWidth : 0,
-                        pixelSize: Number.isFinite(pixelSize) && pixelSize > 0 ? pixelSize : 6
+                        pixelSize: Number.isFinite(pixelSize) && pixelSize > 0 ? pixelSize : 6,
+                        billboard
                     });
+                    pointsByBillboard.set(billboard, bucket);
                 }
             }
 
@@ -209,7 +220,9 @@ export class MergedPointsTile {
                 const offset = Array.isArray(params.pixelOffset) ? params.pixelOffset : [0, 0];
                 const scale = Number(params.scale ?? 1);
                 const outlineWidth = Number(params.outlineWidth ?? 0);
-                labels.push({
+                const billboard = params.billboard !== false;
+                const bucket = labelsByBillboard.get(billboard) ?? [];
+                bucket.push({
                     id,
                     idTileKeys,
                     position,
@@ -221,15 +234,21 @@ export class MergedPointsTile {
                     pixelOffset: [
                         Number(offset[0] ?? 0),
                         Number(offset[1] ?? 0)
-                    ]
+                    ],
+                    billboard
                 });
+                labelsByBillboard.set(billboard, bucket);
             }
         }
 
-        if (points.length) {
-            this.deckPointLayerKey = this.makeDeckLayerKey("merged-point");
-            registry.upsert(this.deckPointLayerKey, new ScatterplotLayer({
-                id: this.deckPointLayerKey,
+        for (const [billboard, points] of pointsByBillboard.entries()) {
+            if (!points.length) {
+                continue;
+            }
+            const layerKey = this.makeDeckLayerKey(`merged-point-${billboard ? "billboard" : "world"}`);
+            this.deckPointLayerKeys.add(layerKey);
+            registry.upsert(layerKey, new ScatterplotLayer({
+                id: layerKey,
                 data: points,
                 coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
                 getPosition: (d: DeckMergedPoint) => d.position,
@@ -239,6 +258,7 @@ export class MergedPointsTile {
                 getLineColor: (d: DeckMergedPoint) => d.outlineColor,
                 getLineWidth: (d: DeckMergedPoint) => d.outlineWidth,
                 lineWidthUnits: "pixels",
+                billboard,
                 stroked: true,
                 filled: true,
                 pickable: true,
@@ -246,10 +266,14 @@ export class MergedPointsTile {
             } as any) as any, 500);
         }
 
-        if (icons.length) {
-            this.deckIconLayerKey = this.makeDeckLayerKey("merged-icon");
-            registry.upsert(this.deckIconLayerKey, new IconLayer({
-                id: this.deckIconLayerKey,
+        for (const [billboard, icons] of iconsByBillboard.entries()) {
+            if (!icons.length) {
+                continue;
+            }
+            const layerKey = this.makeDeckLayerKey(`merged-icon-${billboard ? "billboard" : "world"}`);
+            this.deckIconLayerKeys.add(layerKey);
+            registry.upsert(layerKey, new IconLayer({
+                id: layerKey,
                 data: icons,
                 coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
                 getPosition: (d: DeckMergedIcon) => d.position,
@@ -263,16 +287,20 @@ export class MergedPointsTile {
                     anchorX: d.width / 2,
                     anchorY: d.height / 2
                 }),
-                billboard: true,
+                billboard,
                 pickable: true,
                 getId: (d: DeckMergedIcon) => d.id
             } as any) as any, 510);
         }
 
-        if (labels.length) {
-            this.deckLabelLayerKey = this.makeDeckLayerKey("merged-label");
-            registry.upsert(this.deckLabelLayerKey, new TextLayer({
-                id: this.deckLabelLayerKey,
+        for (const [billboard, labels] of labelsByBillboard.entries()) {
+            if (!labels.length) {
+                continue;
+            }
+            const layerKey = this.makeDeckLayerKey(`merged-label-${billboard ? "billboard" : "world"}`);
+            this.deckLabelLayerKeys.add(layerKey);
+            registry.upsert(layerKey, new TextLayer({
+                id: layerKey,
                 data: labels,
                 coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
                 getPosition: (d: DeckMergedLabel) => d.position,
@@ -283,6 +311,7 @@ export class MergedPointsTile {
                 getSize: (d: DeckMergedLabel) => 14 * d.scale,
                 sizeUnits: "pixels",
                 getPixelOffset: (d: DeckMergedLabel) => d.pixelOffset,
+                billboard,
                 pickable: true,
                 getId: (d: DeckMergedLabel) => d.id
             } as any) as any, 520);
@@ -294,18 +323,18 @@ export class MergedPointsTile {
         if (!registry) {
             return;
         }
-        if (this.deckPointLayerKey) {
-            registry.remove(this.deckPointLayerKey);
-            this.deckPointLayerKey = null;
+        for (const layerKey of this.deckPointLayerKeys) {
+            registry.remove(layerKey);
         }
-        if (this.deckIconLayerKey) {
-            registry.remove(this.deckIconLayerKey);
-            this.deckIconLayerKey = null;
+        this.deckPointLayerKeys.clear();
+        for (const layerKey of this.deckIconLayerKeys) {
+            registry.remove(layerKey);
         }
-        if (this.deckLabelLayerKey) {
-            registry.remove(this.deckLabelLayerKey);
-            this.deckLabelLayerKey = null;
+        this.deckIconLayerKeys.clear();
+        for (const layerKey of this.deckLabelLayerKeys) {
+            registry.remove(layerKey);
         }
+        this.deckLabelLayerKeys.clear();
     }
 
     private makeDeckLayerKey(kind: string): string {
