@@ -6,10 +6,12 @@ import {
     RuleFidelity,
     TileFeatureLayer
 } from "../../../build/libs/core/erdblick-core";
+import {SceneMode} from "../../integrations/geo";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
 import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
+import {Matrix4} from "@math.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, type ErdblickCore_, uint8ArrayFromWasm} from "../../integrations/wasm";
 import {
@@ -37,6 +39,7 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
 interface DeckSceneHandle {
     deck?: unknown;
     layerRegistry?: DeckLayerRegistry;
+    sceneMode?: SceneMode;
 }
 
 interface DeckPickLayerMetadata {
@@ -156,6 +159,7 @@ const RENDER_RANK_PRIORITY_STRIDE = 2 ** 52;
 const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
+const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 const DECK_ARROW_ICON_ATLAS =
     "data:image/svg+xml;charset=utf-8," +
     encodeURIComponent(
@@ -347,9 +351,10 @@ export class DeckTileVisualization implements ITileVisualization {
 
             this.clearMergedPointVisualizations(sceneHandle);
             if (fidelity === "low" && selectedLowFiBundles.length > 0) {
-                this.applyLowFiBundleDataToRegistry(registry, selectedLowFiBundles);
+                this.applyLowFiBundleDataToRegistry(sceneHandle, registry, selectedLowFiBundles);
             } else {
                 this.applyLayerDataToRegistry(
+                    sceneHandle,
                     registry,
                     surfaceLayerData,
                     pathLayerData,
@@ -439,13 +444,14 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private applyLayerDataToRegistry(
+        sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
         surfaceLayerData: DeckSurfaceLayerData[],
         pathLayerData: DeckPathLayerData[],
         pointLayerData: DeckPointLayerData[],
         arrowLayerData: DeckPathLayerData[]
     ): void {
-        this.applyLayerEntriesToRegistry(registry, [{
+        this.applyLayerEntriesToRegistry(sceneHandle, registry, [{
             variantSuffix: "",
             orderOffset: 0,
             surfaceLayerData,
@@ -456,10 +462,11 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private applyLowFiBundleDataToRegistry(
+        sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
         lowFiBundles: DeckLowFiBundleData[]
     ): void {
-        this.applyLayerEntriesToRegistry(registry, lowFiBundles.map((bundle) => ({
+        this.applyLayerEntriesToRegistry(sceneHandle, registry, lowFiBundles.map((bundle) => ({
             variantSuffix: `lowfi-lod-${bundle.lod}`,
             orderOffset: bundle.lod,
             surfaceLayerData: bundle.surfaceLayerData,
@@ -470,6 +477,7 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private applyLayerEntriesToRegistry(
+        sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
         entries: DeckLayerRenderEntry[]
     ): void {
@@ -477,6 +485,7 @@ export class DeckTileVisualization implements ITileVisualization {
         const desiredPointLayerKeys = new Set<string>();
         const desiredPathLayerKeys = new Set<string>();
         const desiredArrowLayerKeys = new Set<string>();
+        const modelMatrix = this.modelMatrixForScene(sceneHandle);
 
         for (const entry of entries) {
             for (const surfaceLayerData of entry.surfaceLayerData) {
@@ -493,6 +502,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     extruded: false,
                     wireframe: false,
                     _full3d: true,
+                    modelMatrix,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     featureIds: surfaceLayerData.featureIds
@@ -517,6 +527,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     stroked: false,
                     radiusUnits: "pixels",
                     billboard: pointLayerData.billboard,
+                    modelMatrix,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     featureIds: pointLayerData.featureIds
@@ -540,6 +551,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     _pathType: "open",
                     widthUnits: "pixels",
                     billboard: pathLayerData.billboard,
+                    modelMatrix,
                     capRounded: true,
                     jointRounded: true,
                     pickable: true,
@@ -575,6 +587,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     getAngle: (marker: DeckArrowMarker) => marker.angleDeg,
                     getColor: (marker: DeckArrowMarker) => marker.color,
                     billboard: arrowLayerData.billboard,
+                    modelMatrix,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     alphaCutoff: 0.05,
@@ -588,6 +601,14 @@ export class DeckTileVisualization implements ITileVisualization {
         this.reconcileLayerKeys(registry, this.pointLayerKeys, desiredPointLayerKeys);
         this.reconcileLayerKeys(registry, this.pathLayerKeys, desiredPathLayerKeys);
         this.reconcileLayerKeys(registry, this.arrowLayerKeys, desiredArrowLayerKeys);
+    }
+
+    private modelMatrixForScene(sceneHandle: IRenderSceneHandle): Matrix4 | null {
+        if (sceneHandle.renderer !== "deck") {
+            return null;
+        }
+        const deckScene = sceneHandle.scene as DeckSceneHandle | undefined;
+        return deckScene?.sceneMode === SceneMode.SCENE2D ? DECK_FLAT_2D_MODEL_MATRIX : null;
     }
 
     private composeGeometryVariant(baseVariantSuffix: string, geometryKind: string, billboard?: boolean): string {
@@ -739,7 +760,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.latestArrowLayerData = [];
         this.latestMergedPointFeatures = null;
         this.latestWorkerTimings = null;
-        this.applyLowFiBundleDataToRegistry(registry, selectedLowFiBundles);
+        this.applyLowFiBundleDataToRegistry(sceneHandle, registry, selectedLowFiBundles);
         this.completeRender("low", selectedLowFiLods);
         return true;
     }

@@ -307,7 +307,8 @@ export abstract class DeckMapView implements IRenderView {
             renderer: "deck",
             scene: {
                 deck: this.deck,
-                layerRegistry: this.layerRegistry
+                layerRegistry: this.layerRegistry,
+                sceneMode: this.sceneMode
             }
         };
     }
