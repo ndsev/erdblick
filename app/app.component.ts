@@ -7,6 +7,7 @@ import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
 import {DialogStackService} from "./shared/dialog-stack.service";
 import {Title} from "@angular/platform-browser";
+import {KeyboardService} from "./shared/keyboard.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -60,9 +61,10 @@ export class AppComponent implements OnDestroy {
     private detachDialogDragEndListener?: () => void;
     private dialogDragActive = false;
 
-    constructor(private httpClient: HttpClient,
-                public mapService: MapDataService,
-                public stateService: AppStateService,
+    constructor(public stateService: AppStateService,
+                private httpClient: HttpClient,
+                private mapService: MapDataService,
+                private keyboardService: KeyboardService,
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
@@ -116,6 +118,8 @@ export class AppComponent implements OnDestroy {
                 this.getBasicVersion();
             }
         });
+
+        this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this));
     }
 
     ngOnDestroy() {
@@ -135,23 +139,23 @@ export class AppComponent implements OnDestroy {
                 if (dialogElement.closest('.search-menu-dialog')) {
                     const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
                     if (mainBar) {
-                        this.dialogStack.bringElementToFront(mainBar);
+                        this.dialogStack.bringToFront(mainBar);
                     }
                     const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
-                    this.dialogStack.bringElementToFront(wrapper ?? dialogElement);
+                    this.dialogStack.bringToFront(wrapper ?? dialogElement);
                     return;
                 }
-                this.dialogStack.bringElementToFront(dialogElement);
+                this.dialogStack.bringToFront(dialogElement);
                 return;
             }
 
             const mainBar = target.closest('.main-bar') as HTMLElement | null;
             const searchWrapper = target.closest('.search-wrapper') as HTMLElement | null;
             if (mainBar) {
-                this.dialogStack.bringElementToFront(mainBar);
+                this.dialogStack.bringToFront(mainBar);
             }
             if (searchWrapper) {
-                this.dialogStack.bringElementToFront(searchWrapper);
+                this.dialogStack.bringToFront(searchWrapper);
             }
         };
         document.addEventListener('mousedown', handler, true);
@@ -223,6 +227,10 @@ export class AppComponent implements OnDestroy {
 
     private capitalizeTitle(title: string) {
         return `${title.charAt(0).toUpperCase()}${title.slice(1)}`;
+    }
+
+    private openStatistics() {
+        this.stateService.diagnosticsPerformanceDialogVisible = true;
     }
 
     protected readonly environment = environment;

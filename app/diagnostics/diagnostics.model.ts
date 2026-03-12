@@ -89,6 +89,30 @@ export interface DiagnosticsExportOptions {
     logFilter: DiagnosticsLogFilter;
 }
 
+export interface TileSizeDistribution {
+    'tile-count'?: number;
+    'total-tile-bytes'?: number;
+    'min-bytes'?: number;
+    'mean-bytes'?: number;
+    'max-bytes'?: number;
+    histogram?: Array<{
+        label?: string;
+        count?: number;
+    }>;
+}
+
+export interface BackendStatusDataSummary {
+    timestampMs?: number;
+    service?: {
+        datasources?: unknown;
+        'active-requests'?: unknown;
+    };
+    cache?: unknown;
+    tilesWebsocket?: unknown;
+    tileSizeDistribution?: TileSizeDistribution;
+    statusFetchError?: string;
+}
+
 export interface DiagnosticsExportBundle {
     exportedAt: string;
     metadata: {
@@ -96,7 +120,9 @@ export interface DiagnosticsExportBundle {
         distributionVersions?: unknown;
         userAgent?: string;
         url?: string;
+        backendStatusFetchError?: string;
     };
+    backendStatus?: BackendStatusDataSummary;
     progress?: DiagnosticsSnapshot;
     performance?: {
         stats: PerfStat[];

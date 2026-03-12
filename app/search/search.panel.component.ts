@@ -21,7 +21,7 @@ interface ExtendedSearchTarget extends SearchTarget {
 @Component({
     selector: 'search-panel',
     template: `
-        <div class="search-wrapper" [ngClass]="{'search-menu-top': searchService.showFeatureSearchDialog}">
+        <div class="search-wrapper">
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"

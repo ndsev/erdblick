@@ -306,4 +306,69 @@ describe('StyleService', () => {
         expect(JSON.parse(stored!)).toEqual([]);
         expect(service.styles.get('StyleOne')?.modified).toBe(false);
     });
+
+    it('reloads modified builtin styles by matching builtin URL, not insertion order', () => {
+        const {service} = createService();
+
+        service.styles.set('StyleA', {
+            id: 'StyleA',
+            url: 'bundle/styles/a.yaml',
+            source: 'name: StyleA',
+            imported: false,
+            modified: false,
+            visible: true,
+        } as any);
+        service.styles.set('StyleB', {
+            id: 'StyleB',
+            url: 'bundle/styles/b.yaml',
+            source: 'name: StyleB',
+            imported: false,
+            modified: false,
+            visible: true,
+        } as any);
+
+        localStorage.setItem('builtinStyleData', JSON.stringify([
+            ['StyleB', {
+                id: 'StyleB',
+                url: 'bundle/styles/b.yaml',
+                source: 'name: StyleB\nlayers: []',
+                imported: false,
+            }],
+        ]));
+
+        const initSpy = vi.spyOn(service as any, 'initializeStyle').mockReturnValue('StyleB');
+
+        service.loadModifiedBuiltinStyles();
+
+        expect(initSpy).toHaveBeenCalledWith(
+            'name: StyleB\nlayers: []',
+            'bundle/styles/b.yaml',
+            'StyleB',
+            true,
+            false
+        );
+    });
+
+    it('persists visibility before delayed reapply so toggles do not bounce back', () => {
+        const {service, stateService} = createService();
+
+        service.styles.set('StyleOne', {
+            id: 'StyleOne',
+            url: 'bundle/styles/style-one.yaml',
+            source: 'name: StyleOne',
+            imported: false,
+            modified: false,
+            visible: true,
+            featureLayerStyle: {
+                defaultEnabled: () => true,
+            },
+            options: [],
+            shortId: 'S1',
+        } as any);
+
+        service.toggleStyle('StyleOne', false, true);
+
+        expect(stateService.getStyleVisibility('StyleOne', true)).toBe(false);
+        expect(service.styles.get('StyleOne')?.visible).toBe(false);
+    });
 });

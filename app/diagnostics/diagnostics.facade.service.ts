@@ -2,7 +2,24 @@ import {Injectable, OnDestroy} from '@angular/core';
 import {AppStateService} from '../shared/appstate.service';
 import {MapDataService} from '../mapdata/map.service';
 import {DiagnosticsDatasource} from './diagnostics.datasource';
-import {DiagnosticsExportBundle, DiagnosticsExportOptions, DiagnosticsLogFilter, LogEntry} from './diagnostics.model';
+import {
+    DiagnosticsExportBundle,
+    DiagnosticsExportOptions,
+    DiagnosticsLogFilter,
+    LogEntry,
+    TileSizeDistribution
+} from './diagnostics.model';
+
+interface MapgetStatusDataResponse {
+    timestampMs?: unknown;
+    service?: {
+        datasources?: unknown;
+        'active-requests'?: unknown;
+        'cached-feature-tile-size-distribution'?: unknown;
+    };
+    cache?: unknown;
+    tilesWebsocket?: unknown;
+}
 
 @Injectable({providedIn: 'root'})
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
@@ -71,8 +88,9 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         return bundle;
     }
 
-    downloadExportBundle(options: DiagnosticsExportOptions, filename: string = 'diagnostics-export.json') {
+    async downloadExportBundle(options: DiagnosticsExportOptions, filename: string = 'diagnostics-export.json'): Promise<void> {
         const bundle = this.createExportBundle(options);
+        await this.enrichBundleWithMapgetStatus(bundle);
         const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: 'application/json'});
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -92,6 +110,53 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             }
             return filter.error;
         });
+    }
+
+    private async enrichBundleWithMapgetStatus(bundle: DiagnosticsExportBundle): Promise<void> {
+        const statusQuery = '/status-data?includeTileSizeDistribution=1&includeCachedFeatureTreeBytes=0';
+
+        try {
+            const response = await fetch(statusQuery, {cache: 'no-store'});
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText || 'Failed to fetch /status-data'}`);
+            }
+
+            const statusData = (await response.json()) as MapgetStatusDataResponse;
+            const serviceData = statusData.service;
+            const timestampMs = typeof statusData.timestampMs === 'number' ? statusData.timestampMs : undefined;
+            const tileSizeDistribution = this.getTileSizeDistribution(serviceData?.['cached-feature-tile-size-distribution']);
+
+            bundle.backendStatus = {
+                timestampMs,
+                service: serviceData ? {
+                    datasources: serviceData.datasources,
+                    'active-requests': serviceData['active-requests']
+                } : undefined,
+                cache: statusData.cache,
+                tilesWebsocket: statusData.tilesWebsocket
+            };
+
+            if (tileSizeDistribution) {
+                bundle.backendStatus.tileSizeDistribution = tileSizeDistribution;
+            }
+        } catch (error) {
+            bundle.metadata.backendStatusFetchError = this.stringifyError(error);
+        }
+    }
+
+    private getTileSizeDistribution(value: unknown): TileSizeDistribution | undefined {
+        if (!value || typeof value !== 'object') {
+            return undefined;
+        }
+
+        return value as TileSizeDistribution;
+    }
+
+    private stringifyError(error: unknown): string {
+        if (error instanceof Error) {
+            return error.message;
+        }
+        return String(error);
     }
 
     override ngOnDestroy(): void {

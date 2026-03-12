@@ -18,6 +18,7 @@ import {
     ROOT_BADGE_RENDER_DT,
     UNIT_SUFFIXES
 } from './diagnostics.constants';
+import {KeyboardService} from "../shared/keyboard.service";
 
 interface LayerOption {
     label: string;

@@ -1,4 +1,4 @@
-import {Component, OnDestroy, ViewChild, ViewContainerRef, Input} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -149,7 +149,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     styles: [``],
     standalone: false
 })
-export class FeatureSearchComponent implements OnDestroy {
+export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
@@ -178,8 +178,6 @@ export class FeatureSearchComponent implements OnDestroy {
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
     @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
-
-    private detachFocusListener?: () => void;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
@@ -211,28 +209,9 @@ export class FeatureSearchComponent implements OnDestroy {
         })
     }
 
-    ngOnDestroy() {
-        this.detachFocusListener?.();
-    }
-
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
-        this.bindDialogFocus();
-    }
-
-    private bindDialogFocus() {
-        if (!this.featureSearchDialog?.container) {
-            return;
-        }
-        this.detachFocusListener?.();
-        const handler = () => {
-            this.dialogStack.bringToFront(this.featureSearchDialog);
-        };
-        this.featureSearchDialog.container.addEventListener('mousedown', handler, true);
-        this.detachFocusListener = () => {
-            this.featureSearchDialog?.container?.removeEventListener('mousedown', handler, true);
-        };
     }
 
     searchResultReady() {

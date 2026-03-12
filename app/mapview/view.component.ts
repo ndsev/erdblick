@@ -1,9 +1,5 @@
 import {
-    AppStateService,
-    VIEW_SYNC_LAYERS,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
-    VIEW_SYNC_PROJECTION
+    AppStateService
 } from "../shared/appstate.service";
 import {
     AfterViewInit,
@@ -35,6 +31,8 @@ import {environment} from "../environments/environment";
 import {Popover} from "primeng/popover";
 import {coreLib} from "../integrations/wasm";
 
+
+
 @Component({
     selector: 'map-view',
     template: `
@@ -45,9 +43,9 @@ import {coreLib} from "../integrations/wasm";
              style="z-index: 0"></div>
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select">
-                @for (option of syncOptions; track $index) {
+                @for (option of stateService.syncOptions; track $index) {
                     <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
-                                    [(ngModel)]="option.value" (ngModelChange)="updateSelectedOptions()" 
+                                    [(ngModel)]="option.value" (ngModelChange)="stateService.updateSelectedSyncOptions()"
                                     onLabel="" offLabel="" pTooltip="{{option.tooltip}}" tooltipPosition="bottom">
                         <ng-template #icon>
                             <span class="material-symbols-outlined">{{ option.icon }}</span>
@@ -57,7 +55,8 @@ import {coreLib} from "../integrations/wasm";
             </p-buttonGroup>
         }
         @if (!appModeService.isVisualizationOnly && !isNarrow) {
-            <p-contextMenu #viewerContextMenu [model]="menuItems" (onShow)="onContextMenuShow()" (onHide)="onContextMenuHide()" appendTo="body" />
+            <p-contextMenu #viewerContextMenu [model]="menuItems" (onShow)="onContextMenuShow()"
+                           (onHide)="onContextMenuHide()" appendTo="body"/>
         }
         @if (!appModeService.isVisualizationOnly) {
             <sourcedatadialog></sourcedatadialog>
@@ -96,12 +95,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     outlined: boolean = false;
     showSyncMenu: boolean = false;
     isNarrow: boolean = false;
-    syncOptions: {name: string, code: string, value: boolean, icon: string, tooltip: string}[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
-    ];
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
     private modeSubscription?: Subscription;
@@ -147,12 +140,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 private ngZone: NgZone
     ) {
         this.subscriptions.push(
-            this.menuService.menuItems.subscribe(items => {
-                this.menuItems = [...items];
-            })
-        );
-
-        this.subscriptions.push(
             this.stateService.focusedViewState.subscribe(focusedViewIndex => {
                 this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
             })
@@ -160,6 +147,29 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     ngOnInit() {
+        this.subscriptions.push(
+            this.menuService.menuItems.subscribe(items => {
+                this.menuItems = [...items];
+                if (this.stateService.numViews === 1) {
+                    this.menuItems.push({
+                        label: 'Split View',
+                        icon: 'pi pi-plus',
+                        command: () => {
+                            this.stateService.numViews += 1;
+                        }
+                    });
+                } else if (this.viewIndex() > 0) {
+                    this.menuItems.push({
+                        label: 'Close View',
+                        icon: 'pi pi-times',
+                        command: () => {
+                            this.stateService.numViews -= 1;
+                        }
+                    });
+                }
+            })
+        );
+
         if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
             this.mediaQueryList = window.matchMedia('(max-width: 56em)');
             this.isNarrow = this.mediaQueryList.matches;
@@ -261,10 +271,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 spinner.style.display = 'none';
             }
             this.stateService.focusedView = this.stateService.focusedView.valueOf(); // Focus on the last focused view
-            this.showSyncMenu = this.stateService.numViews > 1 && this.mapView!.viewIndex > 0;
+            const mapView = this.mapView;
+            if (!mapView) {
+                this.cdr.markForCheck();
+                return;
+            }
+            this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
             const currentSyncState = new Set(this.stateService.viewSync);
-            this.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
-            this.hoverSubscription = this.mapView!.hoveredFeatureIds.subscribe(result => {
+            this.stateService.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
+            this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
                 this.featureIdsContent = [];
                 if (!result || !result.featureIds.length) {
                     this.featureIdsPopover.hide();
@@ -291,7 +306,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     return;
                 }
                 this.featureIdsContent = featureIdsContent;
-                const canvasRect = this.mapView!.getCanvasClientRect();
+                const canvasRect = mapView.getCanvasClientRect();
                 const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
                 const y = result.position.y + canvasRect.top;
                 const anchor = this.anchorRef.nativeElement;
@@ -317,36 +332,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     get canvasId(): string {
         return `mapViewContainer-${this.viewIndex()}`;
-    }
-
-    updateSelectedOptions() {
-        const previousSelection = new Set(this.stateService.viewSync);
-        const hasMovement = this.syncOptions.some(option =>
-            option.code === VIEW_SYNC_MOVEMENT && option.value);
-        const hasPosition = this.syncOptions.some(option =>
-            option.code === VIEW_SYNC_POSITION && option.value);
-
-        if (hasMovement && hasPosition) {
-            let valueToRemove = VIEW_SYNC_POSITION;
-            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
-            }
-            for (const option of this.syncOptions) {
-                if (option.code === valueToRemove) {
-                    option.value = false;
-                }
-            }
-        }
-
-        this.stateService.viewSync = this.syncOptions.filter(option =>
-            option.value).map(option=> option.code);
-        this.stateService.syncViews();
     }
 
     private resetRightPressTracking(): void {

@@ -211,11 +211,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 <!-- Template for boolean style option nodes -->
                                 <ng-template let-node pTemplate="Bool">
                                     <div style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-symbols-outlined menu-toggler"
-                                              (click)="$event.stopPropagation()"
-                                              tabindex="0">
-                                            more_vert
-                                        </span>
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
@@ -447,65 +442,6 @@ export class MapPanelComponent {
                 }
             }
         ];
-    }
-
-    showOptionsToggleMenu(event: MouseEvent, node: StyleOptionNode) {
-        this.toggleMenu.toggle(event);
-        /* this.toggleMenuItems = [
-            {
-                label: 'Toggle All off but This',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, id == optionId);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            },
-            {
-                label: 'Toggle All on but This',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, id != optionId);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            },
-            {
-                label: 'Toggle All Off',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, false);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            },
-            {
-                label: 'Toggle All On',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, true);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            }
-        ];
-        */
     }
 
     toggleLayerDialog() {

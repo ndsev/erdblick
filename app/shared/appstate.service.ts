@@ -103,6 +103,14 @@ export interface LayerViewConfig {
     visible: boolean;
 }
 
+export interface ViewSyncOption {
+    name: string;
+    code: string;
+    value: boolean;
+    icon: string;
+    tooltip: string;
+}
+
 export type TileGridMode = "xyz" | "nds";
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
@@ -127,7 +135,10 @@ export class AppStateService implements OnDestroy {
     private pendingStorageSyncStates = new Set<AppState<any>>;
     private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
+    private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
+    private lastMergedUrlSyncAt = 0;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
+    private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
 
     // Base UI metrics
     get baseFontSize(): number {
@@ -583,6 +594,14 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
+    // TODO: merge this functionality with the state?
+    readonly syncOptions: ViewSyncOption[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
+    ];
+
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
@@ -639,6 +658,10 @@ export class AppStateService implements OnDestroy {
 
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
+        if (this.urlSyncHandle !== null) {
+            clearTimeout(this.urlSyncHandle);
+            this.urlSyncHandle = null;
+        }
     }
 
     get replaceUrl() {
@@ -692,7 +715,7 @@ export class AppStateService implements OnDestroy {
                 return;
             }
             this.syncStorage();
-            this.syncUrl();
+            this.scheduleUrlSync();
         });
     }
 
@@ -713,7 +736,44 @@ export class AppStateService implements OnDestroy {
         this.pendingStorageSyncStates.clear();
     }
 
-    private syncUrl(): void {
+    private scheduleUrlSync(): void {
+        if (!this.pendingUrlSyncStates.size) {
+            return;
+        }
+        if (this.urlSyncHandle !== null) {
+            return;
+        }
+        // Browsers can reject rapid History API updates; keep merge syncs below that threshold.
+        const elapsed = Date.now() - this.lastMergedUrlSyncAt;
+        const delay = Math.max(0, AppStateService.URL_SYNC_MIN_INTERVAL_MS - elapsed);
+        if (delay === 0) {
+            this.flushUrlSync();
+            return;
+        }
+        this.urlSyncHandle = setTimeout(() => {
+            this.urlSyncHandle = null;
+            this.flushUrlSync();
+        }, delay);
+    }
+
+    private flushUrlSync(): void {
+        if (this.isHydrating) {
+            this.pendingUrlSyncStates.clear();
+            return;
+        }
+        if (!this.pendingUrlSyncStates.size) {
+            return;
+        }
+        const queryParamsHandling = this.syncUrl();
+        if (queryParamsHandling === 'merge') {
+            this.lastMergedUrlSyncAt = Date.now();
+        }
+        if (this.pendingUrlSyncStates.size) {
+            this.scheduleUrlSync();
+        }
+    }
+
+    private syncUrl(): 'replace' | 'merge' {
         const params: Record<string, string> = {};
         for (const state of this.pendingUrlSyncStates) {
             const serialized = state.serialize(true);
@@ -738,6 +798,7 @@ export class AppStateService implements OnDestroy {
         }).catch(error => {
             console.error('[AppStateService] Failed to sync URL parameters', error);
         });
+        return queryParamsHandling;
     }
 
     private hydrateFromStorage(): void {
@@ -1714,5 +1775,35 @@ export class AppStateService implements OnDestroy {
             base: this.createComparisonEntryFromPanel(basePanel),
             others
         };
+    }
+
+    updateSelectedSyncOptions() {
+        const previousSelection = new Set(this.viewSync);
+        const hasMovement = this.syncOptions.some(option =>
+            option.code === VIEW_SYNC_MOVEMENT && option.value);
+        const hasPosition = this.syncOptions.some(option =>
+            option.code === VIEW_SYNC_POSITION && option.value);
+
+        if (hasMovement && hasPosition) {
+            let valueToRemove = VIEW_SYNC_POSITION;
+            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                valueToRemove = VIEW_SYNC_MOVEMENT;
+            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
+                valueToRemove = VIEW_SYNC_POSITION;
+            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                valueToRemove = VIEW_SYNC_POSITION;
+            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
+                valueToRemove = VIEW_SYNC_MOVEMENT;
+            }
+            for (const option of this.syncOptions) {
+                if (option.code === valueToRemove) {
+                    option.value = false;
+                }
+            }
+        }
+
+        this.viewSync = this.syncOptions.filter(option =>
+            option.value).map(option=> option.code);
+        this.syncViews();
     }
 }

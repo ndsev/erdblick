@@ -37,7 +37,7 @@ import {AppStateService} from '../shared/appstate.service';
                 </div>
 
                 <div class="diagnostics-dialog-actions">
-                    <p-button label="Export JSON" [disabled]="!canExport" (click)="export()" />
+                    <p-button label="Export JSON" [disabled]="!canExport || exporting" (click)="export()" />
                 </div>
             </div>
         </p-dialog>
@@ -47,6 +47,7 @@ import {AppStateService} from '../shared/appstate.service';
 })
 export class DiagnosticsExportDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
+    exporting = false;
     exportOptions: DiagnosticsExportOptions = {
         includeProgress: true,
         includePerformance: true,
@@ -97,9 +98,18 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
         };
     }
 
-    export() {
+    async export() {
+        if (this.exporting) {
+            return;
+        }
+
+        this.exporting = true;
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `diagnostics-${timestamp}.json`;
-        this.diagnostics.downloadExportBundle(this.exportOptions, filename);
+        try {
+            await this.diagnostics.downloadExportBundle(this.exportOptions, filename);
+        } finally {
+            this.exporting = false;
+        }
     }
 }

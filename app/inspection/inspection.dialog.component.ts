@@ -137,7 +137,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
 
-    private detachFocusListener?: () => void;
     private detachHeaderDownListener?: () => void;
     private detachDragMoveListener?: () => void;
     private detachDragUpListener?: () => void;
@@ -322,7 +321,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     protected onDialogShow() {
         this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
-        this.bindDialogFocus();
         this.bindDockDragCue();
         this.applyInitialPosition();
         setTimeout(() => this.featurePanel?.refresh(), 0);
@@ -397,7 +395,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     ngOnDestroy() {
         this.endDrag();
-        this.detachFocusListener?.();
         this.detachHeaderDownListener?.();
         this.detachDragMoveListener?.();
         this.detachDragUpListener?.();
@@ -418,18 +415,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.detachPointerUpListener = undefined;
         this.featurePanel?.unfreezeTree();
         this.sourceDataPanel?.unfreezeTree();
-    }
-
-    private bindDialogFocus() {
-        if (!this.dialog?.container) {
-            return;
-        }
-        this.detachFocusListener?.();
-        const handler = () => this.dialogStack.bringToFront(this.dialog);
-        this.dialog.container.addEventListener('mousedown', handler, true);
-        this.detachFocusListener = () => {
-            this.dialog?.container?.removeEventListener('mousedown', handler, true);
-        };
     }
 
     private bindDockDragCue() {

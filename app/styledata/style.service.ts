@@ -413,13 +413,15 @@ export class StyleService {
     loadModifiedBuiltinStyles() {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
-            for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
+            for (const [, style] of JSON.parse(modifiedBuiltinStyleData)) {
                 // A modified style will only be applied if there is a matching builtin style by the URL.
-                const matchingBuiltinStyle = this.styles.values().filter(style => style.url === style.url).toArray();
-                if (!matchingBuiltinStyle.length) {
+                const matchingBuiltinStyle = Array.from(this.styles.values()).find(
+                    builtinStyle => builtinStyle.url === style.url
+                );
+                if (!matchingBuiltinStyle) {
                     continue;
                 }
-                if (!this.initializeStyle(style.source, style.url, matchingBuiltinStyle[0].id, true, style.imported)) {
+                if (!this.initializeStyle(style.source, style.url, matchingBuiltinStyle.id, true, style.imported)) {
                     continue;
                 }
                 const hash = this.styleHashes.get(style.url);
@@ -613,10 +615,10 @@ export class StyleService {
         }
         const style = this.styles.get(styleId)!;
         style.visible = enabled !== undefined ? enabled : !style.visible;
+        this.stateService.setStyleVisibility(styleId, style.visible);
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
-        this.stateService.setStyleVisibility(styleId, style.visible);
     }
 
     private loadStyleHashes(): Map<string, string> {

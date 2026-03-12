@@ -1,4 +1,4 @@
-import {Component, HostListener, OnDestroy, ViewChild} from "@angular/core";
+import {Component, HostListener, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
@@ -34,7 +34,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                             <span>
                                 <p-checkbox [ngModel]="node.visible"
                                             (click)="$event.stopPropagation()"
-                                            (ngModelChange)="toggleStyleGroup(0, node.id)"
+                                            (ngModelChange)="toggleStyleGroup(node.id, $event)"
                                             [binary]="true"
                                             [inputId]="node.id"
                                             [name]="node.id" tabindex="0"/>
@@ -192,7 +192,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     `],
     standalone: false
 })
-export class StyleComponent implements OnDestroy {
+export class StyleComponent {
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     editedStyleSourceSubscription: Subscription = new Subscription();
@@ -207,9 +207,6 @@ export class StyleComponent implements OnDestroy {
     @ViewChild('styles') stylesDialog: Dialog | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
     @ViewChild('warningDialog') warningDialog: Dialog | undefined;
-
-    private detachStylesFocusListener?: () => void;
-    private detachEditorFocusListener?: () => void;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
@@ -228,40 +225,12 @@ export class StyleComponent implements OnDestroy {
         });
     }
 
-    ngOnDestroy() {
-        this.detachStylesFocusListener?.();
-        this.detachEditorFocusListener?.();
-    }
-
     onStylesDialogShow() {
         this.dialogStack.bringToFront(this.stylesDialog);
-        this.bindDialogFocus(this.stylesDialog, 'styles');
     }
 
     onEditorDialogShow() {
         this.dialogStack.bringToFront(this.editorDialog);
-        this.bindDialogFocus(this.editorDialog, 'editor');
-    }
-
-    private bindDialogFocus(dialog: Dialog | undefined, kind: 'styles' | 'editor') {
-        if (!dialog?.container) {
-            return;
-        }
-        if (kind === 'styles') {
-            this.detachStylesFocusListener?.();
-            const handler = () => this.dialogStack.bringToFront(dialog);
-            dialog.container.addEventListener('mousedown', handler, true);
-            this.detachStylesFocusListener = () => {
-                dialog.container?.removeEventListener('mousedown', handler, true);
-            };
-        } else {
-            this.detachEditorFocusListener?.();
-            const handler = () => this.dialogStack.bringToFront(dialog);
-            dialog.container.addEventListener('mousedown', handler, true);
-            this.detachEditorFocusListener = () => {
-                dialog.container?.removeEventListener('mousedown', handler, true);
-            };
-        }
     }
 
     showStylesToggleMenu(event: MouseEvent, styleId: string) {
@@ -434,19 +403,18 @@ export class StyleComponent implements OnDestroy {
         return 0;
     }
 
-    toggleStyleGroup(viewIndex: number, id: string) {
+    toggleStyleGroup(id: string, enabled: boolean) {
         if (!id || id === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
         const group = this.findStyleGroupById(rootGroups, id);
-        if (!group || !this.checkIsStyleGroup(group)) {
+        if (!group) {
             return;
         }
-        const target = !group.visible;
         const styleIds = this.collectStyleIds(group);
         for (const id of styleIds) {
-            this.styleService.toggleStyle(id, target, true);
+            this.styleService.toggleStyle(id, enabled, true);
         }
         this.styleService.reapplyAllStyles();
         this.mapService.scheduleUpdate();
@@ -456,14 +424,17 @@ export class StyleComponent implements OnDestroy {
         return e.type === "Group";
     }
 
-    private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | ErdblickStyle | undefined {
+    private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | undefined {
         for (const elem of elements) {
+            if (!this.checkIsStyleGroup(elem)) {
+                continue;
+            }
             if (elem.id === id) {
                 return elem;
             }
-            if (this.checkIsStyleGroup(elem)) {
-                const found = this.findStyleGroupById(elem.children, id);
-                if (found) return found;
+            const found = this.findStyleGroupById(elem.children, id);
+            if (found) {
+                return found;
             }
         }
         return undefined;

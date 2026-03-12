@@ -1,4 +1,4 @@
-import {Component, HostListener, OnDestroy, ViewChild} from "@angular/core";
+import {Component, HostListener, ViewChild} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {InfoMessageService} from "../shared/info.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -69,7 +69,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     `],
     standalone: false
 })
-export class DatasourcesComponent implements OnDestroy {
+export class DatasourcesComponent {
     warningDialogVisible: boolean = false;
     wasModified: boolean = false;
     dataSourcesConfig: string = "";
@@ -86,8 +86,6 @@ export class DatasourcesComponent implements OnDestroy {
 
     private editedConfigSourceSubscription: Subscription = new Subscription();
     private savedConfigSourceSubscription: Subscription = new Subscription();
-    private detachFocusListener?: () => void;
-
     constructor(private messageService: InfoMessageService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
@@ -110,26 +108,9 @@ export class DatasourcesComponent implements OnDestroy {
 
     }
 
-    ngOnDestroy() {
-        this.detachFocusListener?.();
-    }
-
     onEditorDialogShow() {
         this.loadConfigEditor();
         this.dialogStack.bringToFront(this.editorDialog);
-        this.bindDialogFocus();
-    }
-
-    private bindDialogFocus() {
-        if (!this.editorDialog?.container) {
-            return;
-        }
-        this.detachFocusListener?.();
-        const handler = () => this.dialogStack.bringToFront(this.editorDialog);
-        this.editorDialog.container.addEventListener('mousedown', handler, true);
-        this.detachFocusListener = () => {
-            this.editorDialog?.container?.removeEventListener('mousedown', handler, true);
-        };
     }
 
     loadConfigEditor() {

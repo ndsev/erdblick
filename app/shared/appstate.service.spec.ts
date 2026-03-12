@@ -87,6 +87,7 @@ describe('AppStateService', () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         vi.restoreAllMocks();
     });
 
@@ -130,6 +131,48 @@ describe('AppStateService', () => {
         const view = service.cameraViewDataState.getValue(1);
         expect(view.destination).toEqual({ lon: 90, lat: 45, alt: 500 });
         expect(view.orientation).toEqual(orientation);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('throttles rapid URL sync updates to avoid flooding router history operations', async () => {
+        vi.useFakeTimers();
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+
+        service.markerState.next(true);
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledTimes(1);
+        expect(routerStub.navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({ m: '1' }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
+
+        service.markerState.next(false);
+        await flushMicrotasks();
+        service.markerState.next(true);
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(400);
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledTimes(2);
+        expect(routerStub.navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({ m: '1' }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
 
         service.ngOnDestroy();
         routerStub.events.complete();
