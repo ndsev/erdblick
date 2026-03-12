@@ -32,10 +32,13 @@ import {MenuItem} from "primeng/api";
                     <search-panel></search-panel>
                 }
             </ng-template>
-            <ng-template #item let-item>
+            <ng-template #item let-item let-root="root">
                 <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
                     <span>{{ item.name }}</span>
+                    @if (!root && item.items?.length) {
+                        <span class="pi submenu-indicator pi-angle-right"></span>
+                    }
                 </a>
             </ng-template>
             <ng-template #end>
@@ -327,7 +330,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             splitViewItem.visible = numViews <= 1;
         }
 
-        const closeViewItem = viewMenu.items.find(item => item['name'] === 'Close View');
+        const closeViewItem = viewMenu.items.find(item => item['name'] === 'Close Right View');
         if (closeViewItem) {
             closeViewItem.visible = numViews > 1;
         }

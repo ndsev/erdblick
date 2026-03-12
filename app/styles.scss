@@ -137,6 +137,11 @@ main-bar {
         .material-symbols-outlined {
           font-size: 1.2em;
         }
+
+        .submenu-indicator {
+          margin-left: auto;
+          font-size: 0.75em;
+        }
       }
     }
 
@@ -453,9 +458,9 @@ diagnostics-indicator {
     padding: 0.15em 0.55em;
     font-size: 0.78em;
     font-weight: 500;
-    background: rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--p-badge-contrast-background) 90%, transparent);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    color: rgba(255, 255, 255, 0.92);
+    color: var(--p-badge-contrast-color);
   }
 }
 
