@@ -2683,6 +2683,10 @@ body.dialog-dragging * {
       align-items: center;
       cursor: pointer;
     }
+
+    .p-tree-node-leaf {
+      padding-left: 0.33em;
+    }
   }
 
   .add-view-button {
