@@ -299,7 +299,7 @@ export class AppStateService implements OnDestroy {
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 6.0, pitch: -1.55, roll: 0.25}
+            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0}
         },
         schema: z.object({
             lon: z.coerce.number().optional(),
@@ -380,7 +380,7 @@ export class AppStateService implements OnDestroy {
 
     readonly osmOpacityState = this.createMapViewState<number>({
         name: 'osmOpacity',
-        defaultValue: 30,
+        defaultValue: 6,
         schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
         urlParamName: 'osmOp'
     });

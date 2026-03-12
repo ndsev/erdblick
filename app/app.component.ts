@@ -119,7 +119,7 @@ export class AppComponent implements OnDestroy {
             }
         });
 
-        this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
     }
 
     ngOnDestroy() {

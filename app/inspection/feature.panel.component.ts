@@ -148,14 +148,9 @@ export class FeaturePanelComponent implements OnDestroy {
             return value === "Points" || value === "Polyline" || value === "Polygon" || value === "Mesh";
         };
 
-        const hideHiFiStageLabelChild = (children: TreeTableNode[]): TreeTableNode[] => {
+        const hideGeometryStageLabelChild = (children: TreeTableNode[]): TreeTableNode[] => {
             const stageLabelNode = children.find(child => child.data?.["key"] === "stageLabel");
-            const stageLabel = stageLabelNode?.data?.["value"];
-            if (typeof stageLabel !== "string") {
-                return children;
-            }
-            const normalized = stageLabel.trim().toLowerCase();
-            if (normalized !== "hi-fi" && normalized !== "high-fi" && normalized !== "high fi") {
+            if (!stageLabelNode) {
                 return children;
             }
             return children.filter(child => child.data?.["key"] !== "stageLabel");
@@ -169,10 +164,6 @@ export class FeaturePanelComponent implements OnDestroy {
             }
             const trimmed = stageLabel.trim();
             if (!trimmed.length) {
-                return null;
-            }
-            const normalized = trimmed.toLowerCase();
-            if (normalized === "hi-fi" || normalized === "high-fi" || normalized === "high fi") {
                 return null;
             }
             return trimmed;
@@ -247,7 +238,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     if (stageBubble) {
                         node.data["stageLabelBubble"] = stageBubble;
                     }
-                    children = hideHiFiStageLabelChild(children);
+                    children = hideGeometryStageLabelChild(children);
                 }
                 node.children = children;
                 treeNodes.push(node);

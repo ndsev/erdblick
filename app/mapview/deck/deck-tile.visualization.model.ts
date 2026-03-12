@@ -42,6 +42,15 @@ interface DeckSceneHandle {
     sceneMode?: SceneMode;
 }
 
+interface MergeCountProvider {
+    count: (
+        geoPos: {x: number, y: number, z: number},
+        hashPos: string,
+        level: number,
+        mapViewLayerStyleRuleId: string
+    ) => number;
+}
+
 interface DeckPickLayerMetadata {
     tileKey: string;
     featureIds?: Array<number | null>;
@@ -435,11 +444,15 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private clearMergedPointVisualizations(sceneHandle: IRenderSceneHandle): void {
-        for (const removedCornerTile of this.pointMergeService.remove(
+        for (const affectedCornerTile of this.pointMergeService.remove(
             this.tile.tileId,
+            this.tile.mapTileKey,
             this.mapViewLayerStyleId()
         )) {
-            removedCornerTile.removeScene(sceneHandle);
+            affectedCornerTile.removeScene(sceneHandle);
+            if (affectedCornerTile.referencingTiles.length > 0) {
+                affectedCornerTile.renderScene(sceneHandle);
+            }
         }
     }
 
@@ -788,11 +801,15 @@ export class DeckTileVisualization implements ITileVisualization {
     destroy(sceneHandle: IRenderSceneHandle): void {
         this.deleted = true;
         const registry = this.resolveRegistry(sceneHandle);
-        for (const removedCornerTile of this.pointMergeService.remove(
+        for (const affectedCornerTile of this.pointMergeService.remove(
             this.tile.tileId,
+            this.tile.mapTileKey,
             this.mapViewLayerStyleId()
         )) {
-            removedCornerTile.removeScene(sceneHandle);
+            affectedCornerTile.removeScene(sceneHandle);
+            if (affectedCornerTile.referencingTiles.length > 0) {
+                affectedCornerTile.renderScene(sceneHandle);
+            }
         }
         for (const pointLayerKey of this.pointLayerKeys) {
             registry.remove(pointLayerKey);
@@ -967,7 +984,8 @@ export class DeckTileVisualization implements ITileVisualization {
             featureIdSubset: [...this.featureIdSubset],
             mergeCountSnapshot: this.pointMergeService.makeMergeCountSnapshot(
                 this.tile.tileId,
-                this.mapViewLayerStyleId()
+                this.mapViewLayerStyleId(),
+                this.tile.mapTileKey
             )
         });
         return {
@@ -1019,12 +1037,21 @@ export class DeckTileVisualization implements ITileVisualization {
         outputMode: DeckGeometryOutputMode
     ): DeckFeatureLayerVisualization {
         const deckCtor = deckFeatureLayerVisualizationCtor();
+        const mergeCountProvider: MergeCountProvider = {
+            count: (geoPos, hashPos, level, mapViewLayerStyleRuleId) => this.pointMergeService.count(
+                geoPos,
+                hashPos,
+                level,
+                mapViewLayerStyleRuleId,
+                this.tile.mapTileKey
+            )
+        };
         return new deckCtor(
             this.viewIndex,
             this.tile.mapTileKey,
             this.style,
             this.options,
-            this.pointMergeService,
+            mergeCountProvider,
             this.highlightMode,
             this.fidelityEnumValue(fidelity),
             this.resolvedHighFidelityStage(),

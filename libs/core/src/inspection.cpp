@@ -65,6 +65,11 @@ std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
     return fmt::format("Stage {}", stage);
 }
 
+bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
+{
+    return stage > highFidelityStage(layer);
+}
+
 }
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
@@ -271,7 +276,9 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     geomScope->value_ = convertString(typeString);
     auto const geomStage = g->model().stage().value_or(0U);
     push("stage", "stage", ValueType::Number)->value_ = JsValue(geomStage);
-    push("stageLabel", "stageLabel", ValueType::String)->value_ = convertString(stageLabel(g->model(), geomStage));
+    if (shouldDisplayStageLabel(g->model(), geomStage)) {
+        push("stageLabel", "stageLabel", ValueType::String)->value_ = convertString(stageLabel(g->model(), geomStage));
+    }
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
 
@@ -333,8 +340,10 @@ void InspectionConverter::convertValidity(
 
         if (auto geometryStage = v.geometryStage()) {
             push("geometryStage", "geometryStage", ValueType::Number)->value_ = JsValue(*geometryStage);
-            push("geometryStageLabel", "geometryStageLabel", ValueType::String)->value_ =
-                convertString(stageLabel(v.model(), *geometryStage));
+            if (shouldDisplayStageLabel(v.model(), *geometryStage)) {
+                push("geometryStageLabel", "geometryStageLabel", ValueType::String)->value_ =
+                    convertString(stageLabel(v.model(), *geometryStage));
+            }
         }
 
         auto renderOffset = [this, &v](Point const& data, std::string_view const& name)

@@ -119,8 +119,9 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
-    private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 240];
+    private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 48];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
+    private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
     // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
@@ -439,13 +440,11 @@ export abstract class DeckMapView implements IRenderView {
             return undefined;
         }
         if (sizeLon >= DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN) {
-            const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south);
-            const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north);
             const fullWorldViewport: Viewport = {
-                south: clampedSouth,
+                south: -DeckMapView.WEB_MERCATOR_MAX_LATITUDE,
                 west: this.viewState.longitude - DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN / 2,
                 width: DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN,
-                height: Math.max(0, clampedNorth - clampedSouth),
+                height: DeckMapView.WEB_MERCATOR_MAX_LATITUDE * 2,
                 camPosLon: this.viewState.longitude,
                 camPosLat: this.viewState.latitude,
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
@@ -456,13 +455,11 @@ export abstract class DeckMapView implements IRenderView {
         const expandLat = sizeLat * 0.05;
         const expandedWidth = sizeLon + expandLon * 2;
         if (expandedWidth >= DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN) {
-            const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south - expandLat);
-            const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north + expandLat);
             const fullWorldViewport: Viewport = {
-                south: clampedSouth,
+                south: -DeckMapView.WEB_MERCATOR_MAX_LATITUDE,
                 west: this.viewState.longitude - DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN / 2,
                 width: DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN,
-                height: Math.max(0, clampedNorth - clampedSouth),
+                height: DeckMapView.WEB_MERCATOR_MAX_LATITUDE * 2,
                 camPosLon: this.viewState.longitude,
                 camPosLat: this.viewState.latitude,
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
@@ -1088,11 +1085,19 @@ export abstract class DeckMapView implements IRenderView {
             this.logTileGridDiagnostic("no-levels");
             return;
         }
-        const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels);
-        const layer = this.createTileGridLayer(levels);
+        const viewport = this.computeViewport();
+        if (!viewport) {
+            this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.removeTileStateLayers();
+            this.logTileGridDiagnostic("no-viewport");
+            return;
+        }
+        const effectiveLevels = this.coarsenedTileGridLevels(levels, viewport);
+        const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels, viewport);
+        const layer = this.createTileGridLayer(effectiveLevels);
         this.layerRegistry.upsert(DeckMapView.TILE_GRID_LAYER_KEY, layer, 490);
         this.logTileGridDiagnostic(
-            `enabled mode=${this.tileGridMode} levels=[${levels.join(",")}] stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
+            `enabled mode=${this.tileGridMode} requested=[${levels.join(",")}] effective=[${effectiveLevels.join(",")}] stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
         );
     }
 
@@ -1126,18 +1131,18 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
-    private updateTileStateOverlays(levels: number[]): {layerCount: number; coloredTileCount: number} {
-        const viewport = this.computeViewport();
-        if (!viewport) {
-            this.removeTileStateLayers();
-            return {layerCount: 0, coloredTileCount: 0};
-        }
-
+    private updateTileStateOverlays(
+        levels: number[],
+        viewport: Viewport
+    ): {layerCount: number; coloredTileCount: number} {
         const visibleLayersByLevel = this.visibleMapLayersByLevel(levels);
         const nextLayerKeys = new Set<string>();
         const tileLimitPerView = this.tileLimitPerView();
         let coloredTileCount = 0;
         for (const level of levels) {
+            if (this.tileGridVisibleCellCount(level, viewport) > DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS) {
+                continue;
+            }
             const visibleLayers = visibleLayersByLevel.get(level) ?? [];
             if (!visibleLayers.length) {
                 continue;
@@ -1203,6 +1208,28 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.tileStateLayerKeys = nextLayerKeys;
         return {layerCount: nextLayerKeys.size, coloredTileCount};
+    }
+
+    private coarsenedTileGridLevels(levels: number[], viewport: Viewport): number[] {
+        const effectiveLevels = new Set<number>();
+        for (const level of levels) {
+            effectiveLevels.add(this.coarsenedTileGridLevel(level, viewport));
+        }
+        return Array.from(effectiveLevels.values()).sort((lhs, rhs) => lhs - rhs);
+    }
+
+    private coarsenedTileGridLevel(level: number, viewport: Viewport): number {
+        let effectiveLevel = Math.max(0, Math.min(22, Math.floor(level)));
+        while (effectiveLevel > 0 &&
+            this.tileGridVisibleCellCount(effectiveLevel, viewport) > DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS) {
+            effectiveLevel -= 1;
+        }
+        return effectiveLevel;
+    }
+
+    private tileGridVisibleCellCount(level: number, viewport: Viewport): number {
+        const extent = this.tileGridExtentForLevel(level, viewport);
+        return extent ? extent.width * extent.height : 0;
     }
 
     private visibleMapLayerLevels(): number[] {

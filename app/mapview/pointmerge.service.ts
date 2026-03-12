@@ -128,8 +128,25 @@ export class MergedPointsTile {
         }
     }
 
-    count(positionHash: PositionHash) {
-        return this.features.has(positionHash) ? this.features.get(positionHash)!.featureIds.length : 0;
+    count(positionHash: PositionHash, excludedSourceTileKey?: string) {
+        const feature = this.features.get(positionHash);
+        if (!feature) {
+            return 0;
+        }
+        if (!excludedSourceTileKey) {
+            return feature.featureIds.length;
+        }
+        const idTileKeys = feature.idTileKeys ?? [];
+        if (!idTileKeys.length) {
+            return feature.featureIds.length;
+        }
+        let count = 0;
+        for (let index = 0; index < feature.featureIds.length; index++) {
+            if (idTileKeys[index] !== excludedSourceTileKey) {
+                count += 1;
+            }
+        }
+        return count;
     }
 
     renderScene(sceneHandle: IRenderSceneHandle) {
@@ -146,6 +163,33 @@ export class MergedPointsTile {
     addReference(sourceTileId: bigint) {
         if (this.referencingTiles.findIndex(v => v == sourceTileId) == -1) {
             this.referencingTiles.push(sourceTileId);
+        }
+    }
+
+    removeSource(sourceTileKey: string) {
+        for (const [positionHash, feature] of this.features.entries()) {
+            const idTileKeys = feature.idTileKeys ?? [];
+            if (!idTileKeys.length) {
+                continue;
+            }
+
+            const remainingFeatureIds: number[] = [];
+            const remainingIdTileKeys: string[] = [];
+            for (let index = 0; index < feature.featureIds.length; index++) {
+                if (idTileKeys[index] === sourceTileKey) {
+                    continue;
+                }
+                remainingFeatureIds.push(feature.featureIds[index]);
+                remainingIdTileKeys.push(idTileKeys[index]);
+            }
+
+            if (!remainingFeatureIds.length) {
+                this.features.delete(positionHash);
+                continue;
+            }
+
+            feature.featureIds = remainingFeatureIds;
+            feature.idTileKeys = remainingIdTileKeys;
         }
     }
 
@@ -366,7 +410,11 @@ export class PointMergeService
      * Build a snapshot of merge counts for the corner tiles touched by sourceTileId.
      * Keys are encoded as `${mapViewLayerStyleRuleId}|${positionHash}`.
      */
-    makeMergeCountSnapshot(sourceTileId: bigint, mapViewLayerStyleId: string): Record<string, number> {
+    makeMergeCountSnapshot(
+        sourceTileId: bigint,
+        mapViewLayerStyleId: string,
+        excludedSourceTileKey?: string
+    ): Record<string, number> {
         const result: Record<string, number> = {};
         const cornerTileIds = [
             sourceTileId,
@@ -384,8 +432,9 @@ export class PointMergeService
                 if (!cornerTile) {
                     continue;
                 }
-                for (const [positionHash, feature] of cornerTile.features.entries()) {
-                    result[`${mapViewLayerStyleRuleId}|${positionHash}`] = feature.featureIds.length;
+                for (const [positionHash] of cornerTile.features.entries()) {
+                    result[`${mapViewLayerStyleRuleId}|${positionHash}`] =
+                        cornerTile.count(positionHash, excludedSourceTileKey);
                 }
             }
         }
@@ -396,8 +445,17 @@ export class PointMergeService
     /**
      * Count how many points have been merged for the given position and style rule so far.
      */
-    count(geoPos: Cartographic, hashPos: PositionHash, level: number, mapViewLayerStyleRuleId: MapViewLayerStyleRule): number {
-        return this.getCornerTileByPosition(geoPos, level, mapViewLayerStyleRuleId).count(hashPos);
+    count(
+        geoPos: Cartographic,
+        hashPos: PositionHash,
+        level: number,
+        mapViewLayerStyleRuleId: MapViewLayerStyleRule,
+        excludedSourceTileKey?: string
+    ): number {
+        return this.getCornerTileByPosition(geoPos, level, mapViewLayerStyleRuleId).count(
+            hashPos,
+            excludedSourceTileKey
+        );
     }
 
     /**
@@ -469,18 +527,22 @@ export class PointMergeService
     }
 
     /**
-     * Remove a sourceTileId reference from each surrounding corner tile whose mapViewLayerStyleRuleId has a
-     * prefix-match with the mapViewLayerStyleId. Yields MergedPointsTiles which now have empty referencingTiles,
-     * and whose visualization (if existing) must therefore be removed from the scene.
+     * Remove a source tile contribution from each surrounding corner tile whose mapViewLayerStyleRuleId has a
+     * prefix-match with the mapViewLayerStyleId. Yields all touched corner tiles so callers can refresh their scene
+     * representation. Tiles whose references become empty are removed from the service map.
      */
-    *remove(sourceTileId: bigint, mapViewLayerStyleId: string): Generator<MergedPointsTile> {
+    *remove(sourceTileId: bigint, sourceTileKey: string, mapViewLayerStyleId: string): Generator<MergedPointsTile> {
         for (let [mapViewLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {
             if (mapViewLayerStyleRuleId.startsWith(mapViewLayerStyleId)) {
                 for (let [tileId, tile] of tiles) {
-                    // Yield the corner tile as to-be-deleted, if it does not have any referencing tiles.
+                    const hadReference = tile.referencingTiles.includes(sourceTileId);
+                    if (!hadReference) {
+                        continue;
+                    }
+                    tile.removeSource(sourceTileKey);
                     tile.referencingTiles = tile.referencingTiles.filter(val => val != sourceTileId);
+                    yield tile;
                     if (!tile.referencingTiles.length) {
-                        yield tile;
                         tiles.delete(tileId);
                     }
                 }

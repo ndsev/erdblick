@@ -1237,6 +1237,24 @@ export class MapDataService {
         visualization.maxLowFiLod = policy.maxLowFiLod;
     }
 
+    private shouldHardResetMergedPointsForPolicyChange(
+        previousPrefersHighFidelity: boolean,
+        previousMaxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
+        visualization: ITileVisualization,
+        styleHasExplicitLowFidelityRules: boolean
+    ): boolean {
+        // Switching into low-fi, or tightening the active low-fi LOD cap, changes
+        // the point-merge layer family itself. Returning to high-fi is handled by
+        // normal tile rerenders so low-fi fallback can stay visible until replaced.
+        if (visualization.prefersHighFidelity) {
+            return false;
+        }
+        if (previousPrefersHighFidelity) {
+            return true;
+        }
+        return styleHasExplicitLowFidelityRules && previousMaxLowFiLod !== visualization.maxLowFiLod;
+    }
+
     private canonicalizeMapTileKey(tileKey: string): string {
         const parsed = this.parseMapTileKeySafe(tileKey);
         if (!parsed) {
@@ -1455,7 +1473,9 @@ export class MapDataService {
     private updateVisualizations() {
         let anyRenderPolicyChanged = false;
         this.viewVisualizationState.forEach((state, viewIndex) => {
-            const mapViewLayerStyleIdsWithPolicyChange = new Set<string>();
+            // A low-fidelity policy change invalidates merged-point aggregation as a whole.
+            // Hard-reset the style family once and let subsequent tile renders rebuild it.
+            const mapViewLayerStyleIdsRequiringMergedPointReset = new Set<string>();
             const visibleTileByKey = new Map<string, boolean>();
             const isVisibleForView = (tile: FeatureTile): boolean => {
                 const cached = visibleTileByKey.get(tile.mapTileKey);
@@ -1506,7 +1526,14 @@ export class MapDataService {
                             tileVisu.styleId,
                             coreLib.HighlightMode.NO_HIGHLIGHT
                         );
-                        mapViewLayerStyleIdsWithPolicyChange.add(mapViewLayerStyleId);
+                        if (this.shouldHardResetMergedPointsForPolicyChange(
+                            previousPrefersHighFidelity,
+                            previousMaxLowFiLod,
+                            tileVisu,
+                            styleHasExplicitLowFidelityRules
+                        )) {
+                            mapViewLayerStyleIdsRequiringMergedPointReset.add(mapViewLayerStyleId);
+                        }
                     }
                 }
                 for (const tileKey of removals) {
@@ -1514,10 +1541,10 @@ export class MapDataService {
                 }
             }
 
-            for (const mapViewLayerStyleId of mapViewLayerStyleIdsWithPolicyChange) {
+            for (const mapViewLayerStyleId of mapViewLayerStyleIdsRequiringMergedPointReset) {
                 this.clearMergedPointsForMapViewLayerStyleId(mapViewLayerStyleId);
             }
-            if (mapViewLayerStyleIdsWithPolicyChange.size > 0) {
+            if (mapViewLayerStyleIdsRequiringMergedPointReset.size > 0) {
                 anyRenderPolicyChanged = true;
             }
 
