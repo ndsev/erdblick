@@ -6,6 +6,7 @@
 :root {
   --erdblick-card-bg: rgba(255, 255, 255, 0.87);
   --erdblick-card-bg-hover: rgba(255, 255, 255, 1);
+  --erdblick-map-bg: #050505;
   --p-progressspinner-color-one: var(--p-blue-500) !important;
   --p-progressspinner-color-two: var(--p-blue-500) !important;
   --p-progressspinner-color-three: var(--p-blue-500) !important;
@@ -705,12 +706,17 @@ map-view {
     height: 100vh;
     inset: 0;
     overflow: hidden;
+    background: var(--erdblick-map-bg);
     user-select: none;
     -moz-user-select: none;
     -webkit-user-select: none;
     -ms-user-select: none;
     -o-user-select: none;
     box-sizing: border-box;
+
+    canvas {
+      background: var(--erdblick-map-bg);
+    }
 
     &.border::after {
       content: "";
