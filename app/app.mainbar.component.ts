@@ -33,7 +33,7 @@ import {MenuItem} from "primeng/api";
                 }
             </ng-template>
             <ng-template #item let-item>
-                <a pRipple class="p-menubar-item-link">
+                <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
                     <span>{{ item.name }}</span>
                 </a>
@@ -100,7 +100,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     command: () => { this.stateService.numViews = 2; }
                 },
                 {
-                    name: 'Close View',
+                    name: 'Close Right View',
                     icon: 'tab_close',
                     command: () => { this.stateService.numViews = 1; }
                 },
@@ -222,6 +222,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.stateService.numViewsState.subscribe(numViews => {
             this.updateViewMenuItemsVisibility(numViews);
         }));
+        this.subscriptions.add(this.stateService.viewSyncState.subscribe(() => {
+            this.menuItems = [...this.menuItems];
+        }));
     }
 
     ngAfterViewInit() {
@@ -330,6 +333,22 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
 
         this.menuItems = [...this.menuItems];
+    }
+
+    protected isSyncViewOptionActive(item: MenuItem): boolean {
+        const itemName = item['name'];
+        switch (itemName) {
+            case 'Position':
+                return this.stateService.viewSync.includes(VIEW_SYNC_POSITION);
+            case 'Movement':
+                return this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT);
+            case 'Projection':
+                return this.stateService.viewSync.includes(VIEW_SYNC_PROJECTION);
+            case 'Layers':
+                return this.stateService.viewSync.includes(VIEW_SYNC_LAYERS);
+            default:
+                return false;
+        }
     }
 
     protected readonly environment = environment;

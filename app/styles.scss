@@ -139,6 +139,16 @@ main-bar {
         }
       }
     }
+
+    .p-menubar-item-link.sync-option-active {
+      background: var(--p-button-success-background) !important;
+      color: var(--p-button-success-color) !important;
+      border-radius: 6px !important;
+
+      .material-symbols-outlined {
+        color: var(--p-button-success-color) !important;
+      }
+    }
   }
 
   .p-menubar-mobile {
