@@ -642,8 +642,9 @@ export abstract class DeckMapView implements IRenderView {
         this.subscriptions.push(
             this.mapService.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
                 const tileVis = task.visualization;
+                // The render task topic is shared across all views. Only the
+                // owning view may consume and complete the task.
                 if (tileVis.viewIndex !== this._viewIndex) {
-                    task.onDone?.();
                     return;
                 }
                 tileVis.render(this.getSceneHandle())
