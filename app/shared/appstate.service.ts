@@ -12,6 +12,9 @@ import {InfoMessageService} from "./info.service";
 import type {FeatureWrapper} from "../mapdata/features.model";
 import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
 
+const COORDINATE_STATE_DECIMAL_PLACES = 8;
+const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
+
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 512;
@@ -119,9 +122,6 @@ export interface ViewSyncOption {
 
 export type TileGridMode = "xyz" | "nds";
 
-const COORDINATE_STATE_DECIMAL_PLACES = 8;
-const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
-
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
@@ -134,29 +134,12 @@ function roundCoordinateStateValue(value: number): number {
     return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
 }
 
-function roundCoordinateStateArray(values: number[]): number[] {
-    return values.map(v => roundCoordinateStateValue(v));
-}
-
 function clampOsmOpacity(value: number): number {
     if (!Number.isFinite(value)) {
         return 30;
     }
     const rounded = Math.round(value);
     return Math.max(0, Math.min(100, rounded));
-}
-
-function parseOsmEntry(value: string, currentValue: OsmViewState): OsmViewState {
-    const parts = value.split('~');
-    const enabledToken = parts[0];
-    const opacityToken = parts[1];
-    const enabled = enabledToken === '1' || enabledToken.toLowerCase() === 'true';
-    const opacity = opacityToken === undefined ? currentValue.opacity : clampOsmOpacity(Number(opacityToken));
-    return {enabled, opacity};
-}
-
-function serializeOsmEntry(value: OsmViewState): string {
-    return `${value.enabled ? 1 : 0}~${clampOsmOpacity(value.opacity)}`;
 }
 
 @Injectable({providedIn: 'root'})
@@ -219,8 +202,8 @@ export class AppStateService implements OnDestroy {
         name: 'markedPosition',
         defaultValue: [],
         schema: z.array(z.coerce.number()).max(2),
-        toStorage: (value: number[]) => roundCoordinateStateArray(value),
-        fromStorage: (payload: any): number[] => roundCoordinateStateArray(payload as number[]),
+        toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
+        fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
         urlParamName: 'mp',
         urlIncludeInVisualizationOnly: false
     });
@@ -421,8 +404,13 @@ export class AppStateService implements OnDestroy {
             opacity: 6,
         },
         schema: z.string(),
-        toStorage: (value: OsmViewState) => serializeOsmEntry(value),
-        fromStorage: (payload: any, currentValue: OsmViewState): OsmViewState => parseOsmEntry(String(payload), currentValue),
+        toStorage: (value: OsmViewState) => `${value.enabled ? 1 : 0}~${clampOsmOpacity(value.opacity)}`,
+        fromStorage: (payload: any, currentValue: OsmViewState): OsmViewState => {
+            const parts = String(payload).split('~');
+            const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
+            const opacity = parts[1] === undefined ? currentValue.opacity : clampOsmOpacity(Number(parts[1]));
+            return {enabled, opacity};
+        },
         urlParamName: 'osm'
     });
 
@@ -904,7 +892,7 @@ export class AppStateService implements OnDestroy {
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
-    set markedPosition(val: number[]) {this.markedPositionState.next(roundCoordinateStateArray(val));};
+    set markedPosition(val: number[]) {this.markedPositionState.next(val.map(v => roundCoordinateStateValue(v)));};
     get selection() {return this.selectionState.getValue();}
     set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
