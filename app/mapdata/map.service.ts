@@ -90,6 +90,7 @@ interface RequestedLayerProgressState {
  */
 @Injectable({providedIn: 'root'})
 export class MapDataService {
+    private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 16 * 1024;
 
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
@@ -1085,7 +1086,7 @@ export class MapDataService {
             this.viewVisualizationState.forEach((state, viewIndex) => {
                 state.recalculateTileIds(
                     tileLimit,
-                    this.maps.allLevels(viewIndex),
+                    this.visibleFeatureLevelsInView(viewIndex),
                     this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt
                 );
             });
@@ -1813,7 +1814,7 @@ export class MapDataService {
                     if (!this.maps.getMapLayerVisibility(viewIndex, mapName, layer.id)) {
                         continue;
                     }
-                    let level = this.maps.getMapLayerLevel(viewIndex, mapName, layer.id);
+                    let level = this.getEffectiveMapLayerLevel(viewIndex, mapName, layer.id);
                     let tileIds = this.viewVisualizationState[viewIndex].visibleTileIdsPerLevel.get(level);
                     if (tileIds === undefined) {
                         continue;
@@ -2676,6 +2677,81 @@ export class MapDataService {
         this.scheduleUpdate();
     }
 
+    setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
+        if (autoLevel) {
+            const configuredLevel = this.maps.getMapLayerLevel(viewIndex, mapId, layerId);
+            const normalizedLevel = this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, configuredLevel);
+            this.maps.setMapLayerLevel(viewIndex, mapId, layerId, normalizedLevel);
+        }
+        this.maps.setMapLayerAutoLevel(viewIndex, mapId, layerId, autoLevel);
+        this.syncViewsIfEnabled(viewIndex);
+        this.scheduleUpdate();
+    }
+
+    isMapLayerAutoLevelEnabled(viewIndex: number, mapId: string, layerId: string): boolean {
+        return this.maps.getMapLayerAutoLevel(viewIndex, mapId, layerId);
+    }
+
+    getEffectiveMapLayerLevel(viewIndex: number, mapId: string, layerId: string): number {
+        const configuredLevel = this.maps.getMapLayerLevel(viewIndex, mapId, layerId);
+        if (!this.maps.getMapLayerAutoLevel(viewIndex, mapId, layerId)) {
+            return configuredLevel;
+        }
+        return this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, configuredLevel);
+    }
+
+    private autoSelectedMapLayerLevel(
+        viewIndex: number,
+        mapId: string,
+        layerId: string,
+        fallbackLevel: number
+    ): number {
+        const advertisedLevels = this.advertisedLayerLevels(mapId, layerId);
+        if (!advertisedLevels.length) {
+            return fallbackLevel;
+        }
+        const viewport = this.viewVisualizationState[viewIndex]?.viewport;
+        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+            return this.clampLayerLevelToAdvertised(fallbackLevel, advertisedLevels);
+        }
+        for (let index = advertisedLevels.length - 1; index >= 0; index--) {
+            const candidateLevel = advertisedLevels[index];
+            const visibleTileCount = (coreLib.getTileIds(
+                viewport,
+                candidateLevel,
+                MapDataService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES + 1
+            ) as bigint[]).length;
+            if (visibleTileCount <= MapDataService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES) {
+                return candidateLevel;
+            }
+        }
+        return advertisedLevels[0];
+    }
+
+    private advertisedLayerLevels(mapId: string, layerId: string): number[] {
+        const mapItem = this.maps.maps.get(mapId);
+        const layer = mapItem?.layers.get(layerId);
+        if (!layer) {
+            return [];
+        }
+        return [...new Set(
+            layer.info.zoomLevels
+                .filter(level => Number.isFinite(level))
+                .map(level => Math.max(0, Math.min(22, Math.floor(level))))
+        )].sort((lhs, rhs) => lhs - rhs);
+    }
+
+    private clampLayerLevelToAdvertised(level: number, advertisedLevels: number[]): number {
+        let clampedLevel = advertisedLevels[0];
+        for (const advertisedLevel of advertisedLevels) {
+            if (advertisedLevel > level) {
+                break;
+            }
+            clampedLevel = advertisedLevel;
+        }
+        return clampedLevel;
+    }
+
     private viewShowsFeatureTile(viewIndex: number, tile: FeatureTile, skipViewportCheck: boolean = false) {
         if (viewIndex >= this.viewVisualizationState.length) {
             console.error("Attempt to access non-existing view index.");
@@ -2688,7 +2764,7 @@ export class MapDataService {
             }
         }
         return this.maps.getMapLayerVisibility(viewIndex, tile.mapName, tile.layerName) &&
-            tile.level() === this.maps.getMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
+            tile.level() === this.getEffectiveMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
     }
 
     private scheduleOutsideAngular(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
@@ -2755,7 +2831,7 @@ export class MapDataService {
                 if (!this.maps.getMapLayerVisibility(viewIndex, mapId, layerInfo.id)) {
                     continue;
                 }
-                levels.add(this.maps.getMapLayerLevel(viewIndex, mapId, layerInfo.id));
+                levels.add(this.getEffectiveMapLayerLevel(viewIndex, mapId, layerInfo.id));
             }
         }
         return levels;

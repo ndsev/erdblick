@@ -71,7 +71,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                   [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-primary' : 'map-controls-button p-button-secondary'"
                                   [style]="{'min-width': '3.5em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
                                   [disabled]="!tileBordersEnabled[index]"
-                                  [label]="tileGridModes[index].toUpperCase()"
+                                  [label]="tileGridModes[index] ? tileGridModes[index].toUpperCase() : 'NDS'"
                                   pTooltip="Switch tile grid mode (XYZ/NDS)"
                                   tooltipPosition="bottom" tabindex="0">
                         </p-button>
@@ -191,7 +191,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                             <span class="material-symbols-outlined"
                                                   style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                             </p-button>
-                                            <p-inputNumber [(ngModel)]="node.viewConfig[index].level"
+                                            <p-inputNumber [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"
                                                            (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
                                                            [showButtons]="true" [min]="0" [max]="15"
                                                            buttonLayout="horizontal" spinnerMode="horizontal"
@@ -203,9 +203,18 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                                            pTooltip="Change zoom level" tooltipPosition="bottom"
                                                            tabindex="0">
                                             </p-inputNumber>
+                                            <p-button onEnterClick
+                                                      (click)="toggleLayerAutoLevel(index, node.mapId, node.id)"
+                                                      [styleClass]="node.viewConfig[index].autoLevel ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
+                                                      [style]="{'min-width': '3.75em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
+                                                      label="AUTO"
+                                                      pTooltip="Automatically select the layer level"
+                                                      tooltipPosition="bottom"
+                                                      tabindex="0">
+                                            </p-button>
                                         </div>
                                         <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                               [(ngModel)]="node.viewConfig[index].level"/>
+                                               [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"/>
                                     </div>
                                 </ng-template>
                                 <!-- Template for boolean style option nodes -->
@@ -307,27 +316,24 @@ export class MapPanelComponent {
 
         this.subscriptions.push(
             this.stateService.numViewsState.subscribe(numViews => {
+                this.viewIndices = Array.from({length: numViews}, (_, i) => i);
                 this.osmEnabled = [];
                 this.osmOpacityValue = [];
                 this.tileBordersEnabled = [];
                 this.tileGridModes = [];
-                const viewIndices = Array.from({length: numViews}, (_, i) => i);
-                viewIndices.forEach(viewIndex => {
+                this.viewIndices.forEach(viewIndex => {
                     this.osmEnabled.push(this.stateService.getOsmEnabled(viewIndex));
                     this.osmOpacityValue.push(this.stateService.getOsmOpacity(viewIndex));
                     this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
                     this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
-                while (this.mapsCollapsed.length < viewIndices.length) {
+                while (this.mapsCollapsed.length < this.viewIndices.length) {
                     this.mapsCollapsed.push(false);
                 }
-                if (this.mapsCollapsed.length > viewIndices.length) {
-                    this.mapsCollapsed.length = viewIndices.length;
+                if (this.mapsCollapsed.length > this.viewIndices.length) {
+                    this.mapsCollapsed.length = this.viewIndices.length;
                 }
-                this.syncedOptions = viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
-                setTimeout(() => {
-                    this.viewIndices = viewIndices;
-                }, 150);
+                this.syncedOptions = this.viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
 
@@ -505,14 +511,32 @@ export class MapPanelComponent {
     }
 
     toggleViewTileGridMode(viewIndex: number) {
-        const currentMode = this.tileGridModes[viewIndex] ?? "xyz";
+        const currentMode = this.tileGridModes[viewIndex] ?? "nds";
         const nextMode: TileGridMode = currentMode === "xyz" ? "nds" : "xyz";
         this.tileGridModes[viewIndex] = nextMode;
         this.mapService.setViewTileGridMode(viewIndex, nextMode);
     }
 
-    onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
-        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Number(event.toString()));
+    onLayerLevelChanged(level: number | null, viewIndex: number, mapName: string, layerName: string) {
+        if (level === null || !Number.isFinite(level)) {
+            return;
+        }
+        if (this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
+            this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, false);
+        }
+        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Math.max(0, Math.floor(level)));
+    }
+
+    toggleLayerAutoLevel(viewIndex: number, mapName: string, layerName: string) {
+        const nextState = !this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName);
+        this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, nextState);
+    }
+
+    displayMapLayerLevel(viewIndex: number, mapName: string, layerName: string, fallbackLevel: number) {
+        if (!this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
+            return fallbackLevel;
+        }
+        return this.mapService.getEffectiveMapLayerLevel(viewIndex, mapName, layerName);
     }
 
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {

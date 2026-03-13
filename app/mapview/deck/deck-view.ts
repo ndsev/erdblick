@@ -40,6 +40,7 @@ interface DeckCameraState {
     zoom: number;
     pitch: number;
     bearing: number;
+    maxPitch: number;
 }
 
 interface TileGridOverlayGeometry {
@@ -119,7 +120,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
-    private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 48];
+    private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
@@ -142,7 +143,8 @@ export abstract class DeckMapView implements IRenderView {
         latitude: 0,
         zoom: 2,
         pitch: 0,
-        bearing: 0
+        bearing: 0,
+        maxPitch: 85
     };
 
     hoveredFeatureIds: BehaviorSubject<{
@@ -160,7 +162,7 @@ export abstract class DeckMapView implements IRenderView {
     private osmLayerEnabled = false;
     private osmLayerOpacity = -1;
     private tileGridEnabled = false;
-    private tileGridMode: TileGridMode = "xyz";
+    private tileGridMode: TileGridMode = "nds";
     private lastTileGridDiagnosticSignature = "";
     private tileStateLayerKeys = new Set<string>();
     private tileGridOverlayUpdateRaf: number | null = null;
@@ -388,16 +390,18 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     setViewFromState(cameraData: CameraViewState): void {
+        const maxPitch = this.allowPitchAndBearing ? Math.max(0, this.viewState.maxPitch) : 0;
         const next: DeckCameraState = {
             longitude: cameraData.destination.lon,
             latitude: cameraData.destination.lat,
             zoom: this.altitudeToZoom(cameraData.destination.alt, cameraData.destination.lat),
             pitch: this.allowPitchAndBearing
-                ? Math.max(0, Math.min(60, GeoMath.toDegrees(cameraData.orientation.pitch) + 90))
+                ? Math.max(0, Math.min(maxPitch, GeoMath.toDegrees(cameraData.orientation.pitch) + 90))
                 : 0,
             bearing: this.allowPitchAndBearing
                 ? this.normalizeDegrees(GeoMath.toDegrees(cameraData.orientation.heading))
-                : 0
+                : 0,
+            maxPitch
         };
         this.updateViewState(next, true, true);
     }
@@ -831,12 +835,14 @@ export abstract class DeckMapView implements IRenderView {
         const zoom = Number.isFinite(next.zoom) ? next.zoom : this.viewState.zoom;
         const pitch = Number.isFinite(next.pitch) ? next.pitch : this.viewState.pitch;
         const bearing = Number.isFinite(next.bearing) ? next.bearing : this.viewState.bearing;
+        const maxPitch = Number.isFinite(next.maxPitch) ? next.maxPitch : this.viewState.maxPitch;
         return {
             longitude: this.normalizeLongitude(longitude),
             latitude: Math.max(-85.05113, Math.min(85.05113, latitude)),
             zoom: Math.max(0, Math.min(22, zoom)),
-            pitch: this.allowPitchAndBearing ? Math.max(0, Math.min(60, pitch)) : 0,
-            bearing: this.allowPitchAndBearing ? this.normalizeDegrees(bearing) : 0
+            pitch: this.allowPitchAndBearing ? Math.max(0, Math.min(maxPitch, pitch)) : 0,
+            bearing: this.allowPitchAndBearing ? this.normalizeDegrees(bearing) : 0,
+            maxPitch: this.allowPitchAndBearing ? Math.max(0, maxPitch) : 0
         };
     }
 
@@ -1234,7 +1240,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                const level = this.mapService.maps.getMapLayerLevel(this._viewIndex, mapId, layer.id);
+                const level = this.mapService.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
                 if (!Number.isFinite(level)) {
                     continue;
                 }
@@ -1259,7 +1265,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                const level = this.mapService.maps.getMapLayerLevel(this._viewIndex, mapId, layer.id);
+                const level = this.mapService.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
                 if (!Number.isFinite(level)) {
                     continue;
                 }

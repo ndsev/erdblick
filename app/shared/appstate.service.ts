@@ -14,7 +14,7 @@ import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostic
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
-export const MAX_NUM_TILES_TO_LOAD = 2048;
+export const MAX_NUM_TILES_TO_LOAD = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
@@ -104,6 +104,7 @@ export interface OsmViewState {
 }
 
 export interface LayerViewConfig {
+    autoLevel: boolean;
     level: number;
     visible: boolean;
 }
@@ -455,7 +456,7 @@ export class AppStateService implements OnDestroy {
 
     readonly viewTileGridModeState = this.createMapViewState<TileGridMode>({
         name: "tileGridMode",
-        defaultValue: "xyz",
+        defaultValue: "nds",
         schema: z.enum(["xyz", "nds"]),
         urlParamName: 'tgm'
     });
@@ -465,6 +466,13 @@ export class AppStateService implements OnDestroy {
         defaultValue: [],
         schema: z.array(z.number().min(0).max(15)),
         urlParamName: 'z'
+    });
+
+    readonly layerAutoZoomLevelState = this.createMapViewState<Array<boolean>>({
+        name: "autoZoomLevel",
+        defaultValue: [],
+        schema: z.array(Boolish),
+        urlParamName: 'az'
     });
 
     readonly stylesState = new StyleState(this.statePool);
@@ -1446,6 +1454,7 @@ export class AppStateService implements OnDestroy {
 
         for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
             result.push({
+                autoLevel: layerStateValue(this.layerAutoZoomLevelState, viewIndex, true),
                 visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
             });
@@ -1475,6 +1484,7 @@ export class AppStateService implements OnDestroy {
         };
 
         for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
+            insertLayerState(this.layerAutoZoomLevelState, viewIndex, viewConfig[viewIndex].autoLevel, true);
             insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
             insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
         }
@@ -1644,8 +1654,10 @@ export class AppStateService implements OnDestroy {
                 for (let v = 0; v < views; v++) {
                     const vis = this.layerVisibilityState.getValue(v);
                     const levels = this.layerZoomLevelState.getValue(v);
+                    const autoLevels = this.layerAutoZoomLevelState.getValue(v);
                     this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
                     this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
+                    this.layerAutoZoomLevelState.next(v, filterLayerArray<boolean>(autoLevels ?? [], true));
                 }
             }
         }
@@ -1699,6 +1711,7 @@ export class AppStateService implements OnDestroy {
         pruneViews(this.cameraViewDataState);
         pruneViews(this.layerVisibilityState);
         pruneViews(this.layerZoomLevelState);
+        pruneViews(this.layerAutoZoomLevelState);
 
         // Also prune view-dimension from style option arrays
         for (const [k, vals] of stylesMap.entries()) {

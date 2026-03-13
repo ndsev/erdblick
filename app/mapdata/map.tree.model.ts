@@ -392,6 +392,19 @@ export class MapLayerTree {
         this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
     }
 
+    setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
+        const mapItem = this.maps.get(mapId);
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
+            return;
+        }
+        const layer = mapItem.layers.get(layerId)!;
+        if (layer.viewConfig.length <= viewIndex) {
+            return;
+        }
+        layer.viewConfig[viewIndex].autoLevel = autoLevel;
+        this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
+    }
+
     *allLevels(viewIndex: number) {
         for (let [_, map] of this.maps) {
             for (let layer of map.children) {
@@ -414,6 +427,18 @@ export class MapLayerTree {
             return 13;
         }
         return layer.viewConfig[viewIndex].level;
+    }
+
+    getMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string) {
+        const mapItem = this.maps.get(mapId);
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
+            return true;
+        }
+        const layer = mapItem.layers.get(layerId)!;
+        if (layer.viewConfig.length <= viewIndex) {
+            return true;
+        }
+        return layer.viewConfig[viewIndex].autoLevel;
     }
 
     getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {
@@ -554,8 +579,10 @@ export class MapLayerTree {
                 }
 
                 if (targetConfig.visible !== sourceConfig.visible ||
-                    targetConfig.level !== sourceConfig.level) {
+                    targetConfig.level !== sourceConfig.level ||
+                    targetConfig.autoLevel !== sourceConfig.autoLevel) {
                     layer.viewConfig[targetIndex] = {
+                        autoLevel: sourceConfig.autoLevel,
                         visible: sourceConfig.visible,
                         level: sourceConfig.level
                     };

@@ -349,11 +349,12 @@ describe('AppStateService', () => {
         const config = service.mapLayerConfig('m1', 'layerA', false, 9);
 
         expect(config).toEqual([
-            { visible: false, level: 9 },
+            { autoLevel: true, visible: false, level: 9 },
         ]);
         expect(service.layerNamesState.getValue()).toEqual(['m1/layerA']);
         expect(service.layerVisibilityState.getValue(0)).toEqual([false]);
         expect(service.layerZoomLevelState.getValue(0)).toEqual([9]);
+        expect(service.layerAutoZoomLevelState.getValue(0)).toEqual([true]);
         expect(service.viewTileBordersState.getValue(0)).toBe(true);
 
         service.ngOnDestroy();
@@ -368,16 +369,17 @@ describe('AppStateService', () => {
         // Prime internal state so indices exist before updating.
         service.mapLayerConfig('m2', 'layerB');
 
-        service.setMapLayerConfig('m2', 'layerB', [{ visible: false, level: 7 }]);
+        service.setMapLayerConfig('m2', 'layerB', [{ autoLevel: false, visible: false, level: 7 }]);
 
         const config = service.mapLayerConfig('m2', 'layerB');
 
         expect(config).toEqual([
-            { visible: false, level: 7 },
+            { autoLevel: false, visible: false, level: 7 },
         ]);
         expect(service.layerNamesState.getValue()).toEqual(['m2/layerB']);
         expect(service.layerVisibilityState.getValue(0)).toEqual([false]);
         expect(service.layerZoomLevelState.getValue(0)).toEqual([7]);
+        expect(service.layerAutoZoomLevelState.getValue(0)).toEqual([false]);
         expect(service.viewTileBordersState.getValue(0)).toBe(true);
 
         service.ngOnDestroy();
