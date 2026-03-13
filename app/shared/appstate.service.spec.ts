@@ -118,6 +118,105 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('hydrates marked position from CSV query params', async () => {
+        const routerStub = createRouterStub({ mp: '11.141985707869166,48.002375728153766' });
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markedPositionState.getValue()).toEqual([11.14198571, 48.00237573]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('serializes marked position to a CSV query param', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+
+        service.markedPositionState.next([11.141985707869166, 48.002375728153766]);
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({
+                mp: '11.14198571,48.00237573',
+            }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates OSM settings from combined query params', async () => {
+        const routerStub = createRouterStub({ n: '2', osm: '1~50,0~30' });
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.getOsmState(0)).toEqual({ enabled: true, opacity: 50 });
+        expect(service.getOsmState(1)).toEqual({ enabled: false, opacity: 30 });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('serializes OSM settings into a single osm query param', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+
+        service.setOsmState(0, true, 50);
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({
+                osm: '1~50',
+            }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
+        const lastCall = (routerStub.navigate as any).mock.calls.at(-1)?.[1];
+        expect(lastCall?.queryParams?.osmOp).toBeUndefined();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates selection colors from storage with a leading hash', async () => {
+        localStorage.setItem('selected', JSON.stringify(['1~1~Features:map:layer:tile~feature-1~30:20~abc123~0']));
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].color).toBe('#abc123');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('converts views to degrees when setting a camera view', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -131,6 +230,32 @@ describe('AppStateService', () => {
         const view = service.cameraViewDataState.getValue(1);
         expect(view.destination).toEqual({ lon: 90, lat: 45, alt: 500 });
         expect(view.orientation).toEqual(orientation);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rounds camera state values to 8 decimal places', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const destination = Cartographic.fromDegrees(11.141985707869166, 48.002375728153766, 123.123456789123);
+        const orientation = { heading: 1.123456789, pitch: -2.987654321, roll: 3.000000009 };
+
+        service.setView(0, destination, orientation);
+
+        const view = service.cameraViewDataState.getValue(0);
+        expect(view.destination).toEqual({
+            lon: 11.14198571,
+            lat: 48.00237573,
+            alt: 123.12345679,
+        });
+        expect(view.orientation).toEqual({
+            heading: 1.12345679,
+            pitch: -2.98765432,
+            roll: 3.00000001,
+        });
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -595,6 +720,9 @@ describe('AppStateService', () => {
         });
         await flushMicrotasks();
 
+        const persistedSelection = localStorage.getItem('selected') ?? '';
+        expect(persistedSelection).toContain('~555555~');
+        expect(persistedSelection).not.toContain('#555555');
         expect(localStorage.getItem('selected')).toContain('3:100:200');
         expect(localStorage.getItem('inspectionDialogLayoutState')).toBeNull();
         expect(localStorage.getItem('inspectionComparisonState')).toContain('"panelId":5');

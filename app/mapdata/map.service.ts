@@ -1405,19 +1405,15 @@ export class MapDataService {
         if (viewIndex < 0 || viewIndex >= numViews) {
             return false;
         }
-        const sourceOsmEnabled = this.stateService.osmEnabledState.getValue(viewIndex);
-        const sourceOsmOpacity = this.stateService.osmOpacityState.getValue(viewIndex);
+        const sourceOsm = this.stateService.getOsmState(viewIndex);
         let changed = false;
         for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
             if (targetIndex === viewIndex) {
                 continue;
             }
-            if (this.stateService.osmEnabledState.getValue(targetIndex) !== sourceOsmEnabled) {
-                this.stateService.osmEnabledState.next(targetIndex, sourceOsmEnabled);
-                changed = true;
-            }
-            if (this.stateService.osmOpacityState.getValue(targetIndex) !== sourceOsmOpacity) {
-                this.stateService.osmOpacityState.next(targetIndex, sourceOsmOpacity);
+            const targetOsm = this.stateService.getOsmState(targetIndex);
+            if (targetOsm.enabled !== sourceOsm.enabled || targetOsm.opacity !== sourceOsm.opacity) {
+                this.stateService.setOsmState(targetIndex, sourceOsm.enabled, sourceOsm.opacity);
                 changed = true;
             }
         }

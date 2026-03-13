@@ -42,7 +42,7 @@ import {MenuItem} from "primeng/api";
                 </a>
             </ng-template>
             <ng-template #end>
-                <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
+                <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
                     <diagnostics-indicator></diagnostics-indicator>
                     @if (copyright.length) {
                         <div class="copyright-info" (click)="openLegalInfo()">
@@ -56,10 +56,12 @@ import {MenuItem} from "primeng/api";
     styles: [
         `
             .copyright-info {
-                width: 5em;
+                width: 6.5em;
                 font-size: 0.8em;
-                word-wrap: normal;
+                word-wrap: break-word;
                 text-align: end;
+                cursor: pointer;
+                margin-right: 0.5em;
             }
         `
     ],
@@ -218,7 +220,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.copyright = '';
             let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
             if (firstSet !== undefined && firstSet.size) {
-                this.copyright = '© '.concat(firstSet.values().next().value as string).slice(0, 14).concat('…');
+                this.copyright = '© '
+                    .concat(firstSet.values().next().value as string)
+                    .slice(0, 22)
+                    .trim()
+                    .concat('…')
+                    .replace(' ', ' ');
             }
         }));
         this.updateViewMenuItemsVisibility(this.stateService.numViews);

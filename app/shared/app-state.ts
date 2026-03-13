@@ -57,6 +57,8 @@ function isScalar(schema: z.ZodTypeAny): boolean {
         z.ZodBoolean,
         z.ZodBigInt,
         z.ZodDate,
+        z.ZodEnum,
+        z.ZodLiteral,
         z.ZodSymbol,
         z.ZodUndefined,
         z.ZodNull,
@@ -82,12 +84,18 @@ function splitCSV(val: string): string[] {
     }
     return String(val)
         .split(',')
-        .map(s => decodeURIComponent(s))
+        .map(s => {
+            try {
+                return decodeURIComponent(s);
+            } catch {
+                return s;
+            }
+        })
         .filter(s => s.length > 0 || s === '');
 }
 
 function joinCSV(values: unknown[]): string {
-    return values.map(v => encodeURIComponent(String(compactBooleans(v)))).join(',');
+    return values.map(v => String(compactBooleans(v))).join(',');
 }
 
 /** Detect array-of-arrays-of-primitives */

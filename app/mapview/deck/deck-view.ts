@@ -548,11 +548,8 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            combineLatest([
-                this.stateService.osmEnabledState.pipe(this._viewIndex),
-                this.stateService.osmOpacityState.pipe(this._viewIndex)
-            ]).subscribe(([osmEnabled, osmOpacity]) => {
-                this.updateOsmLayers(osmEnabled, osmOpacity / 100);
+            this.stateService.osmState.pipe(this._viewIndex).subscribe((osmState) => {
+                this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
             })
         );
 
@@ -805,10 +802,8 @@ export abstract class DeckMapView implements IRenderView {
         }
         if (updateViewport) {
             this.updateViewport();
-            this.updateOsmLayers(
-                this.stateService.osmEnabledState.getValue(this._viewIndex),
-                this.stateService.osmOpacityState.getValue(this._viewIndex) / 100
-            );
+            const osmState = this.stateService.getOsmState(this._viewIndex);
+            this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
             this.scheduleTileGridOverlayUpdate();
         }
     }

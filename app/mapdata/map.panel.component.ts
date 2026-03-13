@@ -313,8 +313,8 @@ export class MapPanelComponent {
                 this.tileGridModes = [];
                 const viewIndices = Array.from({length: numViews}, (_, i) => i);
                 viewIndices.forEach(viewIndex => {
-                    this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
-                    this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
+                    this.osmEnabled.push(this.stateService.getOsmEnabled(viewIndex));
+                    this.osmOpacityValue.push(this.stateService.getOsmOpacity(viewIndex));
                     this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
                     this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
@@ -340,18 +340,12 @@ export class MapPanelComponent {
         );
 
         this.subscriptions.push(
-            this.stateService.osmEnabledState.appState.subscribe(_ => {
+            this.stateService.osmState.appState.subscribe(_ => {
                 const numViews = this.stateService.numViews;
                 this.osmEnabled = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.osmEnabledState.getValue(index));
-            })
-        );
-
-        this.subscriptions.push(
-            this.stateService.osmOpacityState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+                    this.stateService.getOsmEnabled(index));
                 this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.osmOpacityState.getValue(index));
+                    this.stateService.getOsmOpacity(index));
             })
         );
 
@@ -492,8 +486,7 @@ export class MapPanelComponent {
     }
 
     updateOSMOverlay(viewIndex: number) {
-        this.stateService.osmEnabledState.next(viewIndex, this.osmEnabled[viewIndex]);
-        this.stateService.osmOpacityState.next(viewIndex, this.osmOpacityValue[viewIndex]);
+        this.stateService.setOsmState(viewIndex, this.osmEnabled[viewIndex], this.osmOpacityValue[viewIndex]);
         this.mapService.syncOsmSettings(viewIndex);
     }
 

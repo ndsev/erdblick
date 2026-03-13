@@ -36,6 +36,38 @@ describe('AppState', () => {
         });
     });
 
+    it('serializes enum arrays as CSV when targeting the URL', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState(pool, {
+            name: 'tileGridMode',
+            defaultValue: ['xyz'],
+            schema: z.array(z.enum(['xyz', 'nds'])),
+            urlParamName: 'tgm',
+        });
+
+        state.next(['nds']);
+
+        expect(state.serialize(true)).toEqual({
+            tgm: 'nds',
+        });
+    });
+
+    it('serializes string arrays without pre-encoding URL-permitted separators', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'selection',
+            defaultValue: [] as string[],
+            schema: z.array(z.string()),
+            urlParamName: 'sel',
+        });
+
+        state.next(['SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0']);
+
+        expect(state.serialize(true)).toEqual({
+            sel: 'SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0',
+        });
+    });
+
     it('serializes arrays of primitive arrays using colon-separated CSV groups', () => {
         const pool = new Map<string, AppState<unknown>>();
         const state = new AppState(pool, {
@@ -91,6 +123,20 @@ describe('AppState', () => {
         state.deserialize({ mx: '4,5:6,7:' });
 
         expect(state.getValue()).toEqual([[4, 5], [6, 7], []]);
+    });
+
+    it('deserializes pre-encoded CSV payloads for backward compatibility', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'selection',
+            defaultValue: [] as string[],
+            schema: z.array(z.string()),
+            urlParamName: 'sel',
+        });
+
+        state.deserialize({ sel: 'SourceData%3Amap%3Alayer' });
+
+        expect(state.getValue()).toEqual(['SourceData:map:layer']);
     });
 
     it('exposes field names for form-encoded objects', () => {

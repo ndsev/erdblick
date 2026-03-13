@@ -98,6 +98,11 @@ export interface CameraViewState {
     orientation: { heading: number, pitch: number, roll: number };
 }
 
+export interface OsmViewState {
+    enabled: boolean;
+    opacity: number;
+}
+
 export interface LayerViewConfig {
     level: number;
     visible: boolean;
@@ -113,9 +118,44 @@ export interface ViewSyncOption {
 
 export type TileGridMode = "xyz" | "nds";
 
+const COORDINATE_STATE_DECIMAL_PLACES = 8;
+const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
+
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
+}
+
+function roundCoordinateStateValue(value: number): number {
+    if (!Number.isFinite(value)) {
+        return value;
+    }
+    return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
+}
+
+function roundCoordinateStateArray(values: number[]): number[] {
+    return values.map(v => roundCoordinateStateValue(v));
+}
+
+function clampOsmOpacity(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 30;
+    }
+    const rounded = Math.round(value);
+    return Math.max(0, Math.min(100, rounded));
+}
+
+function parseOsmEntry(value: string, currentValue: OsmViewState): OsmViewState {
+    const parts = value.split('~');
+    const enabledToken = parts[0];
+    const opacityToken = parts[1];
+    const enabled = enabledToken === '1' || enabledToken.toLowerCase() === 'true';
+    const opacity = opacityToken === undefined ? currentValue.opacity : clampOsmOpacity(Number(opacityToken));
+    return {enabled, opacity};
+}
+
+function serializeOsmEntry(value: OsmViewState): string {
+    return `${value.enabled ? 1 : 0}~${clampOsmOpacity(value.opacity)}`;
 }
 
 @Injectable({providedIn: 'root'})
@@ -177,10 +217,9 @@ export class AppStateService implements OnDestroy {
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        schema: z.union([
-            z.tuple([]),
-            z.tuple([z.coerce.number(), z.coerce.number()]),
-        ]),
+        schema: z.array(z.coerce.number()).max(2),
+        toStorage: (value: number[]) => roundCoordinateStateArray(value),
+        fromStorage: (payload: any): number[] => roundCoordinateStateArray(payload as number[]),
         urlParamName: 'mp',
         urlIncludeInVisualizationOnly: false
     });
@@ -199,12 +238,14 @@ export class AppStateService implements OnDestroy {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
+                // Remove # character from hex color
+                const color = state.color.startsWith('#') ? state.color.slice(1) : state.color;
                 // size ~ [optional layout slot:left:top] ~ color ~ undockedFlag
                 if (state.inspectionDialogLayoutEntry) {
                     const entry = state.inspectionDialogLayoutEntry;
-                    s += `${state.size[0]}:${state.size[1]}~${entry.slot}:${entry.position.left}:${entry.position.top}~${state.color}~${state.undocked ? 1 : 0}`;
+                    s += `${state.size[0]}:${state.size[1]}~${entry.slot}:${entry.position.left}:${entry.position.top}~${color}~${state.undocked ? 1 : 0}`;
                 } else {
-                    s += `${state.size[0]}:${state.size[1]}~${state.color}~${state.undocked ? 1 : 0}`;
+                    s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
                 }
                 return s;
             });
@@ -222,7 +263,8 @@ export class AppStateService implements OnDestroy {
                 const id = Number(parts.shift()!);
                 const lockState = parts.shift() === "1";
                 const undocked = parts.pop()! === "1";
-                const color = parts.pop()!;
+                const colorToken = parts.pop()!;
+                const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
                 let sizeToken = parts.pop()!;
                 let inspectionDialogLayoutEntry: InspectionDialogLayoutEntry | undefined;
                 if (sizeToken.split(':').length === 3) {
@@ -310,23 +352,23 @@ export class AppStateService implements OnDestroy {
             r: z.coerce.number().optional()
         }),
         toStorage: (value: any) => ({
-            lon: value.destination.lon,
-            lat: value.destination.lat,
-            alt: value.destination.alt,
-            h: value.orientation.heading,
-            p: value.orientation.pitch,
-            r: value.orientation.roll
+            lon: roundCoordinateStateValue(value.destination.lon),
+            lat: roundCoordinateStateValue(value.destination.lat),
+            alt: roundCoordinateStateValue(value.destination.alt),
+            h: roundCoordinateStateValue(value.orientation.heading),
+            p: roundCoordinateStateValue(value.orientation.pitch),
+            r: roundCoordinateStateValue(value.orientation.roll)
         }),
         fromStorage: (payload: any, currentValue: CameraViewState) => ({
             destination: {
-                lon: payload.lon ?? currentValue.destination.lon,
-                lat: payload.lat ?? currentValue.destination.lat,
-                alt: payload.alt ?? currentValue.destination.alt,
+                lon: roundCoordinateStateValue(payload.lon ?? currentValue.destination.lon),
+                lat: roundCoordinateStateValue(payload.lat ?? currentValue.destination.lat),
+                alt: roundCoordinateStateValue(payload.alt ?? currentValue.destination.alt),
             },
             orientation: {
-                heading: payload.h ?? currentValue.orientation.heading,
-                pitch: payload.p ?? currentValue.orientation.pitch,
-                roll: payload.r ?? currentValue.orientation.roll,
+                heading: roundCoordinateStateValue(payload.h ?? currentValue.orientation.heading),
+                pitch: roundCoordinateStateValue(payload.p ?? currentValue.orientation.pitch),
+                roll: roundCoordinateStateValue(payload.r ?? currentValue.orientation.roll),
             }
         }),
         urlFormEncode: true
@@ -371,16 +413,21 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly osmEnabledState = this.createMapViewState<boolean>({
+    readonly osmState = this.createMapViewState<OsmViewState>({
         name: 'osm',
-        defaultValue: true,
-        schema: Boolish,
+        defaultValue: {
+            enabled: true,
+            opacity: 6,
+        },
+        schema: z.string(),
+        toStorage: (value: OsmViewState) => serializeOsmEntry(value),
+        fromStorage: (payload: any, currentValue: OsmViewState): OsmViewState => parseOsmEntry(String(payload), currentValue),
         urlParamName: 'osm'
     });
 
     readonly osmOpacityState = this.createMapViewState<number>({
         name: 'osmOpacity',
-        defaultValue: 6,
+        defaultValue: 30,
         schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
         urlParamName: 'osmOp'
     });
@@ -849,7 +896,7 @@ export class AppStateService implements OnDestroy {
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
-    set markedPosition(val: number[]) {this.markedPositionState.next(val);};
+    set markedPosition(val: number[]) {this.markedPositionState.next(roundCoordinateStateArray(val));};
     get selection() {return this.selectionState.getValue();}
     set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
@@ -936,6 +983,39 @@ export class AppStateService implements OnDestroy {
         this.layerSyncOptionsState.next(viewIndex, enabled);
     }
 
+    getOsmState(viewIndex: number): OsmViewState {
+        const value = this.osmState.getValue(viewIndex);
+        return {
+            enabled: value.enabled,
+            opacity: clampOsmOpacity(value.opacity),
+        };
+    }
+
+    setOsmState(viewIndex: number, enabled: boolean, opacity: number): void {
+        this.osmState.next(viewIndex, {
+            enabled,
+            opacity: clampOsmOpacity(opacity),
+        });
+    }
+
+    getOsmEnabled(viewIndex: number): boolean {
+        return this.getOsmState(viewIndex).enabled;
+    }
+
+    setOsmEnabled(viewIndex: number, enabled: boolean): void {
+        const current = this.getOsmState(viewIndex);
+        this.setOsmState(viewIndex, enabled, current.opacity);
+    }
+
+    getOsmOpacity(viewIndex: number): number {
+        return this.getOsmState(viewIndex).opacity;
+    }
+
+    setOsmOpacity(viewIndex: number, opacity: number): void {
+        const current = this.getOsmState(viewIndex);
+        this.setOsmState(viewIndex, current.enabled, opacity);
+    }
+
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
     }
@@ -950,14 +1030,14 @@ export class AppStateService implements OnDestroy {
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
         const view: CameraViewState = {
             destination: {
-                lon: GeoMath.toDegrees(destination.longitude),
-                lat: GeoMath.toDegrees(destination.latitude),
-                alt: destination.height,
+                lon: roundCoordinateStateValue(GeoMath.toDegrees(destination.longitude)),
+                lat: roundCoordinateStateValue(GeoMath.toDegrees(destination.latitude)),
+                alt: roundCoordinateStateValue(destination.height),
             },
             orientation: {
-                heading: orientation.heading,
-                pitch: orientation.pitch,
-                roll: orientation.roll,
+                heading: roundCoordinateStateValue(orientation.heading),
+                pitch: roundCoordinateStateValue(orientation.pitch),
+                roll: roundCoordinateStateValue(orientation.roll),
             }
         };
         this.cameraViewDataState.next(viewIndex, view);
@@ -1334,9 +1414,9 @@ export class AppStateService implements OnDestroy {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
             const latitude = GeoMath.toDegrees(position.latitude);
-            this.markedPositionState.next([longitude, latitude]);
+            this.markedPosition = [longitude, latitude];
         } else {
-            this.markedPositionState.next([]);
+            this.markedPosition = [];
         }
         if (!delayUpdate) {
             this._replaceUrl = false;
@@ -1613,8 +1693,7 @@ export class AppStateService implements OnDestroy {
             }
         };
         pruneViews(this.mode2dState);
-        pruneViews(this.osmEnabledState);
-        pruneViews(this.osmOpacityState);
+        pruneViews(this.osmState);
         pruneViews(this.viewTileBordersState);
         pruneViews(this.viewTileGridModeState);
         pruneViews(this.cameraViewDataState);
