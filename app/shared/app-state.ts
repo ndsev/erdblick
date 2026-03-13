@@ -98,6 +98,11 @@ function joinCSV(values: unknown[]): string {
     return values.map(v => String(compactBooleans(v))).join(',');
 }
 
+function looksLikeJsonArray(raw: string): boolean {
+    const trimmed = raw.trim();
+    return trimmed.startsWith('[') && trimmed.endsWith(']');
+}
+
 /** Detect array-of-arrays-of-primitives */
 function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.ZodArray<ZodTypeAny>> {
     if (!(schema instanceof z.ZodArray)) return false;
@@ -355,8 +360,13 @@ export class AppState<T> extends BehaviorSubject<T> {
 
                 // Array of primitives from CSV
                 if (this.arrayIsPrimitive() && raw[base] !== undefined) {
-                    const parts = splitCSV(String(raw[base]));
-                    parsed = parts.map(s => coerceFromString(s, elSchema));
+                    const rawValue = String(raw[base]);
+                    if (looksLikeJsonArray(rawValue)) {
+                        parsed = JSON.parse(rawValue);
+                    } else {
+                        const parts = splitCSV(rawValue);
+                        parsed = parts.map(s => coerceFromString(s, elSchema));
+                    }
                 }
                 // Array of arrays of primitives from colon-separated CSV
                 else if (isArrayOfPrimitiveArrays(this.schema) && raw[base] !== undefined) {
