@@ -26,18 +26,6 @@ export interface CompletionWorkerTask {
     groupId: string;
 }
 
-export interface DiagnosticsWorkerTask {
-    type: 'DiagnosticsWorkerTask';
-    tileBlobs: Uint8Array[];
-    fieldDictBlob: Uint8Array;
-    dataSourceInfo: Uint8Array;
-    nodeId: string;
-    query: string;
-    diagnostics: Array<Uint8Array>; // List of diagnostic data
-    taskId: string;
-    groupId: string;
-}
-
 export interface SearchResultPosition {
     cartesian: {x: number, y: number, z: number},
     cartographic: {x: number, y: number, z: number} | null,
@@ -90,14 +78,6 @@ export interface CompletionCandidatesForTile {
     groupId?: string;
 }
 
-export interface DiagnosticsResultsForTile {
-    type: 'DiagnosticsResultsForTile';
-    query: string;
-    messages: DiagnosticsMessage[];
-    taskId?: string;
-    groupId?: string;
-}
-
 export interface WorkerInitMessage {
     type: 'WorkerInit';
 }
@@ -107,8 +87,8 @@ export interface WorkerReadyMessage {
     scriptUrl: string;
 }
 
-export type WorkerTask = SearchWorkerTask | CompletionWorkerTask | DiagnosticsWorkerTask;
-export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile | DiagnosticsResultsForTile;
+export type WorkerTask = SearchWorkerTask | CompletionWorkerTask;
+export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile;
 export type WorkerInboundMessage = WorkerTask | WorkerInitMessage;
 export type WorkerOutboundMessage = WorkerResult | WorkerReadyMessage;
 
@@ -250,42 +230,6 @@ function processCompletion(task: CompletionWorkerTask) {
     }
 }
 
-function processDiagnostics(task: DiagnosticsWorkerTask) {
-    try {
-        // Parse the tile.
-        let parser = new coreLib.TileLayerParser();
-        uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
-        uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile = parseTileWithOverlays(parser, task.tileBlobs);
-        if (!tile) {
-            throw new Error("No tile blobs provided for diagnostics task.");
-        }
-
-        // Get the query results from the tile.
-        let search = new coreLib.FeatureLayerSearch(tile);
-
-        let messages = search.diagnostics(task.query, task.diagnostics);
-        if (messages["error"]) {
-            console.error("Diagnostics error", messages["error"]);
-            messages = null;
-        }
-
-        search.delete();
-        tile.delete();
-
-        postMessage({
-            type: 'DiagnosticsResultsForTile',
-            query: task.query,
-            messages: messages || [],
-            taskId: task.taskId,
-            groupId: task.groupId
-        } as DiagnosticsResultsForTile);
-    }
-    catch (exc: any) {
-        console.error("Diagnostics error", exc);
-    }
-}
-
 addEventListener('message', async ({data}) => {
     const task = (data as WorkerInboundMessage);
 
@@ -304,7 +248,5 @@ addEventListener('message', async ({data}) => {
             return processSearch(task as SearchWorkerTask);
         case 'CompletionWorkerTask':
             return processCompletion(task as CompletionWorkerTask);
-        case 'DiagnosticsWorkerTask':
-            return processDiagnostics(task as DiagnosticsWorkerTask);
     }
 })

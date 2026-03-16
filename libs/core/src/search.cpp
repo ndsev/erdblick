@@ -13,18 +13,6 @@
 #include <sstream>
 #include <streambuf>
 
-namespace
-{
-
-struct Uint8StreamBuffer : public std::streambuf {
-    Uint8StreamBuffer(std::vector<std::uint8_t>& buf) {
-        auto begin = reinterpret_cast<char*>(buf.data());
-        setg(begin, begin, begin + buf.size());
-    }
-};
-
-}
-
 erdblick::FeatureLayerSearch::FeatureLayerSearch(TileFeatureLayer& tfl) : tfl_(tfl)
 {}
 
@@ -179,57 +167,6 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
         obj.push(std::move(candidate));
     }
     return obj.value_;
-}
-
-erdblick::NativeJsValue erdblick::FeatureLayerSearch::diagnostics(std::string const& q, NativeJsValue const& ndiagnostics)
-{
-    auto diagnostics = JsValue(ndiagnostics);
-    simfil::Diagnostics merged;
-
-    const auto length = diagnostics["length"].as<std::size_t>();
-    for (auto i = 0; i < length; ++i) {
-        auto buffer = diagnostics.at(i).toUint8Array();
-
-        Uint8StreamBuffer streamBuffer(buffer);
-        std::istream stream(&streamBuffer);
-
-        simfil::Diagnostics item;
-        if (!item.read(stream)) {
-            return JsValue::Dict({
-                {"error", JsValue("Read error")},
-            }).value_;
-        } else {
-            merged.append(item);
-        }
-    }
-
-    auto messages = tfl_.model_->collectQueryDiagnostics(q, merged);
-    if (!messages) {
-        return JsValue::Dict({
-            {"error", JsValue(messages.error().message)}
-        }).value_;
-    }
-
-    auto result = JsValue::List();
-    for (const auto& msg : *messages) {
-        auto fixValue = JsValue::Undefined();
-        if (msg.fix)
-            fixValue = JsValue(*msg.fix);
-
-        auto location = JsValue::Dict({
-            {"offset", JsValue(msg.location.offset)},
-            {"size", JsValue(msg.location.size)},
-        });
-
-        result.push(JsValue::Dict({
-            {"query", JsValue(q)},
-            {"message", JsValue(msg.message)},
-            {"location", location},
-            {"fix", fixValue},
-        }));
-    }
-
-    return result.value_;
 }
 
 std::string erdblick::anyWrap(const std::string_view& q)
