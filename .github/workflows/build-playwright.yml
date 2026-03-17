@@ -15,6 +15,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        submodules: recursive
 
       - name: Configure Git authentication for GitHub
         run: |
