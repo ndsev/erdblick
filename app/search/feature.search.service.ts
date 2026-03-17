@@ -180,9 +180,8 @@ class FeatureSearchQuadTree {
             targetNode.center = markersCenter;
             targetNode.addChildren(results);
             nodes = targetNode.children;
-            let next: Array<FeatureSearchQuadTreeNode> = [];
             while (currentLevel <= this.maxDepth) {
-                next = [];
+                const next: Array<FeatureSearchQuadTreeNode> = [];
                 for (const node of nodes) {
                     const containedMarkers = node.filterPointsForNode(results);
                     if (containedMarkers.length) {
@@ -655,13 +654,14 @@ export class FeatureSearchService {
 
         const seenFeatureKeys = new Set<string>();
         const dedupedMatches = tileResult.matches.filter(([mapTileKey, featureId]) => {
-            let canonicalTileKey = mapTileKey;
-            try {
-                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
-                canonicalTileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
-            } catch (_error) {
-                canonicalTileKey = mapTileKey;
-            }
+            const canonicalTileKey = (() => {
+                try {
+                    const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+                    return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+                } catch {
+                    return mapTileKey;
+                }
+            })();
             const dedupeKey = `${canonicalTileKey}|${featureId}`;
             if (seenFeatureKeys.has(dedupeKey)) {
                 return false;

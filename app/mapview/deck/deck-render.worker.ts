@@ -159,7 +159,6 @@ function attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLa
 
 function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     const totalStart = performance.now();
-    let deserializeMs = 0;
     let baseLayer: TileFeatureLayer | null = null;
     const overlays: TileFeatureLayer[] = [];
     let deckVisu: DeckFeatureLayerVisualization | null = null;
@@ -174,7 +173,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
                 deserializedLayers.push(layer);
             }
         }
-        deserializeMs = performance.now() - deserializeStart;
+        const deserializeMs = performance.now() - deserializeStart;
         if (!deserializedLayers.length) {
             throw new Error("Worker render requested without any deserializable tile layers.");
         }

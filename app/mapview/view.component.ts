@@ -230,11 +230,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.menuService, this.coordinatesService, this.stateService
+                this.menuService, this.coordinatesService, this.stateService
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.menuService, this.coordinatesService, this.stateService
+                this.menuService, this.coordinatesService, this.stateService
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());

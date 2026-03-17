@@ -10,11 +10,10 @@ import {
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import {TileLayer} from "@deck.gl/geo-layers";
 import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
-import type {Parameters as LumaParameters} from "@luma.gl/core";
+import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
-import {JumpTargetService} from "../../search/jump.service";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
 import {AppStateService, CameraViewState, TileFeatureId, TileGridMode} from "../../shared/appstate.service";
@@ -117,6 +116,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly SEARCH_RESULTS_LAYER_KEY = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
     private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
+    private static readonly CANVAS_USE_DEVICE_PIXELS = 1;
     private static readonly LOCATION_MARKER_ICON_NAME = "marker";
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
@@ -160,6 +160,8 @@ export abstract class DeckMapView implements IRenderView {
     private suppressDeckViewStateEvent = false;
     private readonly tickCallbacks = new Set<() => void>();
     private tickHandle: number | null = null;
+    private deckDevice: Device | null = null;
+    private canvasResizeTimer: ReturnType<typeof setTimeout> | null = null;
     private osmLayerEnabled = false;
     private osmLayerOpacity = -1;
     private tileGridEnabled = false;
@@ -188,7 +190,6 @@ export abstract class DeckMapView implements IRenderView {
                 canvasId: string,
                 protected mapService: MapDataService,
                 protected featureSearchService: FeatureSearchService,
-                protected jumpService: JumpTargetService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
                 protected stateService: AppStateService) {
@@ -202,18 +203,19 @@ export abstract class DeckMapView implements IRenderView {
             throw new Error(`Deck container #${this.canvasId} not found.`);
         }
         container.innerHTML = "";
+        const canvas = this.createDeckCanvas(container);
+        this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
+        const gl = canvas.getContext("webgl2");
+        if (!gl) {
+            throw new Error(`WebGL2 context for #${this.canvasId} could not be created.`);
+        }
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
         const deckProps: DeckProps<DeckMercatorView> = {
-            parent: container,
+            gl,
             // Lowering device pixel ratio reduces redraw pressure during live resizes.
-            useDevicePixels: 1,
-            deviceProps: {
-                createCanvasContext: {
-                    resizeDebounceMs: DeckMapView.CANVAS_RESIZE_DEBOUNCE_MS
-                }
-            },
+            useDevicePixels: DeckMapView.CANVAS_USE_DEVICE_PIXELS,
             views: new DeckMercatorView({
                 id: `deck-view-${this._viewIndex}`,
                 repeat: true,
@@ -226,6 +228,15 @@ export abstract class DeckMapView implements IRenderView {
                 dragRotate: false,
                 touchRotate: false,
                 keyboard: false
+            },
+            onDeviceInitialized: (device) => {
+                this.deckDevice = device;
+            },
+            onResize: ({width, height}) => {
+                this.updateViewport();
+                this.scheduleTileGridOverlayUpdate();
+                this.scheduleSearchResultsOverlayUpdate();
+                this.scheduleCanvasResize(width, height);
             },
             onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
             onHover: (info) => this.onHover(info),
@@ -245,6 +256,7 @@ export abstract class DeckMapView implements IRenderView {
         this.stopTickLoop();
         this.cancelTileGridOverlayUpdateScheduling();
         this.cancelSearchResultsOverlayScheduling();
+        this.cancelCanvasResizeScheduling();
         this.tickCallbacks.clear();
         this.hoveredFeatureIds.next(undefined);
         this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
@@ -265,6 +277,7 @@ export abstract class DeckMapView implements IRenderView {
             this.deck.finalize();
             this.deck = null;
         }
+        this.deckDevice = null;
 
         const container = document.getElementById(this.canvasId);
         if (container) {
@@ -276,11 +289,11 @@ export abstract class DeckMapView implements IRenderView {
         return this.deck !== null;
     }
 
-    requestRender(): void {
+    requestRender(reason?: string): void {
         if (!this.deck) {
             return;
         }
-        this.deck.redraw();
+        this.deck.redraw(reason);
     }
 
     getCanvasClientRect(): DOMRect {
@@ -311,6 +324,63 @@ export abstract class DeckMapView implements IRenderView {
 
     getSceneMode(): SceneMode {
         return this.sceneMode;
+    }
+
+    private createDeckCanvas(container: HTMLDivElement): HTMLCanvasElement {
+        const canvas = document.createElement("canvas");
+        canvas.style.position = "absolute";
+        canvas.style.inset = "0";
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
+        canvas.style.display = "block";
+        container.appendChild(canvas);
+        return canvas;
+    }
+
+    private setCanvasDrawingBufferSize(canvas: HTMLCanvasElement, cssWidth: number, cssHeight: number): void {
+        const width = Math.max(1, Math.round(cssWidth * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
+        const height = Math.max(1, Math.round(cssHeight * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
+        if (canvas.width === width && canvas.height === height) {
+            return;
+        }
+        canvas.width = width;
+        canvas.height = height;
+    }
+
+    private scheduleCanvasResize(cssWidth: number, cssHeight: number): void {
+        this.cancelCanvasResizeScheduling();
+        this.canvasResizeTimer = setTimeout(() => {
+            this.canvasResizeTimer = null;
+            this.applyCanvasResize(cssWidth, cssHeight);
+        }, DeckMapView.CANVAS_RESIZE_DEBOUNCE_MS);
+    }
+
+    private applyCanvasResize(cssWidth: number, cssHeight: number): void {
+        const width = Math.max(1, Math.round(cssWidth * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
+        const height = Math.max(1, Math.round(cssHeight * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
+        const canvasContext = this.deckDevice?.getDefaultCanvasContext();
+        if (canvasContext) {
+            const [currentWidth, currentHeight] = canvasContext.getDrawingBufferSize();
+            if (currentWidth === width && currentHeight === height) {
+                return;
+            }
+            canvasContext.setDrawingBufferSize(width, height);
+            this.requestRender("Canvas resized");
+            return;
+        }
+        const canvas = this.deck?.getCanvas();
+        if (!canvas) {
+            return;
+        }
+        this.setCanvasDrawingBufferSize(canvas, cssWidth, cssHeight);
+        this.requestRender("Canvas resized");
+    }
+
+    private cancelCanvasResizeScheduling(): void {
+        if (this.canvasResizeTimer !== null) {
+            clearTimeout(this.canvasResizeTimer);
+            this.canvasResizeTimer = null;
+        }
     }
 
     getSceneHandle(): IRenderSceneHandle {

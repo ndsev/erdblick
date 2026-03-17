@@ -1,4 +1,4 @@
-import {Component, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren, effect, input} from '@angular/core';
+import {Component, effect, input, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren} from '@angular/core';
 import {Dialog} from 'primeng/dialog';
 import {ContextMenu} from 'primeng/contextmenu';
 import {MenuItem} from 'primeng/api';
@@ -326,7 +326,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     private syncComparisonHeight() {
-        const container = this.dialog?.container;
+        const container = this.dialog?.container() ?? undefined;
         if (!container) {
             return;
         }

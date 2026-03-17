@@ -303,7 +303,7 @@ export class MapDataService {
                     pendingPanelUpdates.push({panel: existing, selection});
                     continue;
                 }
-                let features: FeatureWrapper[] = [];
+                let features: FeatureWrapper[];
                 try {
                     features = await this.loadFeatures(selection.features);
                 } catch (error) {
@@ -2538,7 +2538,7 @@ export class MapDataService {
         groups: {features: FeatureWrapper[], color?: string, id?: number}[],
         signature: string = this.buildHighlightVisualizationSignature(mode, groups)
     ) {
-        let visualizationCollection = null;
+        let visualizationCollection: ITileVisualization[];
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
                 visualizationCollection = this.selectionVisualizations;

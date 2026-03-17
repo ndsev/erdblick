@@ -139,7 +139,7 @@ export class JumpTargetService {
         const matchSourceDataElements = (value: string): [bigint, string, string]|null => {
             const regex = /^\s*(\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
-            let tileId: bigint = -1n;
+            let tileId: bigint;
             let mapId = "";
             let sourceLayerId = "";
 
@@ -173,31 +173,22 @@ export class JumpTargetService {
                 return null;
             }
 
-            if (tileId === -1n) {
-                return null;
-            }
-
             return [tileId, mapId, sourceLayerId]
         }
 
         const matches = matchSourceDataElements(searchString);
         if (matches) {
             const [tileId, mapId, sourceLayerId] = matches;
-            if (tileId !== -1n) {
-                label = `tileId = ${tileId}`;
-                if (mapId) {
-                    label = `${label} | mapId = ${mapId}`;
-                    if (sourceLayerId) {
-                        label = `${label} | sourceLayerId = ${sourceLayerId}`;
-                    } else {
-                        label = `${label} | (sourceLayerId = ?)`;
-                    }
+            label = `tileId = ${tileId}`;
+            if (mapId) {
+                label = `${label} | mapId = ${mapId}`;
+                if (sourceLayerId) {
+                    label = `${label} | sourceLayerId = ${sourceLayerId}`;
                 } else {
-                    label = `${label} | (mapId = ?) | (sourceLayerId = ?)`;
+                    label = `${label} | (sourceLayerId = ?)`;
                 }
             } else {
-                label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-                valid = false;
+                label = `${label} | (mapId = ?) | (sourceLayerId = ?)`;
             }
 
             if (matches.length > 1 && matches[1]) {

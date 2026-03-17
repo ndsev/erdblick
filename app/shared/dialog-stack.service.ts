@@ -45,7 +45,7 @@ export class DialogStackService {
                     undefined
             };
         }
-        const container = target.container;
+        const container = target.container();
         if (!container) {
             return undefined;
         }
