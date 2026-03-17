@@ -107,7 +107,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                         <li>
                                             <div>
                                                 <span>{{ message.message }}</span>
-                                                <div>
+                                                <div *ngIf="message.query.length > 0">
                                                     <span>Here: </span>
                                                     <code style="width: 100%;"
                                                           [innerHTML]="message.query | highlightRegion: message.location?.offset:message.location?.size:25"></code>

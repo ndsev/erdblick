@@ -37,6 +37,7 @@ const char *__asan_default_options() {
 #include "search.h"
 #include "layer.h"
 #include "simfil/exception-handler.h"
+#include "simfil/simfil.h"
 
 #include "mapget/log.h"
 
@@ -377,6 +378,66 @@ std::string demangle(const char* name) {
     return (status==0) ? res.get() : name ;
 }
 
+/**
+ * Merge multiple simfil diagnostics buffers into a single diagnostics object
+ * and return the final diagnostics message objects.
+ */
+em::val simfilGetDiagnostics(const std::string& query, em::val const& ndiagnosticsList) {
+    struct Uint8StreamBuffer : public std::streambuf {
+        Uint8StreamBuffer(std::vector<std::uint8_t>& buf) {
+            auto begin = reinterpret_cast<char*>(buf.data());
+            setg(begin, begin, begin + buf.size());
+        }
+    };
+
+    auto diagnostics = JsValue(ndiagnosticsList);
+    simfil::Diagnostics merged;
+
+    const auto length = diagnostics["length"].as<std::size_t>();
+    for (auto i = 0; i < length; ++i) {
+        auto buffer = diagnostics.at(i).toUint8Array();
+
+        Uint8StreamBuffer streamBuffer(buffer);
+        std::istream stream(&streamBuffer);
+
+        simfil::Diagnostics item;
+        if (!item.read(stream)) {
+            return JsValue::Dict({
+                {"error", JsValue("Read error")},
+            }).value_;
+        } else {
+            merged.append(item);
+        }
+    }
+
+    auto messages = simfil::diagnostics(merged);
+    if (!messages) {
+        return JsValue::Dict({
+            {"error", JsValue(messages.error().message)}
+        }).value_;
+    }
+
+    auto result = JsValue::List();
+    for (const auto& msg : *messages) {
+        auto fixValue = JsValue::Undefined();
+        if (msg.fix)
+            fixValue = JsValue(*msg.fix);
+
+        auto location = JsValue::Dict({
+            {"offset", JsValue(msg.location.offset)},
+            {"size", JsValue(msg.location.size)},
+        });
+
+        result.push(JsValue::Dict({
+            {"query", JsValue(query)},
+            {"message", JsValue(msg.message)},
+            {"location", location},
+            {"fix", fixValue},
+        }));
+    }
+    return std::move(*result);
+}
+
 /** Create a test style. */
 void setExceptionHandler(em::val handler) {
     simfil::ThrowHandler::instance().set([handler](auto&& type, auto&& message){
@@ -608,8 +669,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
         .constructor<TileFeatureLayer&>()
         .function("filter", &FeatureLayerSearch::filter)
-        .function("complete", &FeatureLayerSearch::complete)
-        .function("diagnostics", &FeatureLayerSearch::diagnostics);
+        .function("complete", &FeatureLayerSearch::complete);
 
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
@@ -649,6 +709,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     return *convertedResult;
                 }))
         .function("reset", &TileLayerParser::reset);
+
+    ////////// Get simfil diagnostics messages from a list of diagnostics buffers
+    em::function("simfilGetDiagnostics", &simfilGetDiagnostics);
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);

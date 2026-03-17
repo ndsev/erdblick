@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapDataService} from "../mapdata/map.service";
-import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
+import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
 import {Cartographic, Cartesian3, GeoMath, Rectangle} from "../integrations/geo";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
@@ -26,7 +26,6 @@ export interface SearchResultPoint {
 }
 
 const TASK_SEARCH = 'SearchWorkerTask' as const;
-const TASK_DIAGNOSTICS = 'DiagnosticsWorkerTask' as const;
 const TASK_COMPLETION = 'CompletionWorkerTask' as const;
 
 function generateChildrenIds(parentTileId: bigint) {
@@ -269,7 +268,6 @@ export class FeatureSearchService {
 
     workers: Array<Worker> = []
     private workerBusy: Array<boolean> = [];
-    private diagnosticsQueue: Array<WorkerTask> = [];
     private workersReady: Promise<void> | null = null;
 
     jobGroupManager: JobGroupManager = new JobGroupManager();
@@ -295,8 +293,6 @@ export class FeatureSearchService {
 
     diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
     diagnosticsMessageLimit: number = 25;
-    private diagnosticsMessagesList: DiagnosticsMessage[] = [];
-    private diagnosticsStartedForSearchGroupId: string | null = null;
 
     completionPending: Subject<boolean> = new Subject<boolean>();
     completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
@@ -421,9 +417,6 @@ export class FeatureSearchService {
                 case 'CompletionCandidatesForTile':
                     this.addCompletionCandidates(result as CompletionCandidatesForTile);
                     break;
-                case 'DiagnosticsResultsForTile':
-                    this.addDiagnostics(result as DiagnosticsResultsForTile);
-                    break;
             }
 
             this.scheduleNextTask(index);
@@ -436,7 +429,6 @@ export class FeatureSearchService {
         this.startTime = Date.now();
 
         this.currentSearch = new SearchState(query, this.generateTaskGroupId());
-        this.diagnosticsStartedForSearchGroupId = null;
         this.jobGroupManager.addGroup(this.currentSearch);
 
         this.pendingSearchTilesByKey.clear();
@@ -454,7 +446,7 @@ export class FeatureSearchService {
         // all tasks of the group are done. Note: This will only ever
         // be called if a search truly finishes (is not superseded by a newer one).
         this.currentSearch.onComplete((group: JobGroup) => {
-            this.maybeStartDiagnosticsForCompletedSearch(group);
+            this.getDiagnosticsForCompletedSearch(group.id);
         });
 
         this.progress.next(this.currentSearch);
@@ -514,9 +506,7 @@ export class FeatureSearchService {
         this.progress.next(null);
         this.searchResults = [];
         this.traceResults = [];
-        this.diagnosticsMessagesList = [];
         this.diagnosticsMessages.next([]);
-        this.diagnosticsStartedForSearchGroupId = null;
         this.totalFeatureCount = 0;
         this.startTime = 0;
         this.endTime = 0;
@@ -543,50 +533,14 @@ export class FeatureSearchService {
         return `group_${Date.now()}_${++this.taskGroupIdCounter}`;
     }
 
-    private startDiagnosticsForCompletedSearch(query: string, searchGroupId: string) {
+    private getDiagnosticsForCompletedSearch(searchGroupId: string) {
         const completedSearchGroup = this.jobGroupManager.getGroup(searchGroupId);
         if (!completedSearchGroup || this.currentSearch?.id !== searchGroupId) {
             return;
         }
 
-        const diagnosticsGroup = this.jobGroupManager.createGroup('diagnostics', query, this.generateTaskGroupId());
-
-        const tileParser = this.mapService.tileLayerParser;
-        const makeDiagnosticsTask = (tile: FeatureTile): DiagnosticsWorkerTask | null => {
-            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
-            if (!tileBlobs.length) {
-                return null;
-            }
-            const taskId = this.generateTaskId();
-            const task: DiagnosticsWorkerTask = {
-                type: TASK_DIAGNOSTICS,
-                tileBlobs,
-                fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getFieldDict(buf, tile.nodeId)
-                })!,
-                query: query,
-                dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getDataSourceInfo(buf, tile.mapName)
-                })!,
-                nodeId: tile.nodeId,
-                diagnostics: Array.from(completedSearchGroup.getDiagnostics()),
-                taskId: taskId,
-                groupId: diagnosticsGroup.id,
-            };
-
-            this.jobGroupManager.addTask(task);
-            return task;
-        };
-
-        let diagTasks: DiagnosticsWorkerTask[] = [];
-        for (const tile of this.orderedTilesForSearchProcessing()) {
-            const task = makeDiagnosticsTask(tile);
-            if (task) {
-                diagTasks.push(task);
-            }
-        }
-        this.diagnosticsQueue.push(...diagTasks);
-        this.runWorkers();
+        const messages = coreLib.simfilGetDiagnostics(completedSearchGroup.query, Array.from(completedSearchGroup.getDiagnostics()))
+        this.diagnosticsMessages.next(messages.slice(0, this.diagnosticsMessageLimit));
     }
 
     private maybeStartDiagnosticsForCompletedSearch(group: JobGroup): void {
@@ -596,12 +550,8 @@ export class FeatureSearchService {
         if (!this.currentSearch || this.currentSearch.id !== group.id) {
             return;
         }
-        if (this.diagnosticsStartedForSearchGroupId === group.id) {
-            return;
-        }
-        this.diagnosticsStartedForSearchGroupId = group.id;
         console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
-        this.startDiagnosticsForCompletedSearch(group.query, group.id);
+        this.getDiagnosticsForCompletedSearch(group.id);
     }
 
     public clearCurrentCompletion() {
@@ -672,18 +622,6 @@ export class FeatureSearchService {
             .slice(0, this.completionCandidateLimit);
 
         this.completionCandidates.next(this.completionCandidateList);
-    }
-
-    private addDiagnostics(result : DiagnosticsResultsForTile) {
-        this.diagnosticsMessagesList = this.diagnosticsMessagesList
-            .concat(result.messages)
-            .filter((item, index, array) => {
-                return array.findIndex(other => {
-                    return other.message === item.message && other.location?.offset === item.location?.offset;
-                }) === index
-            })
-            .slice(0, this.diagnosticsMessageLimit);
-        this.diagnosticsMessages.next(this.diagnosticsMessagesList);
     }
 
     private addSearchResult(tileResult: SearchResultForTile) {
@@ -775,9 +713,6 @@ export class FeatureSearchService {
         let nextTask = undefined;
         if (this.currentSearch && !this.currentSearch.isComplete() && !this.currentSearch.paused) {
             nextTask = this.currentSearch.takeTask();
-        }
-        else if (this.diagnosticsQueue.length) {
-            nextTask = this.diagnosticsQueue.shift();
         }
         else if (this.currentCompletion && !this.currentCompletion.isComplete()) {
             nextTask = this.currentCompletion.takeTask();
