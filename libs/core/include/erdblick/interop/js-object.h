@@ -62,16 +62,28 @@ struct JsValue
     static JsValue List(std::initializer_list<JsValue> initializers = {});
 
     /**
+     * Construct an Object as a new JS Float32 TypedArray.
+     * @param data Float32 buffer to fill the typed array.
+     */
+    static JsValue Float32Array(std::span<const float> data);
+
+    /**
      * Construct an Object as a new JS Float64 TypedArray.
      * @param coordinates Float64 buffer to fill the typed array.
      */
-    static JsValue Float64Array(std::span<double> const& data);
+    static JsValue Float64Array(std::span<const double> data);
+
+    /**
+     * Construct a Uint32Array object, filled with the data passed.
+     * @param data Data to pass to the Uint32Array
+     */
+    static JsValue Uint32Array(std::span<const std::uint32_t> data);
 
     /**
      * Construct a Uint8Array object, filled with the data passed.
      * @param data Data to pass to the Uint8Array
      */
-    static JsValue Uint8Array(std::span<std::uint8_t> const& data);
+    static JsValue Uint8Array(std::span<const std::uint8_t> data);
 
     /**
      * Construct an undefined value.

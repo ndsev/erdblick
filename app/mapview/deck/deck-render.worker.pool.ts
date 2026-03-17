@@ -1,8 +1,9 @@
 import {
     DeckGeometryOutputMode,
+    DeckLowFiBundleBuffers,
+    DeckTileRenderBuffers,
     DeckTileRenderResult,
     DeckTileRenderTask,
-    DeckWorkerTimings,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
 
@@ -27,64 +28,6 @@ export interface DeckTileRenderRequest {
     outputMode: DeckGeometryOutputMode;
     featureIdSubset: string[];
     mergeCountSnapshot: Record<string, number>;
-}
-
-export interface DeckTileRenderBuffers {
-    vertexCount: number;
-    pointPositions: Float32Array;
-    pointColors: Uint8Array;
-    pointRadii: Float32Array;
-    pointFeatureIds: Uint32Array;
-    pointBillboards: Uint8Array;
-    coordinateOrigin: Float64Array;
-    surfacePositions: Float32Array;
-    surfaceStartIndices: Uint32Array;
-    surfaceColors: Uint8Array;
-    surfaceFeatureIds: Uint32Array;
-    positions: Float32Array;
-    startIndices: Uint32Array;
-    colors: Uint8Array;
-    widths: Float32Array;
-    featureIds: Uint32Array;
-    billboards: Uint8Array;
-    dashArrays: Float32Array;
-    dashOffsets: Float32Array;
-    arrowPositions: Float32Array;
-    arrowStartIndices: Uint32Array;
-    arrowColors: Uint8Array;
-    arrowWidths: Float32Array;
-    arrowFeatureIds: Uint32Array;
-    arrowBillboards: Uint8Array;
-    lowFiBundles: DeckLowFiBundleBuffers[];
-    mergedPointFeatures: Record<string, any[]>;
-    workerTimings?: DeckWorkerTimings;
-}
-
-export interface DeckLowFiBundleBuffers {
-    lod: number;
-    pointPositions: Float32Array;
-    pointColors: Uint8Array;
-    pointRadii: Float32Array;
-    pointFeatureIds: Uint32Array;
-    pointBillboards: Uint8Array;
-    surfacePositions: Float32Array;
-    surfaceStartIndices: Uint32Array;
-    surfaceColors: Uint8Array;
-    surfaceFeatureIds: Uint32Array;
-    positions: Float32Array;
-    startIndices: Uint32Array;
-    colors: Uint8Array;
-    widths: Float32Array;
-    featureIds: Uint32Array;
-    billboards: Uint8Array;
-    dashArrays: Float32Array;
-    dashOffsets: Float32Array;
-    arrowPositions: Float32Array;
-    arrowStartIndices: Uint32Array;
-    arrowColors: Uint8Array;
-    arrowWidths: Float32Array;
-    arrowFeatureIds: Uint32Array;
-    arrowBillboards: Uint8Array;
 }
 
 export interface DeckRenderWorkerSettings {
@@ -224,55 +167,23 @@ export class DeckRenderWorkerPool {
 
         pending.resolve({
             vertexCount: Math.max(0, Math.floor(result.vertexCount)),
-            pointPositions: this.toFloat32Array(result.pointPositions),
-            pointColors: this.toUint8Array(result.pointColors),
-            pointRadii: this.toFloat32Array(result.pointRadii),
-            pointFeatureIds: this.toUint32Array(result.pointFeatureIds),
-            pointBillboards: this.toUint8Array(result.pointBillboards),
-            coordinateOrigin: this.toFloat64Array(result.coordinateOrigin),
-            surfacePositions: this.toFloat32Array(result.surfacePositions),
-            surfaceStartIndices: this.toUint32Array(result.surfaceStartIndices),
-            surfaceColors: this.toUint8Array(result.surfaceColors),
-            surfaceFeatureIds: this.toUint32Array(result.surfaceFeatureIds),
-            positions: this.toFloat32Array(result.positions),
-            startIndices: this.toUint32Array(result.startIndices),
-            colors: this.toUint8Array(result.colors),
-            widths: this.toFloat32Array(result.widths),
-            featureIds: this.toUint32Array(result.featureIds),
-            billboards: this.toUint8Array(result.billboards),
-            dashArrays: this.toFloat32Array(result.dashArrays),
-            dashOffsets: this.toFloat32Array(result.dashOffsets),
-            arrowPositions: this.toFloat32Array(result.arrowPositions),
-            arrowStartIndices: this.toUint32Array(result.arrowStartIndices),
-            arrowColors: this.toUint8Array(result.arrowColors),
-            arrowWidths: this.toFloat32Array(result.arrowWidths),
-            arrowFeatureIds: this.toUint32Array(result.arrowFeatureIds),
-            arrowBillboards: this.toUint8Array(result.arrowBillboards),
-            lowFiBundles: (result.lowFiBundles ?? []).map((bundle) => ({
+            pointWorld: result.pointWorld,
+            pointBillboard: result.pointBillboard,
+            surface: result.surface,
+            pathWorld: result.pathWorld,
+            pathBillboard: result.pathBillboard,
+            arrowWorld: result.arrowWorld,
+            arrowBillboard: result.arrowBillboard,
+            coordinateOrigin: result.coordinateOrigin,
+            lowFiBundles: (result.lowFiBundles ?? []).map((bundle): DeckLowFiBundleBuffers => ({
                 lod: Number.isFinite(bundle.lod) ? Math.max(0, Math.min(7, Math.floor(bundle.lod))) : 0,
-                pointPositions: this.toFloat32Array(bundle.pointPositions),
-                pointColors: this.toUint8Array(bundle.pointColors),
-                pointRadii: this.toFloat32Array(bundle.pointRadii),
-                pointFeatureIds: this.toUint32Array(bundle.pointFeatureIds),
-                pointBillboards: this.toUint8Array(bundle.pointBillboards),
-                surfacePositions: this.toFloat32Array(bundle.surfacePositions),
-                surfaceStartIndices: this.toUint32Array(bundle.surfaceStartIndices),
-                surfaceColors: this.toUint8Array(bundle.surfaceColors),
-                surfaceFeatureIds: this.toUint32Array(bundle.surfaceFeatureIds),
-                positions: this.toFloat32Array(bundle.positions),
-                startIndices: this.toUint32Array(bundle.startIndices),
-                colors: this.toUint8Array(bundle.colors),
-                widths: this.toFloat32Array(bundle.widths),
-                featureIds: this.toUint32Array(bundle.featureIds),
-                billboards: this.toUint8Array(bundle.billboards),
-                dashArrays: this.toFloat32Array(bundle.dashArrays),
-                dashOffsets: this.toFloat32Array(bundle.dashOffsets),
-                arrowPositions: this.toFloat32Array(bundle.arrowPositions),
-                arrowStartIndices: this.toUint32Array(bundle.arrowStartIndices),
-                arrowColors: this.toUint8Array(bundle.arrowColors),
-                arrowWidths: this.toFloat32Array(bundle.arrowWidths),
-                arrowFeatureIds: this.toUint32Array(bundle.arrowFeatureIds),
-                arrowBillboards: this.toUint8Array(bundle.arrowBillboards)
+                pointWorld: bundle.pointWorld,
+                pointBillboard: bundle.pointBillboard,
+                surface: bundle.surface,
+                pathWorld: bundle.pathWorld,
+                pathBillboard: bundle.pathBillboard,
+                arrowWorld: bundle.arrowWorld,
+                arrowBillboard: bundle.arrowBillboard
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
             workerTimings: result.timings
@@ -305,31 +216,6 @@ export class DeckRenderWorkerPool {
     private makeTaskId(): string {
         this.nextTaskId += 1;
         return `deck-task-${Date.now()}-${this.nextTaskId}`;
-    }
-
-    private toFloat32Array(buffer: ArrayBuffer): Float32Array {
-        if (buffer.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
-            return new Float32Array();
-        }
-        return new Float32Array(buffer);
-    }
-
-    private toFloat64Array(buffer: ArrayBuffer): Float64Array {
-        if (buffer.byteLength % Float64Array.BYTES_PER_ELEMENT !== 0) {
-            return new Float64Array();
-        }
-        return new Float64Array(buffer);
-    }
-
-    private toUint32Array(buffer: ArrayBuffer): Uint32Array {
-        if (buffer.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
-            return new Uint32Array();
-        }
-        return new Uint32Array(buffer);
-    }
-
-    private toUint8Array(buffer: ArrayBuffer): Uint8Array {
-        return new Uint8Array(buffer);
     }
 
     dispose(reason = "Deck render worker pool reset."): void {

@@ -210,7 +210,7 @@ void InspectionConverter::convertAttributeLayer(
         OptionalValueAndType singleValue;
         attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val){
             auto singleValueForField = convertField(fieldName, val);
-            if (singleValueForField && fieldName != "schemaValidity" && fieldName != "origValidity") {
+            if (singleValueForField) {
                 ++numValues;
                 singleValue = singleValueForField;
             }
@@ -300,11 +300,7 @@ void InspectionConverter::convertValidity(
     model_ptr<MultiValidity> const& multiValidity)
 {
     auto scope = push(key, key.as<std::string>());
-    uint32_t valIndex = 0;
-    multiValidity->forEach([this, &valIndex](Validity const& v) -> bool {
-        auto validityScope = push(
-            JsValue(valIndex),
-            valIndex);
+    auto renderValidity = [this](Validity const& v) -> bool {
 
         if (auto direction = v.direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
@@ -316,7 +312,7 @@ void InspectionConverter::convertValidity(
                 dirScope->value_ = convertString("NEGATIVE");
                 break;
             case Validity::Both:
-                dirScope->value_ = convertString("BOTH");
+                dirScope->value_ = convertString("COMPLETE");
                 break;
             case Validity::None:
                 dirScope->value_ = convertString("NONE");
@@ -381,6 +377,20 @@ void InspectionConverter::convertValidity(
         }
 
         return true;
+    };
+
+    if (multiValidity->size() == 1) {
+        multiValidity->forEach(renderValidity);
+        return;
+    }
+
+    uint32_t valIndex = 0;
+    multiValidity->forEach([&](Validity const& v) -> bool {
+        auto validityScope = push(
+            JsValue(valIndex),
+            valIndex);
+        ++valIndex;
+        return renderValidity(v);
     });
 }
 

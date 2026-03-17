@@ -85,8 +85,8 @@ interface TileGridLevelExtent {
 
 interface DeckPickLayerProps {
     tileKey?: string;
-    featureIds?: Array<number | null>;
-    featureIdsByVertex?: Array<number | null>;
+    featureIds?: ArrayLike<number | null>;
+    featureIdsByVertex?: ArrayLike<number | null>;
 }
 
 interface DeckGestureEventLike {
@@ -120,6 +120,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly LOCATION_MARKER_ICON_NAME = "marker";
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
+    private static readonly UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
@@ -407,6 +408,17 @@ export abstract class DeckMapView implements IRenderView {
             return [];
         }
 
+        const readFeatureIndex = (buffer: ArrayLike<number | null> | undefined, index: number): number | null => {
+            if (!buffer || index < 0 || index >= buffer.length) {
+                return null;
+            }
+            const value = buffer[index];
+            if (!Number.isInteger(value) || value === DeckMapView.UNSELECTABLE_FEATURE_INDEX) {
+                return null;
+            }
+            return value;
+        };
+
         const resolveFeatureIndex = (
             tileKey: string | undefined,
             value: unknown
@@ -444,14 +456,14 @@ export abstract class DeckMapView implements IRenderView {
         const pickedIndex = Number(picked.index);
         const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
         if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
-            const featureIds = layerProps?.featureIds;
-            if (Array.isArray(featureIds) && pickedIndex < featureIds.length) {
-                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureIds[pickedIndex]);
+            const featureId = readFeatureIndex(layerProps?.featureIds, pickedIndex);
+            if (featureId !== null) {
+                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureId);
                 return resolved ? [resolved] : [];
             }
-            const featureIdsByVertex = layerProps?.featureIdsByVertex;
-            if (Array.isArray(featureIdsByVertex) && pickedIndex < featureIdsByVertex.length) {
-                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureIdsByVertex[pickedIndex]);
+            const featureIdByVertex = readFeatureIndex(layerProps?.featureIdsByVertex, pickedIndex);
+            if (featureIdByVertex !== null) {
+                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureIdByVertex);
                 return resolved ? [resolved] : [];
             }
         }

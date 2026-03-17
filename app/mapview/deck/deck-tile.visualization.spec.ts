@@ -31,6 +31,62 @@ function attachDeckVisualizationStatics<T extends (...args: never[]) => unknown>
     });
 }
 
+function emptyRenderResult(): any {
+    return {
+        pointWorld: {
+            positions: new Float32Array(),
+            colors: new Uint8Array(),
+            radii: new Float32Array(),
+            featureIds: new Uint32Array()
+        },
+        pointBillboard: {
+            positions: new Float32Array(),
+            colors: new Uint8Array(),
+            radii: new Float32Array(),
+            featureIds: new Uint32Array()
+        },
+        surface: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array([0]),
+            colors: new Uint8Array(),
+            featureIds: new Uint32Array()
+        },
+        pathWorld: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array([0]),
+            colors: new Uint8Array(),
+            widths: new Float32Array(),
+            featureIds: new Uint32Array(),
+            dashArrays: new Float32Array()
+        },
+        pathBillboard: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array([0]),
+            colors: new Uint8Array(),
+            widths: new Float32Array(),
+            featureIds: new Uint32Array(),
+            dashArrays: new Float32Array()
+        },
+        arrowWorld: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array([0]),
+            colors: new Uint8Array(),
+            widths: new Float32Array(),
+            featureIds: new Uint32Array()
+        },
+        arrowBillboard: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array([0]),
+            colors: new Uint8Array(),
+            widths: new Float32Array(),
+            featureIds: new Uint32Array()
+        },
+        coordinateOrigin: new Float64Array([0, 0, 0]),
+        lowFiBundles: [],
+        mergedPointFeatures: {}
+    };
+}
+
 describe("DeckTileVisualization", () => {
     it("upserts and removes path layers via DeckLayerRegistry", async () => {
         const deck = new DeckStub();
@@ -242,7 +298,7 @@ describe("DeckTileVisualization", () => {
                 length: 2,
                 coordinateOrigin: [11, 48, 0],
                 startIndices: new Uint32Array([0, 3, 6]),
-                featureIds: [10, 11],
+                featureIds: new Uint32Array([10, 11]),
                 attributes: {
                     getPolygon: {
                         value: new Float32Array([
@@ -255,9 +311,13 @@ describe("DeckTileVisualization", () => {
                         ]),
                         size: 3
                     },
-                    getFillColor: {
+                    fillColors: {
                         value: new Uint8Array([
                             255, 0, 0, 255,
+                            255, 0, 0, 255,
+                            255, 0, 0, 255,
+                            0, 128, 255, 255,
+                            0, 128, 255, 255,
                             0, 128, 255, 255
                         ]),
                         size: 4
@@ -624,19 +684,18 @@ describe("DeckTileVisualization", () => {
             startIndices: new Uint32Array([0, 2, 4]),
             colors: new Uint8Array([
                 255, 228, 181, 255,
+                255, 228, 181, 255,
+                1, 2, 3, 4,
                 1, 2, 3, 4
             ]),
-            widths: new Float32Array([3, 7]),
-            featureIds: new Uint32Array([101, 202]),
-            billboards: new Uint8Array([0, 0]),
-            dashArrays: new Float32Array([6, 2, 1, 0]),
-            dashOffsets: new Float32Array([0, 0])
-        });
+            widths: new Float32Array([3, 3, 7, 7]),
+            featureIds: new Uint32Array([101, 101, 202, 202]),
+            dashArrays: new Float32Array([6, 2, 6, 2, 1, 0, 1, 0])
+        }, false);
 
         expect(pathData).toHaveLength(1);
         expect(pathData[0].billboard).toBe(false);
-        expect(pathData[0].featureIds).toEqual([101, 202]);
-        expect(pathData[0].featureIdsByVertex).toEqual([101, 101, 202, 202]);
+        expect(Array.from(pathData[0].featureIdsByVertex as Uint32Array)).toEqual([101, 101, 202, 202]);
         expect(Array.from(pathData[0].attributes.instanceColors.value.slice(0, 8))).toEqual([
             255, 228, 181, 255,
             255, 228, 181, 255
@@ -749,15 +808,14 @@ describe("DeckTileVisualization", () => {
                 32, 196, 255, 200
             ]),
             radii: new Float32Array([4, 6]),
-            featureIds: new Uint32Array([101, 0xffffffff]),
-            billboards: new Uint8Array([0, 0])
-        });
+            featureIds: new Uint32Array([101, 0xffffffff])
+        }, false);
 
         expect(pointData).toHaveLength(1);
         expect(pointData[0].billboard).toBe(false);
         expect(pointData[0].length).toBe(2);
         expect(pointData[0].coordinateOrigin).toEqual([11, 48, 0]);
-        expect(pointData[0].featureIds).toEqual([101, null]);
+        expect(Array.from(pointData[0].featureIds as Uint32Array)).toEqual([101, 0xffffffff]);
         expect(Array.from(pointData[0].attributes.getPosition.value)).toEqual([0, 0, 0, 10, 20, 0]);
         expect(Array.from(pointData[0].attributes.getFillColor.value)).toEqual([255, 128, 0, 255, 32, 196, 255, 200]);
         expect(Array.from(pointData[0].attributes.getRadius.value)).toEqual([4, 6]);
@@ -930,6 +988,7 @@ describe("DeckTileVisualization", () => {
         const fakeDeckVisualization = {
             addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
             run: vi.fn(),
+            renderResult: () => emptyRenderResult(),
             mergedPointFeatures: () => ({}),
             externalRelationReferences: () => [],
             processResolvedExternalReferences: vi.fn(),
@@ -974,11 +1033,6 @@ describe("DeckTileVisualization", () => {
                 false,
                 {}
             ) as any;
-            visu.readFloat64Array = () => new Float64Array([0, 0, 0]);
-            visu.readFloat32Array = () => new Float32Array();
-            visu.readUint32Array = () => new Uint32Array();
-            visu.readUint8Array = () => new Uint8Array();
-            visu.readLowFiBundlesFromDeckVisualization = () => [];
 
             await visu.renderWasmOnMainThread("high", 0);
 
@@ -1001,6 +1055,7 @@ describe("DeckTileVisualization", () => {
         const deckVisualization = {
             addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
             run: vi.fn(),
+            renderResult: () => emptyRenderResult(),
             mergedPointFeatures: () => ({}),
             externalRelationReferences: () => currentRequests,
             processResolvedExternalReferences: vi.fn(() => {
@@ -1066,11 +1121,6 @@ describe("DeckTileVisualization", () => {
                 {},
                 relationExternalTileLoader
             ) as any;
-            visu.readFloat64Array = () => new Float64Array([0, 0, 0]);
-            visu.readFloat32Array = () => new Float32Array();
-            visu.readUint32Array = () => new Uint32Array();
-            visu.readUint8Array = () => new Uint8Array();
-            visu.readLowFiBundlesFromDeckVisualization = () => [];
 
             await visu.renderWasmOnMainThread("high", 0);
 

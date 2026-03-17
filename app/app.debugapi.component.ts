@@ -154,8 +154,12 @@ export class ErdblickDebugApi {
                     const validityNode = Array.isArray(node.children)
                         ? node.children.find((child: any) => child && child.key === "validity")
                         : null;
-                    const validitySummary = Array.isArray(validityNode?.children)
-                        ? validityNode.children.map((validity: any) => {
+                    const validityEntries = Array.isArray(validityNode?.children)
+                        ? (typeof validityNode.children[0]?.key === "number"
+                            ? validityNode.children
+                            : [validityNode])
+                        : [];
+                    const validitySummary = validityEntries.map((validity: any) => {
                             const simpleGeometry = Array.isArray(validity.children)
                                 ? validity.children.find((child: any) => child && child.key === "simpleGeometry")
                                 : null;
@@ -165,8 +169,7 @@ export class ErdblickDebugApi {
                                     ? simpleGeometry.children.length
                                     : 0
                             };
-                        })
-                        : [];
+                        });
                     hits.push({
                         key: node.key,
                         value: node.value,
