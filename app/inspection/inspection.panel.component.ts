@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, OnDestroy, output, Renderer2, ViewChild, effect} from "@angular/core";
 import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
 import {
@@ -22,7 +22,7 @@ interface SourceLayerMenuItem {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="inspect-panel" [value]="accordionValue">
+        <p-accordion class="inspect-panel" [value]="accordionValue" [transitionOptions]="accordionTransitionOptions">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
@@ -144,7 +144,7 @@ interface SourceLayerMenuItem {
     `],
     standalone: false
 })
-export class InspectionPanelComponent implements AfterViewInit {
+export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     title = "";
     isExpanded: boolean = true;
     errorMessage: string = "";
@@ -159,7 +159,8 @@ export class InspectionPanelComponent implements AfterViewInit {
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
     panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
-    accordionValue: string | undefined = '0';
+    accordionValue: string | undefined = undefined;
+    readonly accordionTransitionOptions = '320ms cubic-bezier(0.22, 1, 0.36, 1)';
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -167,6 +168,8 @@ export class InspectionPanelComponent implements AfterViewInit {
     @ViewChild('extraMenu') extraMenu!: ContextMenu;
     extraMenuItems: MenuItem[] = [];
     private lastExtraMenuTarget?: HTMLElement;
+    private autoExpandRafFirst?: number;
+    private autoExpandRafSecond?: number;
     isMetadata: boolean = false;
 
     constructor(private mapService: MapDataService,
@@ -222,6 +225,7 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     ngAfterViewInit() {
         this.detectSafari();
+        this.scheduleAutoExpand();
     }
 
     protected onSelectedLayerItem() {
@@ -381,5 +385,38 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.stateService.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
+    }
+
+    ngOnDestroy() {
+        this.clearScheduledAutoExpand();
+    }
+
+    private scheduleAutoExpand() {
+        if (typeof window === "undefined") {
+            this.accordionValue = '0';
+            return;
+        }
+        this.clearScheduledAutoExpand();
+        this.autoExpandRafFirst = window.requestAnimationFrame(() => {
+            this.autoExpandRafFirst = undefined;
+            this.autoExpandRafSecond = window.requestAnimationFrame(() => {
+                this.autoExpandRafSecond = undefined;
+                this.accordionValue = '0';
+            });
+        });
+    }
+
+    private clearScheduledAutoExpand() {
+        if (typeof window === "undefined") {
+            return;
+        }
+        if (this.autoExpandRafFirst !== undefined) {
+            window.cancelAnimationFrame(this.autoExpandRafFirst);
+            this.autoExpandRafFirst = undefined;
+        }
+        if (this.autoExpandRafSecond !== undefined) {
+            window.cancelAnimationFrame(this.autoExpandRafSecond);
+            this.autoExpandRafSecond = undefined;
+        }
     }
 }
