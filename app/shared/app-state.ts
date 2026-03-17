@@ -17,6 +17,10 @@ export interface AppStateOptions<T> {
     urlIncludeInVisualizationOnly?: boolean;
 }
 
+/**
+ * Shared boolean schema for storage/URL parsing.
+ * Accepts booleans and common scalar encodings (`1/0`, `true/false`).
+ */
 export const Boolish = z.union([
     z.boolean(),
     z.string()
@@ -76,6 +80,52 @@ function coerceFromString(txt: string, schema: ZodTypeAny): any {
     if (unwrapped instanceof z.ZodNumber) return Number(txt);
     if (unwrapped instanceof z.ZodString) return txt;
     return txt; // unions/refinements/others: let zod finalize
+}
+
+function schemaAcceptsRunLengthValue(token: string, schema: ZodTypeAny): boolean {
+    const unwrapped = unwrapScalar(schema);
+
+    if (unwrapped === Boolish || unwrapped instanceof z.ZodBoolean) {
+        return /^(?:0|1|true|false)$/i.test(token.trim());
+    }
+    if (unwrapped instanceof z.ZodNumber) {
+        return Number.isFinite(Number(token));
+    }
+    if (unwrapped instanceof z.ZodEnum) {
+        const values = Object.values((unwrapped as z.ZodEnum<any>).enum);
+        return values.includes(token);
+    }
+    if (unwrapped instanceof z.ZodLiteral) {
+        return String((unwrapped as z.ZodLiteral<any>).value) === token;
+    }
+    if (unwrapped instanceof z.ZodUnion) {
+        return (unwrapped as z.ZodUnion<any>).options.some((opt: unknown) =>
+            schemaAcceptsRunLengthValue(token, opt as ZodTypeAny)
+        );
+    }
+    return false;
+}
+
+function expandRunLengthTokens(parts: string[], schema: ZodTypeAny): string[] {
+    const expanded: string[] = [];
+    for (const token of parts) {
+        // Compact URL values can use `<value>x<count>` (for example `1x5`).
+        const match = token.match(/^(.*)x(\d+)$/);
+        if (!match) {
+            expanded.push(token);
+            continue;
+        }
+        const valueToken = match[1];
+        const count = Number(match[2]);
+        if (!Number.isInteger(count) || count <= 1 || !schemaAcceptsRunLengthValue(valueToken, schema)) {
+            expanded.push(token);
+            continue;
+        }
+        for (let i = 0; i < count; i++) {
+            expanded.push(valueToken);
+        }
+    }
+    return expanded;
 }
 
 function splitCSV(val: string): string[] {
@@ -211,6 +261,15 @@ function deepCopy<V>(value: V): V {
     return result as V;
 }
 
+/**
+ * Generic state container with optional URL/storage serialization hooks.
+ *
+ * URL encoding strategy is schema-aware:
+ * - scalar arrays -> CSV (with optional run-length tokens),
+ * - nested primitive arrays -> colon-separated CSV groups,
+ * - form-encoded object arrays -> per-field CSV columns,
+ * - everything else -> JSON.
+ */
 export class AppState<T> extends BehaviorSubject<T> {
     readonly name: string;
     readonly defaultValue: T;
@@ -269,6 +328,10 @@ export class AppState<T> extends BehaviorSubject<T> {
             !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false);
     }
 
+    /**
+     * Serialize current state either for URL parameters (`forUrl=true`) or
+     * for local storage payload (`forUrl=false`).
+     */
     serialize(forUrl: boolean): Record<string, string> | undefined {
         if (forUrl && !this.isUrlState()) {
             return undefined;
@@ -331,6 +394,10 @@ export class AppState<T> extends BehaviorSubject<T> {
         }
     }
 
+    /**
+     * Deserialize from either a storage JSON string or URL params.
+     * URL parsing mirrors `serialize()` and supports compact CSV/run-length forms.
+     */
     deserialize(raw: string | Params) {
         try {
             // Raw storage path (JSON string)
@@ -364,7 +431,7 @@ export class AppState<T> extends BehaviorSubject<T> {
                     if (looksLikeJsonArray(rawValue)) {
                         parsed = JSON.parse(rawValue);
                     } else {
-                        const parts = splitCSV(rawValue);
+                        const parts = expandRunLengthTokens(splitCSV(rawValue), elSchema);
                         parsed = parts.map(s => coerceFromString(s, elSchema));
                     }
                 }
@@ -372,7 +439,9 @@ export class AppState<T> extends BehaviorSubject<T> {
                 else if (isArrayOfPrimitiveArrays(this.schema) && raw[base] !== undefined) {
                     const inner = (elSchema as z.ZodArray<any>).element as ZodTypeAny; // inner primitive schema
                     const groups = splitColonCSV(String(raw[base])); // string[][]
-                    parsed = groups.map(group => group.map(s => coerceFromString(s, inner)));
+                    parsed = groups.map(group =>
+                        expandRunLengthTokens(group, inner).map(s => coerceFromString(s, inner))
+                    );
                 }
                 // Array of objects from per-field CSV
                 else if (this.arrayIsFormObject()) {
@@ -383,7 +452,7 @@ export class AppState<T> extends BehaviorSubject<T> {
                     for (const field of Object.keys(shape)) {
                         if (raw[field] === undefined)
                             continue;
-                        const arr = splitCSV(String(raw[field]));
+                        const arr = expandRunLengthTokens(splitCSV(String(raw[field])), shape[field]);
                         fieldArrays[field] = arr;
                         if (arr.length > maxLen) maxLen = Math.max(maxLen, arr.length);
                     }
@@ -440,6 +509,10 @@ export class AppState<T> extends BehaviorSubject<T> {
     }
 }
 
+/**
+ * Wrapper around `AppState<T[]>` that exposes per-view accessors while keeping
+ * a single underlying state entry for URL/storage sync.
+ */
 export class MapViewState<T> {
     public appState: AppState<Array<T>>;
     private readonly defaultValue: T;
@@ -526,27 +599,26 @@ function compactBooleans(value: unknown): unknown {
 /**
  * Style Option State Encoding:
  *
- *    We have a compact schema for encoding style option values on a
- *    per-stylesheet per-map-layer per-view basis. For each style sheet,
- *    we encode its option values in a single URL parameter. This URL
- *    parameter is composed as follows:
+ *    Style option values are encoded per style sheet, per referenced layer index
+ *    and per view. One URL parameter stores all option bodies for one style key:
  *
  *    <short-style-id>~<dash-separated-layerName-indices>~<tilde-separated-option-names>=
  *    <tilde-separated-array-per-option-of-colon-separated-array-per-view-of-comma-separated-values-per-layer>
  *
  * For example:
  *
- *    NY0X~1-2-3~showLanes~showLaneGroups~ADAS=1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0
+ *    STY0~0-2~showOptionA~showOptionB=1,0:1,1~5,7:6,8
  *
- *    NY0X   - is the short style id.
- *    1-2-3  - The indices of the layer names in the layerNames state for which values are stored.
- *    showLanes~showLaneGroups~ADAS - The style option IDs for which values are stored.
- *    1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0 - breaks down into three pairs of tilde-separated per-view-per-layer option value arrays:
- *    a) 1,0,0:1,0,0 - The values for the showLanes option. Two arrays of values (one for each map view).
- *                     Three values, as there are three affected layers (1-2-3).
- *    b) 1,1,1:0,0,0 - The values for the showLaneGroups option. Again, two sets of values (per view) and three values
- *                     (one per layer) per view.
- *    b) 0,0,0:0,0,0 - The values for the ADAS option. Same encoding as for showLanes and showLaneGroups.
+ *    STY0           - short style id.
+ *    0-2            - indices into `layerNames`.
+ *    showOptionA~showOptionB - option ids stored in-order.
+ *    1,0:1,1        - option A values (`view0`, `view1`) for layer indices `0` and `2`.
+ *    5,7:6,8        - option B values (`view0`, `view1`) for layer indices `0` and `2`.
+ *
+ * v2 key compaction may shorten option ids:
+ *    showOptionA -> .OptionA
+ * so the same key can appear as:
+ *    STY0~0-2~.OptionA~.OptionB
  */
 export class StyleState extends AppState<Map<string, (string|number|boolean)[]>> {
     layerNamesState: AppState<string[]>;
@@ -586,9 +658,9 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
 
         // Group by style -> option -> mapLayerId
         // E.g. {
-        //   'NY0X': {
-        //     'showLanes': {'Bavaria/Island2/Lane': [0, 1], 'Bavaria/Island6/Lane': [0, 0]},
-        //     'showLaneGroups': {'Bavaria/Island2/Lane': [0, 0], 'Bavaria/Island6/Lane': [1, 1]}
+        //   'STY0': {
+        //     'showOptionA': {'MapA/LayerX': [0, 1], 'MapB/LayerX': [0, 0]},
+        //     'showOptionB': {'MapA/LayerX': [0, 0], 'MapB/LayerX': [1, 1]}
         //   }
         // }
         const grouped = new Map<string, Map<string, Map<string, (string|number|boolean)[]>>>();
@@ -684,7 +756,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             const parts = key.split('~');
             const shortStyleId = parts[0];
             const layerIndices = parts[1].split('-').map(s => Number(s)).filter(n => Number.isFinite(n));
-            const optionIds = parts.slice(2); // remaining parts are option IDs
+            const optionIds = parts.slice(2).map(optionId => this.decodeOptionId(optionId)); // remaining parts are option IDs
 
             if (!optionIds.length || !layerIndices.length) {
                 continue;
@@ -701,10 +773,15 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                 const optionId = optionIds[oi];
                 const optionBody = optionValueSegments[oi] ?? '';
                 const perView = optionBody.split(':'); // per-view strings
+                const effectivePerView = perView.length === 1 && numViews > 1
+                    ? Array.from({length: numViews}, () => perView[0])
+                    : perView;
 
                 for (let view = 0; view < numViews; view++) {
-                    const layerCsv = perView[view] ?? '';
-                    const perLayer = layerCsv.length ? layerCsv.split(',') : [];
+                    const layerCsv = effectivePerView[view] ?? '';
+                    const perLayer = layerCsv.length
+                        ? this.expandStyleRunLengthTokens(layerCsv.split(','))
+                        : [];
                     for (let li = 0; li < layerIndices.length; li++) {
                         const layerIndex = layerIndices[li];
                         if (layerIndex < 0 || layerIndex >= layerNames.length) {
@@ -727,8 +804,8 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         }
     }
 
-    private isStyleOptionUrlParamKey(key: string): boolean {
-        // Example: NY0X~1-2-3~showLanes~showLaneGroups
+    public isStyleOptionUrlParamKey(key: string): boolean {
+        // Example: STY0~0-2~showOptionA~showOptionB
         // Constraints: at least 3 segments separated by '~' (styleId, layers, one option)
         if (!key) {
             return false;
@@ -748,6 +825,37 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
 
     private styleOptionKeyFromMapLayer(mapLayerId: string, shortStyleId: string, optionId: string): string {
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
+    }
+
+    private decodeOptionId(optionId: string): string {
+        return optionId.startsWith('.') && optionId.length > 1
+            ? `show${optionId.slice(1)}`
+            : optionId;
+    }
+
+    private expandStyleRunLengthTokens(tokens: string[]): string[] {
+        const expanded: string[] = [];
+        for (const token of tokens) {
+            const match = token.match(/^(.*)x(\d+)$/);
+            if (!match) {
+                expanded.push(token);
+                continue;
+            }
+            const value = match[1];
+            const count = Number(match[2]);
+            if (!this.isStylePrimitiveToken(value) || !Number.isInteger(count) || count <= 1) {
+                expanded.push(token);
+                continue;
+            }
+            for (let i = 0; i < count; i++) {
+                expanded.push(value);
+            }
+        }
+        return expanded;
+    }
+
+    private isStylePrimitiveToken(token: string): boolean {
+        return /^(?:true|false|0|1|-?\d+(?:\.\d+)?)$/i.test(token);
     }
 
     public coerceOptionValue(value: any, optionType: string): string|number|boolean {

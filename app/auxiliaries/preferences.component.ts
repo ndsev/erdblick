@@ -21,7 +21,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                   (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
-                <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
+                <label [for]="tilesToLoadInput">Max Tiles to Load</label>
                 <div style="display: inline-block">
                     <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
                     <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
@@ -31,7 +31,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="slider-container">
-                <label [for]="limitSimultaneousInspectionsInput">Max Inspections:</label>
+                <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
                 <div style="display: inline-block">
                     <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
                     <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="1" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
@@ -40,7 +40,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Tile pull compression:</label>
+                <label>Tile pull compression</label>
                 <p-selectButton [options]="toggleOptions"
                                 [(ngModel)]="tilePullCompressionEnabledSetting"
                                 optionLabel="label"
@@ -48,7 +48,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Threaded tile rendering:</label>
+                <label>Threaded tile rendering</label>
                 <p-selectButton [options]="toggleOptions"
                                 [(ngModel)]="deckThreadedRenderingEnabledSetting"
                                 optionLabel="label"
@@ -56,13 +56,13 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Deck worker count override:</label>
+                <label>Deck worker count override</label>
                 <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
                                 [disabled]="!deckThreadedRenderingEnabledSetting"
                                 (ngModelChange)="setDeckStyleWorkersOverride($event)" />
             </div>
             <div class="slider-container">
-                <label [for]="deckStyleWorkersCountInput">Deck worker count:</label>
+                <label [for]="deckStyleWorkersCountInput">Deck worker count</label>
                 <div style="display: inline-block">
                     <input class="tiles-input w-full"
                            type="text"
@@ -82,24 +82,28 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                       icon="pi pi-check"
                       [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"></p-button>
             <div class="button-container">
-                <label>Dark Mode:</label>
+                <label>Dark Mode</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Collapse Dock automatically:</label>
-                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible" />
+                <label>Collapse Dock automatically</label>
+                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"/>
+            </div>
+            <div class="button-container">
+                <label>Use URL v2 <p-tag severity="danger" value="EXPERIMENTAL"/></label>
+                <p-toggleswitch [(ngModel)]="useUrlV2Setting" (ngModelChange)="setUseUrlV2($event)" />
             </div>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Storage for Viewer properties and search history:</label>
+                <label>Storage for Viewer properties and search history</label>
                 <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">
-                <label>Storage for imported styles:</label>
+                <label>Storage for imported styles</label>
                 <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">
-                <label>Storage for modified built-in styles:</label>
+                <label>Storage for modified built-in styles</label>
                 <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <p-divider></p-divider>
@@ -141,6 +145,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     limitSimultaneousInspectionsInput: number = 0;
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
+    useUrlV2Setting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
     toggleOptions = [
@@ -180,6 +185,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
             this.deckThreadedRenderingEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.useUrlV2State.subscribe(enabled => {
+            this.useUrlV2Setting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -249,6 +257,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setDeckStyleWorkersOverride(enabled: boolean) {
         this.deckStyleWorkersOverrideSetting = enabled;
         this.stateService.deckStyleWorkersOverride = enabled;
+    }
+
+    setUseUrlV2(enabled: boolean) {
+        this.useUrlV2Setting = enabled;
+        this.stateService.useUrlV2 = enabled;
     }
 
     applyDeckStyleWorkersCount() {

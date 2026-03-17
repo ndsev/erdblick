@@ -139,6 +139,34 @@ describe('AppState', () => {
         expect(state.getValue()).toEqual(['SourceData:map:layer']);
     });
 
+    it('deserializes run-length tokens for numeric arrays', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState(pool, {
+            name: 'numbers',
+            defaultValue: [0],
+            schema: z.array(z.number()),
+            urlParamName: 'n',
+        });
+
+        state.deserialize({ n: '5x3,2' });
+
+        expect(state.getValue()).toEqual([5, 5, 5, 2]);
+    });
+
+    it('does not treat string-array tokens as run-length compressed values', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'labels',
+            defaultValue: [],
+            schema: z.array(z.string()),
+            urlParamName: 'l',
+        });
+
+        state.deserialize({ l: 'ax2,b' });
+
+        expect(state.getValue()).toEqual(['ax2', 'b']);
+    });
+
     it('exposes field names for form-encoded objects', () => {
         const pool = new Map<string, AppState<unknown>>();
         const state = new AppState(pool, {
@@ -363,5 +391,24 @@ describe('StyleState', () => {
         styles.deserialize('{"NY0X~0~opt":"1"}');
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
         expect(styles.getValue().get(k)).toEqual(['1']);
+    });
+
+    it('deserialize accepts show-option shorthand with broadcast and run-length payloads', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
+        createLayerAndViewStates(pool, layers, 2);
+        const styles = new StyleState(pool);
+        styles.resetToDefault();
+
+        styles.deserialize({
+            'NY0X~0-1~.Lanes': '1x2',
+        });
+
+        const k = (layer: string) => {
+            const [mapId, ...rest] = layer.split('/');
+            return styles.styleOptionKey(mapId, rest.join('/'), 'NY0X', 'showLanes');
+        };
+        expect(styles.getValue().get(k(layers[0]))).toEqual(['1', '1']);
+        expect(styles.getValue().get(k(layers[1]))).toEqual(['1', '1']);
     });
 });

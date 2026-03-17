@@ -24,7 +24,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                         <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                             <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
                                       [disabled]="!wasModified"></p-button>
-                            <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Cancel"'
+                            <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Close"'
                                       icon="pi pi-times"></p-button>
                             <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
                                 <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>

@@ -416,12 +416,12 @@ diagnostics-indicator {
   @supports ((-webkit-background-clip: text) or (background-clip: text)) {
     .diagnostics-stage-bar-value {
       background-image: linear-gradient(
-        90deg,
-        #fff 0%,
-        #fff calc(var(--diagnostics-progress) - 0.75%),
-        #d0d0d0 var(--diagnostics-progress),
-        #111 calc(var(--diagnostics-progress) + 0.75%),
-        #111 100%
+                      90deg,
+                      #fff 0%,
+                      #fff calc(var(--diagnostics-progress) - 0.75%),
+                      #d0d0d0 var(--diagnostics-progress),
+                      #111 calc(var(--diagnostics-progress) + 0.75%),
+                      #111 100%
       );
       background-clip: text;
       -webkit-background-clip: text;

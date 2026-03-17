@@ -116,6 +116,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
     private static readonly SEARCH_RESULTS_LAYER_KEY = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
+    private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
     private static readonly LOCATION_MARKER_ICON_NAME = "marker";
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
@@ -206,6 +207,13 @@ export abstract class DeckMapView implements IRenderView {
 
         const deckProps: DeckProps<DeckMercatorView> = {
             parent: container,
+            // Lowering device pixel ratio reduces redraw pressure during live resizes.
+            useDevicePixels: 1,
+            deviceProps: {
+                createCanvasContext: {
+                    resizeDebounceMs: DeckMapView.CANVAS_RESIZE_DEBOUNCE_MS
+                }
+            },
             views: new DeckMercatorView({
                 id: `deck-view-${this._viewIndex}`,
                 repeat: true,

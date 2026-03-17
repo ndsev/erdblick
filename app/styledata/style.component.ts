@@ -145,7 +145,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
                     <p-button (click)="closeEditorDialog($event)"
-                              [label]='sourceWasModified ? "Discard" : "Cancel"'
+                              [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
@@ -154,8 +154,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 </div>
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
-                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export"
-                              [style]="{margin: '0 0.5em'}">
+                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export">
                     </p-button>
                     <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
