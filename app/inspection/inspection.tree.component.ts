@@ -204,6 +204,8 @@ export class FeatureFilterOptions {
     standalone: false
 })
 export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
+    private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
+    private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -235,10 +237,21 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private suppressFilterEmit = false;
     private lastEmittedFilterText = "";
     private frozen = false;
+    private manualFreezeRequested = false;
+    private dockFreezeRequested = false;
+    private pendingScrollerRecalcWhileFrozen = false;
     private destroyed = false;
     private resizeObserver?: ResizeObserver;
     private scrollerRecalcFrame?: number;
     private readonly onWindowResize = () => this.scheduleScrollerRecalc();
+    private readonly onDockResizePauseStart = () => {
+        this.dockFreezeRequested = true;
+        this.applyFreezeState();
+    };
+    private readonly onDockResizePauseEnd = () => {
+        this.dockFreezeRequested = false;
+        this.applyFreezeState();
+    };
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
@@ -259,10 +272,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
             this.scheduleScrollerRecalc();
             this.refreshLayout();
-
-            this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
-                setTimeout(() => this.table.scrollToVirtualIndex(index ?? 0), 5);
-            }));
             this.cdr.markForCheck();
         });
         effect(() => {
@@ -295,16 +304,20 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
         if (typeof window !== "undefined") {
             window.addEventListener("resize", this.onWindowResize);
+            window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
+            window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
         }
     }
 
     ngOnDestroy() {
-        this.destroyed = true;
         this.unfreeze();
+        this.destroyed = true;
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
         if (typeof window !== "undefined") {
             window.removeEventListener("resize", this.onWindowResize);
+            window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
+            window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
         }
         if (this.scrollerRecalcFrame !== undefined) {
             window.cancelAnimationFrame(this.scrollerRecalcFrame);
@@ -314,27 +327,57 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     freeze(): void {
-        if (this.frozen || this.destroyed) {
+        if (this.destroyed) {
             return;
         }
-        this.frozen = true;
-        this.cdr.detach();
+        this.manualFreezeRequested = true;
+        this.applyFreezeState();
     }
 
     unfreeze(): void {
+        if (this.destroyed) {
+            return;
+        }
+        this.manualFreezeRequested = false;
+        this.applyFreezeState();
+    }
+
+    private shouldStayFrozen(): boolean {
+        return this.manualFreezeRequested || this.dockFreezeRequested;
+    }
+
+    private applyFreezeState(): void {
+        const shouldFreeze = this.shouldStayFrozen();
+        if (shouldFreeze) {
+            if (!this.frozen) {
+                this.frozen = true;
+                this.cdr.detach();
+            }
+            return;
+        }
+
         if (!this.frozen) {
             return;
         }
+
         this.frozen = false;
         this.cdr.reattach();
-        if (!this.destroyed) {
-            this.cdr.detectChanges();
+        this.cdr.detectChanges();
+        const hadPendingRecalc = this.pendingScrollerRecalcWhileFrozen;
+        this.pendingScrollerRecalcWhileFrozen = false;
+        if (hadPendingRecalc) {
             this.scheduleScrollerRecalc();
+            return;
         }
+        this.scheduleScrollerRecalc();
     }
 
     private scheduleScrollerRecalc() {
         if (this.destroyed || typeof window === "undefined") {
+            return;
+        }
+        if (this.frozen) {
+            this.pendingScrollerRecalcWhileFrozen = true;
             return;
         }
         if (this.scrollerRecalcFrame !== undefined) {
@@ -352,8 +395,16 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     refreshLayout(): void {
+        if (this.frozen) {
+            this.pendingScrollerRecalcWhileFrozen = true;
+            return;
+        }
         // Recalculate virtual scroller geometry after data or container-size changes.
         setTimeout(() => {
+            if (this.destroyed || this.frozen) {
+                this.pendingScrollerRecalcWhileFrozen = true;
+                return;
+            }
             const scroller = (this.table as any)?.scrollableViewChild?.scroller;
             if (scroller) {
                 scroller.init();

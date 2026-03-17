@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, input, OnDestroy, output, Renderer2, ViewChild, effect} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
 import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
 import {
@@ -144,7 +144,7 @@ interface SourceLayerMenuItem {
     `],
     standalone: false
 })
-export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
+export class InspectionPanelComponent implements AfterViewInit {
     title = "";
     isExpanded: boolean = true;
     errorMessage: string = "";
@@ -159,7 +159,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
     panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
-    accordionValue: string | undefined = undefined;
+    accordionValue: string | undefined = '0';
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -167,7 +167,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     @ViewChild('extraMenu') extraMenu!: ContextMenu;
     extraMenuItems: MenuItem[] = [];
     private lastExtraMenuTarget?: HTMLElement;
-    private autoExpandTimer?: number;
     isMetadata: boolean = false;
 
     constructor(private mapService: MapDataService,
@@ -219,22 +218,10 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
                 this.selectedLayerItem = undefined;
             }
         });
-
-        this.autoExpandTimer = window.setTimeout(() => {
-            this.accordionValue = '0';
-            this.autoExpandTimer = undefined;
-        }, 0);
     }
 
     ngAfterViewInit() {
         this.detectSafari();
-    }
-
-    ngOnDestroy() {
-        if (this.autoExpandTimer !== undefined) {
-            window.clearTimeout(this.autoExpandTimer);
-            this.autoExpandTimer = undefined;
-        }
     }
 
     protected onSelectedLayerItem() {
