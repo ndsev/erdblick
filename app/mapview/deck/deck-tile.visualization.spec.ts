@@ -37,26 +37,26 @@ function emptyRenderResult(): any {
             positions: new Float32Array(),
             colors: new Uint8Array(),
             radii: new Float32Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         },
         pointBillboard: {
             positions: new Float32Array(),
             colors: new Uint8Array(),
             radii: new Float32Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         },
         surface: {
             positions: new Float32Array(),
             startIndices: new Uint32Array([0]),
             colors: new Uint8Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         },
         pathWorld: {
             positions: new Float32Array(),
             startIndices: new Uint32Array([0]),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array(),
+            featureAddresses: new Uint32Array(),
             dashArrays: new Float32Array()
         },
         pathBillboard: {
@@ -64,7 +64,7 @@ function emptyRenderResult(): any {
             startIndices: new Uint32Array([0]),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array(),
+            featureAddresses: new Uint32Array(),
             dashArrays: new Float32Array()
         },
         arrowWorld: {
@@ -72,14 +72,14 @@ function emptyRenderResult(): any {
             startIndices: new Uint32Array([0]),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         },
         arrowBillboard: {
             positions: new Float32Array(),
             startIndices: new Uint32Array([0]),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         },
         coordinateOrigin: new Float64Array([0, 0, 0]),
         lowFiBundles: [],
@@ -120,8 +120,7 @@ describe("DeckTileVisualization", () => {
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
             billboard: false,
-            featureIds: [null],
-            featureIdsByVertex: [null, null],
+            featureAddressesByPath: [null],
             attributes: {
                 getPath: {
                     value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
@@ -196,8 +195,7 @@ describe("DeckTileVisualization", () => {
                 billboard: false,
                 coordinateOrigin: [11, 48, 0],
                 startIndices: new Uint32Array([0, 3]),
-                featureIds: [123],
-                featureIdsByVertex: [123, 123, 123],
+                featureAddressesByPath: [123],
                 attributes: {
                     getPath: {
                         value: new Float32Array([
@@ -230,8 +228,7 @@ describe("DeckTileVisualization", () => {
                 coordinateOrigin: [11, 48, 0] as [number, number, number],
                 startIndices: new Uint32Array([0, 2]),
                 billboard: false,
-                featureIds: [123],
-                featureIdsByVertex: [123, 123],
+                featureAddressesByPath: [123],
                 attributes: {
                     getPath: {
                         value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
@@ -298,7 +295,7 @@ describe("DeckTileVisualization", () => {
                 length: 2,
                 coordinateOrigin: [11, 48, 0],
                 startIndices: new Uint32Array([0, 3, 6]),
-                featureIds: new Uint32Array([10, 11]),
+                featureAddresses: new Uint32Array([10, 11]),
                 attributes: {
                     getPolygon: {
                         value: new Float32Array([
@@ -424,8 +421,7 @@ describe("DeckTileVisualization", () => {
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
             billboard: false,
-            featureIds: [null],
-            featureIdsByVertex: [null, null],
+            featureAddressesByPath: [null],
             attributes: {
                 getPath: {
                     value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
@@ -485,8 +481,7 @@ describe("DeckTileVisualization", () => {
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
             billboard: false,
-            featureIds: [null],
-            featureIdsByVertex: [null, null],
+            featureAddressesByPath: [null],
             attributes: {
                 getPath: {
                     value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
@@ -689,13 +684,13 @@ describe("DeckTileVisualization", () => {
                 1, 2, 3, 4
             ]),
             widths: new Float32Array([3, 3, 7, 7]),
-            featureIds: new Uint32Array([101, 101, 202, 202]),
+            featureAddresses: new Uint32Array([101, 202]),
             dashArrays: new Float32Array([6, 2, 6, 2, 1, 0, 1, 0])
         }, false);
 
         expect(pathData).toHaveLength(1);
         expect(pathData[0].billboard).toBe(false);
-        expect(Array.from(pathData[0].featureIdsByVertex as Uint32Array)).toEqual([101, 101, 202, 202]);
+        expect(Array.from(pathData[0].featureAddressesByPath as Uint32Array)).toEqual([101, 202]);
         expect(Array.from(pathData[0].attributes.instanceColors.value.slice(0, 8))).toEqual([
             255, 228, 181, 255,
             255, 228, 181, 255
@@ -737,8 +732,7 @@ describe("DeckTileVisualization", () => {
             length: 1,
             coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 3]),
-            featureIds: [123],
-            featureIdsByVertex: [123, 123, 123],
+            featureAddressesByPath: [123],
             attributes: {
                 getPath: {
                     value: new Float32Array([
@@ -769,7 +763,7 @@ describe("DeckTileVisualization", () => {
 
         const markers = visu.buildArrowMarkers(arrowPathData);
         expect(markers).toHaveLength(1);
-        expect(markers[0].featureId).toBe(123);
+        expect(markers[0].featureAddress).toBe(123);
         expect(markers[0].sizePx).toBe(12);
         expect(Number.isFinite(markers[0].angleDeg)).toBe(true);
         expect(markers[0].position).toEqual([10, 20, 0]);
@@ -808,14 +802,14 @@ describe("DeckTileVisualization", () => {
                 32, 196, 255, 200
             ]),
             radii: new Float32Array([4, 6]),
-            featureIds: new Uint32Array([101, 0xffffffff])
+            featureAddresses: new Uint32Array([101, 0xffffffff])
         }, false);
 
         expect(pointData).toHaveLength(1);
         expect(pointData[0].billboard).toBe(false);
         expect(pointData[0].length).toBe(2);
         expect(pointData[0].coordinateOrigin).toEqual([11, 48, 0]);
-        expect(Array.from(pointData[0].featureIds as Uint32Array)).toEqual([101, 0xffffffff]);
+        expect(Array.from(pointData[0].featureAddresses as Uint32Array)).toEqual([101, 0xffffffff]);
         expect(Array.from(pointData[0].attributes.getPosition.value)).toEqual([0, 0, 0, 10, 20, 0]);
         expect(Array.from(pointData[0].attributes.getFillColor.value)).toEqual([255, 128, 0, 255, 32, 196, 255, 200]);
         expect(Array.from(pointData[0].attributes.getRadius.value)).toEqual([4, 6]);

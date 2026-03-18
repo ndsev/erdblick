@@ -2272,8 +2272,8 @@ export class MapDataService {
         this.showInfoMessage('Tile pipeline is paused; cannot load additional tiles');
     }
 
-    resolveTileFeatureIdByIndex(tileKey: string, featureIndex: number): TileFeatureId | null {
-        if (!Number.isInteger(featureIndex) || featureIndex < 0) {
+    resolveTileFeatureIdByAddress(tileKey: string, featureAddress: number): TileFeatureId | null {
+        if (!Number.isInteger(featureAddress) || featureAddress < 0) {
             return null;
         }
         const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
@@ -2281,22 +2281,14 @@ export class MapDataService {
         if (!tile || !tile.hasData()) {
             return null;
         }
-        if (featureIndex >= tile.numFeatures) {
+        if (featureAddress >= tile.numFeatures) {
             return null;
         }
-        const featureId = tile.featureIdByIndex(featureIndex);
-        if (featureId) {
-            return {
-                mapTileKey: canonicalTileKey,
-                featureId,
-                featureIndex
-            };
-        }
-        return {
+        const featureId = tile.featureIdByAddress(featureAddress);
+        return featureId ? {
             mapTileKey: canonicalTileKey,
-            featureId: `${featureIndex}`,
-            featureIndex
-        };
+            featureId
+        } : null;
     }
 
     async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
@@ -2363,16 +2355,6 @@ export class MapDataService {
 
         // Ensure that the feature really exists in the tile.
         const features: FeatureWrapper[] = [];
-        const parseFeatureIndexToken = (value: string): number | undefined => {
-            if (!/^\d+$/.test(value)) {
-                return undefined;
-            }
-            const parsed = Number(value);
-            if (!Number.isInteger(parsed) || parsed < 0) {
-                return undefined;
-            }
-            return parsed;
-        };
         for (const id of normalizedIds) {
             const tile = tiles.get(id?.mapTileKey || "");
             if (!tile) {
@@ -2380,48 +2362,11 @@ export class MapDataService {
                 continue;
             }
 
-            const maybeResolveByIndex = (featureIndex: number | undefined): string | null => {
-                if (!Number.isInteger(featureIndex) || featureIndex === undefined || featureIndex < 0) {
-                    return null;
-                }
-                return tile.featureIdByIndex(featureIndex);
-            };
-
-            let resolvedFeatureId = id?.featureId || "";
-            let featureIndex = Number.isInteger(id.featureIndex) && id.featureIndex !== undefined && id.featureIndex >= 0
-                ? id.featureIndex
-                : undefined;
-            let resolvedFromFeatureIndex = false;
-
-            const resolvedFromExplicitIndex = maybeResolveByIndex(featureIndex);
-            if (resolvedFromExplicitIndex) {
-                resolvedFeatureId = resolvedFromExplicitIndex;
-                resolvedFromFeatureIndex = true;
-            } else {
-                const numericFeatureId = parseFeatureIndexToken(resolvedFeatureId);
-                if (numericFeatureId !== undefined) {
-                    featureIndex = featureIndex ?? numericFeatureId;
-                    const resolvedFromNumericId = maybeResolveByIndex(numericFeatureId);
-                    if (resolvedFromNumericId) {
-                        resolvedFeatureId = resolvedFromNumericId;
-                        resolvedFromFeatureIndex = true;
-                    }
-                }
-            }
-
-            if (!resolvedFeatureId && featureIndex === undefined) {
+            const resolvedFeatureId = id?.featureId || "";
+            if (!resolvedFeatureId) {
                 continue;
             }
-
-            const unresolvedNumericFeatureId =
-                !resolvedFromFeatureIndex &&
-                parseFeatureIndexToken(resolvedFeatureId) !== undefined;
-            const useFeatureIndexFallback =
-                featureIndex !== undefined &&
-                (!resolvedFeatureId || unresolvedNumericFeatureId || !tile.has(resolvedFeatureId));
-            if (useFeatureIndexFallback) {
-                resolvedFeatureId = `${featureIndex}`;
-            } else if (!tile.has(resolvedFeatureId)) {
+            if (!tile.has(resolvedFeatureId)) {
                 const parsedTileKey = this.parseMapTileKeySafe(id?.mapTileKey || "");
                 const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0n];
                 this.showErrorMessage(
@@ -2429,7 +2374,7 @@ export class MapDataService {
                 continue;
             }
 
-            features.push(new FeatureWrapper(resolvedFeatureId, tile, featureIndex));
+            features.push(new FeatureWrapper(resolvedFeatureId, tile));
         }
         return features;
     }

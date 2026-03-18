@@ -26,7 +26,7 @@ describe('MergedPointsTile', () => {
             positionHash: hash,
             pointParameters: {p: 1},
             labelParameters: {l: 1},
-            featureIds: [1, 2],
+            featureAddresses: [1, 2],
         } as any;
 
         tile.add(point1, 'k');
@@ -42,13 +42,13 @@ describe('MergedPointsTile', () => {
             positionHash: hash,
             pointParameters: {p: 2},
             labelParameters: {l: 2},
-            featureIds: [2, 3],
+            featureAddresses: [2, 3],
         } as any;
 
         tile.add(point2, 'k');
 
         const stored2 = tile.features.get(hash)!;
-        expect(stored2.featureIds.sort()).toEqual([1, 2, 3]);
+        expect(stored2.featureAddresses.sort()).toEqual([1, 2, 3]);
         expect(stored2.pointParameters).toBe(point2.pointParameters);
         expect(stored2.labelParameters).toBe(point2.labelParameters);
         expect(tile.count('unknown-hash')).toBe(0);
@@ -75,7 +75,7 @@ describe('MergedPointsTile', () => {
                 scale: 1,
                 pixelOffset: [0, 0]
             },
-            featureIds: [3]
+            featureAddresses: [3]
         } as any, 'tile-key');
 
         const deck = new DeckStub();
@@ -115,7 +115,7 @@ describe('PointMergeService', () => {
             positionHash: 'h1',
             pointParameters: null,
             labelParameters: null,
-            featureIds: [1],
+            featureAddresses: [1],
         } as any;
 
         const sourceTileId = 5n;
@@ -146,8 +146,8 @@ describe('PointMergeService', () => {
             positionHash: 'h',
             pointParameters: null,
             labelParameters: null,
-            featureIds: [11, 22],
-            idTileKeys: ['tile-a', 'tile-b']
+            featureAddresses: [11, 22],
+            featureTileKeys: ['tile-a', 'tile-b']
         } as any);
 
         service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
@@ -157,8 +157,8 @@ describe('PointMergeService', () => {
         const touched = Array.from(service.remove(10n, 'tile-a', '0:map'));
         expect(touched).toEqual([tile]);
         expect(tile.referencingTiles).toEqual([20n]);
-        expect(tile.features.get('h')?.featureIds).toEqual([22]);
-        expect(tile.features.get('h')?.idTileKeys).toEqual(['tile-b']);
+        expect(tile.features.get('h')?.featureAddresses).toEqual([22]);
+        expect(tile.features.get('h')?.featureTileKeys).toEqual(['tile-b']);
     });
 
     it('captures merge-count snapshot for surrounding corner tiles', () => {
@@ -171,7 +171,7 @@ describe('PointMergeService', () => {
             positionHash: 'h',
             pointParameters: null,
             labelParameters: null,
-            featureIds: [11, 22]
+            featureAddresses: [11, 22]
         } as any);
 
         service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
@@ -192,8 +192,8 @@ describe('PointMergeService', () => {
             positionHash: 'h',
             pointParameters: null,
             labelParameters: null,
-            featureIds: [11, 22],
-            idTileKeys: ['tile-a', 'tile-b']
+            featureAddresses: [11, 22],
+            featureTileKeys: ['tile-a', 'tile-b']
         } as any);
 
         service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([

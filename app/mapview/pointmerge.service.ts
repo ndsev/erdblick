@@ -15,8 +15,8 @@ type DeckPosition = [number, number, number];
 type DeckScene = {layerRegistry?: DeckLayerRegistry};
 
 interface DeckMergedPoint {
-    id: number[];
-    idTileKeys: string[];
+    featureAddresses: number[];
+    featureTileKeys: string[];
     position: DeckPosition;
     color: DeckColor;
     outlineColor: DeckColor;
@@ -26,8 +26,8 @@ interface DeckMergedPoint {
 }
 
 interface DeckMergedIcon {
-    id: number[];
-    idTileKeys: string[];
+    featureAddresses: number[];
+    featureTileKeys: string[];
     position: DeckPosition;
     image: string;
     width: number;
@@ -37,8 +37,8 @@ interface DeckMergedIcon {
 }
 
 interface DeckMergedLabel {
-    id: number[];
-    idTileKeys: string[];
+    featureAddresses: number[];
+    featureTileKeys: string[];
     position: DeckPosition;
     text: string;
     color: DeckColor;
@@ -59,8 +59,8 @@ export interface MergedPointVisualization {
     positionHash: PositionHash,
     pointParameters: any,
     labelParameters: any,
-    featureIds: Array<number>,
-    idTileKeys?: Array<string>
+    featureAddresses: Array<number>,
+    featureTileKeys?: Array<string>
 }
 
 /**
@@ -86,38 +86,38 @@ export class MergedPointsTile {
     }
 
     add(point: MergedPointVisualization, sourceTileKey: string) {
-        const normalizedFeatureIds = point.featureIds
-            .filter((featureId): featureId is number =>
-                Number.isInteger(featureId) && featureId >= 0);
-        const normalizedIdTileKeys = normalizedFeatureIds.map((_, i) => {
-            const idTileKey = point.idTileKeys?.[i];
-            return typeof idTileKey === "string" ? idTileKey : sourceTileKey;
+        const normalizedFeatureAddresses = point.featureAddresses
+            .filter((featureAddress): featureAddress is number =>
+                Number.isInteger(featureAddress) && featureAddress >= 0);
+        const normalizedFeatureTileKeys = normalizedFeatureAddresses.map((_, i) => {
+            const featureTileKey = point.featureTileKeys?.[i];
+            return typeof featureTileKey === "string" ? featureTileKey : sourceTileKey;
         });
 
         let existingPoint = this.features.get(point.positionHash);
         if (!existingPoint) {
             this.features.set(point.positionHash, {
                 ...point,
-                featureIds: normalizedFeatureIds,
-                idTileKeys: normalizedIdTileKeys,
+                featureAddresses: normalizedFeatureAddresses,
+                featureTileKeys: normalizedFeatureTileKeys,
             });
         }
         else {
-            let anyNewFeatureIdAdded = false;
-            if (!Array.isArray(existingPoint.idTileKeys)) {
-                existingPoint.idTileKeys = existingPoint.featureIds.map(() => sourceTileKey);
+            let anyNewFeatureAddressAdded = false;
+            if (!Array.isArray(existingPoint.featureTileKeys)) {
+                existingPoint.featureTileKeys = existingPoint.featureAddresses.map(() => sourceTileKey);
             }
-            for (let i = 0; i < normalizedFeatureIds.length; i++) {
-                const fid = normalizedFeatureIds[i];
-                const idTileKey = normalizedIdTileKeys[i];
-                if (existingPoint.featureIds.findIndex((v, idx) =>
-                    v === fid && existingPoint.idTileKeys?.[idx] === idTileKey) == -1) {
-                    existingPoint.featureIds.push(fid);
-                    existingPoint.idTileKeys!.push(idTileKey);
-                    anyNewFeatureIdAdded = true;
+            for (let i = 0; i < normalizedFeatureAddresses.length; i++) {
+                const featureAddress = normalizedFeatureAddresses[i];
+                const featureTileKey = normalizedFeatureTileKeys[i];
+                if (existingPoint.featureAddresses.findIndex((v, idx) =>
+                    v === featureAddress && existingPoint.featureTileKeys?.[idx] === featureTileKey) == -1) {
+                    existingPoint.featureAddresses.push(featureAddress);
+                    existingPoint.featureTileKeys!.push(featureTileKey);
+                    anyNewFeatureAddressAdded = true;
                 }
             }
-            if (anyNewFeatureIdAdded) {
+            if (anyNewFeatureAddressAdded) {
                 if (point.pointParameters) {
                     existingPoint.pointParameters = point.pointParameters;
                 }
@@ -134,15 +134,15 @@ export class MergedPointsTile {
             return 0;
         }
         if (!excludedSourceTileKey) {
-            return feature.featureIds.length;
+            return feature.featureAddresses.length;
         }
-        const idTileKeys = feature.idTileKeys ?? [];
-        if (!idTileKeys.length) {
-            return feature.featureIds.length;
+        const featureTileKeys = feature.featureTileKeys ?? [];
+        if (!featureTileKeys.length) {
+            return feature.featureAddresses.length;
         }
         let count = 0;
-        for (let index = 0; index < feature.featureIds.length; index++) {
-            if (idTileKeys[index] !== excludedSourceTileKey) {
+        for (let index = 0; index < feature.featureAddresses.length; index++) {
+            if (featureTileKeys[index] !== excludedSourceTileKey) {
                 count += 1;
             }
         }
@@ -168,28 +168,28 @@ export class MergedPointsTile {
 
     removeSource(sourceTileKey: string) {
         for (const [positionHash, feature] of this.features.entries()) {
-            const idTileKeys = feature.idTileKeys ?? [];
-            if (!idTileKeys.length) {
+            const featureTileKeys = feature.featureTileKeys ?? [];
+            if (!featureTileKeys.length) {
                 continue;
             }
 
-            const remainingFeatureIds: number[] = [];
-            const remainingIdTileKeys: string[] = [];
-            for (let index = 0; index < feature.featureIds.length; index++) {
-                if (idTileKeys[index] === sourceTileKey) {
+            const remainingFeatureAddresses: number[] = [];
+            const remainingFeatureTileKeys: string[] = [];
+            for (let index = 0; index < feature.featureAddresses.length; index++) {
+                if (featureTileKeys[index] === sourceTileKey) {
                     continue;
                 }
-                remainingFeatureIds.push(feature.featureIds[index]);
-                remainingIdTileKeys.push(idTileKeys[index]);
+                remainingFeatureAddresses.push(feature.featureAddresses[index]);
+                remainingFeatureTileKeys.push(featureTileKeys[index]);
             }
 
-            if (!remainingFeatureIds.length) {
+            if (!remainingFeatureAddresses.length) {
                 this.features.delete(positionHash);
                 continue;
             }
 
-            feature.featureIds = remainingFeatureIds;
-            feature.idTileKeys = remainingIdTileKeys;
+            feature.featureAddresses = remainingFeatureAddresses;
+            feature.featureTileKeys = remainingFeatureTileKeys;
         }
     }
 
@@ -206,8 +206,8 @@ export class MergedPointsTile {
         const labelsByBillboard = new Map<boolean, DeckMergedLabel[]>();
 
         for (const feature of this.features.values()) {
-            const id = feature.featureIds;
-            const idTileKeys = feature.idTileKeys ?? [];
+            const featureAddresses = feature.featureAddresses;
+            const featureTileKeys = feature.featureTileKeys ?? [];
             const defaultPosition: DeckPosition = [
                 feature.position.x,
                 feature.position.y,
@@ -225,8 +225,8 @@ export class MergedPointsTile {
                     const billboard = params.billboard !== false;
                     const bucket = iconsByBillboard.get(billboard) ?? [];
                     bucket.push({
-                        id,
-                        idTileKeys,
+                        featureAddresses,
+                        featureTileKeys,
                         position,
                         image: params.image,
                         width: Number.isFinite(width) && width > 0 ? width : 12,
@@ -241,8 +241,8 @@ export class MergedPointsTile {
                     const billboard = params.billboard === true;
                     const bucket = pointsByBillboard.get(billboard) ?? [];
                     bucket.push({
-                        id,
-                        idTileKeys,
+                        featureAddresses,
+                        featureTileKeys,
                         position,
                         color,
                         outlineColor: this.toDeckColor(params.outlineColor, [0, 0, 0, 0]),
@@ -267,8 +267,8 @@ export class MergedPointsTile {
                 const billboard = params.billboard !== false;
                 const bucket = labelsByBillboard.get(billboard) ?? [];
                 bucket.push({
-                    id,
-                    idTileKeys,
+                    featureAddresses,
+                    featureTileKeys,
                     position,
                     text,
                     color: this.toDeckColor(params.fillColor, [255, 255, 255, 255]),
@@ -306,7 +306,7 @@ export class MergedPointsTile {
                 stroked: true,
                 filled: true,
                 pickable: true,
-                getId: (d: DeckMergedPoint) => d.id
+                getId: (d: DeckMergedPoint) => d.featureAddresses
             } as any) as any, 500);
         }
 
@@ -333,7 +333,7 @@ export class MergedPointsTile {
                 }),
                 billboard,
                 pickable: true,
-                getId: (d: DeckMergedIcon) => d.id
+                getId: (d: DeckMergedIcon) => d.featureAddresses
             } as any) as any, 510);
         }
 
@@ -357,7 +357,7 @@ export class MergedPointsTile {
                 getPixelOffset: (d: DeckMergedLabel) => d.pixelOffset,
                 billboard,
                 pickable: true,
-                getId: (d: DeckMergedLabel) => d.id
+                getId: (d: DeckMergedLabel) => d.featureAddresses
             } as any) as any, 520);
         }
     }

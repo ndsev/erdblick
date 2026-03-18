@@ -254,7 +254,6 @@ protected:
     FeatureLayerStyle const& style_;
     std::set<std::string> featureIdSubset_;
     std::set<std::string> featureIdBaseSubset_;
-    std::unordered_set<uint32_t> featureIndexSubset_;
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;
     FeatureStyleRule::Fidelity fidelity_;

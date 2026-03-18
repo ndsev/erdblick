@@ -85,8 +85,8 @@ interface TileGridLevelExtent {
 
 interface DeckPickLayerProps {
     tileKey?: string;
-    featureIds?: ArrayLike<number | null>;
-    featureIdsByVertex?: ArrayLike<number | null>;
+    featureAddresses?: ArrayLike<number | null>;
+    featureAddressesByPath?: ArrayLike<number | null>;
 }
 
 interface DeckGestureEventLike {
@@ -408,7 +408,7 @@ export abstract class DeckMapView implements IRenderView {
             return [];
         }
 
-        const readFeatureIndex = (buffer: ArrayLike<number | null> | undefined, index: number): number | null => {
+        const readFeatureAddress = (buffer: ArrayLike<number | null> | undefined, index: number): number | null => {
             if (!buffer || index < 0 || index >= buffer.length) {
                 return null;
             }
@@ -419,7 +419,7 @@ export abstract class DeckMapView implements IRenderView {
             return value;
         };
 
-        const resolveFeatureIndex = (
+        const resolveFeatureAddress = (
             tileKey: string | undefined,
             value: unknown
         ): TileFeatureId | null => {
@@ -429,41 +429,41 @@ export abstract class DeckMapView implements IRenderView {
             if (!tileKey) {
                 return null;
             }
-            return this.mapService.resolveTileFeatureIdByIndex(tileKey, value as number);
+            return this.mapService.resolveTileFeatureIdByAddress(tileKey, value as number);
         };
 
         const objectTileKey = (picked.layer?.props as DeckPickLayerProps | undefined)?.tileKey;
         const pickedObject = picked.object;
-        const objectIdTileKeys = Array.isArray(pickedObject?.idTileKeys)
-            ? pickedObject.idTileKeys as unknown[]
+        const objectFeatureTileKeys = Array.isArray(pickedObject?.featureTileKeys)
+            ? pickedObject.featureTileKeys as unknown[]
             : undefined;
-        const objectId = pickedObject?.id ?? pickedObject?.featureId;
-        if (objectId !== undefined && objectId !== null) {
-            if (Array.isArray(objectId)) {
-                return objectId
+        const objectFeatureAddresses = pickedObject?.featureAddresses ?? pickedObject?.featureAddress;
+        if (objectFeatureAddresses !== undefined && objectFeatureAddresses !== null) {
+            if (Array.isArray(objectFeatureAddresses)) {
+                return objectFeatureAddresses
                     .map((value, index) => {
-                        const idTileKey = typeof objectIdTileKeys?.[index] === "string"
-                            ? objectIdTileKeys[index] as string
+                        const featureTileKey = typeof objectFeatureTileKeys?.[index] === "string"
+                            ? objectFeatureTileKeys[index] as string
                             : objectTileKey;
-                        return resolveFeatureIndex(idTileKey, value);
+                        return resolveFeatureAddress(featureTileKey, value);
                     })
                     .filter((value): value is TileFeatureId => value !== null);
             }
-            const resolved = resolveFeatureIndex(objectTileKey, objectId);
+            const resolved = resolveFeatureAddress(objectTileKey, objectFeatureAddresses);
             return resolved ? [resolved] : [];
         }
 
         const pickedIndex = Number(picked.index);
         const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
         if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
-            const featureId = readFeatureIndex(layerProps?.featureIds, pickedIndex);
-            if (featureId !== null) {
-                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureId);
+            const featureAddress = readFeatureAddress(layerProps?.featureAddresses, pickedIndex);
+            if (featureAddress !== null) {
+                const resolved = resolveFeatureAddress(layerProps?.tileKey, featureAddress);
                 return resolved ? [resolved] : [];
             }
-            const featureIdByVertex = readFeatureIndex(layerProps?.featureIdsByVertex, pickedIndex);
-            if (featureIdByVertex !== null) {
-                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureIdByVertex);
+            const featureAddressByPath = readFeatureAddress(layerProps?.featureAddressesByPath, pickedIndex);
+            if (featureAddressByPath !== null) {
+                const resolved = resolveFeatureAddress(layerProps?.tileKey, featureAddressByPath);
                 return resolved ? [resolved] : [];
             }
         }

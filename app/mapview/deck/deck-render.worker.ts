@@ -123,11 +123,11 @@ function attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLa
 }
 
 function transferPointBucket(bucket: DeckGeometryBucketBuffers["pointWorld"]): ArrayBuffer[] {
-    return [bucket.positions.buffer, bucket.colors.buffer, bucket.radii.buffer, bucket.featureIds.buffer];
+    return [bucket.positions.buffer, bucket.colors.buffer, bucket.radii.buffer, bucket.featureAddresses.buffer];
 }
 
 function transferSurfaceBucket(bucket: DeckGeometryBucketBuffers["surface"]): ArrayBuffer[] {
-    return [bucket.positions.buffer, bucket.startIndices.buffer, bucket.colors.buffer, bucket.featureIds.buffer];
+    return [bucket.positions.buffer, bucket.startIndices.buffer, bucket.colors.buffer, bucket.featureAddresses.buffer];
 }
 
 function transferPathBucket(bucket: DeckGeometryBucketBuffers["pathWorld"]): ArrayBuffer[] {
@@ -136,7 +136,7 @@ function transferPathBucket(bucket: DeckGeometryBucketBuffers["pathWorld"]): Arr
         bucket.startIndices.buffer,
         bucket.colors.buffer,
         bucket.widths.buffer,
-        bucket.featureIds.buffer,
+        bucket.featureAddresses.buffer,
         ...(bucket.dashArrays ? [bucket.dashArrays.buffer] : [])
     ];
 }
@@ -249,15 +249,15 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
 
 function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
     return {
-        pointWorld: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureIds: new Uint32Array()},
-        pointBillboard: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureIds: new Uint32Array()},
-        surface: {positions: new Float32Array(), startIndices: new Uint32Array(), colors: new Uint8Array(), featureIds: new Uint32Array()},
+        pointWorld: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureAddresses: new Uint32Array()},
+        pointBillboard: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureAddresses: new Uint32Array()},
+        surface: {positions: new Float32Array(), startIndices: new Uint32Array(), colors: new Uint8Array(), featureAddresses: new Uint32Array()},
         pathWorld: {
             positions: new Float32Array(),
             startIndices: new Uint32Array(),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array(),
+            featureAddresses: new Uint32Array(),
             dashArrays: new Float32Array()
         },
         pathBillboard: {
@@ -265,7 +265,7 @@ function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
             startIndices: new Uint32Array(),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array(),
+            featureAddresses: new Uint32Array(),
             dashArrays: new Float32Array()
         },
         arrowWorld: {
@@ -273,14 +273,14 @@ function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
             startIndices: new Uint32Array(),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         },
         arrowBillboard: {
             positions: new Float32Array(),
             startIndices: new Uint32Array(),
             colors: new Uint8Array(),
             widths: new Float32Array(),
-            featureIds: new Uint32Array()
+            featureAddresses: new Uint32Array()
         }
     };
 }

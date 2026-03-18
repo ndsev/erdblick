@@ -322,7 +322,33 @@ void InspectionConverter::convertValidity(
         }
 
         if (auto featureId = v.featureId()) {
-            push("featureId", "featureId", ValueType::FeatureId)->value_ = convertString(featureId_);
+            auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
+            featureIdScope->value_ = convertString(featureId->toString());
+            featureIdScope->mapId_ = JsValue(tile_->mapId());
+        }
+
+        if (auto transitionNumber = v.transitionNumber()) {
+            push("transitionNumber", "transitionNumber", ValueType::Number)->value_ =
+                JsValue(*transitionNumber);
+            if (auto fromFeature = v.transitionFromFeature()) {
+                auto fromScope = push("from", "from", ValueType::FeatureId);
+                fromScope->value_ = convertString(fromFeature->id()->toString());
+                fromScope->mapId_ = JsValue(fromFeature->model().mapId());
+            }
+            if (auto fromConnectedEnd = v.transitionFromConnectedEnd()) {
+                push("fromConnectedEnd", "fromConnectedEnd", ValueType::String)->value_ =
+                    convertString(*fromConnectedEnd == Validity::End ? "END" : "START");
+            }
+            if (auto toFeature = v.transitionToFeature()) {
+                auto toScope = push("to", "to", ValueType::FeatureId);
+                toScope->value_ = convertString(toFeature->id()->toString());
+                toScope->mapId_ = JsValue(toFeature->model().mapId());
+            }
+            if (auto toConnectedEnd = v.transitionToConnectedEnd()) {
+                push("toConnectedEnd", "toConnectedEnd", ValueType::String)->value_ =
+                    convertString(*toConnectedEnd == Validity::End ? "END" : "START");
+            }
+            return true;
         }
 
         if (auto geom = v.simpleGeometry()) {

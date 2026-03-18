@@ -55,12 +55,12 @@ interface MergeCountProvider {
     ) => number;
 }
 
-type DeckFeatureIdBuffer = Uint32Array | Array<number | null>;
+type DeckFeatureAddressBuffer = Uint32Array | Array<number | null>;
 
 interface DeckPickLayerMetadata {
     tileKey: string;
-    featureIds?: DeckFeatureIdBuffer;
-    featureIdsByVertex?: DeckFeatureIdBuffer;
+    featureAddresses?: DeckFeatureAddressBuffer;
+    featureAddressesByPath?: DeckFeatureAddressBuffer;
 }
 
 interface DeckPathLayerMetadata extends DeckPickLayerMetadata {
@@ -77,7 +77,7 @@ interface DeckPathLayerData {
     billboard: boolean;
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
-    featureIdsByVertex: DeckFeatureIdBuffer;
+    featureAddressesByPath: DeckFeatureAddressBuffer;
     attributes: {
         getPath: DeckBinaryAttribute<Float32Array>;
         instanceColors: DeckBinaryAttribute<Uint8Array>;
@@ -90,7 +90,7 @@ interface DeckPointLayerData {
     length: number;
     billboard: boolean;
     coordinateOrigin: [number, number, number];
-    featureIds: DeckFeatureIdBuffer;
+    featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
         getPosition: DeckBinaryAttribute<Float32Array>;
         getFillColor: DeckBinaryAttribute<Uint8Array>;
@@ -102,7 +102,7 @@ interface DeckSurfaceLayerData {
     length: number;
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
-    featureIds: DeckFeatureIdBuffer;
+    featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
         getPolygon: DeckBinaryAttribute<Float32Array>;
         fillColors: DeckBinaryAttribute<Uint8Array>;
@@ -115,7 +115,7 @@ interface DeckPathRawBuffers {
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
     dashArrays?: Float32Array;
 }
 
@@ -124,7 +124,7 @@ interface DeckPointRawBuffers {
     positions: Float32Array;
     colors: Uint8Array;
     radii: Float32Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
 }
 
 interface DeckSurfaceRawBuffers {
@@ -132,7 +132,7 @@ interface DeckSurfaceRawBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
 }
 
 interface DeckWasmRenderOutput {
@@ -203,12 +203,11 @@ function deckRuleFidelityEnum(): DeckRuleFidelityEnum {
 }
 
 interface DeckArrowMarker {
-    id: number | null;
+    featureAddress: number | null;
     position: [number, number, number];
     color: [number, number, number, number];
     sizePx: number;
     angleDeg: number;
-    featureId: number | null;
 }
 
 interface DeckLayerKeys {
@@ -522,7 +521,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     modelMatrix,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
-                    featureIds: surfaceLayerData.featureIds
+                    featureAddresses: surfaceLayerData.featureAddresses
                 });
                 registry.upsert(layerKeys.surfaceLayerKey, surfaceLayer, 350 + entry.orderOffset);
                 desiredSurfaceLayerKeys.add(layerKeys.surfaceLayerKey);
@@ -547,7 +546,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     modelMatrix,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
-                    featureIds: pointLayerData.featureIds
+                    featureAddresses: pointLayerData.featureAddresses
                 });
                 registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset);
                 desiredPointLayerKeys.add(layerKeys.pointLayerKey);
@@ -575,7 +574,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     dashJustified: true,
                     extensions: [new PathStyleExtension({dash: true})],
                     tileKey: this.tile.mapTileKey,
-                    featureIdsByVertex: pathLayerData.featureIdsByVertex
+                    featureAddressesByPath: pathLayerData.featureAddressesByPath
                 });
                 registry.upsert(layerKeys.pathLayerKey, pathLayer, 400 + entry.orderOffset);
                 desiredPathLayerKeys.add(layerKeys.pathLayerKey);
@@ -1210,7 +1209,7 @@ export class DeckTileVisualization implements ITileVisualization {
         if (raw.positions.length < vertexCount * 3) {
             return [];
         }
-        if (raw.colors.length < vertexCount * 4 || raw.widths.length < vertexCount || raw.featureIds.length < vertexCount) {
+        if (raw.colors.length < vertexCount * 4 || raw.widths.length < vertexCount || raw.featureAddresses.length < pathCount) {
             return [];
         }
         if (raw.dashArrays && raw.dashArrays.length < vertexCount * 2) {
@@ -1241,7 +1240,7 @@ export class DeckTileVisualization implements ITileVisualization {
             billboard,
             coordinateOrigin,
             startIndices: raw.startIndices,
-            featureIdsByVertex: raw.featureIds,
+            featureAddressesByPath: raw.featureAddresses,
             attributes
         }];
     }
@@ -1268,7 +1267,7 @@ export class DeckTileVisualization implements ITileVisualization {
 
         if (raw.positions.length < vertexCount * 3
             || raw.colors.length < vertexCount * 4
-            || raw.featureIds.length < surfaceCount) {
+            || raw.featureAddresses.length < surfaceCount) {
             return [];
         }
         if (raw.startIndices[0] !== 0) {
@@ -1287,7 +1286,7 @@ export class DeckTileVisualization implements ITileVisualization {
             length: surfaceCount,
             coordinateOrigin,
             startIndices: raw.startIndices,
-            featureIds: raw.featureIds,
+            featureAddresses: raw.featureAddresses,
             attributes: {
                 getPolygon: {value: raw.positions, size: 3},
                 fillColors: {value: raw.colors, size: 4}
@@ -1313,7 +1312,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
         if (raw.colors.length < pointCount * 4
             || raw.radii.length < pointCount
-            || raw.featureIds.length < pointCount) {
+            || raw.featureAddresses.length < pointCount) {
             return [];
         }
 
@@ -1321,7 +1320,7 @@ export class DeckTileVisualization implements ITileVisualization {
             length: pointCount,
             billboard,
             coordinateOrigin,
-            featureIds: raw.featureIds,
+            featureAddresses: raw.featureAddresses,
             attributes: {
                 getPosition: {value: raw.positions, size: 3},
                 getFillColor: {value: raw.colors, size: 4},
@@ -1362,10 +1361,10 @@ export class DeckTileVisualization implements ITileVisualization {
 
             const colorBase = tipVertex * 4;
             const widthPx = widths[tipVertex];
-            const rawFeatureId = pathData.featureIdsByVertex[start];
-            const featureId =
-                Number.isInteger(rawFeatureId) && rawFeatureId !== DECK_UNSELECTABLE_FEATURE_INDEX
-                    ? rawFeatureId
+            const rawFeatureAddress = pathData.featureAddressesByPath[arrowIndex];
+            const featureAddress =
+                Number.isInteger(rawFeatureAddress) && rawFeatureAddress !== DECK_UNSELECTABLE_FEATURE_INDEX
+                    ? rawFeatureAddress
                     : null;
             const angleDeg =
                 this.normalizeDegrees(
@@ -1374,7 +1373,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 );
             const sizePx = Math.max(8, widthPx * 4);
             markers.push({
-                id: featureId,
+                featureAddress,
                 position: [tipX, tipY, tipZ],
                 color: [
                     colors[colorBase],
@@ -1383,8 +1382,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     colors[colorBase + 3]
                 ],
                 sizePx,
-                angleDeg,
-                featureId
+                angleDeg
             });
         }
         return markers;

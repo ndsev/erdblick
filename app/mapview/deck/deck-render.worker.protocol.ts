@@ -47,14 +47,14 @@ export interface DeckPointBucketBuffers {
     positions: Float32Array;
     colors: Uint8Array;
     radii: Float32Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
 }
 
 export interface DeckSurfaceBucketBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
 }
 
 export interface DeckPathBucketBuffers {
@@ -62,7 +62,7 @@ export interface DeckPathBucketBuffers {
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
     dashArrays?: Float32Array;
 }
 

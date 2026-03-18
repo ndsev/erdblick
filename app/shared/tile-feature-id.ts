@@ -1,11 +1,9 @@
 export interface TileFeatureIdLike {
     featureId: string;
     mapTileKey: string;
-    featureIndex?: number;
 }
 
 const COMPACT_TILE_FEATURE_ID_PREFIX = "tfid:";
-const COMPACT_TILE_FEATURE_INDEX_PREFIX = "tfii:";
 
 interface DecodedCompactTileFeaturePayload {
     mapTileKey: string;
@@ -40,27 +38,12 @@ function decodeCompactPayload(
 
 export function decodeCompactTileFeatureId(value: string): TileFeatureIdLike | undefined {
     const decodedFeatureId = decodeCompactPayload(value, COMPACT_TILE_FEATURE_ID_PREFIX);
-    if (decodedFeatureId) {
-        return {
-            mapTileKey: decodedFeatureId.mapTileKey,
-            featureId: decodedFeatureId.payload,
-        };
-    }
-
-    const decodedFeatureIndex = decodeCompactPayload(value, COMPACT_TILE_FEATURE_INDEX_PREFIX);
-    if (!decodedFeatureIndex) {
+    if (!decodedFeatureId) {
         return undefined;
     }
-
-    const featureIndex = Number(decodedFeatureIndex.payload);
-    if (!Number.isInteger(featureIndex) || featureIndex < 0) {
-        return undefined;
-    }
-
     return {
-        mapTileKey: decodedFeatureIndex.mapTileKey,
-        featureId: decodedFeatureIndex.payload,
-        featureIndex,
+        mapTileKey: decodedFeatureId.mapTileKey,
+        featureId: decodedFeatureId.payload,
     };
 }
 

@@ -4,8 +4,6 @@
 #include "simfil/simfil.h"
 
 #include <algorithm>
-#include <charconv>
-#include <cctype>
 #include <deque>
 #include <iostream>
 #include <regex>
@@ -38,16 +36,6 @@ std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     return featureId.substr(0, cut);
 }
 
-std::string_view trimAsciiWhitespace(std::string_view value) {
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
-        value.remove_prefix(1);
-    }
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
-        value.remove_suffix(1);
-    }
-    return value;
-}
-
 std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
     std::string key;
     key.reserve(expression.size() + 3);
@@ -56,28 +44,6 @@ std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bo
     key.push_back(':');
     key.append(expression);
     return key;
-}
-
-std::optional<uint32_t> parseFeatureIndexToken(std::string_view value) {
-    auto token = trimAsciiWhitespace(value);
-    if (token.empty()) {
-        return std::nullopt;
-    }
-    if (token.front() == '#') {
-        token.remove_prefix(1);
-    }
-    if (token.empty()) {
-        return std::nullopt;
-    }
-
-    uint32_t parsed = 0;
-    auto const* begin = token.data();
-    auto const* end = begin + token.size();
-    auto [ptr, ec] = std::from_chars(begin, end, parsed);
-    if (ec != std::errc{} || ptr != end) {
-        return std::nullopt;
-    }
-    return parsed;
 }
 
 }
@@ -362,12 +328,7 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
     for (auto i = 0; i < featureIdSubset.size(); ++i) {
         auto featureId = featureIdSubset.at(i).as<std::string>();
         featureIdSubset_.insert(featureId);
-        auto featureToken = stripFeatureIdSuffix(featureId);
-        if (auto featureIndex = parseFeatureIndexToken(featureToken)) {
-            featureIndexSubset_.insert(*featureIndex);
-            continue;
-        }
-        featureIdBaseSubset_.insert(std::string(featureToken));
+        featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
     }
 }
 
@@ -716,7 +677,7 @@ void FeatureLayerVisualizationBase::run()
         }
     };
 
-    if (featureIdBaseSubset_.empty() || !featureIndexSubset_.empty()) {
+    if (featureIdBaseSubset_.empty()) {
         for (auto&& feature : *tile_) {
             processFeature(feature);
         }
@@ -737,7 +698,6 @@ void FeatureLayerVisualizationBase::addFeature(
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId)
 {
-    auto featureIndex = static_cast<uint32_t>(feature->addr().index());
     std::optional<std::string> featureId;
     auto resolveFeatureId = [&]() -> std::string const& {
         if (!featureId) {
@@ -745,15 +705,8 @@ void FeatureLayerVisualizationBase::addFeature(
         }
         return *featureId;
     };
-    if (!featureIdBaseSubset_.empty() || !featureIndexSubset_.empty()) {
-        auto const indexMatches = featureIndexSubset_.contains(featureIndex);
-        bool idMatches = false;
-        if (!featureIdBaseSubset_.empty()) {
-            idMatches = featureIdBaseSubset_.contains(resolveFeatureId());
-        }
-        if (!indexMatches && !idMatches) {
-            return;
-        }
+    if (!featureIdBaseSubset_.empty() && !featureIdBaseSubset_.contains(resolveFeatureId())) {
+        return;
     }
 
     auto offset = glm::dvec3{.0, .0, .0};
@@ -766,9 +719,10 @@ void FeatureLayerVisualizationBase::addFeature(
     case FeatureStyleRule::Feature: {
         if (auto geom = feature->geomOrNull()) {
             geom->forEachGeometry(
-                [this, featureIndex, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
+                [this, featureAddress = static_cast<uint32_t>(feature->addr().index()),
+                 &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
                 {
-                    addGeometry(geom, featureIndex, rule, mapLayerStyleRuleId, evalFun, offset);
+                    addGeometry(geom, featureAddress, rule, mapLayerStyleRuleId, evalFun, offset);
                     return true;
                 });
         }
@@ -811,7 +765,7 @@ void FeatureLayerVisualizationBase::addFeature(
                     feature,
                     layerName,
                     attr,
-                    featureIndex,
+                    static_cast<uint32_t>(feature->addr().index()),
                     rule,
                     mapLayerStyleRuleId,
                     offsetFactor,
@@ -1013,13 +967,13 @@ void FeatureLayerVisualizationBase::addMergedPointGeometry(
             {"position", JsValue(pointCartographic)},
             {"positionHash", JsValue(gridPositionHash)},
             {geomField, JsValue(makeGeomParams(evalFun))},
-            {"featureIds", JsValue::List({JsValue(tileFeatureId)})},
+            {"featureAddresses", JsValue::List({JsValue(tileFeatureId)})},
         });
     }
     else {
         mergedPointVisu->set(geomField, JsValue(makeGeomParams(evalFun)));
         if (featureIdIsNew) {
-            (*mergedPointVisu)["featureIds"].push(JsValue(tileFeatureId));
+            (*mergedPointVisu)["featureAddresses"].push(JsValue(tileFeatureId));
         }
     }
 }
@@ -1309,7 +1263,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         {
             addGeometry(
                 validity.computeGeometry(feature->geomOrNull()),
-                std::nullopt,
+                attr->model().stage(),
                 tileFeatureId,
                 rule,
                 mapLayerStyleRuleId,
@@ -1322,7 +1276,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         auto geom = feature->firstGeometry();
         addGeometry(
             geom,
-            std::nullopt,
+            attr->model().stage(),
             tileFeatureId,
             rule,
             mapLayerStyleRuleId,

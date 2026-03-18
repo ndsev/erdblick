@@ -595,8 +595,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("center", &TileFeatureLayer::center)
         .function("find", &TileFeatureLayer::find)
         .function("attachOverlay", &TileFeatureLayer::attachOverlay)
-        .function("featureIdByIndex", &TileFeatureLayer::featureIdByIndex)
-        .function("featureByIndex", &TileFeatureLayer::featureByIndex)
+        .function("featureIdByAddress", &TileFeatureLayer::featureIdByAddress)
+        .function("featureByAddress", &TileFeatureLayer::featureByAddress)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
     ////////// Highlight Modes

@@ -22,7 +22,7 @@ export class FeatureTile {
     private parser: TileLayerParser;
     private fieldDictBlobCache: Uint8Array | null = null;
     private dataSourceInfoBlobCache: Uint8Array | null = null;
-    private featureIdByIndexCache: Map<number, string> = new Map<number, string>();
+    private featureIdByAddressCache: Map<number, string> = new Map<number, string>();
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
     private vertexCountCache: number | null = null;
     private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
@@ -96,7 +96,7 @@ export class FeatureTile {
         this.tileFeatureLayerBlob = this.highestStageBlob();
         this.fieldDictBlobCache = null;
         this.dataSourceInfoBlobCache = null;
-        this.featureIdByIndexCache.clear();
+        this.featureIdByAddressCache.clear();
         this.dataVersion += 1;
 
         if (this.mapTileKey === "undefined") {
@@ -466,23 +466,23 @@ export class FeatureTile {
         });
     }
 
-    featureIdByIndex(featureIndex: number): string | null {
-        if (!Number.isInteger(featureIndex) || featureIndex < 0) {
+    featureIdByAddress(featureAddress: number): string | null {
+        if (!Number.isInteger(featureAddress) || featureAddress < 0) {
             return null;
         }
-        if (featureIndex >= this.numFeatures) {
+        if (featureAddress >= this.numFeatures) {
             return null;
         }
-        const cached = this.featureIdByIndexCache.get(featureIndex);
+        const cached = this.featureIdByAddressCache.get(featureAddress);
         if (cached !== undefined) {
             return cached;
         }
         const featureId = this.peek((tileFeatureLayer: TileFeatureLayer) => {
-            const result = tileFeatureLayer.featureIdByIndex(featureIndex);
+            const result = tileFeatureLayer.featureIdByAddress(featureAddress);
             return (typeof result === "string" && result.length > 0) ? result : null;
         });
         if (typeof featureId === "string" && featureId.length > 0) {
-            this.featureIdByIndexCache.set(featureIndex, featureId);
+            this.featureIdByAddressCache.set(featureAddress, featureId);
             return featureId;
         }
         return null;
@@ -496,7 +496,6 @@ export class FeatureTile {
  */
 export class FeatureWrapper implements TileFeatureId {
     public readonly featureId: string;
-    public readonly featureIndex?: number;
     public featureTile: FeatureTile;
 
     get mapTileKey(): string {
@@ -504,17 +503,13 @@ export class FeatureWrapper implements TileFeatureId {
     }
 
     /**
-     * Construct a feature wrapper from a featureTile and a feature index
-     * within that tile.
+     * Construct a feature wrapper from a feature tile and feature ID.
      * @param featureId The feature-id of the feature.
      * @param featureTile {FeatureTile} The feature tile container.
      */
-    constructor(featureId: string, featureTile: FeatureTile, featureIndex?: number) {
+    constructor(featureId: string, featureTile: FeatureTile) {
         this.featureId = featureId;
         this.featureTile = featureTile;
-        this.featureIndex = Number.isInteger(featureIndex) && featureIndex !== undefined && featureIndex >= 0
-            ? featureIndex
-            : undefined;
     }
 
     /**
@@ -524,16 +519,7 @@ export class FeatureWrapper implements TileFeatureId {
      */
     peek(callback: any) {
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
-            let feature: any = null;
-            if (this.featureIndex !== undefined) {
-                feature = tileFeatureLayer.featureByIndex(this.featureIndex);
-            }
-            if (!feature || feature.isNull()) {
-                if (feature && feature.isNull()) {
-                    feature.delete();
-                }
-                feature = tileFeatureLayer.find(this.featureId);
-            }
+            const feature = tileFeatureLayer.find(this.featureId);
             if (feature.isNull()) {
                 feature.delete();
                 return null;
@@ -552,10 +538,6 @@ export class FeatureWrapper implements TileFeatureId {
         if (!other) {
             return false;
         }
-        if (this.featureIndex !== undefined || other.featureIndex !== undefined) {
-            return this.featureTile.mapTileKey == other.featureTile.mapTileKey &&
-                this.featureIndex === other.featureIndex;
-        }
         return this.featureTile.mapTileKey == other.featureTile.mapTileKey && this.featureId == other.featureId;
     }
 
@@ -563,8 +545,7 @@ export class FeatureWrapper implements TileFeatureId {
     key(): TileFeatureId {
         return {
             mapTileKey: this.featureTile.mapTileKey,
-            featureId: this.featureId,
-            featureIndex: this.featureIndex
+            featureId: this.featureId
         };
     }
 }
