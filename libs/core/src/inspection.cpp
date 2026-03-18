@@ -225,13 +225,12 @@ void InspectionConverter::convertAttributeLayer(
             current_->type_ = ValueType::Boolean;
         }
 
-        if (auto validity = attr->validityOrNull()) {
-            convertValidity(convertString("validity"), validity);
-        }
-
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
                               std::to_string(static_cast<uint32_t>(attr->addr().index()));
+        if (auto validity = attr->validityOrNull()) {
+            convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
+        }
         return true;
     });
 }
@@ -297,7 +296,8 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
 
 void InspectionConverter::convertValidity(
     JsValue const& key,
-    model_ptr<MultiValidity> const& multiValidity)
+    model_ptr<MultiValidity> const& multiValidity,
+    std::string const* hoverIdPrefix)
 {
     auto scope = push(key, key.as<std::string>());
     auto renderValidity = [this](Validity const& v) -> bool {
@@ -406,6 +406,9 @@ void InspectionConverter::convertValidity(
     };
 
     if (multiValidity->size() == 1) {
+        if (hoverIdPrefix) {
+            scope->hoverId_ = *hoverIdPrefix + ":validity#0";
+        }
         multiValidity->forEach(renderValidity);
         return;
     }
@@ -415,6 +418,9 @@ void InspectionConverter::convertValidity(
         auto validityScope = push(
             JsValue(valIndex),
             valIndex);
+        if (hoverIdPrefix) {
+            validityScope->hoverId_ = *hoverIdPrefix + ":validity#" + std::to_string(valIndex);
+        }
         ++valIndex;
         return renderValidity(v);
     });

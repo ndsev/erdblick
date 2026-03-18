@@ -21,7 +21,6 @@ import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
-import {FeatureWrapper} from "../mapdata/features.model";
 
 export interface Column {
     key: string,
@@ -92,18 +91,33 @@ export class FeatureFilterOptions {
 
             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                 @if (rowData) {
-                    <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)" [class]="rowData.styleClass || ''">
+                    <tr [ttRow]="rowNode"
+                        (click)="onRowClick($event, rowNode)"
+                        (mouseenter)="onRowHover(rowData)"
+                        (mouseleave)="onRowHoverExit(rowData)"
+                        [ngClass]="getRowClasses(rowData)">
                         @for (col of columns(); track $index) {
                             <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap;"
                                 pTooltip="{{rowData[col.key]}}" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
-                                <div style="display: flex; flex-direction: row; gap: 0.25em;">
+                                <div [class.inspection-first-cell-content]="$index === 0"
+                                     style="display: flex; flex-direction: row; gap: 0.25em;">
                                     @if ($index === 0) {
-                                        <p-treeTableToggler [rowNode]="rowNode"/>
+                                        @if (shouldShowRowActions(rowNode, rowData)) {
+                                            <button type="button"
+                                                    class="inspection-row-actions"
+                                                    (click)="onRowActionsClick($event, rowData)"
+                                                    pTooltip="Row actions"
+                                                    tooltipPosition="top">...</button>
+                                        }
+                                        <span class="inspection-row-toggle" (click)="$event.stopPropagation()">
+                                            <p-treeTableToggler [rowNode]="rowNode"/>
+                                        </span>
                                     }
                                     <span (click)="onNodeClick($event, rowData, col.key)"
-                                          (mouseover)="onNodeHover($event, rowData)"
-                                          (mouseout)="onNodeHoverExit($event, rowData)"
+                                          (mouseenter)="onNodeValueHover(rowData, col.key)"
+                                          (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
                                           style="cursor: pointer"
+                                          [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
                                           [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
                                           [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
                                           [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
@@ -181,6 +195,65 @@ export class FeatureFilterOptions {
             font-style: italic;
         }
 
+        :host ::ng-deep tr.inspection-hover-soft > td {
+            background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+        }
+
+        :host ::ng-deep tr.inspection-hover-strong > td {
+            background: color-mix(in srgb, var(--p-primary-color) 22%, transparent);
+        }
+
+        .inspection-feature-id-pill {
+            border-radius: 999px;
+            box-shadow: 0 0 0 0.22em color-mix(in srgb, var(--p-primary-color) 32%, transparent);
+            background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
+            display: inline-block;
+        }
+
+        .inspection-row-actions {
+            align-items: center;
+            background: color-mix(in srgb, var(--p-content-background) 82%, var(--p-primary-color) 18%);
+            border: 1px solid color-mix(in srgb, var(--p-content-border-color) 72%, var(--p-primary-color) 28%);
+            border-radius: 0.4rem;
+            color: color-mix(in srgb, var(--p-content-color) 76%, var(--p-primary-color) 24%);
+            cursor: pointer;
+            font-size: 0.75rem;
+            height: 1.1rem;
+            line-height: 1;
+            min-width: 1.1rem;
+            opacity: 0;
+            padding: 0;
+            pointer-events: none;
+            position: absolute;
+            left: -0.15rem;
+            top: 50%;
+            transform: translateY(-50%);
+            transition: opacity 120ms ease;
+            visibility: hidden;
+            box-shadow: 0 0.08rem 0.24rem color-mix(in srgb, black 20%, transparent);
+            z-index: 1;
+        }
+
+        :host ::ng-deep tr:hover .inspection-row-actions {
+            opacity: 1;
+            pointer-events: auto;
+            visibility: visible;
+        }
+
+        .inspection-row-actions:hover {
+            background: color-mix(in srgb, var(--p-content-background) 70%, var(--p-primary-color) 30%);
+            border-color: color-mix(in srgb, var(--p-content-border-color) 58%, var(--p-primary-color) 42%);
+            color: var(--p-content-color);
+        }
+
+        .inspection-row-toggle {
+            display: inline-flex;
+        }
+
+        .inspection-first-cell-content {
+            position: relative;
+        }
+
         .inspection-stage-label-badge {
             align-items: center;
             background: var(--p-primary-100);
@@ -206,6 +279,9 @@ export class FeatureFilterOptions {
 export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
+    private activeSoftHoverGroupId?: string;
+    private activeStrongHoverGroupId?: string;
+    private activeFeatureIdNodeId?: string;
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -222,7 +298,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     filterTextChange = output<string>();
     showFilter = input<boolean>(true);
     geoJson = input<string>();
-    selectedFeatures = input<FeatureWrapper[]>();
     enableSourceDataNavigation = input<boolean>(true);
 
     filterFields: string[] = [
@@ -429,7 +504,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
-    onRowClick(rowNode: any) {
+    onRowClick(event: MouseEvent, rowNode: any) {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest(".inspection-row-actions") || target?.closest(".p-treetable-toggler")) {
+            return;
+        }
         const node: TreeNode = rowNode.node;
         node.expanded = !node.expanded;
         this.data = [...this.data];
@@ -442,14 +521,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        if (colKey === "key") {
-            this.onKeyClick(event, rowData);
-        } else if (colKey === "value") {
+        if (colKey === "value" && this.isFeatureIdValueRow(rowData)) {
             this.onValueClick(event, rowData);
         }
     }
 
-    onKeyClick(event: MouseEvent, rowData: any) {
+    onRowActionsClick(event: MouseEvent, rowData: any) {
         this.inspectionMenu.toggle(event);
         event.stopPropagation();
         const key = rowData["key"];
@@ -481,88 +558,119 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
-        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightByJumpTargetFilter(
-                rowData["mapId"],
-                rowData["value"]).then();
-        }
+        this.jumpService.highlightByJumpTargetFilter(
+            rowData["mapId"],
+            rowData["value"]).then();
     }
 
-    onNodeHover(event: any, rowData: any) {
-        event.stopPropagation();
-        this.highlightHoveredEntry(rowData);
+    onRowHover(rowData: any) {
+        this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
+            ? rowData["softHoverGroupId"]
+            : undefined;
+        this.activeStrongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
+            ? rowData["strongHoverGroupId"]
+            : undefined;
+        this.activeFeatureIdNodeId = undefined;
+        this.highlightRowHoverTarget(rowData);
     }
 
-    onNodeHoverExit(event: any, rowData: any) {
-        event.stopPropagation();
-        if (!rowData.hasOwnProperty("type") && !rowData.hasOwnProperty("hoverId")) {
+    onRowHoverExit(rowData: any) {
+        this.activeSoftHoverGroupId = undefined;
+        this.activeStrongHoverGroupId = undefined;
+        this.activeFeatureIdNodeId = undefined;
+        if (!rowData.hasOwnProperty("type") &&
+            !rowData.hasOwnProperty("hoverId") &&
+            !rowData.hasOwnProperty("softHoverGroupId")) {
             return;
         }
-        if (rowData["type"] === this.InspectionValueType.FEATUREID.value || rowData["hoverId"]) {
+        if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
+            rowData["hoverId"] ||
+            rowData["softHoverGroupId"]) {
             this.mapService.setHoveredFeatures([]).then();
         }
     }
 
-    private highlightHoveredEntry(rowData: any) {
-        if (!rowData.hasOwnProperty("type") && !rowData.hasOwnProperty("hoverId")) {
+    onNodeValueHover(rowData: any, colKey: string) {
+        if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
         }
-        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightByJumpTargetFilter(
-                rowData["mapId"],
-                rowData["value"],
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
-        } else if (rowData["hoverId"] && this.selectedFeatures()) {
-            const hoverId = String(rowData["hoverId"]);
-            const mapTileKey = this.resolveHoverMapTileKey(
-                hoverId,
-                rowData["featureIndex"],
-                this.selectedFeatures() ?? []
-            );
-            if (!mapTileKey) {
-                return;
-            }
-            this.mapService.setHoveredFeatures([{
-                mapTileKey,
-                featureId: hoverId
-            }]).then();
-        }
+        this.activeFeatureIdNodeId = typeof rowData?.["nodeId"] === "string"
+            ? rowData["nodeId"]
+            : undefined;
+        this.jumpService.highlightByJumpTargetFilter(
+            rowData["mapId"],
+            rowData["value"],
+            coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
     }
 
-    private resolveHoverMapTileKey(
-        hoverId: string,
-        rawFeatureIndex: unknown,
-        selectedFeatures: FeatureWrapper[]
-    ): string | undefined {
-        const featureIndex = Number(rawFeatureIndex);
-        if (Number.isInteger(featureIndex) &&
-            featureIndex >= 0 &&
-            featureIndex < selectedFeatures.length) {
-            return selectedFeatures[featureIndex].mapTileKey;
+    onNodeValueHoverExit(rowData: any, colKey: string) {
+        if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
+            return;
         }
-
-        const baseFeatureId = this.stripHoverSuffix(hoverId);
-        const matched = selectedFeatures.find(feature => feature.featureId === baseFeatureId);
-        if (matched) {
-            return matched.mapTileKey;
-        }
-
-        if (selectedFeatures.length === 1) {
-            return selectedFeatures[0].mapTileKey;
-        }
-        return undefined;
+        this.activeFeatureIdNodeId = undefined;
+        this.highlightRowHoverTarget(rowData);
     }
 
-    private stripHoverSuffix(featureId: string): string {
-        const attributeIndex = featureId.indexOf(":attribute#");
-        if (attributeIndex >= 0) {
-            return featureId.slice(0, attributeIndex);
+    private highlightRowHoverTarget(rowData: any) {
+        const hoverId = typeof rowData["strongHoverGroupId"] === "string"
+            ? String(rowData["strongHoverGroupId"])
+            : typeof rowData["softHoverGroupId"] === "string"
+                ? String(rowData["softHoverGroupId"])
+                : typeof rowData["hoverId"] === "string"
+                    ? String(rowData["hoverId"])
+                    : "";
+        const mapTileKey = typeof rowData["mapTileKey"] === "string"
+            ? rowData["mapTileKey"]
+            : undefined;
+        if (!mapTileKey || !hoverId) {
+            this.mapService.setHoveredFeatures([]).then();
+            return;
         }
-        const relationIndex = featureId.indexOf(":relation#");
-        if (relationIndex >= 0) {
-            return featureId.slice(0, relationIndex);
+        this.mapService.setHoveredFeatures([{
+            mapTileKey,
+            featureId: hoverId
+        }]).then();
+    }
+
+    private isFeatureIdValueRow(rowData: any): boolean {
+        return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;
+    }
+
+    isHoveredFeatureIdValue(rowData: any, colKey: string): boolean {
+        return colKey === "value" &&
+            this.isFeatureIdValueRow(rowData) &&
+            typeof rowData?.["nodeId"] === "string" &&
+            rowData["nodeId"] === this.activeFeatureIdNodeId;
+    }
+
+    private rowLevel(rowNode: any): number {
+        if (typeof rowNode?.level === "number") {
+            return rowNode.level;
         }
-        return featureId;
+        if (typeof rowNode?.node?.level === "number") {
+            return rowNode.node.level;
+        }
+        return 0;
+    }
+
+    shouldShowRowActions(rowNode: any, rowData: any): boolean {
+        return this.rowLevel(rowNode) > 0 && rowData?.["type"] !== this.InspectionValueType.SECTION.value;
+    }
+
+    getRowClasses(rowData: any): Record<string, boolean> {
+        const strongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
+            ? rowData["strongHoverGroupId"]
+            : undefined;
+        const softHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
+            ? rowData["softHoverGroupId"]
+            : undefined;
+        return {
+            [rowData?.styleClass ?? ""]: !!rowData?.styleClass,
+            "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
+                softHoverGroupId === this.activeSoftHoverGroupId,
+            "inspection-hover-strong": !!this.activeStrongHoverGroupId &&
+                strongHoverGroupId === this.activeStrongHoverGroupId
+        };
     }
 
     showSourceData(event: Event, sourceDataRef: any) {

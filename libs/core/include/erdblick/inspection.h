@@ -76,7 +76,10 @@ public:
     void convertAttributeLayer(std::string_view const& name, mapget::model_ptr<mapget::AttributeLayer> const& l);
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     void convertGeometry(JsValue const& key, mapget::model_ptr<mapget::Geometry> const& r);
-    void convertValidity(JsValue const& key, mapget::model_ptr<mapget::MultiValidity> const& r);
+    void convertValidity(
+        JsValue const& key,
+        mapget::model_ptr<mapget::MultiValidity> const& r,
+        std::string const* hoverIdPrefix = nullptr);
 
     OptionalValueAndType convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);

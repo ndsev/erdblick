@@ -42,6 +42,7 @@ options:
 - `stage` – Optional minimum tile stage required before any rule in the style can render.
 - High-vs-low fidelity stage cutover now comes from layer metadata (`LayerInfo.highFidelityStage`), not from style-sheet YAML.
 - Low-fidelity rendering uses stages below that metadata threshold; high-fidelity rendering uses stages at/above it. The frontend may additionally apply a per-view `lod` cap (`LOD_0..LOD_7`) before rules run.
+- Do not infer fidelity from the stage label alone. Some staged layers intentionally use labels like `Low-Fi` / `High-Fi` for UI continuity while still publishing `highFidelityStage: 0`, meaning all stages are treated as high-fidelity for rule selection and later stages are enrichment-only.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
 
