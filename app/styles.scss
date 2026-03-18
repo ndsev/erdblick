@@ -1960,11 +1960,18 @@ body.dialog-dragging * {
 
     .inspect-panel .p-accordionpanel.p-accordionpanel-active,
     .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent,
-    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-accordioncontent-content {
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-motion,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-motion > .p-accordioncontent-wrapper,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-motion > .p-accordioncontent-wrapper > .p-accordioncontent-content {
       display: flex;
       flex-direction: column;
       flex: 1 1 auto;
       min-height: 0;
+    }
+
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-motion {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr);
     }
 
     .inspect-panel .p-accordionpanel:not(.p-accordionpanel-active) > .p-accordioncontent {
@@ -1974,11 +1981,24 @@ body.dialog-dragging * {
     }
 
     .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
       height: 100% !important;
       max-height: none;
       min-height: 0;
       resize: none;
       padding-bottom: 0;
+    }
+
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container feature-panel,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container sourcedata-panel,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container inspection-tree,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container .p-treetable {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
     }
   }
 
