@@ -844,7 +844,6 @@ void FeatureLayerVisualizationBase::addFeature(
                     rule,
                     mapLayerStyleRuleId,
                     offsetFactor,
-                    offset,
                     hoveredValidityIndices);
                 return true;
             });
@@ -1277,7 +1276,6 @@ void FeatureLayerVisualizationBase::addAttribute(
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId,
     uint32_t& offsetFactor,
-    glm::dvec3 const& offset,
     std::unordered_set<uint32_t> const* hoveredValidityIndices)
 {
     // Check if the attribute type name is accepted for the rule.
@@ -1319,9 +1317,6 @@ void FeatureLayerVisualizationBase::addAttribute(
             return evaluateExpression(str, *attrEvaluationContext, false, false);
         }};
 
-    // Bump visual offset factor for next visualized attribute.
-    ++offsetFactor;
-
     // Check if the attribute's values match the attribute filter for the rule.
     if (auto const& attrFilter = rule.attributeFilter()) {
         if (!attrFilter->empty()) {
@@ -1334,40 +1329,84 @@ void FeatureLayerVisualizationBase::addAttribute(
         }
     }
 
+    auto validityIndexId = internalStringPoolCopy_->emplace("$validityIndex");
+    auto validityCountId = internalStringPoolCopy_->emplace("$validityCount");
+
     // Draw validity geometry.
     if (auto multiValidity = attr->validityOrNull()) {
+        auto const totalValidityCount = static_cast<uint32_t>(multiValidity->size());
+        uint32_t renderedValidityCount = 0;
         uint32_t validityIndex = 0;
+        multiValidity->forEach([&](auto&& validity)
+        {
+            (void) validity;
+            if (!hoveredValidityIndices || hoveredValidityIndices->contains(validityIndex)) {
+                ++renderedValidityCount;
+            }
+            ++validityIndex;
+            return true;
+        });
+        if (renderedValidityCount == 0) {
+            return;
+        }
+
+        auto const& ruleOffset = rule.offset();
+        auto const hasRuleOffset = ruleOffset.x != .0 || ruleOffset.y != .0 || ruleOffset.z != .0;
+        uint32_t renderedValidityOffsetFactor = 0;
+        validityIndex = 0;
         multiValidity->forEach([&, this](auto&& validity)
         {
             if (hoveredValidityIndices && !hoveredValidityIndices->contains(validityIndex)) {
                 ++validityIndex;
                 return true;
             }
+            attrEvaluationContext->set(
+                validityIndexId.value(),
+                simfil::Value(static_cast<int64_t>(validityIndex)));
+            attrEvaluationContext->set(
+                validityCountId.value(),
+                simfil::Value(static_cast<int64_t>(totalValidityCount)));
+
+            auto validityGeometry = validity.computeGeometry(feature->geomOrNull());
+            if (hasRuleOffset) {
+                validityGeometry = offsetGeometryLocally(
+                    validityGeometry,
+                    ruleOffset * static_cast<double>(renderedValidityOffsetFactor + 1U));
+            }
             addGeometry(
-                validity.computeGeometry(feature->geomOrNull()),
+                validityGeometry,
                 attr->model().stage(),
                 tileFeatureId,
                 rule,
                 mapLayerStyleRuleId,
-                boundEvalFun,
-                offset * static_cast<double>(offsetFactor));
+                boundEvalFun);
+            ++renderedValidityOffsetFactor;
             ++validityIndex;
             return true;
         });
+        offsetFactor += renderedValidityCount;
     }
     else {
         if (hoveredValidityIndices && !hoveredValidityIndices->contains(0U)) {
             return;
         }
+        attrEvaluationContext->set(validityIndexId.value(), simfil::Value(static_cast<int64_t>(0)));
+        attrEvaluationContext->set(validityCountId.value(), simfil::Value(static_cast<int64_t>(1)));
+        ++offsetFactor;
         auto geom = feature->firstGeometry();
+        auto shiftedGeometry = geom;
+        if (rule.offset().x != .0 || rule.offset().y != .0 || rule.offset().z != .0) {
+            shiftedGeometry = offsetGeometryLocally(
+                shiftedGeometry,
+                rule.offset() * static_cast<double>(offsetFactor));
+        }
         addGeometry(
-            geom,
+            shiftedGeometry,
             attr->model().stage(),
             tileFeatureId,
             rule,
             mapLayerStyleRuleId,
-            boundEvalFun,
-            offset * static_cast<double>(offsetFactor));
+            boundEvalFun);
     }
 }
 

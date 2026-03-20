@@ -186,7 +186,6 @@ protected:
         const FeatureStyleRule& rule,
         std::string const& mapLayerStyleRuleId,
         uint32_t& offsetFactor,
-        glm::dvec3 const& offset,
         std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr);
     void addGeometry(
         mapget::SelfContainedGeometry const& geom,

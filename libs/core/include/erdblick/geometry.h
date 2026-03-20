@@ -47,4 +47,15 @@ m::Point boundingRadiusEndPoint(m::SelfContainedGeometry const& g);
  */
 glm::dmat3x3 localWgs84UnitCoordinateSystem(mapget::SelfContainedGeometry const& g);
 
+/**
+ * Shift geometry by a local meter offset.
+ *
+ * For line geometries, the lateral component follows a per-vertex miter
+ * direction so adjacent segments keep a uniform spacing. Non-line geometries
+ * fall back to a single geometry-local basis.
+ */
+m::SelfContainedGeometry offsetGeometryLocally(
+    mapget::SelfContainedGeometry const& g,
+    glm::dvec3 const& localOffsetMeters);
+
 }  // namespace erdblick

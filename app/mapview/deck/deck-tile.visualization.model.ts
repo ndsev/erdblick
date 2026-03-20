@@ -825,6 +825,9 @@ export class DeckTileVisualization implements ITileVisualization {
                 affectedCornerTile.renderScene(sceneHandle);
             }
         }
+        for (const surfaceLayerKey of this.surfaceLayerKeys) {
+            registry.remove(surfaceLayerKey);
+        }
         for (const pointLayerKey of this.pointLayerKeys) {
             registry.remove(pointLayerKey);
         }
@@ -834,6 +837,7 @@ export class DeckTileVisualization implements ITileVisualization {
         for (const arrowLayerKey of this.arrowLayerKeys) {
             registry.remove(arrowLayerKey);
         }
+        this.surfaceLayerKeys.clear();
         this.pointLayerKeys.clear();
         this.pathLayerKeys.clear();
         this.arrowLayerKeys.clear();

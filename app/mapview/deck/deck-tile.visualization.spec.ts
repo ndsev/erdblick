@@ -334,6 +334,89 @@ describe("DeckTileVisualization", () => {
         expect(deck.commits).toHaveLength(1);
         expect(deck.commits[0]).toHaveLength(1);
         expect(deck.commits[0][0].id).toContain("/surface");
+        expect((deck.commits[0][0] as any).props._normalize).toBe(false);
+
+        visu.destroy({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+        registry.flush();
+
+        expect(deck.commits).toHaveLength(2);
+        expect(deck.commits[1]).toHaveLength(0);
+    });
+
+    it("renders hover surface layers without depth testing", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            peekAsync: async () => undefined,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = makeStyle();
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            1,
+            true,
+            null,
+            coreLib.HighlightMode.HOVER_HIGHLIGHT,
+            [],
+            "",
+            false,
+            {value: 0} as any
+        ) as any;
+
+        visu.renderWasm = async function() {
+            this.latestSurfaceLayerData = [{
+                length: 1,
+                coordinateOrigin: [11, 48, 0],
+                startIndices: new Uint32Array([0, 3]),
+                featureAddresses: new Uint32Array([10]),
+                attributes: {
+                    getPolygon: {
+                        value: new Float32Array([
+                            0, 0, 0,
+                            1, 0, 0,
+                            0, 1, 0
+                        ]),
+                        size: 3
+                    },
+                    fillColors: {
+                        value: new Uint8Array([
+                            255, 255, 0, 128,
+                            255, 255, 0, 128,
+                            255, 255, 0, 128
+                        ]),
+                        size: 4
+                    }
+                }
+            }];
+            return [];
+        };
+
+        const rendered = await visu.render({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+        registry.flush();
+
+        expect(rendered).toBe(true);
+        expect((deck.commits[0][0] as any).props.parameters).toEqual({
+            depthWriteEnabled: false,
+            depthCompare: "always",
+            cullMode: "none"
+        });
     });
 
     it("becomes dirty when tile data arrives after an initial empty render", async () => {

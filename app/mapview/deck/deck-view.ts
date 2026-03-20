@@ -46,8 +46,8 @@ interface TileGridOverlayGeometry {
     data: TileGridOverlayDatum[];
     localMin: [number, number];
     localSize: [number, number];
-    subdivisionsX: number[];
-    subdivisionsY: number[];
+    subdivisionX: number;
+    subdivisionY: number;
 }
 
 interface VisibleLayerRef {
@@ -168,6 +168,7 @@ export abstract class DeckMapView implements IRenderView {
     private tileGridEnabled = false;
     private tileGridMode: TileGridMode = "nds";
     private lastTileGridDiagnosticSignature = "";
+    private tileGridLayerKeys = new Set<string>();
     private tileStateLayerKeys = new Set<string>();
     private tileGridOverlayUpdateRaf: number | null = null;
     private tileGridOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -261,7 +262,7 @@ export abstract class DeckMapView implements IRenderView {
         this.tickCallbacks.clear();
         this.hoveredFeatureIds.next(undefined);
         this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
-        this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+        this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
@@ -1164,39 +1165,54 @@ export abstract class DeckMapView implements IRenderView {
 
     private updateTileGridOverlay(): void {
         if (!this.deck || !this.tileGridEnabled) {
-            this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.removeTileGridLayers();
             this.removeTileStateLayers();
             this.logTileGridDiagnostic("disabled");
             return;
         }
         const levels = this.visibleMapLayerLevels();
         if (!levels.length) {
-            this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.removeTileGridLayers();
             this.removeTileStateLayers();
             this.logTileGridDiagnostic("no-levels");
             return;
         }
         const viewport = this.computeViewport();
         if (!viewport) {
-            this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.removeTileGridLayers();
             this.removeTileStateLayers();
             this.logTileGridDiagnostic("no-viewport");
             return;
         }
         const effectiveLevels = this.coarsenedTileGridLevels(levels, viewport);
         const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels, viewport);
-        const layer = this.createTileGridLayer(effectiveLevels);
-        this.layerRegistry.upsert(DeckMapView.TILE_GRID_LAYER_KEY, layer, 490);
+        const gridLayerCount = this.updateTileGridLayers(effectiveLevels, viewport);
         this.logTileGridDiagnostic(
-            `enabled mode=${this.tileGridMode} requested=[${levels.join(",")}] effective=[${effectiveLevels.join(",")}] stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
+            `enabled mode=${this.tileGridMode} requested=[${levels.join(",")}] effective=[${effectiveLevels.join(",")}] gridLayers=${gridLayerCount} stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
         );
     }
 
-    private createTileGridLayer(levels: number[]): TileGridOverlayLayer {
+    private updateTileGridLayers(levels: number[], viewport: Viewport): number {
+        const nextLayerKeys = new Set<string>();
+        levels.forEach((level, index) => {
+            const layerKey = `${DeckMapView.TILE_GRID_LAYER_KEY}/${level}`;
+            const layer = this.createTileGridLayer(level, viewport, layerKey);
+            this.layerRegistry.upsert(layerKey, layer, 490 + index);
+            nextLayerKeys.add(layerKey);
+        });
+        for (const key of this.tileGridLayerKeys) {
+            if (!nextLayerKeys.has(key)) {
+                this.layerRegistry.remove(key);
+            }
+        }
+        this.tileGridLayerKeys = nextLayerKeys;
+        return nextLayerKeys.size;
+    }
+
+    private createTileGridLayer(level: number, viewport: Viewport, layerId: string): TileGridOverlayLayer {
         const overlayGeometry = DeckMapView.TILE_GRID_DEBUG_SOLID
-            ? this.tileGridDebugGeometry(levels)
-            : this.tileGridOverlayGeometry(levels);
-        const layerId = DeckMapView.TILE_GRID_LAYER_KEY;
+            ? this.tileGridDebugGeometry(level, viewport)
+            : this.tileGridOverlayGeometry(level, viewport);
         return new TileGridOverlayLayer({
             id: layerId,
             data: overlayGeometry.data,
@@ -1209,12 +1225,11 @@ export abstract class DeckMapView implements IRenderView {
             // already works with unwrapped/projection-space X coordinates.
             wrapLongitude: false,
             pickable: false,
-            levels,
             gridMode: this.tileGridMode,
             localMin: overlayGeometry.localMin,
             localSize: overlayGeometry.localSize,
-            subdivisionsX: overlayGeometry.subdivisionsX,
-            subdivisionsY: overlayGeometry.subdivisionsY,
+            subdivisionX: overlayGeometry.subdivisionX,
+            subdivisionY: overlayGeometry.subdivisionY,
             lineColor: DeckMapView.TILE_GRID_LINE_COLOR,
             lineWidthPixels: DeckMapView.TILE_GRID_LINE_WIDTH_PX,
             debugSolid: DeckMapView.TILE_GRID_DEBUG_SOLID,
@@ -1380,6 +1395,13 @@ export abstract class DeckMapView implements IRenderView {
         this.tileStateLayerKeys.clear();
     }
 
+    private removeTileGridLayers(): void {
+        for (const key of this.tileGridLayerKeys) {
+            this.layerRegistry.remove(key);
+        }
+        this.tileGridLayerKeys.clear();
+    }
+
     private tileGridExtentForLevel(level: number, viewport: Viewport): TileGridLevelExtent | null {
         if (!Number.isFinite(level) || level < 0) {
             return null;
@@ -1522,8 +1544,8 @@ export abstract class DeckMapView implements IRenderView {
         ];
     }
 
-    private tileGridDebugGeometry(levels: number[]): TileGridOverlayGeometry {
-        const base = this.tileGridOverlayGeometry(levels);
+    private tileGridDebugGeometry(level: number, viewport: Viewport): TileGridOverlayGeometry {
+        const base = this.tileGridOverlayGeometry(level, viewport);
         return {
             ...base,
             data: [{
@@ -1702,58 +1724,49 @@ export abstract class DeckMapView implements IRenderView {
             ),
             localMin,
             localSize,
-            subdivisionsX: [extent.width],
-            subdivisionsY: [extent.height]
+            subdivisionX: extent.width,
+            subdivisionY: extent.height
         };
     }
 
-    private tileGridOverlayGeometry(levels: number[]): TileGridOverlayGeometry {
-        const viewport = this.computeViewport();
+    private tileGridOverlayGeometry(level: number, viewport: Viewport): TileGridOverlayGeometry {
         if (!viewport) {
             return {
                 data: tileGridOverlayData(),
                 localMin: [0, 0],
                 localSize: [1, 1],
-                subdivisionsX: levels.map(() => 1),
-                subdivisionsY: levels.map(() => 1)
+                subdivisionX: 1,
+                subdivisionY: 1
             };
         }
-        const referenceLevel = levels.length ? levels[0] : Math.max(0, Math.floor(this.viewState.zoom));
-        const extent = this.tileGridExtentForLevel(referenceLevel, viewport);
+        const extent = this.tileGridExtentForLevel(level, viewport);
         if (!extent) {
             return {
                 data: tileGridOverlayData(),
                 localMin: [0, 0],
                 localSize: [1, 1],
-                subdivisionsX: levels.map(() => 1),
-                subdivisionsY: levels.map(() => 1)
+                subdivisionX: 1,
+                subdivisionY: 1
             };
         }
         const {localMin, localSize} = this.tileGridLocalBounds(extent);
-        const subdivisionsX = levels.map(level => {
-            const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
-            const colsForLevel = this.tileGridMode === "nds" ? rowsForLevel * 2 : rowsForLevel;
-            return Math.max(1, Math.round(localSize[0] * colsForLevel));
-        });
-        const subdivisionsY = levels.map(level => {
-            const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
-            return Math.max(1, Math.round(localSize[1] * rowsForLevel));
-        });
+        const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
+        const colsForLevel = this.tileGridMode === "nds" ? rowsForLevel * 2 : rowsForLevel;
         return {
             data: this.buildTileGridOverlayData(
                 extent.west,
                 extent.east,
                 extent.south,
                 extent.north,
-                levels,
+                [level],
                 localMin,
                 localSize,
                 extent.coversFullWorldX
             ),
             localMin,
             localSize,
-            subdivisionsX,
-            subdivisionsY
+            subdivisionX: Math.max(1, Math.round(localSize[0] * colsForLevel)),
+            subdivisionY: Math.max(1, Math.round(localSize[1] * rowsForLevel))
         };
     }
 
