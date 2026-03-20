@@ -171,6 +171,11 @@ const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
 const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
+const DECK_HIGHLIGHT_SURFACE_PARAMETERS = {
+    depthWriteEnabled: false,
+    depthCompare: "always",
+    cullMode: "none"
+} as const;
 const DECK_ARROW_ICON_ATLAS =
     "data:image/svg+xml;charset=utf-8," +
     encodeURIComponent(
@@ -502,6 +507,9 @@ export class DeckTileVisualization implements ITileVisualization {
         const desiredPathLayerKeys = new Set<string>();
         const desiredArrowLayerKeys = new Set<string>();
         const modelMatrix = this.modelMatrixForScene(sceneHandle);
+        const surfaceParameters = this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value
+            ? DECK_HIGHLIGHT_SURFACE_PARAMETERS
+            : undefined;
 
         for (const entry of entries) {
             for (const surfaceLayerData of entry.surfaceLayerData) {
@@ -517,8 +525,12 @@ export class DeckTileVisualization implements ITileVisualization {
                     filled: true,
                     extruded: false,
                     wireframe: false,
+                    // Our binary surface buffers carry per-vertex attributes already aligned to the raw vertices.
+                    // Deck's polygon normalization may add closing vertices, which desynchronizes those buffers.
+                    _normalize: false,
                     _full3d: true,
                     modelMatrix,
+                    parameters: surfaceParameters,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     featureAddresses: surfaceLayerData.featureAddresses
