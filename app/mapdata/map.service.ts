@@ -90,7 +90,7 @@ interface RequestedLayerProgressState {
  */
 @Injectable({providedIn: 'root'})
 export class MapDataService {
-    private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 16 * 1024;
+    private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
 
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
@@ -2661,11 +2661,7 @@ export class MapDataService {
         }
         for (let index = advertisedLevels.length - 1; index >= 0; index--) {
             const candidateLevel = advertisedLevels[index];
-            const visibleTileCount = (coreLib.getTileIds(
-                viewport,
-                candidateLevel,
-                MapDataService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES + 1
-            ) as bigint[]).length;
+            const visibleTileCount = coreLib.getNumTileIds(viewport, candidateLevel);
             if (visibleTileCount <= MapDataService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES) {
                 return candidateLevel;
             }

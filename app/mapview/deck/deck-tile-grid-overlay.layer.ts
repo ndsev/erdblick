@@ -2,9 +2,6 @@ import {SolidPolygonLayer, SolidPolygonLayerProps} from "@deck.gl/layers";
 import type {Texture} from "@luma.gl/core";
 import type {ShaderModule} from "@luma.gl/shadertools";
 
-const TILE_GRID_MAX_LEVEL_COUNT = 16;
-const TILE_GRID_MIN_LEVEL = 0;
-const TILE_GRID_MAX_LEVEL = 22;
 const TILE_GRID_LAT_LIMIT = 85.05112878;
 const TILE_GRID_WORLD_RING: [number, number][] = [
     [-180, -TILE_GRID_LAT_LIMIT],
