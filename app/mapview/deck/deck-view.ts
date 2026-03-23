@@ -8,10 +8,10 @@ import {
     WebMercatorViewport
 } from "@deck.gl/core";
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
-import {TileLayer} from "@deck.gl/geo-layers";
 import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
+import {TileLayer} from "../../integrations/deckgl";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";

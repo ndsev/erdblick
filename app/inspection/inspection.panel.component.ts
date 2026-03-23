@@ -86,8 +86,8 @@ interface InspectionPanelContentAdapter {
                                 <p-button class="dock-size-toggle-button" icon=""
                                           (click)="toggleDockAutoSize($event)"
                                           (mousedown)="$event.stopPropagation()"
-                                          [pTooltip]="isExpanded ? 'Contract to default docked height' : 'Expand to fit tree table'"
-                                          tooltipPosition="bottom">
+                                          [pTooltip]="isExpanded ? 'Shrink to default height' : 'Expand to fit content'"
+                                          tooltipPosition="left">
                                     <span class="material-symbols-outlined"
                                           style="font-size: 1.2em; margin: 0 auto;">
                                         @if (isExpanded) {

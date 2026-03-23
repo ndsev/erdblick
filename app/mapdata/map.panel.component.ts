@@ -22,6 +22,8 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                   [style]="{ 'max-height': '100%', 
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
+            <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
+                      (mousedown)="$event.stopPropagation()"/>
             <ng-container *ngFor="let index of viewIndices">
                 <p-fieldset class="map-tab" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
                     <ng-template #header>
@@ -561,8 +563,6 @@ export class MapPanelComponent {
         }
     }
 
-    protected readonly removeGroupPrefix = removeGroupPrefix;
-
     syncOptionsForView(viewIndex: number) {
         const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
         this.mapService.setSyncOptionsForView(viewIndex, nextState);
@@ -570,4 +570,10 @@ export class MapPanelComponent {
         this.syncedOptions = Array.from({length: numViews}, (_, index) =>
             this.mapService.isSyncOptionsForViewEnabled(index));
     }
+
+    protected closeMapsPanel() {
+        this.stateService.mapsDialogVisible = false;
+    }
+
+    protected readonly removeGroupPrefix = removeGroupPrefix;
 }

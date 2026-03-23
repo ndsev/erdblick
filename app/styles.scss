@@ -1341,6 +1341,144 @@ body.dialog-dragging * {
   color: var(--p-iconfield-icon-color);
 }
 
+.inspection-popup-menu {
+  font-size: 0.9em;
+}
+
+inspection-tree {
+  .section-style {
+    background-color: var(--p-highlight-background);
+    margin-top: 1em;
+  }
+
+  .feature-id-style {
+    cursor: pointer;
+    font-style: italic;
+    text-decoration: underline dotted;
+  }
+
+  .inspection-tree-table {
+    .p-treetable-table {
+      min-height: 1px;
+      padding: 0;
+    }
+
+    tr {
+      &.inspection-hover-soft > td {
+        background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+      }
+
+      &.inspection-hover-strong > td {
+        background: color-mix(in srgb, var(--p-primary-color) 22%, transparent);
+      }
+
+      &:hover {
+        .inspection-row-actions {
+          opacity: 1;
+          pointer-events: auto;
+          visibility: visible;
+        }
+      }
+    }
+  }
+
+  .inspection-tree-cell {
+    white-space: nowrap;
+  }
+
+  .inspection-cell-content {
+    display: flex;
+    flex-direction: row;
+    gap: 0.25em;
+  }
+
+  .inspection-node-value {
+    cursor: pointer;
+
+    &.inspection-node-value-filtered {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .inspection-feature-id-pill {
+    background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
+    border-radius: 999px;
+    box-shadow: 0 0 0 0.22em color-mix(in srgb, var(--p-primary-color) 32%, transparent);
+    display: inline-block;
+  }
+
+  .inspection-row-actions {
+    align-items: center;
+    background: color-mix(in srgb, var(--p-content-background) 82%, var(--p-primary-color) 18%);
+    border: 1px solid color-mix(in srgb, var(--p-content-border-color) 72%, var(--p-primary-color) 28%);
+    border-radius: 0.4rem;
+    box-shadow: 0 0.08rem 0.24rem color-mix(in srgb, black 20%, transparent);
+    color: color-mix(in srgb, var(--p-content-color) 76%, var(--p-primary-color) 24%);
+    cursor: pointer;
+    font-size: 0.75rem;
+    height: 1.1rem;
+    left: -0.15rem;
+    line-height: 1;
+    min-width: 1.1rem;
+    opacity: 0;
+    padding: 0;
+    pointer-events: none;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: opacity 120ms ease;
+    visibility: hidden;
+    z-index: 1;
+
+    &:hover {
+      background: color-mix(in srgb, var(--p-content-background) 70%, var(--p-primary-color) 30%);
+      border-color: color-mix(in srgb, var(--p-content-border-color) 58%, var(--p-primary-color) 42%);
+      color: var(--p-content-color);
+    }
+  }
+
+  .inspection-row-toggle {
+    display: inline-flex;
+  }
+
+  .inspection-first-cell-content {
+    position: relative;
+  }
+
+  .inspection-stage-label-badge {
+    align-items: center;
+    background: var(--p-primary-100);
+    border: 1px solid var(--p-primary-300);
+    border-radius: 999px;
+    color: var(--p-primary-900);
+    display: inline-flex;
+    font-size: 0.8em;
+    font-weight: 600;
+    line-height: 1;
+    padding: 0.15em 0.55em;
+    white-space: nowrap;
+  }
+
+  .filter-panel-content {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+  }
+
+  .filter-panel-option-label {
+    cursor: pointer;
+    margin-left: 0.5em;
+  }
+
+  .inspection-filter-trigger,
+  .inspection-filter-clear-icon {
+    cursor: pointer;
+  }
+}
+
 .inspection-dialog,
 .inspection-container {
   .inspection-tree-table {
@@ -2608,6 +2746,19 @@ body.dialog-dragging * {
 }
 
 .map-layer-dialog {
+  .close-maps-button {
+    position: absolute;
+    top: 0.25em;
+    right: 0.25em;
+    visibility: collapse;
+
+    .p-button {
+      width: 1.75em !important;
+      height: 1.75em !important;
+      margin: 0;
+    }
+  }
+
   .p-dialog {
     max-width: 25em;
     min-width: 25em;
@@ -3575,9 +3726,17 @@ body.dialog-dragging * {
     }
   }
 
-  .main-bar {
-    .p-menubar-root-list {
-      height: unset;
+  main-bar {
+    position: absolute;
+    top: 0 !important;
+    left: 0 !important;
+
+    .main-bar {
+      .p-menubar-root-list {
+        height: unset !important;
+        background: var(--p-menubar-background) !important;
+        padding: var(--p-menubar-submenu-padding) !important;
+      }
     }
   }
 
@@ -3659,7 +3818,7 @@ body.dialog-dragging * {
       left: 0;
 
       textarea {
-        width: 100%;
+        width: calc(100vw - 7em) !important;
         height: 100%;
         border-radius: 0;
         border: none;
@@ -3667,7 +3826,7 @@ body.dialog-dragging * {
       }
 
       textarea.single-line {
-        width: 100% !important;
+        width: calc(100vw - 7em) !important;
         height: 100%;
         padding-left: 2em;
         border-radius: 0;
@@ -3690,7 +3849,49 @@ body.dialog-dragging * {
     }
   }
 
+  .diagnostics-performance-dialog,
+  .diagnostics-log-dialog {
+    .p-dialog {
+      width: 100vw !important;
+      height: 100vh !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      max-width: 100vw !important;
+      max-height: 100vh !important;
+      margin: 0;
+    }
+
+    .p-dialog-content {
+      min-width: 0;
+      min-height: 0;
+    }
+  }
+
+  .diagnostics-performance-dialog {
+    .diagnostics-perf-progress,
+    .diagnostics-perf-filter,
+    .diagnostics-perf-table {
+      min-width: 0;
+    }
+  }
+
+  .diagnostics-log-dialog {
+    .diagnostics-log-actions {
+      flex-wrap: wrap;
+    }
+
+    .diagnostics-log-controls,
+    .diagnostics-log-actions,
+    .diagnostics-log-table {
+      min-width: 0;
+    }
+  }
+
   .map-layer-dialog {
+    .close-maps-button {
+      visibility: visible;
+    }
+
     .p-dialog {
       width: 100vw !important;
       height: calc(100vh - 3em) !important;
@@ -3728,7 +3929,6 @@ body.dialog-dragging * {
 
   .editor-dialog {
     .p-dialog {
-      height: 100vh;
       width: 100vw;
       max-width: 100vw;
     }
@@ -3741,7 +3941,6 @@ body.dialog-dragging * {
 
   .style-compare-dialog {
     .p-dialog {
-      height: 100vh;
       width: 100vw;
       max-width: 100vw;
       max-height: 100vh;
