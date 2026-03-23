@@ -301,6 +301,30 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('keeps persisted v2 schema and storage-hydrated state on bare URL without query params', async () => {
+        localStorage.setItem('useUrlV2', '1');
+        localStorage.setItem('marker', '1');
+        const routerStub = createRouterStub({});
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showInfo: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect((service as any).currentUrlVersion).toBe(2);
+        expect(service.markerState.getValue()).toBe(true);
+        expect(infoServiceStub.showInfo).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('shows schema toast when URL auto-switches from persisted v2 to v1', async () => {
         localStorage.setItem('useUrlV2', '1');
         const routerStub = createRouterStub({ m: '1' });

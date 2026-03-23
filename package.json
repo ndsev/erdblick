@@ -26,6 +26,7 @@
     "@codemirror/lint": "^6.9.5",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.40.0",
+    "@codemirror/merge": "^6.12.1",
     "@deck.gl/core": "^9.2.11",
     "@deck.gl/extensions": "^9.2.11",
     "@deck.gl/geo-layers": "^9.2.11",
@@ -65,5 +66,9 @@
     "playwright": "^1.58.2",
     "typescript": "~5.9.3",
     "vitest": "^4.1.0"
+  },
+  "overrides": {
+    "undici": "^7.24.4",
+    "fast-xml-parser": "^5.5.6"
   }
 }

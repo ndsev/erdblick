@@ -1033,8 +1033,15 @@ export class AppStateService implements OnDestroy {
 
     private hydrateFromUrl(params: Params): void {
         this.withHydration(() => {
+            const hasQueryParams = Object.keys(params).length > 0;
+            const rawHash = window.location.hash?.startsWith('#')
+                ? window.location.hash.substring(1)
+                : window.location.hash;
+            const hasHashPayload = this.currentUrlVersion === URL_STATE_VERSION_V2 && !!rawHash;
             const v2Flag = parseUrlStateV2Flag(params[URL_STATE_V2_PARAM]);
-            const nextVersion = v2Flag ? URL_STATE_VERSION_V2 : 1;
+            const nextVersion = hasQueryParams
+                ? (v2Flag ? URL_STATE_VERSION_V2 : 1)
+                : this.currentUrlVersion;
             const versionChanged = this.currentUrlVersion !== nextVersion;
             this.currentUrlVersion = nextVersion;
             // Keep the Preferences toggle in sync with the schema currently in use.
@@ -1045,6 +1052,12 @@ export class AppStateService implements OnDestroy {
                 this.infoMessageService.showInfo?.(
                     `URL schema version ${nextVersion} is currently in use. You can switch the URL schema in the settings.`
                 );
+            }
+
+            if (!hasQueryParams && !hasHashPayload) {
+                // Bare URL: keep storage-hydrated state intact.
+                this.useStableV2LayerDefaults = false;
+                return;
             }
 
             if (nextVersion === URL_STATE_VERSION_V2) {

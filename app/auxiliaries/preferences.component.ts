@@ -22,22 +22,25 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load</label>
-                <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
-                    <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
+                        <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                    </div>
+                    <p-button (click)="applyTileLimits()" label="" icon="pi pi-check"></p-button>
                 </div>
             </div>
-            <!-- Apply button -->
-            <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="slider-container">
                 <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
-                <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
-                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="1" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
+                        <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="1" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                    </div>
+                    <p-button (click)="applyInspectionsLimits()" label="" icon="pi pi-check"></p-button>
                 </div>
             </div>
-            <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Tile pull compression</label>
@@ -63,24 +66,28 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             </div>
             <div class="slider-container">
                 <label [for]="deckStyleWorkersCountInput">Deck worker count</label>
-                <div style="display: inline-block">
-                    <input class="tiles-input w-full"
-                           type="text"
-                           pInputText
-                           [(ngModel)]="deckStyleWorkersCountInput"
-                           [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
-                           (keydown.enter)="applyDeckStyleWorkersCount()"/>
-                    <p-slider [(ngModel)]="deckStyleWorkersCountInput"
-                              class="w-full"
-                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
-                              [min]="1"
-                              [max]="MAX_DECK_STYLE_WORKERS"></p-slider>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="deckStyleWorkersCountInput"
+                               [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
+                               (keydown.enter)="applyDeckStyleWorkersCount()"/>
+                        <p-slider [(ngModel)]="deckStyleWorkersCountInput"
+                                  class="w-full"
+                                  [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
+                                  [min]="1"
+                                  [max]="MAX_DECK_STYLE_WORKERS"></p-slider>
+                    </div>
+                    <p-button (click)="applyDeckStyleWorkersCount()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting">
+                    </p-button>
                 </div>
             </div>
-            <p-button (click)="applyDeckStyleWorkersCount()"
-                      label="Apply Worker Count"
-                      icon="pi pi-check"
-                      [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"></p-button>
+            <p-divider></p-divider>
             <div class="button-container">
                 <label>Dark Mode</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
@@ -90,7 +97,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"/>
             </div>
             <div class="button-container">
-                <label>Use URL v2 <p-tag severity="danger" value="EXPERIMENTAL"/></label>
+                <label>Use URL v2 <p-tag severity="danger" value="EXPERIMENTAL" [rounded]="true"/></label>
                 <p-toggleswitch [(ngModel)]="useUrlV2Setting" (ngModelChange)="setUseUrlV2($event)" />
             </div>
             <p-divider></p-divider>
@@ -106,7 +113,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <label>Storage for modified built-in styles</label>
                 <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
-            <p-divider></p-divider>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
     `,
@@ -116,8 +122,8 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                width: 29em;
-                margin: 1em 0;
+                margin: 0.5em 0;
+                width: 100%;
             }
 
             .tiles-input {

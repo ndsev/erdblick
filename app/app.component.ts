@@ -34,7 +34,6 @@ declare let window: DebugWindow;
             <preferences></preferences>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         }
-        <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         <legal-dialog></legal-dialog>
         <about-dialog></about-dialog>
         <router-outlet></router-outlet>

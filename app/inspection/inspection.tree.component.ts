@@ -414,6 +414,41 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }, 0);
     }
 
+    measurePreferredContentHeightEm(): number | undefined {
+        if (typeof window === "undefined") {
+            return undefined;
+        }
+        const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
+        if (!hostElement) {
+            return undefined;
+        }
+
+        const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
+        if (!Number.isFinite(rootFontSize) || rootFontSize <= 0) {
+            return undefined;
+        }
+
+        const filterHeightPx = hostElement.querySelector<HTMLElement>('.p-treetable-header')
+            ?.getBoundingClientRect().height ?? 0;
+        const headerHeightPx = hostElement.querySelector<HTMLElement>('.p-treetable-thead')
+            ?.getBoundingClientRect().height ?? 0;
+
+        let contentHeightPx = hostElement.querySelector<HTMLElement>('.p-virtualscroller-spacer')
+            ?.getBoundingClientRect().height ?? 0;
+        if (!contentHeightPx) {
+            contentHeightPx = Array
+                .from(hostElement.querySelectorAll<HTMLElement>('.p-treetable-tbody > tr'))
+                .reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
+        }
+        if (!contentHeightPx) {
+            return undefined;
+        }
+
+        const borderCompensationPx = 2;
+        const totalHeightPx = filterHeightPx + headerHeightPx + contentHeightPx + borderCompensationPx;
+        return totalHeightPx / rootFontSize;
+    }
+
     clearFilter() {
         this.filterString = "";
         this.table.filterGlobal("" , 'contains');

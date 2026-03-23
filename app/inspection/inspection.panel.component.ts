@@ -3,6 +3,7 @@ import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
 import {
     AppStateService,
+    DEFAULT_DOCKED_EM_HEIGHT,
     DEFAULT_EM_WIDTH,
     InspectionComparisonOption,
     InspectionPanelModel
@@ -11,12 +12,18 @@ import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {FeaturePanelComponent} from "./feature.panel.component";
+import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 
 interface SourceLayerMenuItem {
     label: string,
     disabled: boolean,
     command: () => void
+}
+
+interface InspectionPanelContentAdapter {
+    measurePreferredHeightEm: () => number | undefined;
+    refreshLayout: () => void;
 }
 
 @Component({
@@ -75,6 +82,22 @@ interface SourceLayerMenuItem {
                                 <span class="material-symbols-outlined"
                                       style="font-size: 1.2em; margin: 0 auto;">eject</span>
                             </p-button>
+                            @if (showDockAutoSizeToggle()) {
+                                <p-button class="dock-size-toggle-button" icon=""
+                                          (click)="toggleDockAutoSize($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          [pTooltip]="isExpanded ? 'Contract to default docked height' : 'Expand to fit tree table'"
+                                          tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">
+                                        @if (isExpanded) {
+                                            unfold_less
+                                        } @else {
+                                            unfold_more
+                                        }
+                                    </span>
+                                </p-button>
+                            }
                             <p-button icon="pi pi-times" severity="secondary" (click)="unsetPanel()"
                                       (mousedown)="$event.stopPropagation()"/>
                         </span>
@@ -146,7 +169,7 @@ interface SourceLayerMenuItem {
 })
 export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     title = "";
-    isExpanded: boolean = true;
+    isExpanded: boolean = false;
     errorMessage: string = "";
 
     layerMenuItems: SourceLayerMenuItem[] = [];
@@ -155,6 +178,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     selectedCompareIds: number[] = [];
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    dockedPanelCount = input<number>(0);
     filterText = input<string | undefined>();
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
@@ -165,6 +189,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
+    @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
     @ViewChild('extraMenu') extraMenu!: ContextMenu;
     extraMenuItems: MenuItem[] = [];
     private lastExtraMenuTarget?: HTMLElement;
@@ -179,6 +204,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
             this.title = "";
             this.errorMessage = "";
             const panel = this.panel();
+            this.isExpanded = this.isPanelHeightExpanded(panel.size[1]);
             if (panel.sourceData !== undefined) {
                 const selection = panel.sourceData!;
                 const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
@@ -251,6 +277,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         const currentEmHeight = element.offsetHeight / this.stateService.baseFontSize;
         panel.size[0] = currentEmWidth < DEFAULT_EM_WIDTH ? DEFAULT_EM_WIDTH : currentEmWidth;
         panel.size[1] = currentEmHeight;
+        this.isExpanded = this.isPanelHeightExpanded(currentEmHeight);
         this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
     }
 
@@ -281,6 +308,25 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.ejectedPanel.emit(this.panel());
     }
 
+    protected showDockAutoSizeToggle(): boolean {
+        const panel = this.panel();
+        return !panel.undocked && this.dockedPanelCount() > 1;
+    }
+
+    protected toggleDockAutoSize(event: MouseEvent) {
+        event.stopPropagation();
+        if (!this.showDockAutoSizeToggle()) {
+            return;
+        }
+        const panel = this.panel();
+        const nextHeight = this.isExpanded ?
+            DEFAULT_DOCKED_EM_HEIGHT :
+            this.computeExpandedHeightEm(panel);
+        this.applyPanelHeight(panel, nextHeight);
+        this.isExpanded = this.isPanelHeightExpanded(nextHeight);
+        this.refreshPanelContentLayout();
+    }
+
     private focusOnFeature(event?: MouseEvent) {
         event?.stopPropagation();
         const panel = this.panel();
@@ -308,6 +354,41 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         return !!target.closest(
             'button, .p-button, .p-colorpicker, .p-select, .p-dropdown, .p-multiselect, input, textarea, select, option, a'
         );
+    }
+
+    private computeExpandedHeightEm(panel: InspectionPanelModel<FeatureWrapper>): number {
+        const contentHeight = this.getPanelContentAdapter()?.measurePreferredHeightEm();
+        if (contentHeight === undefined || !Number.isFinite(contentHeight)) {
+            return Math.max(panel.size[1], DEFAULT_DOCKED_EM_HEIGHT);
+        }
+        return Math.max(contentHeight, panel.size[1], DEFAULT_DOCKED_EM_HEIGHT);
+    }
+
+    private applyPanelHeight(panel: InspectionPanelModel<FeatureWrapper>, heightEm: number) {
+        if (!Number.isFinite(heightEm) || heightEm <= 0) {
+            return;
+        }
+        panel.size[1] = heightEm;
+        this.stateService.setInspectionPanelSize(panel.id, [panel.size[0], heightEm]);
+    }
+
+    private refreshPanelContentLayout() {
+        const refresh = () => this.getPanelContentAdapter()?.refreshLayout();
+        if (typeof window === "undefined") {
+            refresh();
+            return;
+        }
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => refresh());
+        });
+    }
+
+    private getPanelContentAdapter(): InspectionPanelContentAdapter | undefined {
+        return this.panel().sourceData !== undefined ? this.sourceDataPanel : this.featurePanel;
+    }
+
+    private isPanelHeightExpanded(heightEm: number): boolean {
+        return heightEm > DEFAULT_DOCKED_EM_HEIGHT + 0.1;
     }
 
     protected openExtraMenu(event: MouseEvent) {

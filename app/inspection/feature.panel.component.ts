@@ -89,6 +89,14 @@ export class FeaturePanelComponent implements OnDestroy {
         this.inspectionTree?.refreshLayout();
     }
 
+    refreshLayout() {
+        this.inspectionTree?.refreshLayout();
+    }
+
+    measurePreferredHeightEm(): number | undefined {
+        return this.inspectionTree?.measurePreferredContentHeightEm();
+    }
+
     private rebuildInspectionTree() {
         this.selectedFeatures = this.panel().features ?? [];
         if (!this.selectedFeatures.length) {

@@ -332,6 +332,14 @@ export class SourceDataPanelComponent {
         this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
     }
 
+    refreshLayout() {
+        this.inspectionTree?.refreshLayout();
+    }
+
+    measurePreferredHeightEm(): number | undefined {
+        return this.inspectionTree?.measurePreferredContentHeightEm();
+    }
+
     freezeTree() {
         this.inspectionTree?.freeze();
     }

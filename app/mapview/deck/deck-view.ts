@@ -835,6 +835,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
+        this.stateService.isDockOpen = true;
         const shouldPinPanel = !!srcEvent?.ctrlKey;
         this.selectFeatureIds(featureIds, shouldPinPanel);
     }

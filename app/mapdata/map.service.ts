@@ -2211,7 +2211,7 @@ export class MapDataService {
     setViewport(viewIndex: number, viewport: Viewport) {
         const maxIndex = this.viewVisualizationState.length - 1;
         if (viewIndex > maxIndex) {
-            console.error(`Attempted to write @ viewIndex: ${viewIndex} but it is out of bounds (${maxIndex})`);
+            console.warn(`Attempted to write @ viewIndex: ${viewIndex} but it is out of bounds (${maxIndex})`);
             return;
         }
         this.viewVisualizationState[viewIndex].viewport = viewport;

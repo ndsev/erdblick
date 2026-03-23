@@ -35,6 +35,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
             @for (panel of dockedPanels; track panel.id) {
                 @if (panel.features.length > 0 || panel.sourceData !== undefined) {
                     <inspection-panel [panel]="panel"
+                                      [dockedPanelCount]="dockedPanels.length"
                                       [ngClass]="{'dragging': dragPanelId === panel.id,
                                                   'drop-before': dropBeforeId === panel.id,
                                                   'drop-after': dropAfterId === panel.id}"
@@ -88,8 +89,9 @@ export class InspectionContainerComponent implements OnDestroy {
             this.stateService.pruneInspectionDialogLayout(allPanels.map(panel => panel.id));
             this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            this.stateService.isDockOpen = this.stateService.isDockOpen && !this.stateService.isDockAutoCollapsible ||
-                allPanels.filter(p => !p.undocked).length > 0;
+            const hasDockedPanels = this.dockedPanels.length > 0;
+            this.stateService.isDockOpen = this.stateService.isDockOpen &&
+                (!this.stateService.isDockAutoCollapsible || hasDockedPanels);
         });
         this.stateService.inspectionComparisonState.subscribe(comparison => {
             this.comparison = comparison;

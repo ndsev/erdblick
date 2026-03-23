@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
-import {of, BehaviorSubject, Subject} from 'rxjs';
+import {of, BehaviorSubject} from 'rxjs';
 
 import {StyleService} from './style.service';
 
@@ -232,7 +232,8 @@ describe('StyleService', () => {
         const stored = localStorage.getItem('styleHashes');
         expect(stored).not.toBeNull();
         expect(JSON.parse(stored!)).toEqual([['bundle/styles/s1.yaml', 'abc']]);
-        expect(hashes.size).toBe(0);
+        expect(hashes.size).toBe(1);
+        expect(hashes.get('bundle/styles/s1.yaml')?.isUpdated).toBe(false);
     });
 
     it('clears storage keys for imported and builtin styles', () => {
@@ -291,6 +292,7 @@ describe('StyleService', () => {
             service.styles.set('StyleOne', {
                 id: 'StyleOne',
                 url: url,
+                source: 'name: StyleOne',
                 visible: true,
                 imported: false,
                 modified: false,
@@ -370,5 +372,123 @@ describe('StyleService', () => {
 
         expect(stateService.getStyleVisibility('StyleOne', true)).toBe(false);
         expect(service.styles.get('StyleOne')?.visible).toBe(false);
+    });
+
+    it('keeps builtin baseline source when modified local override is loaded', async () => {
+        const {service, httpClient} = createService();
+        localStorage.setItem('builtinStyleData', JSON.stringify([
+            ['BuiltinStyle', {
+                id: 'BuiltinStyle',
+                url: 'bundle/styles/base.yaml',
+                source: 'name: BuiltinStyle\nrules:\n  - color: "#ff00ff"',
+                imported: false,
+            }],
+        ]));
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === 'config.json') {
+                return of({styles: [{id: 'builtin', url: 'base.yaml'}]});
+            }
+            if (url === 'bundle/styles/base.yaml') {
+                return of('name: BuiltinStyle\nrules:\n  - color: "#0000ff"');
+            }
+            throw new Error(`Unexpected URL ${url}`);
+        });
+        vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((source: string) => {
+            const match = source.match(/^\s*name\s*:\s*([^\n]+)/m);
+            const styleName = (match?.[1] ?? 'BuiltinStyle').trim();
+            return [{
+                name: () => styleName,
+                defaultEnabled: () => true,
+                delete: vi.fn(),
+            }, []];
+        });
+
+        await service.initializeStyles();
+
+        expect(service.getBuiltinBaselineSource('BuiltinStyle')).toBe('name: BuiltinStyle\nrules:\n  - color: "#0000ff"');
+        expect(service.styles.get('BuiltinStyle')?.source).toBe('name: BuiltinStyle\nrules:\n  - color: "#ff00ff"');
+        expect(service.styleHashes.get('bundle/styles/base.yaml')?.isModified).toBe(true);
+    });
+
+    it('synchronizes lifecycle modified flag when style source is edited', () => {
+        const {service} = createService();
+        service.styleUrls = [{id: 'StyleOne', url: 'bundle/styles/style-one.yaml'} as any];
+        service.styleHashes.set('bundle/styles/style-one.yaml', {
+            id: 'StyleOne',
+            sha256: 'server',
+            isModified: false,
+            isUpdated: false
+        });
+        service.styles.set('StyleOne', {
+            id: 'StyleOne',
+            url: 'bundle/styles/style-one.yaml',
+            source: 'name: StyleOne',
+            imported: false,
+            modified: false,
+            visible: true,
+        } as any);
+        vi.spyOn(service as any, 'initializeStyle').mockImplementation((_source: string, styleUrl: string) => {
+            service.styles.set('StyleOne', {
+                id: 'StyleOne',
+                url: styleUrl,
+                source: 'name: StyleOne\nrules: []',
+                imported: false,
+                modified: true,
+                visible: true,
+            } as any);
+            return 'StyleOne';
+        });
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+
+        const newStyleId = service.setStyleSource('StyleOne', 'name: StyleOne\nrules: []', true);
+
+        expect(newStyleId).toBe('StyleOne');
+        expect(service.styleHashes.get('bundle/styles/style-one.yaml')?.isModified).toBe(true);
+    });
+
+    it('resets one modified builtin style to cached baseline and clears override state', () => {
+        const {service} = createService();
+        const builtinUrl = 'bundle/styles/style-one.yaml';
+        service.styleUrls = [{id: 'StyleOne', url: builtinUrl} as any];
+        service.styles.set('StyleOne', {
+            id: 'StyleOne',
+            url: builtinUrl,
+            source: 'name: StyleOne\nrules:\n  - modified',
+            imported: false,
+            modified: true,
+            visible: true,
+        } as any);
+        (service as any).builtinStyleBaselines.set(builtinUrl, {
+            id: 'StyleOne',
+            source: 'name: StyleOne\nrules:\n  - original'
+        });
+        service.styleHashes.set(builtinUrl, {
+            id: 'StyleOne',
+            sha256: 'server-hash',
+            isModified: true,
+            isUpdated: true
+        });
+        vi.spyOn(service as any, 'initializeStyle').mockImplementation((source: string, styleUrl: string) => {
+            service.styles.set('StyleOne', {
+                id: 'StyleOne',
+                url: styleUrl,
+                source,
+                imported: false,
+                modified: false,
+                visible: true,
+            } as any);
+            return 'StyleOne';
+        });
+        const reapplySpy = vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+
+        const restoredStyleId = service.resetModifiedBuiltinStyle('StyleOne');
+
+        expect(restoredStyleId).toBe('StyleOne');
+        expect(reapplySpy).toHaveBeenCalledWith('StyleOne');
+        expect(service.styleHashes.get(builtinUrl)?.isModified).toBe(false);
+        expect(service.styleHashes.get(builtinUrl)?.isUpdated).toBe(true);
+        const stored = localStorage.getItem('builtinStyleData');
+        expect(stored).toBeTruthy();
+        expect(JSON.parse(stored!)).toEqual([]);
     });
 });
