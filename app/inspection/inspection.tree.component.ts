@@ -48,23 +48,22 @@ export class FeatureFilterOptions {
                      [rowHover]="true"
                      [virtualScroll]="true"
                      [virtualScrollItemSize]="'1.5em'"
+                     [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
                 @if (showFilter()) {
                     <div class="filter-container">
                         <p-iconfield class="input-container">
                             @if (filterOptions()) {
-                                <p-inputicon class="inspection-filter-trigger"
-                                             (click)="filterPanel.toggle($event)"
-                                             styleClass="pi pi-filter"/>
+                                <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
+                                             style="cursor: pointer"/>
                             }
                             <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
                                    [(ngModel)]="filterString"
                                    (ngModelChange)="onFilterInput($event)"
                                    (input)="onFilterInput($any($event.target).value)"/>
                             @if (filterString) {
-                                <i (click)="clearFilter()"
-                                   class="pi pi-times clear-icon inspection-filter-clear-icon"></i>
+                                <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
                             }
                         </p-iconfield>
                     </div>
@@ -97,10 +96,10 @@ export class FeatureFilterOptions {
                         (mouseleave)="onRowHoverExit(rowData)"
                         [ngClass]="getRowClasses(rowData)">
                         @for (col of columns(); track $index) {
-                            <td [ngClass]="['inspection-tree-cell', getStyleClassByType(rowData)]"
+                            <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap;"
                                 pTooltip="{{rowData[col.key]}}" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
-                                <div class="inspection-cell-content"
-                                     [class.inspection-first-cell-content]="$index === 0">
+                                <div [class.inspection-first-cell-content]="$index === 0"
+                                     style="display: flex; flex-direction: row; gap: 0.25em;">
                                     @if ($index === 0) {
                                         @if (shouldShowRowActions(rowNode, rowData)) {
                                             <button type="button"
@@ -116,9 +115,11 @@ export class FeatureFilterOptions {
                                     <span (click)="onNodeClick($event, rowData, col.key)"
                                           (mouseenter)="onNodeValueHover(rowData, col.key)"
                                           (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
-                                          class="inspection-node-value"
+                                          style="cursor: pointer"
                                           [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
-                                          [class.inspection-node-value-filtered]="filterFields.indexOf(col.key) !== -1"
+                                          [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
+                                          [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
+                                          [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
                                           [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                     </span>
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
@@ -130,9 +131,9 @@ export class FeatureFilterOptions {
                                         </span>
                                     }
                                     @if (enableSourceDataNavigation() &&
-                                         rowData.hasOwnProperty("sourceDataReferences") &&
-                                         rowData["sourceDataReferences"].length > 0 &&
-                                         $index === 0) {
+                                    rowData.hasOwnProperty("sourceDataReferences") &&
+                                    rowData["sourceDataReferences"].length > 0 &&
+                                    $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
                                             @for (item of rowData["sourceDataReferences"]; track $index) {
                                                 <p-button class="source-data-button"
@@ -160,23 +161,24 @@ export class FeatureFilterOptions {
         </p-treeTable>
         <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" appendTo="body" [baseZIndex]="30000"></p-menu>
         <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="30000" appendTo="body"
-                styleClass="inspection-popup-menu"></p-menu>
+                [style]="{'font-size': '0.9em'}"></p-menu>
         <p-popover *ngIf="filterOptions() !== undefined" #filterPanel class="filter-panel">
-            <div class="font-bold white-space-nowrap filter-panel-content">
+            <div class="font-bold white-space-nowrap"
+                 style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
                 <p-checkbox [(ngModel)]="filterOptions()!.filterByKeys" (ngModelChange)="filterTree(filterString)"
                             inputId="fbk" [binary]="true"/>
-                <label for="fbk" class="filter-panel-option-label">Filter by Keys</label>
+                <label for="fbk" style="margin-left: 0.5em; cursor: pointer">Filter by Keys</label>
                 <p-checkbox [(ngModel)]="filterOptions()!.filterByValues" (ngModelChange)="filterTree(filterString)"
                             inputId="fbv" [binary]="true"/>
-                <label for="fbv" class="filter-panel-option-label">Filter by Values</label>
+                <label for="fbv" style="margin-left: 0.5em; cursor: pointer">Filter by Values</label>
                 <p-checkbox [(ngModel)]="filterOptions()!.filterOnlyFeatureIds"
                             (ngModelChange)="filterTree(filterString)"
                             inputId="fofids" [binary]="true"/>
-                <label for="fofids" class="filter-panel-option-label">Filter only FeatureIDs</label>
+                <label for="fofids" style="margin-left: 0.5em; cursor: pointer">Filter only FeatureIDs</label>
                 <p-checkbox [(ngModel)]="filterOptions()!.filterGeometryEntries"
                             (ngModelChange)="filterTree(filterString)"
                             inputId="ige" [binary]="true"/>
-                <label for="ige" class="filter-panel-option-label">Include Geometry Entries</label>
+                <label for="ige" style="margin-left: 0.5em; cursor: pointer">Include Geometry Entries</label>
             </div>
         </p-popover>
     `,

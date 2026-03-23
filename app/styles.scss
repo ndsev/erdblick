@@ -214,6 +214,14 @@ main-bar {
     /* Hide native resizer */
     resize: none;
 
+    &.toggle-transition-active {
+      transition: width 200ms ease-out;
+    }
+
+    &.dragging {
+      transition: none !important;
+    }
+
     &.open {
       /* Let user resize override this default width */
       width: 40em;
@@ -713,6 +721,12 @@ map-view {
     -ms-user-select: none;
     -o-user-select: none;
     box-sizing: border-box;
+    transition: filter 180ms ease, opacity 180ms ease;
+
+    &.dock-resize-active {
+      filter: blur(0.6px);
+      opacity: 0.92;
+    }
 
     canvas {
       background: var(--erdblick-map-bg);
@@ -729,6 +743,18 @@ map-view {
     }
   }
 
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-layout {
+    .collapsible-dock.toggle-transition-active {
+      transition: none !important;
+    }
+  }
+
+  .mapviewer-renderlayer {
+    transition: none !important;
+  }
 }
 
 .p-tooltip {
@@ -2079,6 +2105,12 @@ inspection-tree {
     height: fit-content;
   }
 
+  .inspect-panel .p-accordionpanel:not(.p-accordionpanel-active) > .p-accordioncontent {
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   &.single-panel {
     overflow-y: hidden;
 
@@ -2112,12 +2144,6 @@ inspection-tree {
       grid-template-rows: minmax(0, 1fr);
     }
 
-    .inspect-panel .p-accordionpanel:not(.p-accordionpanel-active) > .p-accordioncontent {
-      flex: 0 0 auto;
-      min-height: 0;
-      overflow: hidden;
-    }
-
     .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
       display: flex;
       flex-direction: column;
@@ -2143,7 +2169,7 @@ inspection-tree {
   &.multi-panel {
     overflow-y: auto;
 
-    .inspect-panel .resizable-container {
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
       min-height: 15em;
       resize: vertical;
       overflow: auto;
