@@ -615,10 +615,6 @@ function compactBooleans(value: unknown): unknown {
  *    1,0:1,1        - option A values (`view0`, `view1`) for layer indices `0` and `2`.
  *    5,7:6,8        - option B values (`view0`, `view1`) for layer indices `0` and `2`.
  *
- * v2 key compaction may shorten option ids:
- *    showOptionA -> .OptionA
- * so the same key can appear as:
- *    STY0~0-2~.OptionA~.OptionB
  */
 export class StyleState extends AppState<Map<string, (string|number|boolean)[]>> {
     layerNamesState: AppState<string[]>;
@@ -756,7 +752,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             const parts = key.split('~');
             const shortStyleId = parts[0];
             const layerIndices = parts[1].split('-').map(s => Number(s)).filter(n => Number.isFinite(n));
-            const optionIds = parts.slice(2).map(optionId => this.decodeOptionId(optionId)); // remaining parts are option IDs
+            const optionIds = parts.slice(2); // remaining parts are option IDs
 
             if (!optionIds.length || !layerIndices.length) {
                 continue;
@@ -825,12 +821,6 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
 
     private styleOptionKeyFromMapLayer(mapLayerId: string, shortStyleId: string, optionId: string): string {
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
-    }
-
-    private decodeOptionId(optionId: string): string {
-        return optionId.startsWith('.') && optionId.length > 1
-            ? `show${optionId.slice(1)}`
-            : optionId;
     }
 
     private expandStyleRunLengthTokens(tokens: string[]): string[] {

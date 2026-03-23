@@ -96,10 +96,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <label>Collapse Dock automatically</label>
                 <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"/>
             </div>
-            <div class="button-container">
-                <label>Use URL v2 <p-tag severity="danger" value="EXPERIMENTAL" [rounded]="true"/></label>
-                <p-toggleswitch [(ngModel)]="useUrlV2Setting" (ngModelChange)="setUseUrlV2($event)" />
-            </div>
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Storage for Viewer properties and search history</label>
@@ -151,7 +147,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     limitSimultaneousInspectionsInput: number = 0;
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
-    useUrlV2Setting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
     toggleOptions = [
@@ -191,9 +186,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
             this.deckThreadedRenderingEnabledSetting = enabled;
-        }));
-        this.subscriptions.push(this.stateService.useUrlV2State.subscribe(enabled => {
-            this.useUrlV2Setting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -263,11 +255,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setDeckStyleWorkersOverride(enabled: boolean) {
         this.deckStyleWorkersOverrideSetting = enabled;
         this.stateService.deckStyleWorkersOverride = enabled;
-    }
-
-    setUseUrlV2(enabled: boolean) {
-        this.useUrlV2Setting = enabled;
-        this.stateService.useUrlV2 = enabled;
     }
 
     applyDeckStyleWorkersCount() {
