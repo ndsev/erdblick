@@ -305,7 +305,7 @@ export class MapDataService {
                 }
                 let features: FeatureWrapper[];
                 try {
-                    features = await this.loadFeatures(selection.features);
+                    features = await this.loadFeatures(selection.features, {allowIncomplete: true});
                 } catch (error) {
                     console.error(`Failed to resolve inspection selection for panel ${selection.id}.`, error);
                     continue;
@@ -2347,8 +2347,84 @@ export class MapDataService {
         return result;
     }
 
-    async loadFeatures(tileFeatureIds: (TileFeatureId | null)[]): Promise<FeatureWrapper[]> {
+    private queueBackgroundSelectionTileRequest(
+        mapId: string,
+        layerId: string,
+        tileId: bigint,
+        canonicalTileKey: string
+    ): void {
+        if (this.selectionTileRequests.some(request => request.tileKey === canonicalTileKey)) {
+            return;
+        }
+
+        this.selectionTileRequests.push({
+            remoteRequest: {
+                mapId,
+                layerId,
+                tileIds: [Number(tileId)],
+            },
+            tileKey: canonicalTileKey,
+            resolve: () => {},
+            reject: () => {}
+        });
+        this.scheduleUpdate();
+    }
+
+    async loadFeatures(
+        tileFeatureIds: (TileFeatureId | null)[],
+        options?: {allowIncomplete?: boolean}
+    ): Promise<FeatureWrapper[]> {
         const normalizedIds = tileFeatureIds.filter((tileFeatureId): tileFeatureId is TileFeatureId => !!tileFeatureId);
+        const allowIncomplete = options?.allowIncomplete ?? false;
+
+        if (allowIncomplete) {
+            const features: FeatureWrapper[] = [];
+
+            for (const id of normalizedIds) {
+                const canonicalTileKey = this.canonicalizeMapTileKey(id.mapTileKey);
+                const parsedTileKey = this.parseMapTileKeySafe(canonicalTileKey);
+                let tile = this.loadedTileLayers.get(canonicalTileKey) ?? this.loadedTileLayers.get(id.mapTileKey);
+
+                if (!tile && parsedTileKey) {
+                    const [mapId, layerId, tileId] = parsedTileKey;
+                    this.ensureTilePlaceholder(mapId, layerId, tileId, true);
+                    tile = this.loadedTileLayers.get(canonicalTileKey);
+                }
+
+                if (!tile) {
+                    console.error(`Could not prepare tile ${id.mapTileKey} for inspection restore!`);
+                    continue;
+                }
+
+                tile.preventCulling = true;
+
+                const resolvedFeatureId = id.featureId || "";
+                if (!resolvedFeatureId) {
+                    continue;
+                }
+
+                const inspectionDataComplete = this.isTileInspectionDataComplete(tile);
+                if (!inspectionDataComplete) {
+                    if (parsedTileKey) {
+                        const [mapId, layerId, tileId] = parsedTileKey;
+                        this.queueBackgroundSelectionTileRequest(mapId, layerId, tileId, canonicalTileKey);
+                    }
+                    features.push(new FeatureWrapper(resolvedFeatureId, tile));
+                    continue;
+                }
+
+                if (!tile.has(resolvedFeatureId)) {
+                    const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0n];
+                    this.showErrorMessage(
+                        `The feature ${id.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
+                    continue;
+                }
+
+                features.push(new FeatureWrapper(resolvedFeatureId, tile));
+            }
+
+            return features;
+        }
 
         // Load the tiles.
         const tiles = await this.loadTiles(new Set(normalizedIds.map(id => id.mapTileKey)));

@@ -611,6 +611,42 @@ describe('MapDataService', () => {
         await selectionTilePromise;
     });
 
+    it('restores feature panels immediately from placeholder tiles while selection data is still loading', async () => {
+        const {service, stateService} = createMapDataService();
+        await service.initialize();
+
+        stateService.selectionState.next([
+            {
+                id: 1,
+                features: [{mapTileKey: 'm1/layerA/1', featureId: 'f1'}],
+                locked: false,
+                size: [30, 20],
+                color: '#111111',
+                undocked: false
+            },
+            {
+                id: 2,
+                features: [{mapTileKey: 'm1/layerA/2', featureId: 'f2'}],
+                locked: true,
+                size: [30, 20],
+                color: '#222222',
+                undocked: false
+            }
+        ]);
+
+        await flushAsync();
+
+        const panels = service.selectionTopic.getValue();
+        expect(panels).toHaveLength(2);
+        expect(panels.every(panel => panel.features.length === 1)).toBe(true);
+        expect(service.loadedTileLayers.get('m1/layerA/1')?.hasData()).toBe(false);
+        expect(service.loadedTileLayers.get('m1/layerA/2')?.hasData()).toBe(false);
+        expect(service.selectionTileRequests.map(request => request.tileKey).sort()).toEqual([
+            'm1/layerA/1',
+            'm1/layerA/2'
+        ]);
+    });
+
     it('keeps SourceData panels when feature selection loading fails', async () => {
         const {service, stateService} = createMapDataService();
         await service.initialize();
