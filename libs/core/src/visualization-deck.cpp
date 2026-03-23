@@ -5,6 +5,9 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <glm/trigonometric.hpp>
+#include <glm/exponential.hpp>
+#include <glm/common.hpp>
 #include <fmt/format.h>
 
 using namespace mapget;
@@ -57,7 +60,7 @@ double mercatorWorldX(double longitudeDeg)
 double mercatorWorldY(double latitudeDeg)
 {
     auto const latitudeRad = latitudeDeg * kDegToRad;
-    auto const mercatorTerm = std::log(std::tan((kPi * 0.25) + (latitudeRad * 0.5)));
+    auto const mercatorTerm = glm::log(glm::tan((kPi * 0.25) + (latitudeRad * 0.5)));
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
 }
 
@@ -67,7 +70,7 @@ bool distanceScalesAt(
     double& unitsPerMeter2)
 {
     auto const latitudeRad = latitudeDeg * kDegToRad;
-    auto const latitudeCos = std::cos(latitudeRad);
+    auto const latitudeCos = glm::cos(latitudeRad);
     if (!std::isfinite(latitudeCos) || std::abs(latitudeCos) < 1e-12) {
         unitsPerMeter = 0.0;
         unitsPerMeter2 = 0.0;
@@ -79,7 +82,7 @@ bool distanceScalesAt(
     unitsPerMeter = kMercatorTileSize / kEarthCircumferenceMeters / latitudeCos;
 
     // math.gl high-precision scale correction term (unitsPerMeter2[0]).
-    auto const latitudeCosine2 = (kDegToRad * std::tan(latitudeRad)) / latitudeCos;
+    auto const latitudeCosine2 = (kDegToRad * glm::tan(latitudeRad)) / latitudeCos;
     auto const unitsPerDegree2 = (kMercatorTileSize / kEarthCircumferenceMeters) * latitudeCosine2;
     unitsPerMeter2 = (unitsPerDegree2 / unitsPerDegreeY) * unitsPerMeter;
     return std::isfinite(unitsPerMeter) && std::isfinite(unitsPerMeter2);
@@ -365,21 +368,14 @@ bool DeckFeatureLayerVisualization::includesNonPointGeometry() const
 }
 
 mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
-    mapget::Point const& wgsPoint,
-    glm::dvec3 const& wgsOffset) const
+    mapget::Point const& wgsPoint) const
 {
-    mapget::Point adjustedWgs{
-        wgsPoint.x + wgsOffset.x,
-        wgsPoint.y + wgsOffset.y,
-        wgsPoint.z + wgsOffset.z,
-    };
-
     if (!hasPathCoordinateOriginWgs_) {
         if (tile_) {
             auto const tileCenter = tile_->tileId().center();
             pathCoordinateOriginWgs_ = {tileCenter.x, tileCenter.y, 0.0};
         } else {
-            pathCoordinateOriginWgs_ = {adjustedWgs.x, adjustedWgs.y, 0.0};
+            pathCoordinateOriginWgs_ = {wgsPoint.x, wgsPoint.y, 0.0};
         }
         hasPathCoordinateOriginWgs_ = true;
     }
@@ -388,19 +384,19 @@ mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
     double unitsPerMeter2 = 0.0;
     if (!distanceScalesAt(pathCoordinateOriginWgs_.y, unitsPerMeter, unitsPerMeter2)) {
         auto const lat0Rad = glm::radians(pathCoordinateOriginWgs_.y);
-        auto const dLonRad = glm::radians(adjustedWgs.x - pathCoordinateOriginWgs_.x);
-        auto const dLatRad = glm::radians(adjustedWgs.y - pathCoordinateOriginWgs_.y);
+        auto const dLonRad = glm::radians(wgsPoint.x - pathCoordinateOriginWgs_.x);
+        auto const dLatRad = glm::radians(wgsPoint.y - pathCoordinateOriginWgs_.y);
         return {
-            dLonRad * std::cos(lat0Rad) * kFallbackEarthRadiusMeters,
+            dLonRad * glm::cos(lat0Rad) * kFallbackEarthRadiusMeters,
             dLatRad * kFallbackEarthRadiusMeters,
-            adjustedWgs.z - pathCoordinateOriginWgs_.z,
+            wgsPoint.z - pathCoordinateOriginWgs_.z,
         };
     }
 
     auto const originWorldX = mercatorWorldX(pathCoordinateOriginWgs_.x);
     auto const originWorldY = mercatorWorldY(pathCoordinateOriginWgs_.y);
-    auto const pointWorldX = mercatorWorldX(adjustedWgs.x);
-    auto const pointWorldY = mercatorWorldY(adjustedWgs.y);
+    auto const pointWorldX = mercatorWorldX(wgsPoint.x);
+    auto const pointWorldY = mercatorWorldY(wgsPoint.y);
     auto const deltaWorldX = pointWorldX - originWorldX;
     auto const deltaWorldY = pointWorldY - originWorldY;
 
@@ -413,7 +409,7 @@ mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
     return {
         xMeters,
         yMeters,
-        adjustedWgs.z - pathCoordinateOriginWgs_.z,
+        wgsPoint.z - pathCoordinateOriginWgs_.z,
     };
 }
 

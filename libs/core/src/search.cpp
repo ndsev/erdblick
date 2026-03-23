@@ -54,7 +54,7 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& 
         auto jsResultForFeature = JsValue::List();
         jsResultForFeature.push(JsValue(mapTileKey));
         jsResultForFeature.push(JsValue(feature->id()->toString()));
-        auto geometryCenterPoint = geometryCenter(feature->firstGeometry());
+        auto geometryCenterPoint = geometryCenter(feature->preferredGeometry());
         jsResultForFeature.push(JsValue::Dict({
             {"cartesian", JsValue(wgsToCartesian<mapget::Point>(geometryCenterPoint))},
             {"cartographic", JsValue(geometryCenterPoint)}
@@ -173,4 +173,3 @@ std::string erdblick::anyWrap(const std::string_view& q)
 {
     return fmt::format("any({})", q);
 }
-

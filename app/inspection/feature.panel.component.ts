@@ -163,21 +163,13 @@ export class FeaturePanelComponent implements OnDestroy {
             return value === "Points" || value === "Polyline" || value === "Polygon" || value === "Mesh";
         };
 
-        const hideGeometryStageLabelChild = (children: TreeTableNode[]): TreeTableNode[] => {
-            const stageLabelNode = children.find(child => child.data?.["key"] === "stageLabel");
-            if (!stageLabelNode) {
-                return children;
-            }
-            return children.filter(child => child.data?.["key"] !== "stageLabel");
-        };
-
-        const extractGeometryStageBubble = (children: TreeTableNode[]): string | null => {
-            const stageLabelNode = children.find(child => child.data?.["key"] === "stageLabel");
-            const stageLabel = stageLabelNode?.data?.["value"];
-            if (typeof stageLabel !== "string") {
+        const extractGeometryNameBubble = (children: TreeTableNode[]): string | null => {
+            const nameNode = children.find(child => child.data?.["key"] === "name");
+            const name = nameNode?.data?.["value"];
+            if (typeof name !== "string") {
                 return null;
             }
-            const trimmed = stageLabel.trim();
+            const trimmed = name.trim();
             if (!trimmed.length) {
                 return null;
             }
@@ -285,11 +277,10 @@ export class FeaturePanelComponent implements OnDestroy {
                     }
                 );
                 if (isGeometryTypeValue(node.data["value"])) {
-                    const stageBubble = extractGeometryStageBubble(children);
-                    if (stageBubble) {
-                        node.data["stageLabelBubble"] = stageBubble;
+                    const nameBubble = extractGeometryNameBubble(children);
+                    if (nameBubble) {
+                        node.data["stageLabelBubble"] = nameBubble;
                     }
-                    children = hideGeometryStageLabelChild(children);
                 }
                 node.children = children;
                 treeNodes.push(node);

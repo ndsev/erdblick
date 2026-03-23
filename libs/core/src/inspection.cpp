@@ -273,20 +273,18 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     case GeomType::Mesh: typeString = "Mesh"; break;
     }
     geomScope->value_ = convertString(typeString);
-    auto const geomStage = g->model().stage().value_or(0U);
-    push("stage", "stage", ValueType::Number)->value_ = JsValue(geomStage);
-    if (shouldDisplayStageLabel(g->model(), geomStage)) {
-        push("stageLabel", "stageLabel", ValueType::String)->value_ = convertString(stageLabel(g->model(), geomStage));
+    if (auto geometryName = g->name()) {
+        push("name", "name", ValueType::String)->value_ = convertString(*geometryName);
     }
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
 
     uint32_t index = 0;
     g->forEachPoint(
-        [this, &geomScope, &index](auto&& pt)
+        [this, &index](auto&& pt)
         {
             auto ptScope = push(
-                JsValue(geomScope->children_.size()),
+                JsValue(index),
                 index++,
                 ValueType::Number | ValueType::ArrayBit);
             ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});

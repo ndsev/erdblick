@@ -3,6 +3,18 @@ import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
 
+function normalizeFeatureIdForLookup(featureId: string): string {
+    const attributeIndex = featureId.indexOf(":attribute#");
+    if (attributeIndex > -1) {
+        return featureId.slice(0, attributeIndex);
+    }
+    const relationIndex = featureId.indexOf(":relation#");
+    if (relationIndex > -1) {
+        return featureId.slice(0, relationIndex);
+    }
+    return featureId;
+}
+
 /**
  * JS interface of a WASM TileFeatureLayer.
  * The WASM TileFeatureLayer object is stored as a blob when not needed,
@@ -454,12 +466,9 @@ export class FeatureTile {
     }
 
     has(featureId: string) {
-        const index = featureId.indexOf(':attribute');
-        if (index > -1) {
-            featureId = featureId.slice(0, index);
-        }
+        const lookupFeatureId = normalizeFeatureIdForLookup(featureId);
         return this.peek((tileFeatureLayer: TileFeatureLayer) => {
-            let feature = tileFeatureLayer.find(featureId);
+            let feature = tileFeatureLayer.find(lookupFeatureId);
             let result = !feature.isNull();
             feature.delete();
             return result;
@@ -519,7 +528,7 @@ export class FeatureWrapper implements TileFeatureId {
      */
     peek(callback: any) {
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
-            const feature = tileFeatureLayer.find(this.featureId);
+            const feature = tileFeatureLayer.find(normalizeFeatureIdForLookup(this.featureId));
             if (feature.isNull()) {
                 feature.delete();
                 return null;

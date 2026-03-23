@@ -101,8 +101,7 @@ protected:
     static constexpr uint32_t kUnselectableFeatureId = std::numeric_limits<uint32_t>::max();
 
     virtual mapget::Point projectWgsPoint(
-        mapget::Point const& wgsPoint,
-        glm::dvec3 const& wgsOffset) const = 0;
+        mapget::Point const& wgsPoint) const = 0;
 
     virtual std::string makeMapLayerStyleRuleId(uint32_t ruleIndex) const;
     virtual void onRelationStyle(

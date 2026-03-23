@@ -21,6 +21,11 @@ constexpr uint32_t geomTypeBit(mapget::GeomType const& g) {
     return 1u << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
 }
 
+bool hasLocalOffset(glm::dvec3 const& offset)
+{
+    return offset.x != .0 || offset.y != .0 || offset.z != .0;
+}
+
 struct ParsedHoverAttributeId {
     std::string_view baseFeatureId_;
     uint32_t attributeIndex_ = 0;
@@ -244,11 +249,6 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
         relationGeometries(relationToRender.relation_->sourceValidityOrNull(), relationToRender.sourceFeature_);
     auto const targetGeometries =
         relationGeometries(relationToRender.relation_->targetValidityOrNull(), relationToRender.targetFeature_);
-    auto offsetBase = glm::dmat3x3(1.0);
-    if (!sourceGeometries.empty() && !sourceGeometries.front().points_.empty()) {
-        offsetBase = localWgs84UnitCoordinateSystem(sourceGeometries.front());
-    }
-    auto const relationOffset = offsetBase * rule_.offset();
 
     auto const sourceId = relationToRender.sourceFeature_->id()->toString();
     auto const targetId = relationToRender.targetFeature_->id()->toString();
@@ -275,7 +275,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
                 FeatureLayerVisualizationBase::kUnselectableFeatureId,
                 rule_,
                 boundEvalFun,
-                relationOffset);
+                rule_.offset());
         }
         if (auto lineEndMarkerStyle = rule_.relationLineEndMarkerStyle()) {
             if (visualizedFeatureParts_.emplace(sourceId + "-line-end-marker").second) {
@@ -285,7 +285,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
                     FeatureLayerVisualizationBase::kUnselectableFeatureId,
                     *lineEndMarkerStyle,
                     boundEvalFun,
-                    offsetBase * lineEndMarkerStyle->offset());
+                    lineEndMarkerStyle->offset());
             }
             if (visualizedFeatureParts_.emplace(targetId + "-line-end-marker").second) {
                 visualization_.addLine(
@@ -294,7 +294,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
                     FeatureLayerVisualizationBase::kUnselectableFeatureId,
                     *lineEndMarkerStyle,
                     boundEvalFun,
-                    offsetBase * lineEndMarkerStyle->offset());
+                    lineEndMarkerStyle->offset());
             }
         }
     }
@@ -312,7 +312,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
                 *sourceStyle,
                 "",
                 boundEvalFun,
-                offsetBase * sourceStyle->offset());
+                sourceStyle->offset());
         }
     }
 
@@ -329,7 +329,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
                 *targetStyle,
                 "",
                 boundEvalFun,
-                offsetBase * targetStyle->offset());
+                targetStyle->offset());
         }
     }
 
@@ -771,22 +771,22 @@ void FeatureLayerVisualizationBase::addFeature(
         return;
     }
 
-    auto offset = glm::dvec3{.0, .0, .0};
-    auto const& ruleOffset = rule.offset();
-    if (ruleOffset.x != .0 || ruleOffset.y != .0 || ruleOffset.z != .0) {
-        offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * ruleOffset;
-    }
-
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
-        if (auto geom = feature->geomOrNull()) {
-            geom->forEachGeometry(
+        if (auto geomCollection = feature->geomOrNull()) {
+            auto addFeatureGeometry =
                 [this, featureAddress = static_cast<uint32_t>(feature->addr().index()),
-                 &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
+                 &rule, &mapLayerStyleRuleId, &evalFun](auto&& geom)
                 {
-                    addGeometry(geom, featureAddress, rule, mapLayerStyleRuleId, evalFun, offset);
+                    addGeometry(geom, featureAddress, rule, mapLayerStyleRuleId, evalFun, rule.offset());
                     return true;
-                });
+                };
+            if (highlightMode_ != FeatureStyleRule::NoHighlight
+                && fidelity_ == FeatureStyleRule::HighFidelity) {
+                geomCollection->forEachGeometryAtPreferredStage(std::nullopt, addFeatureGeometry);
+            } else {
+                geomCollection->forEachGeometry(addFeatureGeometry);
+            }
         }
         break;
     }
@@ -901,14 +901,16 @@ void FeatureLayerVisualizationBase::addGeometry(
     }
 
     auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
+    auto const geometryForRendering =
+        hasLocalOffset(offset) ? offsetGeometryLocally(geom, offset) : geom;
 
     std::vector<mapget::Point> vertsProjected;
-    vertsProjected.reserve(geom.points_.size());
-    for (auto const& vertCarto : geom.points_) {
-        vertsProjected.emplace_back(projectWgsPoint(vertCarto, offset));
+    vertsProjected.reserve(geometryForRendering.points_.size());
+    for (auto const& vertCarto : geometryForRendering.points_) {
+        vertsProjected.emplace_back(projectWgsPoint(vertCarto));
     }
 
-    switch (geom.geomType_) {
+    switch (geometryForRendering.geomType_) {
     case GeomType::Polygon:
         if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
             emitPolygon(vertsProjected, rule, renderFeatureId, evalFun);
@@ -965,17 +967,18 @@ void FeatureLayerVisualizationBase::addGeometry(
     }
 
     if (rule.hasLabel() && includesPointLikeGeometry()) {
-            auto text = rule.labelText(evalFun);
+                auto text = rule.labelText(evalFun);
             if (!text.empty()) {
-                auto wgsPos = geometryCenter(geom);
-                auto xyzPos = JsValue(projectWgsPoint(wgsPos, offset));
+                auto const labelWgsPos = geometryCenter(geometryForRendering);
+                auto const hashWgsPos = geometryCenter(geom);
+                auto xyzPos = JsValue(projectWgsPoint(labelWgsPos));
 
             if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
                 addMergedPointGeometry(
                     renderFeatureId,
                     mapLayerStyleRuleId,
                     gridCellSize,
-                    wgsPos,
+                    hashWgsPos,
                     "labelParameters",
                     evalFun,
                     [&](auto& augmentedEvalFun)
@@ -1089,8 +1092,12 @@ void FeatureLayerVisualizationBase::addLine(
     if (!includesNonPointGeometry()) {
         return;
     }
-    auto pointA = projectWgsPoint(wgsA, offset);
-    auto pointB = projectWgsPoint(wgsB, offset);
+    auto lineGeometry = SelfContainedGeometry{{wgsA, wgsB}, GeomType::Line};
+    if (hasLocalOffset(offset)) {
+        lineGeometry = offsetGeometryLocally(lineGeometry, offset);
+    }
+    auto pointA = projectWgsPoint(lineGeometry.points_[0]);
+    auto pointB = projectWgsPoint(lineGeometry.points_[1]);
 
     addPolyLine({pointA, pointB}, rule, tileFeatureId, evalFun);
 
@@ -1297,17 +1304,21 @@ void FeatureLayerVisualizationBase::addAttribute(
     auto const& constAttr = static_cast<mapget::Attribute const&>(*attr);
     auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
 
-    auto attrEvaluationContext =
-        simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(constAttr));
-    addOptionsToSimfilContext(attrEvaluationContext);
+    auto nameId = internalStringPoolCopy_->emplace("$name");
+    auto featureId = internalStringPoolCopy_->emplace("$feature");
+    auto layerId = internalStringPoolCopy_->emplace("$layer");
+    auto makeAttrEvaluationContext = [&]() {
+        auto context =
+            simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(constAttr));
+        addOptionsToSimfilContext(context);
+        context->set(nameId.value(), simfil::Value(attr->name()));
+        context->set(featureId.value(), simfil::Value::field(constFeature));
+        context->set(layerId.value(), simfil::Value(layer));
+        return context;
+    };
 
     // Assemble simfil evaluation context.
-    auto nameId = internalStringPoolCopy_->emplace("$name");
-    attrEvaluationContext->set(nameId.value(), simfil::Value(attr->name()));
-    auto featureId = internalStringPoolCopy_->emplace("$feature");
-    attrEvaluationContext->set(featureId.value(), simfil::Value::field(constFeature));
-    auto layerId = internalStringPoolCopy_->emplace("$layer");
-    attrEvaluationContext->set(layerId.value(), simfil::Value(layer));
+    auto attrEvaluationContext = makeAttrEvaluationContext();
 
     // Function which can evaluate a simfil expression in the attribute context.
     auto boundEvalFun = BoundEvalFun{
@@ -1352,7 +1363,7 @@ void FeatureLayerVisualizationBase::addAttribute(
 
         auto const& ruleOffset = rule.offset();
         auto const hasRuleOffset = ruleOffset.x != .0 || ruleOffset.y != .0 || ruleOffset.z != .0;
-        uint32_t renderedValidityOffsetFactor = 0;
+        uint32_t currentOffsetFactor = offsetFactor;
         validityIndex = 0;
         multiValidity->forEach([&, this](auto&& validity)
         {
@@ -1360,6 +1371,10 @@ void FeatureLayerVisualizationBase::addAttribute(
                 ++validityIndex;
                 return true;
             }
+            // OverlayNode::set() does not overwrite existing keys, so each validity
+            // needs a fresh context to expose its own $validityIndex/$validityCount.
+            attrEvaluationContext = makeAttrEvaluationContext();
+            boundEvalFun.context_ = attrEvaluationContext;
             attrEvaluationContext->set(
                 validityIndexId.value(),
                 simfil::Value(static_cast<int64_t>(validityIndex)));
@@ -1371,7 +1386,7 @@ void FeatureLayerVisualizationBase::addAttribute(
             if (hasRuleOffset) {
                 validityGeometry = offsetGeometryLocally(
                     validityGeometry,
-                    ruleOffset * static_cast<double>(renderedValidityOffsetFactor + 1U));
+                    ruleOffset * static_cast<double>(currentOffsetFactor + 1U));
             }
             addGeometry(
                 validityGeometry,
@@ -1380,16 +1395,20 @@ void FeatureLayerVisualizationBase::addAttribute(
                 rule,
                 mapLayerStyleRuleId,
                 boundEvalFun);
-            ++renderedValidityOffsetFactor;
+            if (validity.geometryDescriptionType() == mapget::Validity::FeatureTransition) {
+                ++currentOffsetFactor;
+            }
             ++validityIndex;
             return true;
         });
-        offsetFactor += renderedValidityCount;
+        offsetFactor = currentOffsetFactor + 1U;
     }
     else {
         if (hoveredValidityIndices && !hoveredValidityIndices->contains(0U)) {
             return;
         }
+        attrEvaluationContext = makeAttrEvaluationContext();
+        boundEvalFun.context_ = attrEvaluationContext;
         attrEvaluationContext->set(validityIndexId.value(), simfil::Value(static_cast<int64_t>(0)));
         attrEvaluationContext->set(validityCountId.value(), simfil::Value(static_cast<int64_t>(1)));
         ++offsetFactor;

@@ -563,19 +563,19 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "center",
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return geometryCenter(self->firstGeometry());
+                    return geometryCenter(self->preferredGeometry());
                 }))
         .function(
             "boundingRadiusEndPoint",
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return boundingRadiusEndPoint(self->firstGeometry());
+                    return boundingRadiusEndPoint(self->preferredGeometry());
                 }))
         .function(
             "getGeometryType",
             std::function<mapget::GeomType(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return self->firstGeometry().geomType_;
+                    return self->preferredGeometry().geomType_;
                 }));
 
     ////////// GeomType

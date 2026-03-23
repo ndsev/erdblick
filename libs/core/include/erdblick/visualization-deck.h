@@ -43,8 +43,7 @@ public:
 
 private:
     mapget::Point projectWgsPoint(
-        mapget::Point const& wgsPoint,
-        glm::dvec3 const& wgsOffset) const override;
+        mapget::Point const& wgsPoint) const override;
     void onFeatureForRendering(mapget::Feature const& feature) override;
     [[nodiscard]] bool bypassLowFiMaxLodFilter() const override;
     std::string makeMapLayerStyleRuleId(uint32_t ruleIndex) const override;

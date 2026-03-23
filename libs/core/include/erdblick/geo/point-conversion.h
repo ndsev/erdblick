@@ -2,6 +2,9 @@
 
 #include "mapget/model/featurelayer.h"
 #include "glm/glm.hpp"
+#include "glm/trigonometric.hpp"
+#include "glm/exponential.hpp"
+#include "glm/common.hpp"
 #include <cmath>
 
 namespace nlohmann {
@@ -61,13 +64,13 @@ ResultVec wgsToCartesian(mapget::Point const& wgsPoint, glm::dvec3 const& offset
     auto const latRad = glm::radians(wgsPoint.y + offset.y);
     auto const height = wgsPoint.z + offset.z;
 
-    auto const sinLat = std::sin(latRad);
-    auto const cosLat = std::cos(latRad);
-    auto const sinLon = std::sin(lonRad);
-    auto const cosLon = std::cos(lonRad);
+    auto const sinLat = glm::sin(latRad);
+    auto const cosLat = glm::cos(latRad);
+    auto const sinLon = glm::sin(lonRad);
+    auto const cosLon = glm::cos(lonRad);
 
     auto const primeVerticalRadius = detail::WGS84_A /
-        std::sqrt(1.0 - detail::WGS84_E2 * sinLat * sinLat);
+        glm::sqrt(1.0 - detail::WGS84_E2 * sinLat * sinLat);
 
     auto const x = (primeVerticalRadius + height) * cosLat * cosLon;
     auto const y = (primeVerticalRadius + height) * cosLat * sinLon;
@@ -84,27 +87,27 @@ ResultVec cartesianToWgs(glm::dvec3 const& cart)
     auto const x = cart.x;
     auto const y = cart.y;
     auto const z = cart.z;
-    auto const p = std::sqrt(x * x + y * y);
+    auto const p = glm::sqrt(x * x + y * y);
 
     if (p < 1e-12) {
         auto const lat = (z >= 0.0) ? 90.0 : -90.0;
-        auto const h = std::abs(z) - detail::WGS84_B;
+        auto const h = glm::abs(z) - detail::WGS84_B;
         return {0.0, lat, h};
     }
 
-    auto const theta = std::atan2(z * detail::WGS84_A, p * detail::WGS84_B);
-    auto const sinTheta = std::sin(theta);
-    auto const cosTheta = std::cos(theta);
+    auto const theta = glm::atan(z * detail::WGS84_A, p * detail::WGS84_B);
+    auto const sinTheta = glm::sin(theta);
+    auto const cosTheta = glm::cos(theta);
 
-    auto const lon = std::atan2(y, x);
-    auto const lat = std::atan2(
+    auto const lon = glm::atan(y, x);
+    auto const lat = glm::atan(
         z + detail::WGS84_EP2 * detail::WGS84_B * sinTheta * sinTheta * sinTheta,
         p - detail::WGS84_E2 * detail::WGS84_A * cosTheta * cosTheta * cosTheta);
 
-    auto const sinLat = std::sin(lat);
+    auto const sinLat = glm::sin(lat);
     auto const primeVerticalRadius = detail::WGS84_A /
-        std::sqrt(1.0 - detail::WGS84_E2 * sinLat * sinLat);
-    auto const h = p / std::cos(lat) - primeVerticalRadius;
+        glm::sqrt(1.0 - detail::WGS84_E2 * sinLat * sinLat);
+    auto const h = p / glm::cos(lat) - primeVerticalRadius;
 
     return {glm::degrees(lon), glm::degrees(lat), h};
 }

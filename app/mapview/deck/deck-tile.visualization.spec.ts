@@ -784,7 +784,8 @@ describe("DeckTileVisualization", () => {
         ]);
         expect(Array.from(pathData[0].attributes.instanceStrokeWidths.value)).toEqual([3, 3, 7, 7]);
         expect(Array.from(pathData[0].attributes.instanceDashArrays.value)).toEqual([
-            6, 2, 6, 2,
+            6, 2,
+            6, 2,
             1, 0, 1, 0
         ]);
     });
