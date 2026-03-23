@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "buffer.h"
 #include "visualization-base.h"
 
 namespace erdblick
@@ -36,35 +35,8 @@ public:
     [[nodiscard]] uint32_t abiVersion() const;
     void setGeometryOutputMode(int mode);
     [[nodiscard]] int geometryOutputMode() const;
-    void setLowFiOutputLod(int lod);
-    void availableLowFiLodsRaw(SharedUint8Array& out) const;
     void addTileFeatureLayer(TileFeatureLayer const& tile);
-
-    void pointPositionsRaw(SharedUint8Array& out) const;
-    void pointColorsRaw(SharedUint8Array& out) const;
-    void pointRadiiRaw(SharedUint8Array& out) const;
-    void pointFeatureIdsRaw(SharedUint8Array& out) const;
-    void pointBillboardsRaw(SharedUint8Array& out) const;
-    void surfacePositionsRaw(SharedUint8Array& out) const;
-    void surfaceStartIndicesRaw(SharedUint8Array& out) const;
-    void surfaceColorsRaw(SharedUint8Array& out) const;
-    void surfaceFeatureIdsRaw(SharedUint8Array& out) const;
-
-    void pathPositionsRaw(SharedUint8Array& out) const;
-    void pathStartIndicesRaw(SharedUint8Array& out) const;
-    void pathColorsRaw(SharedUint8Array& out) const;
-    void pathWidthsRaw(SharedUint8Array& out) const;
-    void pathFeatureIdsRaw(SharedUint8Array& out) const;
-    void pathBillboardsRaw(SharedUint8Array& out) const;
-    void pathDashArrayRaw(SharedUint8Array& out) const;
-    void pathDashOffsetsRaw(SharedUint8Array& out) const;
-    void pathCoordinateOriginRaw(SharedUint8Array& out) const;
-    void arrowPositionsRaw(SharedUint8Array& out) const;
-    void arrowStartIndicesRaw(SharedUint8Array& out) const;
-    void arrowColorsRaw(SharedUint8Array& out) const;
-    void arrowWidthsRaw(SharedUint8Array& out) const;
-    void arrowFeatureIdsRaw(SharedUint8Array& out) const;
-    void arrowBillboardsRaw(SharedUint8Array& out) const;
+    [[nodiscard]] NativeJsValue renderResult() const;
     [[nodiscard]] NativeJsValue mergedPointFeatures() const;
     [[nodiscard]] NativeJsValue externalRelationReferences() const;
     void processResolvedExternalReferences(NativeJsValue const& resolvedReferences);
@@ -157,40 +129,53 @@ private:
     [[nodiscard]] bool lowFiBundleModeEnabled() const;
     [[nodiscard]] bool emitToAggregateForCurrentFeatureLod() const;
     [[nodiscard]] uint8_t activeLodBucket() const;
-    struct GeometryBuffers {
-        std::vector<float> pointPositions;
-        std::vector<uint8_t> pointColors;
-        std::vector<float> pointRadii;
-        std::vector<uint32_t> pointFeatureIds;
-        std::vector<uint8_t> pointBillboards;
+public:
+    struct PointBuffers {
+        std::vector<float> positions;
+        std::vector<uint8_t> colors;
+        std::vector<float> radii;
+        std::vector<uint32_t> featureAddresses;
+    };
+    struct SurfaceBuffers {
         std::vector<float> surfacePositions;
         std::vector<uint32_t> surfaceStartIndices;
         std::vector<uint8_t> surfaceColors;
-        std::vector<uint32_t> surfaceFeatureIds;
-        std::vector<float> pathPositions;
-        std::vector<uint32_t> pathStartIndices;
-        std::vector<uint8_t> pathColors;
-        std::vector<float> pathWidths;
-        std::vector<uint32_t> pathFeatureIds;
-        std::vector<uint8_t> pathBillboards;
-        std::vector<float> pathDashArray;
-        std::vector<float> pathDashOffsets;
-        std::vector<float> arrowPositions;
-        std::vector<uint32_t> arrowStartIndices;
-        std::vector<uint8_t> arrowColors;
-        std::vector<float> arrowWidths;
-        std::vector<uint32_t> arrowFeatureIds;
-        std::vector<uint8_t> arrowBillboards;
+        std::vector<uint32_t> surfaceFeatureAddresses;
     };
+    struct PathBuffers {
+        std::vector<float> positions;
+        std::vector<uint32_t> startIndices;
+        std::vector<uint8_t> colors;
+        std::vector<float> widths;
+        std::vector<uint32_t> featureAddresses;
+        std::vector<float> dashArray;
+    };
+    struct GeometryBuffers {
+        PointBuffers pointWorld;
+        PointBuffers pointBillboard;
+        SurfaceBuffers surfaces;
+        PathBuffers pathWorld;
+        PathBuffers pathBillboard;
+        PathBuffers arrowWorld;
+        PathBuffers arrowBillboard;
+    };
+private:
+    [[nodiscard]] static bool hasGeometry(PointBuffers const& buffers);
+    [[nodiscard]] static bool hasGeometry(SurfaceBuffers const& buffers);
+    [[nodiscard]] static bool hasGeometry(PathBuffers const& buffers);
     [[nodiscard]] static bool hasGeometry(GeometryBuffers const& buffers);
-    [[nodiscard]] const GeometryBuffers* selectedLowFiBuffers() const;
     [[nodiscard]] bool hasLowFiGeometryForLod(size_t lod) const;
     GeometryBuffers& lowFiBuffersForLod(size_t lod);
+    [[nodiscard]] static JsValue pointBuffersToJs(PointBuffers const& buffers);
+    [[nodiscard]] static JsValue surfaceBuffersToJs(SurfaceBuffers const& buffers);
+    [[nodiscard]] static JsValue pathBuffersToJs(PathBuffers const& buffers, bool withDashArrays);
+    [[nodiscard]] static JsValue geometryBuffersToJs(GeometryBuffers const& buffers);
+    [[nodiscard]] JsValue coordinateOriginToJs() const;
+    [[nodiscard]] JsValue lowFiBundleResultsToJs() const;
 
     GeometryBuffers aggregateBuffers_;
     std::array<GeometryBuffers, 8> lowFiLodBuffers_;
     uint8_t activeFeatureLod_ = 0;
-    int selectedLowFiOutputLod_ = -1;
     mutable bool hasPathCoordinateOriginWgs_ = false;
     mutable mapget::Point pathCoordinateOriginWgs_ = {.0, .0, .0};
 };

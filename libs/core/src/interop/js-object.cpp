@@ -9,6 +9,34 @@
 namespace erdblick
 {
 
+namespace {
+
+#ifdef EMSCRIPTEN
+template <typename TypedArrayCtor, typename T>
+JsValue makeTypedArray(std::span<const T> data)
+{
+    static thread_local const auto type = emscripten::val::global(TypedArrayCtor::value);
+    auto buffer = type.new_(data.size());
+    buffer.template call<void>("set", emscripten::typed_memory_view(data.size(), data.data()));
+    return JsValue(buffer);
+}
+#else
+template <typename T>
+JsValue makeTypedArray(std::span<const T> data)
+{
+    return JsValue(std::vector<T>(data.begin(), data.end()));
+}
+#endif
+
+#ifdef EMSCRIPTEN
+struct Float32ArrayCtor { static constexpr auto value = "Float32Array"; };
+struct Float64ArrayCtor { static constexpr auto value = "Float64Array"; };
+struct Uint32ArrayCtor { static constexpr auto value = "Uint32Array"; };
+struct Uint8ArrayCtor { static constexpr auto value = "Uint8Array"; };
+#endif
+
+}
+
 JsValue::JsValue()
 #ifdef EMSCRIPTEN
     : value_(emscripten::val::null())
@@ -61,29 +89,37 @@ JsValue JsValue::List(std::initializer_list<JsValue> initializers)
 #endif
 }
 
-JsValue JsValue::Float64Array(const std::span<double>& data)
+JsValue JsValue::Float32Array(std::span<const float> data)
 {
 #ifdef EMSCRIPTEN
-    static thread_local const auto type = emscripten::val::global("Float64Array");
-
-    auto buffer = type.new_(data.size());
-    buffer.call<void>("set", emscripten::typed_memory_view(data.size(), data.data()));
-
-    return JsValue(buffer);
+    return makeTypedArray<Float32ArrayCtor>(data);
 #else
-    return JsValue(data);
+    return makeTypedArray(data);
 #endif
 }
 
-JsValue JsValue::Uint8Array(const std::span<std::uint8_t>& data)
+JsValue JsValue::Float64Array(std::span<const double> data)
 {
 #ifdef EMSCRIPTEN
-    static thread_local const auto type = emscripten::val::global("Uint8Array");
+    return makeTypedArray<Float64ArrayCtor>(data);
+#else
+    return makeTypedArray(data);
+#endif
+}
 
-    auto buffer = type.new_(data.size());
-    buffer.call<void>("set", emscripten::typed_memory_view(data.size(), data.data()));
+JsValue JsValue::Uint32Array(std::span<const std::uint32_t> data)
+{
+#ifdef EMSCRIPTEN
+    return makeTypedArray<Uint32ArrayCtor>(data);
+#else
+    return makeTypedArray(data);
+#endif
+}
 
-    return JsValue(buffer);
+JsValue JsValue::Uint8Array(std::span<const std::uint8_t> data)
+{
+#ifdef EMSCRIPTEN
+    return makeTypedArray<Uint8ArrayCtor>(data);
 #else
     return JsValue(base64::encode(data));
 #endif

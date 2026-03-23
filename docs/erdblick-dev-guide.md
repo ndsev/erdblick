@@ -425,11 +425,24 @@ In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces
 
 ### Staged Loading and LOD Policy
 
-The current staged tile contract is:
+Erdblick must treat backend stage metadata as authoritative and avoid hard-coding “stage 0 means low-fi” assumptions. The important inputs are:
 
-- Stage `0` (`Low-Fi`): simple topology geometry + full feature IDs + per-feature `lod` (`LOD_0..LOD_7`).
-- Stage `1` (`High-Fi`): full non-ADAS enrichment (attributes, attribute layers, relations, source-data references).
-- Stage `2` (`ADAS`): ADAS-only enrichment (Road/Lane only).
+- `LayerInfo.stages`
+- `LayerInfo.stageLabels`
+- `LayerInfo.highFidelityStage`
+- per-feature backend `lod` (`LOD_0..LOD_7`)
+
+Current common backend stage models are:
+
+| Stage model | Stage 0 | Stage 1 | Stage 2 | `highFidelityStage` | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `LOW_FI_HIGH_FI_ADAS` | low-fi geometry | full geometry + non-ADAS enrichment | ADAS-only enrichment | `1` | Current `Road` model |
+| `LOW_FI_FULL_GEOM_HIGH_FI_ADAS` | canonical base geometry | non-ADAS enrichment | ADAS-only enrichment | `0` | Current `Lane` model |
+
+Two important consequences:
+
+- `stageLabels` are informational; `highFidelityStage` is what decides whether erdblick runs `fidelity: low` or `fidelity: high` rules.
+- Stage and LOD are independent. Stage answers “which backend payload slices arrived?”, while `lod` answers “may this feature be culled in low-fi rendering?”.
 
 Frontend view policy is tile-count based **per zoom level**:
 
@@ -443,7 +456,7 @@ Frontend view policy is tile-count based **per zoom level**:
 - visible tiles `>= 32` -> `fidelity=low`, render `lod <= LOD_7`
 - visible tiles `<= 31` -> `fidelity=high`, no low-fi LOD culling
 
-Stage retrieval is independent from this render policy: visible tiles are requested up to the layer max stage, and missing stages are streamed incrementally.
+Stage retrieval is independent from this render policy: visible tiles are requested up to the layer max stage, and missing stages are streamed incrementally via `tileIdsByNextStage`.
 
 Runtime diagnostics for this selection are exposed via per-tile stats keys:
 

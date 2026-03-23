@@ -1,9 +1,155 @@
+#include <algorithm>
+
 #include "glm/glm.hpp"
 
 #include "geometry.h"
 #include "geo/point-conversion.h"
 
 using namespace mapget;
+
+namespace {
+
+constexpr double kDegenerateVectorLengthSquared = 1e-18;
+constexpr double kMaxMiterScale = 4.0;
+
+bool isDegenerate(glm::dvec3 const& v)
+{
+    return glm::dot(v, v) <= kDegenerateVectorLengthSquared;
+}
+
+std::optional<glm::dvec3> segmentForward(Point const& from, Point const& to)
+{
+    auto const delta =
+        erdblick::wgsToCartesian<glm::dvec3>(to) - erdblick::wgsToCartesian<glm::dvec3>(from);
+    if (isDegenerate(delta)) {
+        return std::nullopt;
+    }
+    return glm::normalize(delta);
+}
+
+glm::dvec3 pointUp(Point const& point)
+{
+    auto const cart = erdblick::wgsToCartesian<glm::dvec3>(point);
+    auto const lifted = erdblick::wgsToCartesian<glm::dvec3>(point, {.0, .0, 1.});
+    auto const up = lifted - cart;
+    if (isDegenerate(up)) {
+        return {0.0, 0.0, 1.0};
+    }
+    return glm::normalize(up);
+}
+
+std::optional<glm::dvec3> sidewaysFor(
+    std::optional<glm::dvec3> const& forward,
+    glm::dvec3 const& up)
+{
+    if (!forward) {
+        return std::nullopt;
+    }
+    auto const sideways = glm::cross(*forward, up);
+    if (isDegenerate(sideways)) {
+        return std::nullopt;
+    }
+    return glm::normalize(sideways);
+}
+
+glm::dvec3 fallbackSideways(Point const& point)
+{
+    auto const eastInWgs = erdblick::localWgs84UnitCoordinateSystem({{point, point}, GeomType::Points})[0];
+    auto const cart = erdblick::wgsToCartesian<glm::dvec3>(point);
+    auto const shifted = erdblick::wgsToCartesian<glm::dvec3>({
+        point.x + eastInWgs.x,
+        point.y + eastInWgs.y,
+        point.z + eastInWgs.z,
+    });
+    auto const sideways = shifted - cart;
+    if (isDegenerate(sideways)) {
+        return {1.0, 0.0, 0.0};
+    }
+    return glm::normalize(sideways);
+}
+
+glm::dvec3 lineVertexForward(SelfContainedGeometry const& g, size_t pointIndex)
+{
+    std::optional<glm::dvec3> prevForward;
+    std::optional<glm::dvec3> nextForward;
+    if (pointIndex > 0) {
+        prevForward = segmentForward(g.points_[pointIndex - 1], g.points_[pointIndex]);
+    }
+    if (pointIndex + 1 < g.points_.size()) {
+        nextForward = segmentForward(g.points_[pointIndex], g.points_[pointIndex + 1]);
+    }
+
+    if (prevForward && nextForward) {
+        auto const combined = *prevForward + *nextForward;
+        if (!isDegenerate(combined)) {
+            return glm::normalize(combined);
+        }
+    }
+    if (nextForward) {
+        return *nextForward;
+    }
+    if (prevForward) {
+        return *prevForward;
+    }
+    return {0.0, 1.0, 0.0};
+}
+
+glm::dvec3 lineVertexSideways(SelfContainedGeometry const& g, size_t pointIndex, glm::dvec3 const& up, double& lateralScale)
+{
+    lateralScale = 1.0;
+    std::optional<glm::dvec3> prevForward;
+    std::optional<glm::dvec3> nextForward;
+    if (pointIndex > 0) {
+        prevForward = segmentForward(g.points_[pointIndex - 1], g.points_[pointIndex]);
+    }
+    if (pointIndex + 1 < g.points_.size()) {
+        nextForward = segmentForward(g.points_[pointIndex], g.points_[pointIndex + 1]);
+    }
+
+    auto prevSideways = sidewaysFor(prevForward, up);
+    auto nextSideways = sidewaysFor(nextForward, up);
+    if (prevSideways && nextSideways) {
+        auto const miter = *prevSideways + *nextSideways;
+        if (!isDegenerate(miter)) {
+            auto miterDirection = glm::normalize(miter);
+            auto const denominator = glm::dot(miterDirection, *nextSideways);
+            if (std::abs(denominator) > 1e-3) {
+                if (denominator < 0.0) {
+                    miterDirection = -miterDirection;
+                }
+                lateralScale = std::min(kMaxMiterScale, 1.0 / std::abs(denominator));
+                return miterDirection;
+            }
+        }
+    }
+    if (nextSideways) {
+        return *nextSideways;
+    }
+    if (prevSideways) {
+        return *prevSideways;
+    }
+    return fallbackSideways(g.points_[pointIndex]);
+}
+
+Point applyLocalOffsetToPoint(
+    Point const& point,
+    glm::dvec3 const& sideways,
+    glm::dvec3 const& forward,
+    glm::dvec3 const& up,
+    glm::dvec3 const& localOffsetMeters,
+    double lateralScale = 1.0)
+{
+    auto const cart = erdblick::wgsToCartesian<glm::dvec3>(point);
+    auto adjusted =
+        cart +
+        sideways * (localOffsetMeters.x * lateralScale) +
+        forward * localOffsetMeters.y +
+        up * localOffsetMeters.z;
+    auto const adjustedWgs = erdblick::cartesianToWgs<glm::dvec3>(adjusted);
+    return {adjustedWgs.x, adjustedWgs.y, adjustedWgs.z};
+}
+
+}
 
 Point erdblick::geometryCenter(const SelfContainedGeometry& g)
 {
@@ -210,5 +356,47 @@ glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const SelfContainedGeometr
         return defaultResult;
     }
 
+    return result;
+}
+
+SelfContainedGeometry erdblick::offsetGeometryLocally(
+    SelfContainedGeometry const& g,
+    glm::dvec3 const& localOffsetMeters)
+{
+    if (g.points_.empty() ||
+        (localOffsetMeters.x == .0 && localOffsetMeters.y == .0 && localOffsetMeters.z == .0)) {
+        return g;
+    }
+
+    SelfContainedGeometry result = g;
+    if (g.geomType_ != GeomType::Line || g.points_.size() < 2) {
+        auto const wgsOffset = localWgs84UnitCoordinateSystem(g) * localOffsetMeters;
+        for (auto& point : result.points_) {
+            point.x += wgsOffset.x;
+            point.y += wgsOffset.y;
+            point.z += wgsOffset.z;
+        }
+        return result;
+    }
+
+    for (size_t pointIndex = 0; pointIndex < g.points_.size(); ++pointIndex) {
+        auto const up = pointUp(g.points_[pointIndex]);
+        auto const forward = lineVertexForward(g, pointIndex);
+        double lateralScale = 1.0;
+        auto const lateralDirection = lineVertexSideways(g, pointIndex, up, lateralScale);
+        auto orthogonalForward = glm::cross(up, lateralDirection);
+        if (isDegenerate(orthogonalForward)) {
+            orthogonalForward = forward;
+        } else {
+            orthogonalForward = glm::normalize(orthogonalForward);
+        }
+        result.points_[pointIndex] = applyLocalOffsetToPoint(
+            g.points_[pointIndex],
+            lateralDirection,
+            orthogonalForward,
+            up,
+            localOffsetMeters,
+            lateralScale);
+    }
     return result;
 }

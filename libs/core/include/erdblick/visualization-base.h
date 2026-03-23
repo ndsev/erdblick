@@ -93,6 +93,11 @@ protected:
         RelationStyleState::RelationToVisualize* relationToRender = nullptr;
     };
 
+    struct HoveredAttributeSubset {
+        std::unordered_set<uint32_t> hoveredAttributeIndices_;
+        std::unordered_map<uint32_t, std::unordered_set<uint32_t>> hoveredValidityIndicesByAttribute_;
+    };
+
     static constexpr uint32_t kUnselectableFeatureId = std::numeric_limits<uint32_t>::max();
 
     virtual mapget::Point projectWgsPoint(
@@ -181,7 +186,7 @@ protected:
         const FeatureStyleRule& rule,
         std::string const& mapLayerStyleRuleId,
         uint32_t& offsetFactor,
-        glm::dvec3 const& offset);
+        std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr);
     void addGeometry(
         mapget::SelfContainedGeometry const& geom,
         std::optional<uint32_t> geometryStage,
@@ -254,7 +259,7 @@ protected:
     FeatureLayerStyle const& style_;
     std::set<std::string> featureIdSubset_;
     std::set<std::string> featureIdBaseSubset_;
-    std::unordered_set<uint32_t> featureIndexSubset_;
+    std::unordered_map<std::string, HoveredAttributeSubset> hoveredAttributeSubsetsByFeatureId_;
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;
     FeatureStyleRule::Fidelity fidelity_;

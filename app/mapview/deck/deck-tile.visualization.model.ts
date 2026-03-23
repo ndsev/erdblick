@@ -13,9 +13,8 @@ import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {Matrix4} from "@math.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
-import {coreLib, type ErdblickCore_, uint8ArrayFromWasm} from "../../integrations/wasm";
+import {coreLib, type ErdblickCore_} from "../../integrations/wasm";
 import {
-    DeckLowFiBundleBuffers,
     deckRenderWorkerPool,
     isDeckRenderWorkerPipelineEnabled
 } from "./deck-render.worker.pool";
@@ -23,11 +22,16 @@ import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
+    DeckGeometryBucketBuffers,
     DeckGeometryOutputMode,
+    DeckLowFiBundleBuffers,
+    DeckPathBucketBuffers,
+    DeckPointBucketBuffers,
+    DeckSurfaceBucketBuffers,
+    DeckVisualizationBufferResult,
     DeckWorkerTimings
 } from "./deck-render.worker.protocol";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
-import {collectLowFiRawBundles, type DeckLowFiRawAccessor} from "./deck-lowfi-bundle";
 import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
@@ -51,10 +55,12 @@ interface MergeCountProvider {
     ) => number;
 }
 
+type DeckFeatureAddressBuffer = Uint32Array | Array<number | null>;
+
 interface DeckPickLayerMetadata {
     tileKey: string;
-    featureIds?: Array<number | null>;
-    featureIdsByVertex?: Array<number | null>;
+    featureAddresses?: DeckFeatureAddressBuffer;
+    featureAddressesByPath?: DeckFeatureAddressBuffer;
 }
 
 interface DeckPathLayerMetadata extends DeckPickLayerMetadata {
@@ -71,13 +77,12 @@ interface DeckPathLayerData {
     billboard: boolean;
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
-    featureIds: Array<number | null>;
-    featureIdsByVertex: Array<number | null>;
+    featureAddressesByPath: DeckFeatureAddressBuffer;
     attributes: {
         getPath: DeckBinaryAttribute<Float32Array>;
         instanceColors: DeckBinaryAttribute<Uint8Array>;
         instanceStrokeWidths: DeckBinaryAttribute<Float32Array>;
-        instanceDashArrays: DeckBinaryAttribute<Float32Array>;
+        instanceDashArrays?: DeckBinaryAttribute<Float32Array>;
     };
 }
 
@@ -85,7 +90,7 @@ interface DeckPointLayerData {
     length: number;
     billboard: boolean;
     coordinateOrigin: [number, number, number];
-    featureIds: Array<number | null>;
+    featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
         getPosition: DeckBinaryAttribute<Float32Array>;
         getFillColor: DeckBinaryAttribute<Uint8Array>;
@@ -97,10 +102,10 @@ interface DeckSurfaceLayerData {
     length: number;
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
-    featureIds: Array<number | null>;
+    featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
         getPolygon: DeckBinaryAttribute<Float32Array>;
-        getFillColor: DeckBinaryAttribute<Uint8Array>;
+        fillColors: DeckBinaryAttribute<Uint8Array>;
     };
 }
 
@@ -110,10 +115,8 @@ interface DeckPathRawBuffers {
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
-    featureIds: Uint32Array;
-    billboards: Uint8Array;
+    featureAddresses: Uint32Array;
     dashArrays?: Float32Array;
-    dashOffsets?: Float32Array;
 }
 
 interface DeckPointRawBuffers {
@@ -121,8 +124,7 @@ interface DeckPointRawBuffers {
     positions: Float32Array;
     colors: Uint8Array;
     radii: Float32Array;
-    featureIds: Uint32Array;
-    billboards: Uint8Array;
+    featureAddresses: Uint32Array;
 }
 
 interface DeckSurfaceRawBuffers {
@@ -130,7 +132,7 @@ interface DeckSurfaceRawBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
-    featureIds: Uint32Array;
+    featureAddresses: Uint32Array;
 }
 
 interface DeckWasmRenderOutput {
@@ -169,6 +171,11 @@ const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
 const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
+const DECK_HIGHLIGHT_SURFACE_PARAMETERS = {
+    depthWriteEnabled: false,
+    depthCompare: "always",
+    cullMode: "none"
+} as const;
 const DECK_ARROW_ICON_ATLAS =
     "data:image/svg+xml;charset=utf-8," +
     encodeURIComponent(
@@ -188,7 +195,9 @@ const DECK_ARROW_ICON_MAPPING = {
 
 type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
 type DeckRuleFidelityEnum = ErdblickCore_["RuleFidelity"];
-type DeckVisualizationRawAccessor = DeckLowFiRawAccessor | "pathCoordinateOriginRaw";
+type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
+    renderResult(): DeckVisualizationBufferResult;
+};
 
 function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
     return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
@@ -199,12 +208,11 @@ function deckRuleFidelityEnum(): DeckRuleFidelityEnum {
 }
 
 interface DeckArrowMarker {
-    id: number | null;
+    featureAddress: number | null;
     position: [number, number, number];
     color: [number, number, number, number];
     sizePx: number;
     angleDeg: number;
-    featureId: number | null;
 }
 
 interface DeckLayerKeys {
@@ -499,6 +507,9 @@ export class DeckTileVisualization implements ITileVisualization {
         const desiredPathLayerKeys = new Set<string>();
         const desiredArrowLayerKeys = new Set<string>();
         const modelMatrix = this.modelMatrixForScene(sceneHandle);
+        const surfaceParameters = this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value
+            ? DECK_HIGHLIGHT_SURFACE_PARAMETERS
+            : undefined;
 
         for (const entry of entries) {
             for (const surfaceLayerData of entry.surfaceLayerData) {
@@ -514,11 +525,15 @@ export class DeckTileVisualization implements ITileVisualization {
                     filled: true,
                     extruded: false,
                     wireframe: false,
+                    // Our binary surface buffers carry per-vertex attributes already aligned to the raw vertices.
+                    // Deck's polygon normalization may add closing vertices, which desynchronizes those buffers.
+                    _normalize: false,
                     _full3d: true,
                     modelMatrix,
+                    parameters: surfaceParameters,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
-                    featureIds: surfaceLayerData.featureIds
+                    featureAddresses: surfaceLayerData.featureAddresses
                 });
                 registry.upsert(layerKeys.surfaceLayerKey, surfaceLayer, 350 + entry.orderOffset);
                 desiredSurfaceLayerKeys.add(layerKeys.surfaceLayerKey);
@@ -543,7 +558,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     modelMatrix,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
-                    featureIds: pointLayerData.featureIds
+                    featureAddresses: pointLayerData.featureAddresses
                 });
                 registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset);
                 desiredPointLayerKeys.add(layerKeys.pointLayerKey);
@@ -571,8 +586,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     dashJustified: true,
                     extensions: [new PathStyleExtension({dash: true})],
                     tileKey: this.tile.mapTileKey,
-                    featureIds: pathLayerData.featureIds,
-                    featureIdsByVertex: pathLayerData.featureIdsByVertex
+                    featureAddressesByPath: pathLayerData.featureAddressesByPath
                 });
                 registry.upsert(layerKeys.pathLayerKey, pathLayer, 400 + entry.orderOffset);
                 desiredPathLayerKeys.add(layerKeys.pathLayerKey);
@@ -811,6 +825,9 @@ export class DeckTileVisualization implements ITileVisualization {
                 affectedCornerTile.renderScene(sceneHandle);
             }
         }
+        for (const surfaceLayerKey of this.surfaceLayerKeys) {
+            registry.remove(surfaceLayerKey);
+        }
         for (const pointLayerKey of this.pointLayerKeys) {
             registry.remove(pointLayerKey);
         }
@@ -820,6 +837,7 @@ export class DeckTileVisualization implements ITileVisualization {
         for (const arrowLayerKey of this.arrowLayerKeys) {
             registry.remove(arrowLayerKey);
         }
+        this.surfaceLayerKeys.clear();
         this.pointLayerKeys.clear();
         this.pathLayerKeys.clear();
         this.arrowLayerKeys.clear();
@@ -988,32 +1006,9 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.tile.mapTileKey
             )
         });
+        const geometryLayerData = this.buildGeometryLayerData(result.coordinateOrigin, result);
         return {
-            surfaceLayerData: this.buildSurfaceLayerData({
-                coordinateOrigin: result.coordinateOrigin,
-                positions: result.surfacePositions,
-                startIndices: result.surfaceStartIndices,
-                colors: result.surfaceColors,
-                featureIds: result.surfaceFeatureIds
-            }),
-            pathLayerData: this.buildPathLayerData(result),
-            pointLayerData: this.buildPointLayerData({
-                coordinateOrigin: result.coordinateOrigin,
-                positions: result.pointPositions,
-                colors: result.pointColors,
-                radii: result.pointRadii,
-                featureIds: result.pointFeatureIds,
-                billboards: result.pointBillboards
-            }),
-            arrowLayerData: this.buildPathLayerData({
-                coordinateOrigin: result.coordinateOrigin,
-                positions: result.arrowPositions,
-                startIndices: result.arrowStartIndices,
-                colors: result.arrowColors,
-                widths: result.arrowWidths,
-                featureIds: result.arrowFeatureIds,
-                billboards: result.arrowBillboards
-            }),
+            ...geometryLayerData,
             lowFiBundles: this.buildLowFiBundleData(result.lowFiBundles, result.coordinateOrigin),
             mergedPointFeatures:
                 (result.mergedPointFeatures ?? {}) as Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
@@ -1099,50 +1094,15 @@ export class DeckTileVisualization implements ITileVisualization {
             deckVisu = this.createMainThreadDeckVisualization(fidelity, outputMode);
             const vertexCount = await this.addTilesAndRunMainThreadVisualization(deckVisu);
             await this.resolveExternalRelations(deckVisu);
-
-            const pathLayerData = this.buildPathLayerData({
-                coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
-                positions: this.readFloat32Array(deckVisu, "pathPositionsRaw"),
-                startIndices: this.readUint32Array(deckVisu, "pathStartIndicesRaw"),
-                colors: this.readUint8Array(deckVisu, "pathColorsRaw"),
-                widths: this.readFloat32Array(deckVisu, "pathWidthsRaw"),
-                featureIds: this.readUint32Array(deckVisu, "pathFeatureIdsRaw"),
-                billboards: this.readUint8Array(deckVisu, "pathBillboardsRaw"),
-                dashArrays: this.readFloat32Array(deckVisu, "pathDashArrayRaw"),
-                dashOffsets: this.readFloat32Array(deckVisu, "pathDashOffsetsRaw")
-            });
-            const surfaceLayerData = this.buildSurfaceLayerData({
-                coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
-                positions: this.readFloat32Array(deckVisu, "surfacePositionsRaw"),
-                startIndices: this.readUint32Array(deckVisu, "surfaceStartIndicesRaw"),
-                colors: this.readUint8Array(deckVisu, "surfaceColorsRaw"),
-                featureIds: this.readUint32Array(deckVisu, "surfaceFeatureIdsRaw")
-            });
-            const pointLayerData = this.buildPointLayerData({
-                coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
-                positions: this.readFloat32Array(deckVisu, "pointPositionsRaw"),
-                colors: this.readUint8Array(deckVisu, "pointColorsRaw"),
-                radii: this.readFloat32Array(deckVisu, "pointRadiiRaw"),
-                featureIds: this.readUint32Array(deckVisu, "pointFeatureIdsRaw"),
-                billboards: this.readUint8Array(deckVisu, "pointBillboardsRaw")
-            });
-            const arrowLayerData = this.buildPathLayerData({
-                coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
-                positions: this.readFloat32Array(deckVisu, "arrowPositionsRaw"),
-                startIndices: this.readUint32Array(deckVisu, "arrowStartIndicesRaw"),
-                colors: this.readUint8Array(deckVisu, "arrowColorsRaw"),
-                widths: this.readFloat32Array(deckVisu, "arrowWidthsRaw"),
-                featureIds: this.readUint32Array(deckVisu, "arrowFeatureIdsRaw"),
-                billboards: this.readUint8Array(deckVisu, "arrowBillboardsRaw")
-            });
-            const lowFiBundles = this.readLowFiBundlesFromDeckVisualization(deckVisu);
+            const renderResult = this.readRenderResultFromDeckVisualization(deckVisu);
+            const geometryLayerData = this.buildGeometryLayerData(
+                renderResult.coordinateOrigin,
+                renderResult
+            );
             return {
-                surfaceLayerData,
-                pathLayerData,
-                pointLayerData,
-                arrowLayerData,
-                lowFiBundles,
-                mergedPointFeatures: deckVisu.mergedPointFeatures() as
+                ...geometryLayerData,
+                lowFiBundles: this.buildLowFiBundleData(renderResult.lowFiBundles, renderResult.coordinateOrigin),
+                mergedPointFeatures: renderResult.mergedPointFeatures as
                     Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
                 vertexCount: Math.max(0, Math.floor(vertexCount)),
                 workerTimings: null
@@ -1166,41 +1126,8 @@ export class DeckTileVisualization implements ITileVisualization {
             const lod = Number.isFinite(rawBundle.lod)
                 ? Math.max(0, Math.min(7, Math.floor(rawBundle.lod)))
                 : 0;
-            const pathLayerData = this.buildPathLayerData({
-                coordinateOrigin,
-                positions: rawBundle.positions,
-                startIndices: rawBundle.startIndices,
-                colors: rawBundle.colors,
-                widths: rawBundle.widths,
-                featureIds: rawBundle.featureIds,
-                billboards: rawBundle.billboards,
-                dashArrays: rawBundle.dashArrays,
-                dashOffsets: rawBundle.dashOffsets
-            });
-            const surfaceLayerData = this.buildSurfaceLayerData({
-                coordinateOrigin,
-                positions: rawBundle.surfacePositions,
-                startIndices: rawBundle.surfaceStartIndices,
-                colors: rawBundle.surfaceColors,
-                featureIds: rawBundle.surfaceFeatureIds
-            });
-            const pointLayerData = this.buildPointLayerData({
-                coordinateOrigin,
-                positions: rawBundle.pointPositions,
-                colors: rawBundle.pointColors,
-                radii: rawBundle.pointRadii,
-                featureIds: rawBundle.pointFeatureIds,
-                billboards: rawBundle.pointBillboards
-            });
-            const arrowLayerData = this.buildPathLayerData({
-                coordinateOrigin,
-                positions: rawBundle.arrowPositions,
-                startIndices: rawBundle.arrowStartIndices,
-                colors: rawBundle.arrowColors,
-                widths: rawBundle.arrowWidths,
-                featureIds: rawBundle.arrowFeatureIds,
-                billboards: rawBundle.arrowBillboards
-            });
+            const geometryLayerData = this.buildGeometryLayerData(coordinateOrigin, rawBundle);
+            const {surfaceLayerData, pathLayerData, pointLayerData, arrowLayerData} = geometryLayerData;
             if (!surfaceLayerData.length && !pathLayerData.length && !pointLayerData.length && !arrowLayerData.length) {
                 continue;
             }
@@ -1215,48 +1142,69 @@ export class DeckTileVisualization implements ITileVisualization {
         return [...bundlesByLod.values()].sort((lhs, rhs) => lhs.lod - rhs.lod);
     }
 
-    private readLowFiBundlesFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckLowFiBundleData[] {
-        const rawBundles = collectLowFiRawBundles(
-            deckVisu,
-            (rawAccessor) => this.readRawBytes(deckVisu, rawAccessor)
-        );
-        if (!rawBundles.length) {
-            return [];
-        }
-        const coordinateOrigin = this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw");
-        return this.buildLowFiBundleData(
-            rawBundles.map((bundle): DeckLowFiBundleBuffers => ({
-                lod: bundle.lod,
-                pointPositions: this.bytesToFloat32Array(bundle.pointPositions),
-                pointColors: bundle.pointColors,
-                pointRadii: this.bytesToFloat32Array(bundle.pointRadii),
-                pointFeatureIds: this.bytesToUint32Array(bundle.pointFeatureIds),
-                pointBillboards: bundle.pointBillboards,
-                surfacePositions: this.bytesToFloat32Array(bundle.surfacePositions),
-                surfaceStartIndices: this.bytesToUint32Array(bundle.surfaceStartIndices),
-                surfaceColors: bundle.surfaceColors,
-                surfaceFeatureIds: this.bytesToUint32Array(bundle.surfaceFeatureIds),
-                positions: this.bytesToFloat32Array(bundle.positions),
-                startIndices: this.bytesToUint32Array(bundle.startIndices),
-                colors: bundle.colors,
-                widths: this.bytesToFloat32Array(bundle.widths),
-                featureIds: this.bytesToUint32Array(bundle.featureIds),
-                billboards: bundle.billboards,
-                dashArrays: this.bytesToFloat32Array(bundle.dashArrays),
-                dashOffsets: this.bytesToFloat32Array(bundle.dashOffsets),
-                arrowPositions: this.bytesToFloat32Array(bundle.arrowPositions),
-                arrowStartIndices: this.bytesToUint32Array(bundle.arrowStartIndices),
-                arrowColors: bundle.arrowColors,
-                arrowWidths: this.bytesToFloat32Array(bundle.arrowWidths),
-                arrowFeatureIds: this.bytesToUint32Array(bundle.arrowFeatureIds),
-                arrowBillboards: bundle.arrowBillboards
-            })),
-            coordinateOrigin
-        );
+    private buildGeometryLayerData(
+        coordinateOrigin: Float64Array,
+        geometry: DeckGeometryBucketBuffers
+    ): Pick<DeckWasmRenderOutput, "surfaceLayerData" | "pathLayerData" | "pointLayerData" | "arrowLayerData"> {
+        return {
+            surfaceLayerData: this.buildSurfaceLayerData({
+                coordinateOrigin,
+                ...geometry.surface
+            }),
+            pathLayerData: this.buildCombinedPathLayerData(
+                coordinateOrigin,
+                geometry.pathWorld,
+                geometry.pathBillboard
+            ),
+            pointLayerData: this.buildCombinedPointLayerData(
+                coordinateOrigin,
+                geometry.pointWorld,
+                geometry.pointBillboard
+            ),
+            arrowLayerData: this.buildCombinedPathLayerData(
+                coordinateOrigin,
+                geometry.arrowWorld,
+                geometry.arrowBillboard
+            )
+        };
     }
 
-    private buildPathLayerData(raw: DeckPathRawBuffers): DeckPathLayerData[] {
-        if (raw.coordinateOrigin.length < 3) {
+    private readRenderResultFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
+        return (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+    }
+
+    private buildCombinedPathLayerData(
+        coordinateOrigin: Float64Array,
+        worldRaw: Omit<DeckPathRawBuffers, "coordinateOrigin">,
+        billboardRaw: Omit<DeckPathRawBuffers, "coordinateOrigin">
+    ): DeckPathLayerData[] {
+        return [
+            ...this.buildPathLayerData({coordinateOrigin, ...worldRaw}, false),
+            ...this.buildPathLayerData({coordinateOrigin, ...billboardRaw}, true)
+        ];
+    }
+
+    private buildCombinedPointLayerData(
+        coordinateOrigin: Float64Array,
+        worldRaw: Omit<DeckPointRawBuffers, "coordinateOrigin">,
+        billboardRaw: Omit<DeckPointRawBuffers, "coordinateOrigin">
+    ): DeckPointLayerData[] {
+        return [
+            ...this.buildPointLayerData({coordinateOrigin, ...worldRaw}, false),
+            ...this.buildPointLayerData({coordinateOrigin, ...billboardRaw}, true)
+        ];
+    }
+
+    private coordinateOriginFromRaw(raw: Float64Array): [number, number, number] | null {
+        if (raw.length < 3) {
+            return null;
+        }
+        return [raw[0], raw[1], raw[2]];
+    }
+
+    private buildPathLayerData(raw: DeckPathRawBuffers, billboard: boolean): DeckPathLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
+        if (!coordinateOrigin) {
             return [];
         }
         if (raw.startIndices.length < 2) {
@@ -1277,116 +1225,45 @@ export class DeckTileVisualization implements ITileVisualization {
         if (raw.positions.length < vertexCount * 3) {
             return [];
         }
-        if (raw.colors.length < pathCount * 4 || raw.widths.length < pathCount) {
+        if (raw.colors.length < vertexCount * 4 || raw.widths.length < vertexCount || raw.featureAddresses.length < pathCount) {
             return [];
         }
-        if (raw.dashArrays && raw.dashArrays.length < pathCount * 2) {
+        if (raw.dashArrays && raw.dashArrays.length < vertexCount * 2) {
             return [];
         }
-        if (raw.featureIds.length < pathCount || raw.billboards.length < pathCount) {
+        if (raw.startIndices[0] !== 0) {
             return [];
         }
-
-        const buildBucket = (billboard: boolean): DeckPathLayerData | null => {
-            let bucketPathCount = 0;
-            let bucketVertexCount = 0;
-            for (let pathIndex = 0; pathIndex < pathCount; pathIndex++) {
-                const start = raw.startIndices[pathIndex];
-                const end = raw.startIndices[pathIndex + 1];
-                if (end <= start || end > vertexCount) {
-                    return null;
-                }
-                if ((raw.billboards[pathIndex] !== 0) !== billboard) {
-                    continue;
-                }
-                bucketPathCount += 1;
-                bucketVertexCount += end - start;
+        for (let pathIndex = 0; pathIndex < pathCount; pathIndex++) {
+            const start = raw.startIndices[pathIndex];
+            const end = raw.startIndices[pathIndex + 1];
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end > vertexCount) {
+                return [];
             }
+        }
 
-            if (!bucketPathCount || bucketVertexCount <= 1) {
-                return null;
-            }
-
-            const positions = new Float32Array(bucketVertexCount * 3);
-            const startIndices = new Uint32Array(bucketPathCount + 1);
-            const instanceColors = new Uint8Array(bucketVertexCount * 4);
-            const instanceStrokeWidths = new Float32Array(bucketVertexCount);
-            const instanceDashArrays = new Float32Array(bucketVertexCount * 2);
-            const featureIds: Array<number | null> = new Array<number | null>(bucketPathCount).fill(null);
-            const featureIdsByVertex: Array<number | null> = new Array<number | null>(bucketVertexCount).fill(null);
-
-            let nextPathIndex = 0;
-            let nextVertexIndex = 0;
-            startIndices[0] = 0;
-
-            for (let pathIndex = 0; pathIndex < pathCount; pathIndex++) {
-                if ((raw.billboards[pathIndex] !== 0) !== billboard) {
-                    continue;
-                }
-                const start = raw.startIndices[pathIndex];
-                const end = raw.startIndices[pathIndex + 1];
-                const colorOffset = pathIndex * 4;
-                const width = raw.widths[pathIndex];
-                const dashArrayOffset = pathIndex * 2;
-                const dashA = raw.dashArrays ? (raw.dashArrays[dashArrayOffset] ?? 1) : 1;
-                const dashB = raw.dashArrays ? (raw.dashArrays[dashArrayOffset + 1] ?? 0) : 0;
-                const featureId = raw.featureIds[pathIndex];
-                const normalizedFeatureId =
-                    Number.isInteger(featureId) && featureId !== DECK_UNSELECTABLE_FEATURE_INDEX
-                        ? featureId
-                        : null;
-                featureIds[nextPathIndex] = normalizedFeatureId;
-
-                for (let vertexIndex = start; vertexIndex < end; vertexIndex++) {
-                    const sourcePositionOffset = vertexIndex * 3;
-                    const targetPositionOffset = nextVertexIndex * 3;
-                    positions[targetPositionOffset] = raw.positions[sourcePositionOffset] ?? 0;
-                    positions[targetPositionOffset + 1] = raw.positions[sourcePositionOffset + 1] ?? 0;
-                    positions[targetPositionOffset + 2] = raw.positions[sourcePositionOffset + 2] ?? 0;
-
-                    const colorTargetOffset = nextVertexIndex * 4;
-                    instanceColors[colorTargetOffset] = raw.colors[colorOffset];
-                    instanceColors[colorTargetOffset + 1] = raw.colors[colorOffset + 1];
-                    instanceColors[colorTargetOffset + 2] = raw.colors[colorOffset + 2];
-                    instanceColors[colorTargetOffset + 3] = raw.colors[colorOffset + 3];
-                    instanceStrokeWidths[nextVertexIndex] = width;
-                    const dashTargetOffset = nextVertexIndex * 2;
-                    instanceDashArrays[dashTargetOffset] = dashA;
-                    instanceDashArrays[dashTargetOffset + 1] = dashB;
-                    featureIdsByVertex[nextVertexIndex] = normalizedFeatureId;
-                    nextVertexIndex += 1;
-                }
-
-                nextPathIndex += 1;
-                startIndices[nextPathIndex] = nextVertexIndex;
-            }
-
-            return {
-                length: bucketPathCount,
-                billboard,
-                coordinateOrigin: [
-                    raw.coordinateOrigin[0],
-                    raw.coordinateOrigin[1],
-                    raw.coordinateOrigin[2]
-                ],
-                startIndices,
-                featureIds,
-                featureIdsByVertex,
-                attributes: {
-                    getPath: {value: positions, size: 3},
-                    instanceColors: {value: instanceColors, size: 4},
-                    instanceStrokeWidths: {value: instanceStrokeWidths, size: 1},
-                    instanceDashArrays: {value: instanceDashArrays, size: 2}
-                }
-            };
+        const attributes: DeckPathLayerData["attributes"] = {
+            getPath: {value: raw.positions, size: 3},
+            instanceColors: {value: raw.colors, size: 4},
+            instanceStrokeWidths: {value: raw.widths, size: 1}
         };
+        if (raw.dashArrays && raw.dashArrays.length >= vertexCount * 2) {
+            attributes.instanceDashArrays = {value: raw.dashArrays, size: 2};
+        }
 
-        return [buildBucket(false), buildBucket(true)]
-            .filter((bucket): bucket is DeckPathLayerData => bucket !== null);
+        return [{
+            length: pathCount,
+            billboard,
+            coordinateOrigin,
+            startIndices: raw.startIndices,
+            featureAddressesByPath: raw.featureAddresses,
+            attributes
+        }];
     }
 
     private buildSurfaceLayerData(raw: DeckSurfaceRawBuffers): DeckSurfaceLayerData[] {
-        if (raw.coordinateOrigin.length < 3) {
+        const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
+        if (!coordinateOrigin) {
             return [];
         }
         if (raw.startIndices.length < 2) {
@@ -1405,8 +1282,11 @@ export class DeckTileVisualization implements ITileVisualization {
         }
 
         if (raw.positions.length < vertexCount * 3
-            || raw.colors.length < surfaceCount * 4
-            || raw.featureIds.length < surfaceCount) {
+            || raw.colors.length < vertexCount * 4
+            || raw.featureAddresses.length < surfaceCount) {
+            return [];
+        }
+        if (raw.startIndices[0] !== 0) {
             return [];
         }
 
@@ -1418,33 +1298,21 @@ export class DeckTileVisualization implements ITileVisualization {
             }
         }
 
-        const featureIds: Array<number | null> = new Array<number | null>(surfaceCount).fill(null);
-        for (let surfaceIndex = 0; surfaceIndex < surfaceCount; surfaceIndex++) {
-            const featureId = raw.featureIds[surfaceIndex];
-            featureIds[surfaceIndex] =
-                Number.isInteger(featureId) && featureId !== DECK_UNSELECTABLE_FEATURE_INDEX
-                    ? featureId
-                    : null;
-        }
-
         return [{
             length: surfaceCount,
-            coordinateOrigin: [
-                raw.coordinateOrigin[0],
-                raw.coordinateOrigin[1],
-                raw.coordinateOrigin[2]
-            ],
+            coordinateOrigin,
             startIndices: raw.startIndices,
-            featureIds,
+            featureAddresses: raw.featureAddresses,
             attributes: {
                 getPolygon: {value: raw.positions, size: 3},
-                getFillColor: {value: raw.colors, size: 4}
+                fillColors: {value: raw.colors, size: 4}
             }
         }];
     }
 
-    private buildPointLayerData(raw: DeckPointRawBuffers): DeckPointLayerData[] {
-        if (raw.coordinateOrigin.length < 3) {
+    private buildPointLayerData(raw: DeckPointRawBuffers, billboard: boolean): DeckPointLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
+        if (!coordinateOrigin) {
             return [];
         }
         if (raw.positions.length < 3) {
@@ -1460,73 +1328,21 @@ export class DeckTileVisualization implements ITileVisualization {
         }
         if (raw.colors.length < pointCount * 4
             || raw.radii.length < pointCount
-            || raw.featureIds.length < pointCount
-            || raw.billboards.length < pointCount) {
+            || raw.featureAddresses.length < pointCount) {
             return [];
         }
 
-        const buildBucket = (billboard: boolean): DeckPointLayerData | null => {
-            let bucketPointCount = 0;
-            for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
-                if ((raw.billboards[pointIndex] !== 0) === billboard) {
-                    bucketPointCount += 1;
-                }
+        return [{
+            length: pointCount,
+            billboard,
+            coordinateOrigin,
+            featureAddresses: raw.featureAddresses,
+            attributes: {
+                getPosition: {value: raw.positions, size: 3},
+                getFillColor: {value: raw.colors, size: 4},
+                getRadius: {value: raw.radii, size: 1}
             }
-            if (!bucketPointCount) {
-                return null;
-            }
-
-            const positions = new Float32Array(bucketPointCount * 3);
-            const colors = new Uint8Array(bucketPointCount * 4);
-            const radii = new Float32Array(bucketPointCount);
-            const featureIds: Array<number | null> = new Array<number | null>(bucketPointCount).fill(null);
-
-            let nextPointIndex = 0;
-            for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
-                if ((raw.billboards[pointIndex] !== 0) !== billboard) {
-                    continue;
-                }
-                const sourcePositionOffset = pointIndex * 3;
-                const targetPositionOffset = nextPointIndex * 3;
-                positions[targetPositionOffset] = raw.positions[sourcePositionOffset] ?? 0;
-                positions[targetPositionOffset + 1] = raw.positions[sourcePositionOffset + 1] ?? 0;
-                positions[targetPositionOffset + 2] = raw.positions[sourcePositionOffset + 2] ?? 0;
-
-                const sourceColorOffset = pointIndex * 4;
-                const targetColorOffset = nextPointIndex * 4;
-                colors[targetColorOffset] = raw.colors[sourceColorOffset];
-                colors[targetColorOffset + 1] = raw.colors[sourceColorOffset + 1];
-                colors[targetColorOffset + 2] = raw.colors[sourceColorOffset + 2];
-                colors[targetColorOffset + 3] = raw.colors[sourceColorOffset + 3];
-
-                radii[nextPointIndex] = raw.radii[pointIndex] ?? 0;
-                const featureId = raw.featureIds[pointIndex];
-                featureIds[nextPointIndex] =
-                    Number.isInteger(featureId) && featureId !== DECK_UNSELECTABLE_FEATURE_INDEX
-                        ? featureId
-                        : null;
-                nextPointIndex += 1;
-            }
-
-            return {
-                length: bucketPointCount,
-                billboard,
-                coordinateOrigin: [
-                    raw.coordinateOrigin[0],
-                    raw.coordinateOrigin[1],
-                    raw.coordinateOrigin[2]
-                ],
-                featureIds,
-                attributes: {
-                    getPosition: {value: positions, size: 3},
-                    getFillColor: {value: colors, size: 4},
-                    getRadius: {value: radii, size: 1}
-                }
-            };
-        };
-
-        return [buildBucket(false), buildBucket(true)]
-            .filter((bucket): bucket is DeckPointLayerData => bucket !== null);
+        }];
     }
 
     private buildArrowMarkers(pathData: DeckPathLayerData): DeckArrowMarker[] {
@@ -1561,7 +1377,11 @@ export class DeckTileVisualization implements ITileVisualization {
 
             const colorBase = tipVertex * 4;
             const widthPx = widths[tipVertex];
-            const featureId = pathData.featureIds[arrowIndex];
+            const rawFeatureAddress = pathData.featureAddressesByPath[arrowIndex];
+            const featureAddress =
+                Number.isInteger(rawFeatureAddress) && rawFeatureAddress !== DECK_UNSELECTABLE_FEATURE_INDEX
+                    ? rawFeatureAddress
+                    : null;
             const angleDeg =
                 this.normalizeDegrees(
                     DECK_ARROW_ANGLE_SIGN * ((Math.atan2(dirX, dirY) * 180) / Math.PI) +
@@ -1569,7 +1389,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 );
             const sizePx = Math.max(8, widthPx * 4);
             markers.push({
-                id: featureId,
+                featureAddress,
                 position: [tipX, tipY, tipZ],
                 color: [
                     colors[colorBase],
@@ -1578,51 +1398,10 @@ export class DeckTileVisualization implements ITileVisualization {
                     colors[colorBase + 3]
                 ],
                 sizePx,
-                angleDeg,
-                featureId
+                angleDeg
             });
         }
         return markers;
-    }
-
-    private bytesToFloat32Array(raw: Uint8Array): Float32Array {
-        if (raw.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
-            return new Float32Array();
-        }
-        return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / Float32Array.BYTES_PER_ELEMENT);
-    }
-
-    private bytesToUint32Array(raw: Uint8Array): Uint32Array {
-        if (raw.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
-            return new Uint32Array();
-        }
-        return new Uint32Array(raw.buffer, raw.byteOffset, raw.byteLength / Uint32Array.BYTES_PER_ELEMENT);
-    }
-
-    private readFloat32Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Float32Array {
-        const raw = this.readRawBytes(deckVisu, rawAccessor);
-        return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / Float32Array.BYTES_PER_ELEMENT);
-    }
-
-    private readFloat64Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Float64Array {
-        const raw = this.readRawBytes(deckVisu, rawAccessor);
-        return new Float64Array(raw.buffer, raw.byteOffset, raw.byteLength / Float64Array.BYTES_PER_ELEMENT);
-    }
-
-    private readUint32Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Uint32Array {
-        const raw = this.readRawBytes(deckVisu, rawAccessor);
-        return new Uint32Array(raw.buffer, raw.byteOffset, raw.byteLength / Uint32Array.BYTES_PER_ELEMENT);
-    }
-
-    private readUint8Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Uint8Array {
-        return this.readRawBytes(deckVisu, rawAccessor);
-    }
-
-    private readRawBytes(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Uint8Array {
-        return uint8ArrayFromWasm((shared) => {
-            deckVisu[rawAccessor](shared);
-            return true;
-        }) as Uint8Array;
     }
 
     private tileHasData(): boolean {

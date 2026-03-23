@@ -14,7 +14,7 @@ interface InspectionModelData {
     type: number;
     value: any;
     info?: string;
-    hoverId?: string
+    hoverId?: string;
     geoJsonPath?: string;
     mapId?: string;
     sourceDataReferences?: Array<object>;
@@ -31,7 +31,7 @@ interface InspectionModelData {
                 </div>
             }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
-                             [geoJson]="geoJson" [selectedFeatures]="selectedFeatures"
+                             [geoJson]="geoJson"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
                              [enableSourceDataNavigation]="enableSourceDataNavigation()"
@@ -149,6 +149,13 @@ export class FeaturePanelComponent implements OnDestroy {
     }
 
     getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
+        interface HoverAnnotationContext {
+            mapTileKey: string;
+            softHoverGroupId?: string;
+            strongHoverGroupId?: string;
+            nodePath: string;
+        }
+
         const isGeometryTypeValue = (value: unknown): boolean => {
             if (typeof value !== "string") {
                 return false;
@@ -177,15 +184,27 @@ export class FeaturePanelComponent implements OnDestroy {
             return trimmed;
         };
 
+        const stripValiditySuffix = (hoverId: string): string => {
+            const validityIndex = hoverId.indexOf(":validity#");
+            if (validityIndex >= 0) {
+                return hoverId.slice(0, validityIndex);
+            }
+            return hoverId;
+        };
+
+        const makeNodeId = (context: HoverAnnotationContext, key: string, ordinal: number): string =>
+            `${context.nodePath}/${ordinal}:${key}`;
+
         const convertToTreeTableNodes = (
             dataNodes: Array<InspectionModelData> | undefined,
-            featureIndex: number
+            context: HoverAnnotationContext
         ): TreeTableNode[] => {
             if (!Array.isArray(dataNodes) || !dataNodes.length) {
                 return [];
             }
             const treeNodes: TreeTableNode[] = [];
-            for (const data of dataNodes) {
+            for (let nodeIndex = 0; nodeIndex < dataNodes.length; nodeIndex++) {
+                const data = dataNodes[nodeIndex];
                 const node: TreeTableNode = {};
                 const valueType = Number(data?.type ?? coreLib.ValueType.NULL.value);
                 let value = data?.value;
@@ -218,14 +237,15 @@ export class FeaturePanelComponent implements OnDestroy {
                 node.data = {
                     key: data?.key ?? "",
                     value: value ?? "",
-                    type: valueType
+                    type: valueType,
+                    mapTileKey: context.mapTileKey,
+                    nodeId: makeNodeId(context, data?.key ?? "", nodeIndex)
                 };
                 if (data?.hasOwnProperty("info")) {
                     node.data["info"] = data.info;
                 }
                 if (data?.hasOwnProperty("hoverId")) {
                     node.data["hoverId"] = data.hoverId;
-                    node.data["featureIndex"] = featureIndex;
                 }
                 if (data?.hasOwnProperty("mapId")) {
                     node.data["mapId"] = data.mapId;
@@ -237,9 +257,32 @@ export class FeaturePanelComponent implements OnDestroy {
                     node.data["sourceDataReferences"] = data.sourceDataReferences;
                 }
 
+                let nextSoftHoverGroupId = context.softHoverGroupId;
+                let nextStrongHoverGroupId = context.strongHoverGroupId;
+                if (typeof data?.hoverId === "string") {
+                    if (data.hoverId.includes(":validity#")) {
+                        nextSoftHoverGroupId = stripValiditySuffix(data.hoverId);
+                        nextStrongHoverGroupId = data.hoverId;
+                    } else {
+                        nextSoftHoverGroupId = data.hoverId;
+                        nextStrongHoverGroupId = undefined;
+                    }
+                }
+                if (nextSoftHoverGroupId) {
+                    node.data["softHoverGroupId"] = nextSoftHoverGroupId;
+                }
+                if (nextStrongHoverGroupId) {
+                    node.data["strongHoverGroupId"] = nextStrongHoverGroupId;
+                }
+
                 let children = convertToTreeTableNodes(
                     Array.isArray(data?.children) ? data.children : [],
-                    featureIndex
+                    {
+                        mapTileKey: context.mapTileKey,
+                        softHoverGroupId: nextSoftHoverGroupId,
+                        strongHoverGroupId: nextStrongHoverGroupId,
+                        nodePath: node.data["nodeId"]
+                    }
                 );
                 if (isGeometryTypeValue(node.data["value"])) {
                     const stageBubble = extractGeometryStageBubble(children);
@@ -263,6 +306,7 @@ export class FeaturePanelComponent implements OnDestroy {
             if (!Array.isArray(inspectionModels)) {
                 continue;
             }
+            const mapTileKey = this.selectedFeatures?.[featureIndex]?.mapTileKey ?? "";
             for (const section of inspectionModels) {
                 const node: TreeTableNode = {};
                 node.data = {
@@ -278,7 +322,10 @@ export class FeaturePanelComponent implements OnDestroy {
                 }
                 node.children = convertToTreeTableNodes(
                     Array.isArray(section?.children) ? section.children : [],
-                    featureIndex
+                    {
+                        mapTileKey,
+                        nodePath: `feature-${featureIndex}:${section?.key ?? ""}`
+                    }
                 );
                 treeNodes.push(node);
             }

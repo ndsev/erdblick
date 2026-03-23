@@ -210,7 +210,7 @@ void InspectionConverter::convertAttributeLayer(
         OptionalValueAndType singleValue;
         attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val){
             auto singleValueForField = convertField(fieldName, val);
-            if (singleValueForField && fieldName != "schemaValidity" && fieldName != "origValidity") {
+            if (singleValueForField) {
                 ++numValues;
                 singleValue = singleValueForField;
             }
@@ -225,13 +225,12 @@ void InspectionConverter::convertAttributeLayer(
             current_->type_ = ValueType::Boolean;
         }
 
-        if (auto validity = attr->validityOrNull()) {
-            convertValidity(convertString("validity"), validity);
-        }
-
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
                               std::to_string(static_cast<uint32_t>(attr->addr().index()));
+        if (auto validity = attr->validityOrNull()) {
+            convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
+        }
         return true;
     });
 }
@@ -297,14 +296,11 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
 
 void InspectionConverter::convertValidity(
     JsValue const& key,
-    model_ptr<MultiValidity> const& multiValidity)
+    model_ptr<MultiValidity> const& multiValidity,
+    std::string const* hoverIdPrefix)
 {
     auto scope = push(key, key.as<std::string>());
-    uint32_t valIndex = 0;
-    multiValidity->forEach([this, &valIndex](Validity const& v) -> bool {
-        auto validityScope = push(
-            JsValue(valIndex),
-            valIndex);
+    auto renderValidity = [this](Validity const& v) -> bool {
 
         if (auto direction = v.direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
@@ -316,7 +312,7 @@ void InspectionConverter::convertValidity(
                 dirScope->value_ = convertString("NEGATIVE");
                 break;
             case Validity::Both:
-                dirScope->value_ = convertString("BOTH");
+                dirScope->value_ = convertString("COMPLETE");
                 break;
             case Validity::None:
                 dirScope->value_ = convertString("NONE");
@@ -326,7 +322,33 @@ void InspectionConverter::convertValidity(
         }
 
         if (auto featureId = v.featureId()) {
-            push("featureId", "featureId", ValueType::FeatureId)->value_ = convertString(featureId_);
+            auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
+            featureIdScope->value_ = convertString(featureId->toString());
+            featureIdScope->mapId_ = JsValue(tile_->mapId());
+        }
+
+        if (auto transitionNumber = v.transitionNumber()) {
+            push("transitionNumber", "transitionNumber", ValueType::Number)->value_ =
+                JsValue(*transitionNumber);
+            if (auto fromFeature = v.transitionFromFeature()) {
+                auto fromScope = push("from", "from", ValueType::FeatureId);
+                fromScope->value_ = convertString(fromFeature->id()->toString());
+                fromScope->mapId_ = JsValue(fromFeature->model().mapId());
+            }
+            if (auto fromConnectedEnd = v.transitionFromConnectedEnd()) {
+                push("fromConnectedEnd", "fromConnectedEnd", ValueType::String)->value_ =
+                    convertString(*fromConnectedEnd == Validity::End ? "END" : "START");
+            }
+            if (auto toFeature = v.transitionToFeature()) {
+                auto toScope = push("to", "to", ValueType::FeatureId);
+                toScope->value_ = convertString(toFeature->id()->toString());
+                toScope->mapId_ = JsValue(toFeature->model().mapId());
+            }
+            if (auto toConnectedEnd = v.transitionToConnectedEnd()) {
+                push("toConnectedEnd", "toConnectedEnd", ValueType::String)->value_ =
+                    convertString(*toConnectedEnd == Validity::End ? "END" : "START");
+            }
+            return true;
         }
 
         if (auto geom = v.simpleGeometry()) {
@@ -381,6 +403,26 @@ void InspectionConverter::convertValidity(
         }
 
         return true;
+    };
+
+    if (multiValidity->size() == 1) {
+        if (hoverIdPrefix) {
+            scope->hoverId_ = *hoverIdPrefix + ":validity#0";
+        }
+        multiValidity->forEach(renderValidity);
+        return;
+    }
+
+    uint32_t valIndex = 0;
+    multiValidity->forEach([&](Validity const& v) -> bool {
+        auto validityScope = push(
+            JsValue(valIndex),
+            valIndex);
+        if (hoverIdPrefix) {
+            validityScope->hoverId_ = *hoverIdPrefix + ":validity#" + std::to_string(valIndex);
+        }
+        ++valIndex;
+        return renderValidity(v);
     });
 }
 

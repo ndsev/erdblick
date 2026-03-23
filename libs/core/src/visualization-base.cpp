@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <charconv>
-#include <cctype>
 #include <deque>
 #include <iostream>
 #include <regex>
@@ -20,6 +19,23 @@ namespace erdblick
 namespace {
 constexpr uint32_t geomTypeBit(mapget::GeomType const& g) {
     return 1u << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
+}
+
+struct ParsedHoverAttributeId {
+    std::string_view baseFeatureId_;
+    uint32_t attributeIndex_ = 0;
+    std::optional<uint32_t> validityIndex_;
+};
+
+std::optional<uint32_t> parseTrailingUint(std::string_view value) {
+    uint32_t parsed = 0;
+    auto const* begin = value.data();
+    auto const* end = value.data() + value.size();
+    auto result = std::from_chars(begin, end, parsed);
+    if (result.ec != std::errc() || result.ptr != end) {
+        return std::nullopt;
+    }
+    return parsed;
 }
 
 std::string_view stripFeatureIdSuffix(std::string_view featureId) {
@@ -38,14 +54,36 @@ std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     return featureId.substr(0, cut);
 }
 
-std::string_view trimAsciiWhitespace(std::string_view value) {
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
-        value.remove_prefix(1);
+std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view featureId) {
+    constexpr std::string_view attributeSuffix = ":attribute#";
+    constexpr std::string_view validitySuffix = ":validity#";
+    auto const attributePos = featureId.find(attributeSuffix);
+    if (attributePos == std::string_view::npos) {
+        return std::nullopt;
     }
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
-        value.remove_suffix(1);
+
+    auto const attributeValueStart = attributePos + attributeSuffix.size();
+    auto const validityPos = featureId.find(validitySuffix, attributeValueStart);
+    auto const attributeValueEnd =
+        validityPos == std::string_view::npos ? featureId.size() : validityPos;
+    auto const attributeIndex =
+        parseTrailingUint(featureId.substr(attributeValueStart, attributeValueEnd - attributeValueStart));
+    if (!attributeIndex) {
+        return std::nullopt;
     }
-    return value;
+
+    ParsedHoverAttributeId result{
+        .baseFeatureId_ = featureId.substr(0, attributePos),
+        .attributeIndex_ = *attributeIndex
+    };
+    if (validityPos != std::string_view::npos) {
+        result.validityIndex_ =
+            parseTrailingUint(featureId.substr(validityPos + validitySuffix.size()));
+        if (!result.validityIndex_) {
+            return std::nullopt;
+        }
+    }
+    return result;
 }
 
 std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
@@ -56,28 +94,6 @@ std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bo
     key.push_back(':');
     key.append(expression);
     return key;
-}
-
-std::optional<uint32_t> parseFeatureIndexToken(std::string_view value) {
-    auto token = trimAsciiWhitespace(value);
-    if (token.empty()) {
-        return std::nullopt;
-    }
-    if (token.front() == '#') {
-        token.remove_prefix(1);
-    }
-    if (token.empty()) {
-        return std::nullopt;
-    }
-
-    uint32_t parsed = 0;
-    auto const* begin = token.data();
-    auto const* end = begin + token.size();
-    auto [ptr, ec] = std::from_chars(begin, end, parsed);
-    if (ec != std::errc{} || ptr != end) {
-        return std::nullopt;
-    }
-    return parsed;
 }
 
 }
@@ -362,12 +378,19 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
     for (auto i = 0; i < featureIdSubset.size(); ++i) {
         auto featureId = featureIdSubset.at(i).as<std::string>();
         featureIdSubset_.insert(featureId);
-        auto featureToken = stripFeatureIdSuffix(featureId);
-        if (auto featureIndex = parseFeatureIndexToken(featureToken)) {
-            featureIndexSubset_.insert(*featureIndex);
-            continue;
+        featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
+        if (auto parsedHoverAttributeId = parseHoverAttributeId(featureId)) {
+            auto& hoveredAttributeSubset =
+                hoveredAttributeSubsetsByFeatureId_[std::string(parsedHoverAttributeId->baseFeatureId_)];
+            if (parsedHoverAttributeId->validityIndex_) {
+                hoveredAttributeSubset
+                    .hoveredValidityIndicesByAttribute_[parsedHoverAttributeId->attributeIndex_]
+                    .insert(*parsedHoverAttributeId->validityIndex_);
+            }
+            else {
+                hoveredAttributeSubset.hoveredAttributeIndices_.insert(parsedHoverAttributeId->attributeIndex_);
+            }
         }
-        featureIdBaseSubset_.insert(std::string(featureToken));
     }
 }
 
@@ -716,7 +739,7 @@ void FeatureLayerVisualizationBase::run()
         }
     };
 
-    if (featureIdBaseSubset_.empty() || !featureIndexSubset_.empty()) {
+    if (featureIdBaseSubset_.empty()) {
         for (auto&& feature : *tile_) {
             processFeature(feature);
         }
@@ -737,7 +760,6 @@ void FeatureLayerVisualizationBase::addFeature(
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId)
 {
-    auto featureIndex = static_cast<uint32_t>(feature->addr().index());
     std::optional<std::string> featureId;
     auto resolveFeatureId = [&]() -> std::string const& {
         if (!featureId) {
@@ -745,15 +767,8 @@ void FeatureLayerVisualizationBase::addFeature(
         }
         return *featureId;
     };
-    if (!featureIdBaseSubset_.empty() || !featureIndexSubset_.empty()) {
-        auto const indexMatches = featureIndexSubset_.contains(featureIndex);
-        bool idMatches = false;
-        if (!featureIdBaseSubset_.empty()) {
-            idMatches = featureIdBaseSubset_.contains(resolveFeatureId());
-        }
-        if (!indexMatches && !idMatches) {
-            return;
-        }
+    if (!featureIdBaseSubset_.empty() && !featureIdBaseSubset_.contains(resolveFeatureId())) {
+        return;
     }
 
     auto offset = glm::dvec3{.0, .0, .0};
@@ -766,9 +781,10 @@ void FeatureLayerVisualizationBase::addFeature(
     case FeatureStyleRule::Feature: {
         if (auto geom = feature->geomOrNull()) {
             geom->forEachGeometry(
-                [this, featureIndex, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
+                [this, featureAddress = static_cast<uint32_t>(feature->addr().index()),
+                 &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
                 {
-                    addGeometry(geom, featureIndex, rule, mapLayerStyleRuleId, evalFun, offset);
+                    addGeometry(geom, featureAddress, rule, mapLayerStyleRuleId, evalFun, offset);
                     return true;
                 });
         }
@@ -800,22 +816,35 @@ void FeatureLayerVisualizationBase::addFeature(
                 }
             }
             layer->forEachAttribute([&, this](auto&& attr){
+                auto const attributeIndex = static_cast<uint32_t>(attr->addr().index());
+                std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr;
                 if (hoverAttributeSubsetActive) {
-                     auto const attributeIndex = static_cast<uint32_t>(attr->addr().index());
-                     if (!featureIdSubset_.contains(
-                            fmt::format("{}:attribute#{}", featureIdForAttributes, attributeIndex))) {
-                         return true;
-                     }
+                    auto const hoveredAttributeSubset =
+                        hoveredAttributeSubsetsByFeatureId_.find(featureIdForAttributes);
+                    if (hoveredAttributeSubset == hoveredAttributeSubsetsByFeatureId_.end()) {
+                        return true;
+                    }
+                    auto const fullAttributeHovered =
+                        hoveredAttributeSubset->second.hoveredAttributeIndices_.contains(attributeIndex);
+                    auto const hoveredValiditySet =
+                        hoveredAttributeSubset->second.hoveredValidityIndicesByAttribute_.find(attributeIndex);
+                    if (!fullAttributeHovered) {
+                        if (hoveredValiditySet ==
+                            hoveredAttributeSubset->second.hoveredValidityIndicesByAttribute_.end()) {
+                            return true;
+                        }
+                        hoveredValidityIndices = &hoveredValiditySet->second;
+                    }
                 }
                 addAttribute(
                     feature,
                     layerName,
                     attr,
-                    featureIndex,
+                    static_cast<uint32_t>(feature->addr().index()),
                     rule,
                     mapLayerStyleRuleId,
                     offsetFactor,
-                    offset);
+                    hoveredValidityIndices);
                 return true;
             });
             return true;
@@ -1013,13 +1042,13 @@ void FeatureLayerVisualizationBase::addMergedPointGeometry(
             {"position", JsValue(pointCartographic)},
             {"positionHash", JsValue(gridPositionHash)},
             {geomField, JsValue(makeGeomParams(evalFun))},
-            {"featureIds", JsValue::List({JsValue(tileFeatureId)})},
+            {"featureAddresses", JsValue::List({JsValue(tileFeatureId)})},
         });
     }
     else {
         mergedPointVisu->set(geomField, JsValue(makeGeomParams(evalFun)));
         if (featureIdIsNew) {
-            (*mergedPointVisu)["featureIds"].push(JsValue(tileFeatureId));
+            (*mergedPointVisu)["featureAddresses"].push(JsValue(tileFeatureId));
         }
     }
 }
@@ -1247,7 +1276,7 @@ void FeatureLayerVisualizationBase::addAttribute(
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId,
     uint32_t& offsetFactor,
-    glm::dvec3 const& offset)
+    std::unordered_set<uint32_t> const* hoveredValidityIndices)
 {
     // Check if the attribute type name is accepted for the rule.
     if (auto const& attrTypeRegex = rule.attributeType()) {
@@ -1288,9 +1317,6 @@ void FeatureLayerVisualizationBase::addAttribute(
             return evaluateExpression(str, *attrEvaluationContext, false, false);
         }};
 
-    // Bump visual offset factor for next visualized attribute.
-    ++offsetFactor;
-
     // Check if the attribute's values match the attribute filter for the rule.
     if (auto const& attrFilter = rule.attributeFilter()) {
         if (!attrFilter->empty()) {
@@ -1303,31 +1329,84 @@ void FeatureLayerVisualizationBase::addAttribute(
         }
     }
 
+    auto validityIndexId = internalStringPoolCopy_->emplace("$validityIndex");
+    auto validityCountId = internalStringPoolCopy_->emplace("$validityCount");
+
     // Draw validity geometry.
     if (auto multiValidity = attr->validityOrNull()) {
+        auto const totalValidityCount = static_cast<uint32_t>(multiValidity->size());
+        uint32_t renderedValidityCount = 0;
+        uint32_t validityIndex = 0;
+        multiValidity->forEach([&](auto&& validity)
+        {
+            (void) validity;
+            if (!hoveredValidityIndices || hoveredValidityIndices->contains(validityIndex)) {
+                ++renderedValidityCount;
+            }
+            ++validityIndex;
+            return true;
+        });
+        if (renderedValidityCount == 0) {
+            return;
+        }
+
+        auto const& ruleOffset = rule.offset();
+        auto const hasRuleOffset = ruleOffset.x != .0 || ruleOffset.y != .0 || ruleOffset.z != .0;
+        uint32_t renderedValidityOffsetFactor = 0;
+        validityIndex = 0;
         multiValidity->forEach([&, this](auto&& validity)
         {
+            if (hoveredValidityIndices && !hoveredValidityIndices->contains(validityIndex)) {
+                ++validityIndex;
+                return true;
+            }
+            attrEvaluationContext->set(
+                validityIndexId.value(),
+                simfil::Value(static_cast<int64_t>(validityIndex)));
+            attrEvaluationContext->set(
+                validityCountId.value(),
+                simfil::Value(static_cast<int64_t>(totalValidityCount)));
+
+            auto validityGeometry = validity.computeGeometry(feature->geomOrNull());
+            if (hasRuleOffset) {
+                validityGeometry = offsetGeometryLocally(
+                    validityGeometry,
+                    ruleOffset * static_cast<double>(renderedValidityOffsetFactor + 1U));
+            }
             addGeometry(
-                validity.computeGeometry(feature->geomOrNull()),
-                std::nullopt,
+                validityGeometry,
+                attr->model().stage(),
                 tileFeatureId,
                 rule,
                 mapLayerStyleRuleId,
-                boundEvalFun,
-                offset * static_cast<double>(offsetFactor));
+                boundEvalFun);
+            ++renderedValidityOffsetFactor;
+            ++validityIndex;
             return true;
         });
+        offsetFactor += renderedValidityCount;
     }
     else {
+        if (hoveredValidityIndices && !hoveredValidityIndices->contains(0U)) {
+            return;
+        }
+        attrEvaluationContext->set(validityIndexId.value(), simfil::Value(static_cast<int64_t>(0)));
+        attrEvaluationContext->set(validityCountId.value(), simfil::Value(static_cast<int64_t>(1)));
+        ++offsetFactor;
         auto geom = feature->firstGeometry();
+        auto shiftedGeometry = geom;
+        if (rule.offset().x != .0 || rule.offset().y != .0 || rule.offset().z != .0) {
+            shiftedGeometry = offsetGeometryLocally(
+                shiftedGeometry,
+                rule.offset() * static_cast<double>(offsetFactor));
+        }
         addGeometry(
-            geom,
-            std::nullopt,
+            shiftedGeometry,
+            attr->model().stage(),
             tileFeatureId,
             rule,
             mapLayerStyleRuleId,
-            boundEvalFun,
-            offset * static_cast<double>(offsetFactor));
+            boundEvalFun);
     }
 }
 

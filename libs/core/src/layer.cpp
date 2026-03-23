@@ -115,14 +115,14 @@ int32_t TileFeatureLayer::findFeatureIndex(std::string type, NativeJsValue idPar
     return -1;
 }
 
-std::string TileFeatureLayer::featureIdByIndex(uint32_t index) const
+std::string TileFeatureLayer::featureIdByAddress(uint32_t address) const
 {
-    if (index >= model_->numRoots()) {
+    if (address >= model_->numRoots()) {
         return {};
     }
     uint32_t currentIndex = 0;
     for (auto&& feature : *model_) {
-        if (currentIndex++ != index) {
+        if (currentIndex++ != address) {
             continue;
         }
         if (auto featureId = feature->id()) {
@@ -133,14 +133,14 @@ std::string TileFeatureLayer::featureIdByIndex(uint32_t index) const
     return {};
 }
 
-mapget::model_ptr<mapget::Feature> TileFeatureLayer::featureByIndex(uint32_t index) const
+mapget::model_ptr<mapget::Feature> TileFeatureLayer::featureByAddress(uint32_t address) const
 {
-    if (index >= model_->numRoots()) {
+    if (address >= model_->numRoots()) {
         return {};
     }
     uint32_t currentIndex = 0;
     for (auto&& feature : *model_) {
-        if (currentIndex++ == index) {
+        if (currentIndex++ == address) {
             return feature;
         }
     }

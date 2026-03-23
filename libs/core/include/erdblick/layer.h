@@ -80,18 +80,18 @@ struct TileFeatureLayer
     int32_t findFeatureIndex(std::string type, NativeJsValue idParts) const;
 
     /**
-     * Retrieves the feature ID string for a feature index.
-     * @param index Index of the feature in the tile.
+     * Retrieves the feature ID string for a feature address.
+     * @param address Tile-local address of the feature.
      * @return Feature ID string, or empty string if not found.
      */
-    std::string featureIdByIndex(uint32_t index) const;
+    std::string featureIdByAddress(uint32_t address) const;
 
     /**
-     * Retrieves a feature by index.
-     * @param index Index of the feature in the tile.
-     * @return Feature pointer, or null if index is out of range.
+     * Retrieves a feature by address.
+     * @param address Tile-local address of the feature.
+     * @return Feature pointer, or null if address is out of range.
      */
-    mapget::model_ptr<mapget::Feature> featureByIndex(uint32_t index) const;
+    mapget::model_ptr<mapget::Feature> featureByAddress(uint32_t address) const;
 
     ~TileFeatureLayer();
 
