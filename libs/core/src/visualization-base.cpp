@@ -202,21 +202,67 @@ void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
         targetRef);
 }
 
-std::vector<SelfContainedGeometry> FeatureLayerVisualizationBase::RelationStyleState::relationGeometries(
+std::vector<FeatureLayerVisualizationBase::RelationStyleState::ResolvedGeometry>
+FeatureLayerVisualizationBase::RelationStyleState::relationGeometries(
     model_ptr<MultiValidity> const& validities,
-    model_ptr<Feature> const& feature)
+    model_ptr<Feature> const& feature,
+    std::optional<uint32_t> preferredGeometryStage)
 {
-    std::vector<SelfContainedGeometry> result;
+    std::vector<ResolvedGeometry> result;
     if (validities) {
         validities->forEach([&](auto&& validity) {
-            result.emplace_back(validity.computeGeometry(feature->geomOrNull()));
+            auto const resolvedStage = validity.geometryStage().has_value()
+                ? validity.geometryStage()
+                : preferredGeometryStage;
+            result.emplace_back(ResolvedGeometry{
+                .geometry_ = validity.computeGeometry(feature->geomOrNull(), nullptr, preferredGeometryStage),
+                .stage_ = resolvedStage
+            });
             return true;
         });
     }
     if (result.empty()) {
-        result.emplace_back(feature->firstGeometry());
+        if (auto geometryCollection = feature->geomOrNull()) {
+            bool foundPreferred = false;
+            if (preferredGeometryStage) {
+                geometryCollection->forEachGeometryAtPreferredStage(
+                    preferredGeometryStage,
+                    [&](auto&& geometry) {
+                        result.emplace_back(ResolvedGeometry{
+                            .geometry_ = geometry->toSelfContained(),
+                            .stage_ = geometry->stage()
+                        });
+                        foundPreferred = true;
+                        return false;
+                    });
+            }
+            if (!foundPreferred) {
+                geometryCollection->forEachGeometry([&](auto&& geometry) {
+                    result.emplace_back(ResolvedGeometry{
+                        .geometry_ = geometry->toSelfContained(),
+                        .stage_ = geometry->stage()
+                    });
+                    return false;
+                });
+            }
+        }
     }
     return result;
+}
+
+std::optional<uint32_t> FeatureLayerVisualizationBase::preferredGeometryStageForCurrentFidelity(
+    std::optional<uint32_t> stageOverride) const
+{
+    if (stageOverride) {
+        return stageOverride;
+    }
+    if (fidelity_ == FeatureStyleRule::HighFidelity) {
+        return highFidelityStage_;
+    }
+    if (fidelity_ == FeatureStyleRule::LowFidelity) {
+        return highFidelityStage_ > 0U ? highFidelityStage_ - 1U : 0U;
+    }
+    return std::nullopt;
 }
 
 void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisualize& relationToRender)
@@ -245,20 +291,26 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
             return visualization_.evaluateExpression(expression, *relationContext, false, false);
         }};
 
-    auto const sourceGeometries =
-        relationGeometries(relationToRender.relation_->sourceValidityOrNull(), relationToRender.sourceFeature_);
-    auto const targetGeometries =
-        relationGeometries(relationToRender.relation_->targetValidityOrNull(), relationToRender.targetFeature_);
+    auto const preferredGeometryStage =
+        visualization_.preferredGeometryStageForCurrentFidelity(std::nullopt);
+    auto const sourceGeometries = relationGeometries(
+        relationToRender.relation_->sourceValidityOrNull(),
+        relationToRender.sourceFeature_,
+        preferredGeometryStage);
+    auto const targetGeometries = relationGeometries(
+        relationToRender.relation_->targetValidityOrNull(),
+        relationToRender.targetFeature_,
+        preferredGeometryStage);
 
     auto const sourceId = relationToRender.sourceFeature_->id()->toString();
     auto const targetId = relationToRender.targetFeature_->id()->toString();
 
     if (!sourceGeometries.empty()
         && !targetGeometries.empty()
-        && !sourceGeometries.front().points_.empty()
-        && !targetGeometries.front().points_.empty()) {
-        auto const sourceCenter = geometryCenter(sourceGeometries.front());
-        auto const targetCenter = geometryCenter(targetGeometries.front());
+        && !sourceGeometries.front().geometry_.points_.empty()
+        && !targetGeometries.front().geometry_.points_.empty()) {
+        auto const sourceCenter = geometryCenter(sourceGeometries.front().geometry_);
+        auto const targetCenter = geometryCenter(targetGeometries.front().geometry_);
         auto const liftedSource = Point{
             sourceCenter.x,
             sourceCenter.y,
@@ -302,12 +354,12 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
     if (auto sourceStyle = rule_.relationSourceStyle();
         sourceStyle && visualizedFeatureParts_.emplace(sourceId).second) {
         for (auto const& sourceGeometry : sourceGeometries) {
-            if (sourceGeometry.points_.empty()) {
+            if (sourceGeometry.geometry_.points_.empty()) {
                 continue;
             }
             visualization_.addGeometry(
-                sourceGeometry,
-                std::nullopt,
+                sourceGeometry.geometry_,
+                sourceGeometry.stage_,
                 FeatureLayerVisualizationBase::kUnselectableFeatureId,
                 *sourceStyle,
                 "",
@@ -319,12 +371,12 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
     if (auto targetStyle = rule_.relationTargetStyle();
         targetStyle && visualizedFeatureParts_.emplace(targetId).second) {
         for (auto const& targetGeometry : targetGeometries) {
-            if (targetGeometry.points_.empty()) {
+            if (targetGeometry.geometry_.points_.empty()) {
                 continue;
             }
             visualization_.addGeometry(
-                targetGeometry,
-                std::nullopt,
+                targetGeometry.geometry_,
+                targetGeometry.stage_,
                 FeatureLayerVisualizationBase::kUnselectableFeatureId,
                 *targetStyle,
                 "",
@@ -1344,6 +1396,8 @@ void FeatureLayerVisualizationBase::addAttribute(
     auto validityCountId = internalStringPoolCopy_->emplace("$validityCount");
 
     // Draw validity geometry.
+    auto const preferredGeometryStage =
+        preferredGeometryStageForCurrentFidelity(rule.stage());
     if (auto multiValidity = attr->validityOrNull()) {
         auto const totalValidityCount = static_cast<uint32_t>(multiValidity->size());
         uint32_t renderedValidityCount = 0;
@@ -1382,7 +1436,12 @@ void FeatureLayerVisualizationBase::addAttribute(
                 validityCountId.value(),
                 simfil::Value(static_cast<int64_t>(totalValidityCount)));
 
-            auto validityGeometry = validity.computeGeometry(feature->geomOrNull());
+            auto validityGeometry =
+                validity.computeGeometry(feature->geomOrNull(), nullptr, preferredGeometryStage);
+            auto const validityGeometryStage =
+                validity.geometryStage().has_value()
+                    ? validity.geometryStage()
+                    : preferredGeometryStage;
             if (hasRuleOffset) {
                 validityGeometry = offsetGeometryLocally(
                     validityGeometry,
@@ -1390,7 +1449,7 @@ void FeatureLayerVisualizationBase::addAttribute(
             }
             addGeometry(
                 validityGeometry,
-                attr->model().stage(),
+                validityGeometryStage,
                 tileFeatureId,
                 rule,
                 mapLayerStyleRuleId,
@@ -1412,20 +1471,26 @@ void FeatureLayerVisualizationBase::addAttribute(
         attrEvaluationContext->set(validityIndexId.value(), simfil::Value(static_cast<int64_t>(0)));
         attrEvaluationContext->set(validityCountId.value(), simfil::Value(static_cast<int64_t>(1)));
         ++offsetFactor;
-        auto geom = feature->firstGeometry();
-        auto shiftedGeometry = geom;
-        if (rule.offset().x != .0 || rule.offset().y != .0 || rule.offset().z != .0) {
-            shiftedGeometry = offsetGeometryLocally(
-                shiftedGeometry,
-                rule.offset() * static_cast<double>(offsetFactor));
+        if (auto geomCollection = feature->geomOrNull()) {
+            auto addAttributeGeometry =
+                [&, this](auto&& geom) {
+                    addGeometry(
+                        geom,
+                        tileFeatureId,
+                        rule,
+                        mapLayerStyleRuleId,
+                        boundEvalFun,
+                        rule.offset() * static_cast<double>(offsetFactor));
+                    return true;
+                };
+            if (preferredGeometryStage) {
+                geomCollection->forEachGeometryAtPreferredStage(
+                    preferredGeometryStage,
+                    addAttributeGeometry);
+            } else {
+                geomCollection->forEachGeometry(addAttributeGeometry);
+            }
         }
-        addGeometry(
-            shiftedGeometry,
-            attr->model().stage(),
-            tileFeatureId,
-            rule,
-            mapLayerStyleRuleId,
-            boundEvalFun);
     }
 }
 

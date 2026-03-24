@@ -56,6 +56,11 @@ public:
 
 protected:
     struct RelationStyleState {
+        struct ResolvedGeometry {
+            mapget::SelfContainedGeometry geometry_;
+            std::optional<uint32_t> stage_;
+        };
+
         struct RelationToVisualize {
             mapget::model_ptr<mapget::Relation> relation_;
             mapget::model_ptr<mapget::Feature> sourceFeature_;
@@ -76,9 +81,10 @@ protected:
             mapget::model_ptr<mapget::Feature> const& sourceFeature,
             mapget::model_ptr<mapget::Relation> const& relation,
             bool onlyUpdateTwowayFlags = false);
-        static std::vector<mapget::SelfContainedGeometry> relationGeometries(
+        static std::vector<ResolvedGeometry> relationGeometries(
             mapget::model_ptr<mapget::MultiValidity> const& validities,
-            mapget::model_ptr<mapget::Feature> const& feature);
+            mapget::model_ptr<mapget::Feature> const& feature,
+            std::optional<uint32_t> preferredGeometryStage);
         void render(RelationToVisualize& relationToRender);
 
         FeatureStyleRule const& rule_;
@@ -252,6 +258,8 @@ protected:
     static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
     static std::pair<JsValue, JsValue> encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& points);
     static JsValue encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& points);
+    [[nodiscard]] std::optional<uint32_t> preferredGeometryStageForCurrentFidelity(
+        std::optional<uint32_t> stageOverride = std::nullopt) const;
 
     bool featuresAdded_ = false;
     int viewIndex_;
