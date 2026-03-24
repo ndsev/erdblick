@@ -1,10 +1,9 @@
-import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
-import {KeyboardService} from "../shared/keyboard.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
@@ -37,19 +36,24 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
+            <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">
+                <span>Awaited tiles to load: </span><span>{{ awaitedTilesToLoad }}</span>
+                <p-progress-spinner strokeWidth="10" fill="transparent" animationDuration=".5s"
+                                    [style]="{ width: '1em', height: '1em', margin: '0' }"/>
+            </div>
 
             <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
                 <p-tablist>
                     <p-tab value="results">
-                        <span>Results</span>
+                        <span>Results </span>
                         <p-badge [value]="results.length"/>
                     </p-tab>
                     <p-tab value="diagnostics">
-                        <span>Diagnostics</span>
+                        <span>Diagnostics </span>
                         <p-badge [value]="diagnostics.length"/>
                     </p-tab>
                     <p-tab value="traces" *ngIf="traces.length > 0">
-                        <span>Traces</span>
+                        <span>Traces </span>
                         <p-badge [value]="traces.length"/>
                     </p-tab>
                 </p-tablist>
@@ -156,6 +160,7 @@ export class FeatureSearchComponent {
     percentDone: number = 0;
     totalTiles: number = 0;
     doneTiles: number = 0;
+    awaitedTilesToLoad: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
@@ -187,6 +192,7 @@ export class FeatureSearchComponent {
                 private dialogStack: DialogStackService) {
         this.searchService.progress.subscribe(searchState => {
             if (!searchState) {
+                this.awaitedTilesToLoad = 0;
                 this.resultsTree = [];
                 return;
             }
@@ -194,6 +200,7 @@ export class FeatureSearchComponent {
             this.percentDone = searchState.percentDone();
             this.totalTiles = searchState.getTaskCount();
             this.doneTiles = searchState.getCompletedCount();
+            this.awaitedTilesToLoad = searchState.getPendingTileCount();
             if (searchState.isComplete()) {
                 this.searchResultReady();
                 this.canPauseStopSearch = false;
@@ -285,6 +292,7 @@ export class FeatureSearchComponent {
         this.diagnostics = [];
         this.isSearchPaused = false;
         this.canPauseStopSearch = false;
+        this.awaitedTilesToLoad = 0;
         this.results = [];
         this.resultsTree = [];
         this.showFilter = false;

@@ -250,6 +250,15 @@ export class SearchState extends JobGroup {
         this.pendingTileKeys.delete(tileKey);
     }
 
+    getPendingTileCount(): number {
+        return this.pendingTileKeys.size;
+    }
+
+    override stop(): void {
+        this.pendingTileKeys.clear();
+        super.stop();
+    }
+
     override isComplete(): boolean {
         return super.isComplete() && !this.pendingTileKeys.size;
     }
@@ -489,6 +498,7 @@ export class FeatureSearchService {
         if (!this.currentSearch) {
             return;
         }
+        this.pendingSearchTilesByKey.clear();
         this.currentSearch.stop();
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);

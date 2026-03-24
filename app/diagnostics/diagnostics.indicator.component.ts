@@ -13,7 +13,7 @@ import {MapDataService} from '../mapdata/map.service';
                 @if (showSpinner$ | async) {
                     <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s"
                                         [style]="{ width: '1.75em', height: '1.75em' }"
-                                        [styleClass]="(paused$ | async) ? 'diagnostics-spinner-paused' : ''" />
+                                        [class]="(paused$ | async) ? 'diagnostics-spinner-paused' : ''" />
                 } @else {
                     <i class="pi pi-circle-fill" [class.disconnected]="!(backendConnected$ | async)"></i>
                 }
