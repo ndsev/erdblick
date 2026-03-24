@@ -2,6 +2,8 @@ import {describe, expect, it, vi} from "vitest";
 
 import {coreLib} from "../integrations/wasm";
 import {
+    LOW_FI_LOD7_TILE_COUNT_THRESHOLD,
+    LOW_FI_MAX_LOD,
     ViewVisualizationState
 } from "./view.visualization.model";
 
@@ -102,6 +104,36 @@ describe("ViewVisualizationState", () => {
         expect(level8Policy).toEqual({
             targetFidelity: "high",
             maxLowFiLod: null
+        });
+    });
+
+    it("pins low-fi rendering to the maximum LOD when requested", () => {
+        const state = new ViewVisualizationState();
+        state.viewport = {
+            south: 0,
+            west: 0,
+            width: 1,
+            height: 1,
+            camPosLon: 0,
+            camPosLat: 0,
+            orientation: 0
+        };
+
+        const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
+            .mockReturnValue([1000n]);
+        const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
+            .mockReturnValue(LOW_FI_LOD7_TILE_COUNT_THRESHOLD);
+
+        try {
+            state.recalculateTileIds(999, [0], 1234, true);
+        } finally {
+            getTileIdsSpy.mockRestore();
+            getNumTileIdsForCanonicalCameraSpy.mockRestore();
+        }
+
+        expect(state.getTileRenderPolicy(1000n)).toEqual({
+            targetFidelity: "low",
+            maxLowFiLod: LOW_FI_MAX_LOD
         });
     });
 });

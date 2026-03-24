@@ -12,6 +12,7 @@ import {
 } from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.pool";
 
 @Component({
     selector: 'preferences',
@@ -24,7 +25,12 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <label [for]="tilesToLoadInput">Max Tiles to Load</label>
                 <div class="slider-controls">
                     <div style="display: inline-block">
-                        <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="tilesToLoadInput"
+                               (ngModelChange)="onTilesToLoadInputChange($event)"
+                               (keydown.enter)="applyTileLimits()"/>
                         <p-slider [(ngModel)]="tilesToLoadInput"
                                   (ngModelChange)="onTilesToLoadSliderChange($event)"
                                   class="w-full"
@@ -42,7 +48,12 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
                 <div class="slider-controls">
                     <div style="display: inline-block">
-                        <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="limitSimultaneousInspectionsInput"
+                               (ngModelChange)="onInspectionsLimitInputChange($event)"
+                               (keydown.enter)="applyInspectionsLimits()"/>
                         <p-slider [(ngModel)]="limitSimultaneousInspectionsInput"
                                   (ngModelChange)="onInspectionsLimitSliderChange($event)"
                                   class="w-full"
@@ -75,6 +86,14 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
+                <label>Pin low-fi rendering to max LOD</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="pinLowFiToMaxLodSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setPinLowFiToMaxLod($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
                 <label>Render worker count override 
                     <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues" tooltipPosition="top"></i>
                 </label>
@@ -90,6 +109,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                type="text"
                                pInputText
                                [(ngModel)]="deckStyleWorkersCountInput"
+                               (ngModelChange)="onDeckStyleWorkersCountInputChange($event)"
                                [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
                                (keydown.enter)="applyDeckStyleWorkersCount()"/>
                         <p-slider [(ngModel)]="deckStyleWorkersCountInput"
@@ -162,12 +182,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     @ViewChild('pref') preferencesDialog?: Dialog;
 
-    tilesToLoadInput: number = 0;
-    limitSimultaneousInspectionsInput: number = 0;
+    tilesToLoadInput: number | string = 0;
+    limitSimultaneousInspectionsInput: number | string = 0;
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
+    pinLowFiToMaxLodSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
-    deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
+    deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     deckStyleWorkersCountChanged: boolean = false;
@@ -209,12 +230,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
             this.deckThreadedRenderingEnabledSetting = enabled;
         }));
+        this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
+            this.pinLowFiToMaxLodSetting = enabled;
+        }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersCountState.subscribe(count => {
             this.deckStyleWorkersCountInput = count;
         }));
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
     ngOnInit() {
@@ -229,6 +254,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     onDialogShow() {
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
         this.tilesToLoadInput = this.stateService.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
         this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
@@ -242,11 +268,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         if (!this.tilesToLoadChanged) {
             return;
         }
-        if (isNaN(this.tilesToLoadInput) || this.tilesToLoadInput < 0) {
+        const limit = Number(this.tilesToLoadInput);
+        if (!Number.isFinite(limit) || limit < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
+        this.tilesToLoadInput = limit;
+        this.stateService.tilesLoadLimit = limit;
         this.tilesToLoadChanged = false;
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
@@ -282,11 +310,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setDeckThreadedRenderingEnabled(enabled: boolean) {
         this.deckThreadedRenderingEnabledSetting = enabled;
         this.stateService.deckThreadedRenderingEnabled = enabled;
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    }
+
+    setPinLowFiToMaxLod(enabled: boolean) {
+        this.pinLowFiToMaxLodSetting = enabled;
+        this.stateService.pinLowFiToMaxLod = enabled;
     }
 
     setDeckStyleWorkersOverride(enabled: boolean) {
         this.deckStyleWorkersOverrideSetting = enabled;
         this.stateService.deckStyleWorkersOverride = enabled;
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
     applyDeckStyleWorkersCount() {
@@ -361,17 +396,52 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = true;
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
     }
 
     protected onInspectionsLimitSliderChange(value: number) {
         this.limitSimultaneousInspectionsInput = value;
-        this.inspectionsLimitChanged = true;
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
     }
 
     protected onDeckStyleWorkersCountSliderChange(value: number) {
         this.deckStyleWorkersCountInput = value;
-        this.deckStyleWorkersCountChanged = true;
+        this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
+    }
+
+    protected onTilesToLoadInputChange(value: number | string) {
+        this.tilesToLoadInput = value;
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+    }
+
+    protected onInspectionsLimitInputChange(value: number | string) {
+        this.limitSimultaneousInspectionsInput = value;
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    protected onDeckStyleWorkersCountInputChange(value: number | string) {
+        this.deckStyleWorkersCountInput = value;
+        this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
+    }
+
+    private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
+        if (typeof value === "string" && value.trim().length === 0) {
+            return true;
+        }
+        const parsedValue = Number(value);
+        return !Number.isFinite(parsedValue) || parsedValue !== currentValue;
+    }
+
+    private syncDeckStyleWorkersCountToAutoIfNeeded(): void {
+        if (this.stateService.deckStyleWorkersOverride) {
+            return;
+        }
+        const autoCount = getDeckRenderAutoWorkerCount();
+        this.deckStyleWorkersCountInput = autoCount;
+        this.deckStyleWorkersCountChanged = false;
+        if (this.stateService.deckStyleWorkersCount !== autoCount) {
+            this.stateService.deckStyleWorkersCount = autoCount;
+        }
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

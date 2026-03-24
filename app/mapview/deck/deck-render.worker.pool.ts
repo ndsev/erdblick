@@ -301,6 +301,10 @@ export function getDeckRenderWorkerConcurrency(): number {
     return resolveConfiguredWorkerCount();
 }
 
+export function getDeckRenderAutoWorkerCount(): number {
+    return resolveAutoWorkerCount();
+}
+
 export function deckRenderWorkerPool(): DeckRenderWorkerPool {
     if (!settings.threadedRenderingEnabled) {
         throw new Error("Deck render worker pipeline is disabled.");

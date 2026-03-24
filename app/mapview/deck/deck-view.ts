@@ -9,7 +9,6 @@ import {
 } from "@deck.gl/core";
 import {TileLayer, type TileLayerProps} from "@deck.gl/geo-layers";
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
-import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
@@ -120,6 +119,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly LOCATION_MARKER_ICON_NAME = "marker";
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
+    private static readonly VIEWPORT_BOUNDARY_SAMPLE_STEPS = 16;
     private static readonly UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
@@ -507,20 +507,38 @@ export abstract class DeckMapView implements IRenderView {
             return undefined;
         }
 
-        // Use the full ground-footprint quad instead of diagonal screen samples.
-        // The diagonal approximation collapses under pitch/bearing and briefly turns the
-        // tile-loading viewport into a thin strip while the camera is rotating.
-        const corners = getWebMercatorBounds(
-            viewport as unknown as Parameters<typeof getWebMercatorBounds>[0],
-            0
-        );
-        if (!Array.isArray(corners) || corners.length !== 4) {
+        const width = Math.max(1, Math.floor(viewport.width));
+        const height = Math.max(1, Math.floor(viewport.height));
+        const maxX = Math.max(0, width - 1);
+        const maxY = Math.max(0, height - 1);
+        const sampledCoordinates: [number, number][] = [];
+        for (let step = 0; step <= DeckMapView.VIEWPORT_BOUNDARY_SAMPLE_STEPS; step++) {
+            const t = step / DeckMapView.VIEWPORT_BOUNDARY_SAMPLE_STEPS;
+            const x = maxX * t;
+            const y = maxY * t;
+            const candidates = [
+                viewport.unproject([x, 0]),
+                viewport.unproject([maxX, y]),
+                viewport.unproject([maxX - x, maxY]),
+                viewport.unproject([0, maxY - y])
+            ];
+            for (const coordinate of candidates) {
+                if (!Array.isArray(coordinate) || coordinate.length < 2) {
+                    continue;
+                }
+                if (!Number.isFinite(coordinate[0]) || !Number.isFinite(coordinate[1])) {
+                    continue;
+                }
+                sampledCoordinates.push([coordinate[0], coordinate[1]]);
+            }
+        }
+        if (!sampledCoordinates.length) {
             return undefined;
         }
 
         const centerLon = this.viewState.longitude;
-        const longitudes = corners.map(corner => this.unwrapLongitudeNear(centerLon, Number(corner[0])));
-        const latitudes = corners.map(corner => Number(corner[1]));
+        const longitudes = sampledCoordinates.map(coordinate => this.unwrapLongitudeNear(centerLon, coordinate[0]));
+        const latitudes = sampledCoordinates.map(coordinate => coordinate[1]);
         if (![...longitudes, ...latitudes].every(Number.isFinite)) {
             return undefined;
         }

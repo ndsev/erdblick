@@ -386,6 +386,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly pinLowFiToMaxLodState = this.createState<boolean>({
+        name: 'pinLowFiToMaxLod',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly deckStyleWorkersCountState = this.createState<number>({
         name: 'deckStyleWorkersCount',
         defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
@@ -908,6 +914,8 @@ export class AppStateService implements OnDestroy {
     set numViews(val: number) {this.numViewsState.next(val);};
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
+    get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
+    set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}

@@ -25,60 +25,41 @@ export const LOW_FI_LOD4_TILE_COUNT_THRESHOLD = 128;
 export const LOW_FI_LOD5_TILE_COUNT_THRESHOLD = 64;
 export const LOW_FI_LOD6_TILE_COUNT_THRESHOLD = 32;
 export const LOW_FI_LOD7_TILE_COUNT_THRESHOLD = 16;
+export const LOW_FI_MAX_LOD = 7;
 
 export interface TileRenderPolicy {
     targetFidelity: "low" | "high";
     maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
 }
 
-function tileRenderPolicyForCount(tileCount: number): TileRenderPolicy {
+function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean): TileRenderPolicy {
+    const lowFiPolicy = (maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7): TileRenderPolicy => ({
+        targetFidelity: "low",
+        maxLowFiLod: pinLowFiToMaxLod ? LOW_FI_MAX_LOD : maxLowFiLod
+    });
     if (tileCount >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 0
-        };
+        return lowFiPolicy(0);
     }
     if (tileCount >= LOW_FI_LOD1_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 1
-        };
+        return lowFiPolicy(1);
     }
     if (tileCount >= LOW_FI_LOD2_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 2
-        };
+        return lowFiPolicy(2);
     }
     if (tileCount >= LOW_FI_LOD3_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 3
-        };
+        return lowFiPolicy(3);
     }
     if (tileCount >= LOW_FI_LOD4_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 4
-        };
+        return lowFiPolicy(4);
     }
     if (tileCount >= LOW_FI_LOD5_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 5
-        };
+        return lowFiPolicy(5);
     }
     if (tileCount >= LOW_FI_LOD6_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 6
-        };
+        return lowFiPolicy(6);
     }
     if (tileCount >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
-        return {
-            targetFidelity: "low",
-            maxLowFiLod: 7
-        };
+        return lowFiPolicy(7);
     }
     return {
         targetFidelity: "high",
@@ -207,7 +188,12 @@ export class ViewVisualizationState {
         }
     }
 
-    recalculateTileIds(tileLimit: number, levels: Iterable<number>, canonicalCameraAltitudeMeters: number) {
+    recalculateTileIds(
+        tileLimit: number,
+        levels: Iterable<number>,
+        canonicalCameraAltitudeMeters: number,
+        pinLowFiToMaxLod = false
+    ) {
         this.visibleTileIds.clear();
         this.tileRenderPolicy.clear();
         this.visibleTileIdsPerLevel.clear();
@@ -224,7 +210,7 @@ export class ViewVisualizationState {
             ]);
 
             const canonicalTileCount = coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level);
-            const levelPolicy = tileRenderPolicyForCount(canonicalTileCount);
+            const levelPolicy = tileRenderPolicyForCount(canonicalTileCount, pinLowFiToMaxLod);
 
             for (const tileId of visibleTileIdsForLevel) {
                 this.tileRenderPolicy.set(tileId, levelPolicy);

@@ -194,6 +194,9 @@ export class MapDataService {
         this.stateService.deckThreadedRenderingEnabledState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
+        this.stateService.pinLowFiToMaxLodState.subscribe(() => {
+            this.scheduleUpdate();
+        });
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tileStream?.setPullCompressionEnabled(enabled);
         });
@@ -1087,7 +1090,8 @@ export class MapDataService {
                 state.recalculateTileIds(
                     tileLimit,
                     this.visibleFeatureLevelsInView(viewIndex),
-                    this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt
+                    this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt,
+                    this.stateService.pinLowFiToMaxLod
                 );
             });
 
