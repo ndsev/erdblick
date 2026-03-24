@@ -253,7 +253,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 this.expandTreeNodes(this.data);
             }
 
-            this.scheduleScrollerRecalc();
             this.refreshLayout();
             this.cdr.markForCheck();
         });
@@ -368,33 +367,29 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
         this.scrollerRecalcFrame = window.requestAnimationFrame(() => {
             this.scrollerRecalcFrame = undefined;
-            const scroller = (<any>this.table?.scrollableViewChild)?.scroller;
-            if (!scroller) {
-                return;
-            }
-            scroller.init();
-            scroller.calculateAutoSize();
+            this.recalculateScrollerGeometry();
         });
     }
 
     refreshLayout(): void {
-        if (this.frozen) {
+        this.scheduleScrollerRecalc();
+    }
+
+    private recalculateScrollerGeometry(): void {
+        if (this.destroyed || this.frozen) {
             this.pendingScrollerRecalcWhileFrozen = true;
             return;
         }
-        // Recalculate virtual scroller geometry after data or container-size changes.
-        setTimeout(() => {
-            if (this.destroyed || this.frozen) {
-                this.pendingScrollerRecalcWhileFrozen = true;
-                return;
-            }
-            const scroller = (this.table as any)?.scrollableViewChild?.scroller;
-            if (scroller) {
-                scroller.init();
-                scroller.calculateAutoSize();
-            }
-            this.cdr.markForCheck();
-        }, 0);
+        const scroller = (this.table as any)?.scrollableViewChild?.scroller;
+        if (!scroller) {
+            return;
+        }
+
+        scroller.setSpacerSize?.();
+        scroller.setSize?.();
+        scroller.calculateOptions?.();
+        scroller.setContentPosition?.();
+        this.cdr.detectChanges();
     }
 
     measurePreferredContentHeightEm(): number | undefined {

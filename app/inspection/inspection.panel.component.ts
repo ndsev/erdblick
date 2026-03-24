@@ -183,7 +183,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
     panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
-    accordionValue: string | undefined = undefined;
+    accordionValue = '0';
     readonly accordionTransitionOptions = '320ms cubic-bezier(0.22, 1, 0.36, 1)';
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;

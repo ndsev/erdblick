@@ -25,9 +25,16 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <div class="slider-controls">
                     <div style="display: inline-block">
                         <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
-                        <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                        <p-slider [(ngModel)]="tilesToLoadInput"
+                                  (ngModelChange)="onTilesToLoadSliderChange($event)"
+                                  class="w-full"
+                                  [min]="0"
+                                  [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
                     </div>
-                    <p-button (click)="applyTileLimits()" label="" icon="pi pi-check"></p-button>
+                    <p-button (click)="applyTileLimits()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!tilesToLoadChanged"></p-button>
                 </div>
             </div>
             <p-divider></p-divider>
@@ -36,14 +43,23 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <div class="slider-controls">
                     <div style="display: inline-block">
                         <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
-                        <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="1" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                        <p-slider [(ngModel)]="limitSimultaneousInspectionsInput"
+                                  (ngModelChange)="onInspectionsLimitSliderChange($event)"
+                                  class="w-full"
+                                  [min]="1"
+                                  [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
                     </div>
-                    <p-button (click)="applyInspectionsLimits()" label="" icon="pi pi-check"></p-button>
+                    <p-button (click)="applyInspectionsLimits()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!inspectionsLimitChanged"></p-button>
                 </div>
             </div>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Tile pull compression</label>
+                <label>Tile pull compression 
+                    <i class="pi pi-info-circle" pTooltip="Use only when the bandwith is low" tooltipPosition="top"></i>
+                </label>
                 <p-selectButton [options]="toggleOptions"
                                 [(ngModel)]="tilePullCompressionEnabledSetting"
                                 optionLabel="label"
@@ -59,13 +75,15 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Deck worker count override</label>
+                <label>Render worker count override 
+                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues" tooltipPosition="top"></i>
+                </label>
                 <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
                                 [disabled]="!deckThreadedRenderingEnabledSetting"
                                 (ngModelChange)="setDeckStyleWorkersOverride($event)" />
             </div>
             <div class="slider-container">
-                <label [for]="deckStyleWorkersCountInput">Deck worker count</label>
+                <label [for]="deckStyleWorkersCountInput">Worker count</label>
                 <div class="slider-controls">
                     <div style="display: inline-block">
                         <input class="tiles-input w-full"
@@ -75,6 +93,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
                                (keydown.enter)="applyDeckStyleWorkersCount()"/>
                         <p-slider [(ngModel)]="deckStyleWorkersCountInput"
+                                  (ngModelChange)="onDeckStyleWorkersCountSliderChange($event)"
                                   class="w-full"
                                   [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
                                   [min]="1"
@@ -83,7 +102,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     <p-button (click)="applyDeckStyleWorkersCount()"
                               label=""
                               icon="pi pi-check"
-                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting">
+                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting || !deckStyleWorkersCountChanged">
                     </p-button>
                 </div>
             </div>
@@ -149,6 +168,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     deckThreadedRenderingEnabledSetting: boolean = true;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
+    tilesToLoadChanged: boolean = false;
+    inspectionsLimitChanged: boolean = false;
+    deckStyleWorkersCountChanged: boolean = false;
     toggleOptions = [
         {label: 'Off', value: false},
         {label: 'On', value: true}
@@ -207,15 +229,25 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     onDialogShow() {
+        this.tilesToLoadInput = this.stateService.tilesLoadLimit;
+        this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
+        this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
+        this.tilesToLoadChanged = false;
+        this.inspectionsLimitChanged = false;
+        this.deckStyleWorkersCountChanged = false;
         this.dialogStack.bringToFront(this.preferencesDialog);
     }
 
     applyTileLimits() {
+        if (!this.tilesToLoadChanged) {
+            return;
+        }
         if (isNaN(this.tilesToLoadInput) || this.tilesToLoadInput < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
         this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
+        this.tilesToLoadChanged = false;
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
@@ -258,7 +290,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     applyDeckStyleWorkersCount() {
-        if (!this.deckThreadedRenderingEnabledSetting || !this.deckStyleWorkersOverrideSetting) {
+        if (!this.deckThreadedRenderingEnabledSetting || !this.deckStyleWorkersOverrideSetting || !this.deckStyleWorkersCountChanged) {
             return;
         }
         const count = Number(this.deckStyleWorkersCountInput);
@@ -268,6 +300,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.deckStyleWorkersCountInput = count;
         this.stateService.deckStyleWorkersCount = count;
+        this.deckStyleWorkersCountChanged = false;
     }
 
     setDarkMode(setting: 'off' | 'on' | 'auto') {
@@ -313,13 +346,32 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     protected applyInspectionsLimits() {
+        if (!this.inspectionsLimitChanged) {
+            return;
+        }
         const limit = Number(this.limitSimultaneousInspectionsInput);
         if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_SIMULTANEOUS_INSPECTIONS) {
             this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
             return;
         }
         this.stateService.inspectionsLimit = limit;
+        this.inspectionsLimitChanged = false;
         this.messageService.showSuccess("Successfully updated inspections limit!");
+    }
+
+    protected onTilesToLoadSliderChange(value: number) {
+        this.tilesToLoadInput = value;
+        this.tilesToLoadChanged = true;
+    }
+
+    protected onInspectionsLimitSliderChange(value: number) {
+        this.limitSimultaneousInspectionsInput = value;
+        this.inspectionsLimitChanged = true;
+    }
+
+    protected onDeckStyleWorkersCountSliderChange(value: number) {
+        this.deckStyleWorkersCountInput = value;
+        this.deckStyleWorkersCountChanged = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

@@ -1,4 +1,4 @@
-import {Component, effect, input, OnDestroy, output, ViewChild} from "@angular/core";
+import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {MapDataService} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
@@ -60,15 +60,20 @@ export class FeaturePanelComponent implements OnDestroy {
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
     private readonly tileUpdateSubscription: Subscription;
+    private rebuildQueued = false;
+    private destroyed = false;
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private mapService: MapDataService,
-                private keyboardService: KeyboardService) {
+                private keyboardService: KeyboardService,
+                private cdr: ChangeDetectorRef,
+                private ngZone: NgZone) {
         // TODO: This shortcut is broken, the panels will race with each other.
         // this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
         effect(() => {
-            this.rebuildInspectionTree();
+            this.panel();
+            this.scheduleInspectionTreeRebuild();
         });
         this.tileUpdateSubscription = this.mapService.selectionTileUpdated.subscribe(tileKey => {
             const selectedFeatures = this.panel().features ?? [];
@@ -76,11 +81,12 @@ export class FeaturePanelComponent implements OnDestroy {
             if (!hasUpdatedSelectionTile) {
                 return;
             }
-            this.rebuildInspectionTree();
+            this.scheduleInspectionTreeRebuild();
         });
     }
 
     ngOnDestroy() {
+        this.destroyed = true;
         this.tileUpdateSubscription.unsubscribe();
     }
 
@@ -95,6 +101,23 @@ export class FeaturePanelComponent implements OnDestroy {
 
     measurePreferredHeightEm(): number | undefined {
         return this.inspectionTree?.measurePreferredContentHeightEm();
+    }
+
+    private scheduleInspectionTreeRebuild(): void {
+        if (this.rebuildQueued || this.destroyed) {
+            return;
+        }
+        this.rebuildQueued = true;
+        queueMicrotask(() => {
+            this.rebuildQueued = false;
+            if (this.destroyed) {
+                return;
+            }
+            this.ngZone.run(() => {
+                this.rebuildInspectionTree();
+                this.cdr.markForCheck();
+            });
+        });
     }
 
     private rebuildInspectionTree() {

@@ -164,6 +164,58 @@ main-bar {
     height: 3.1em;
     width: 100%;
   }
+
+  &.main-bar-mobile-layout {
+    top: 0 !important;
+    left: 0 !important;
+
+    .search-wrapper {
+      position: absolute;
+      top: 0;
+      left: 3em;
+      right: 0;
+      min-width: 0;
+      min-height: 3.5em;
+      max-width: none;
+      max-height: calc(100vh - 5em);
+
+      .search-input {
+        width: 100%;
+        height: 3em;
+        position: relative;
+        top: 0;
+        left: 0;
+
+        textarea {
+          width: calc(100% - 4em) !important;
+          height: 100%;
+          border-radius: 0;
+          border: none;
+          padding-top: 1em;
+        }
+
+        textarea.single-line {
+          width: calc(100% - 4em) !important;
+          height: 100%;
+          padding-left: 2em;
+          border-radius: 0;
+          border: none;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          overflow: hidden;
+          padding-top: 1em;
+        }
+      }
+    }
+
+    .main-bar {
+      .p-menubar-root-list {
+        height: unset !important;
+        background: var(--p-menubar-background) !important;
+        padding: var(--p-menubar-submenu-padding) !important;
+      }
+    }
+  }
 }
 
 .dock-toggle {
@@ -2322,7 +2374,6 @@ inspection-tree {
       resize: vertical;
       overflow: auto;
       direction: rtl;
-      max-width: calc(100vw - 28em);
       max-height: calc(100vh - 6em);
       padding-bottom: 0.5em;
 
@@ -2527,6 +2578,7 @@ inspection-tree {
       margin-top: 0;
       margin-bottom: 0;
       box-shadow: none !important;
+      border-radius: 0.5em 0.5em 0 0;
     }
 
     textarea.single-line {
@@ -2609,7 +2661,8 @@ inspection-tree {
     width: 100%;
     margin: 0;
     overflow: auto;
-    max-height: calc(100vh - 10.5em)
+    max-height: calc(100vh - 10.5em);
+    border-radius: 0 0 0.5em 0.5em;
   }
 
   .p-dialog-content {
@@ -2741,6 +2794,7 @@ inspection-tree {
     padding: 0 0.5em 0.5em 0.5em;
     min-height: 30em;
     max-height: calc(100vh - 5em);
+    overflow: hidden;
   }
 
   .p-dialog-header {
@@ -3410,7 +3464,7 @@ inspection-tree {
 
   padding: 0 0 0.25em 0;
   display: flex;
-  gap: 0.5em;
+  gap: 0.25em;
   align-items: center;
 
   .progress-bar-container {
@@ -3752,20 +3806,6 @@ inspection-tree {
     }
   }
 
-  main-bar {
-    position: absolute;
-    top: 0 !important;
-    left: 0 !important;
-
-    .main-bar {
-      .p-menubar-root-list {
-        height: unset !important;
-        background: var(--p-menubar-background) !important;
-        padding: var(--p-menubar-submenu-padding) !important;
-      }
-    }
-  }
-
   .main-layout {
     .collapsible-dock {
       &.open {
@@ -3801,14 +3841,6 @@ inspection-tree {
   }
 
   .search-wrapper {
-    position: absolute;
-    top: 0;
-    left: 3em;
-    min-width: 100%;
-    min-height: 3.5em;
-    max-width: 100%;
-    max-height: calc(100vh - 5em);;
-
     .resizable-container {
       position: relative;
       min-width: 100%;
@@ -3819,11 +3851,12 @@ inspection-tree {
       border-radius: 0;
       margin-left: -3em;
       resize: none;
+      left: 3em;
     }
 
     .p-dialog {
       max-height: calc(100vh - 11.5em);
-      border-radius: 0;
+      border-radius: 0 0 0.5em 0.5em;
 
       .p-dialog-content:last-of-type {
         border-bottom-right-radius: 0;
@@ -3836,33 +3869,6 @@ inspection-tree {
       }
     }
 
-    .search-input {
-      width: calc(100vw - 3em);
-      height: 3em;
-      position: relative;
-      top: 0;
-      left: 0;
-
-      textarea {
-        width: calc(100vw - 7em) !important;
-        height: 100%;
-        border-radius: 0;
-        border: none;
-        padding-top: 1em;
-      }
-
-      textarea.single-line {
-        width: calc(100vw - 7em) !important;
-        height: 100%;
-        padding-left: 2em;
-        border-radius: 0;
-        border: none;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-        overflow: hidden;
-        padding-top: 1em;
-      }
-    }
   }
 
   .pref-dialog {

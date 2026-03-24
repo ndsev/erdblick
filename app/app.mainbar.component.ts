@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, OnDestroy, ViewChild} from '@angular/core';
+import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {MapDataService} from './mapdata/map.service';
 import {StyleService} from './styledata/style.service';
@@ -14,8 +14,16 @@ import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 import {MenuItem} from "primeng/api";
 
+const MAIN_BAR_BREAKPOINT = '56em';
+const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
+const MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM = 45;
+const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
+
 @Component({
     selector: 'main-bar',
+    host: {
+        '[class.main-bar-mobile-layout]': 'isMobileMenubar'
+    },
     template: `
         @if (stateService.mapsDialogVisible) {
             <p-button class="maps-button" (click)="closeMapsPanel()" label="" tooltipPosition="right" pTooltip="Close maps configuration panel">
@@ -26,32 +34,61 @@ import {MenuItem} from "primeng/api";
                 <span class="material-symbols-outlined">stacks</span>
             </p-button>
         }
-        <p-menubar #mainBarMenubar class="main-bar" [model]="menuItems">
-            <ng-template #start>
-                @if (!environment.visualizationOnly) {
-                    <search-panel></search-panel>
-                }
-            </ng-template>
-            <ng-template #item let-item let-root="root">
-                <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
-                    <span class="material-symbols-outlined">{{ item.icon }}</span>
-                    <span>{{ item.name }}</span>
-                    @if (!root && item.items?.length) {
-                        <span class="pi submenu-indicator pi-angle-right"></span>
+        @if (isMobileMenubar) {
+            <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="forcedMobileMenubarBreakpoint">
+                <ng-template #start>
+                    @if (!environment.visualizationOnly) {
+                        <search-panel></search-panel>
                     }
-                </a>
-            </ng-template>
-            <ng-template #end>
-                <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
-                    <diagnostics-indicator></diagnostics-indicator>
-                    @if (copyright.length) {
-                        <div class="copyright-info" (click)="openLegalInfo()">
-                            {{ copyright }}
-                        </div>
+                </ng-template>
+                <ng-template #item let-item let-root="root">
+                    <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
+                        <span class="material-symbols-outlined">{{ item.icon }}</span>
+                        <span>{{ item.name }}</span>
+                        @if (!root && item.items?.length) {
+                            <span class="pi submenu-indicator pi-angle-right"></span>
+                        }
+                    </a>
+                </ng-template>
+                <ng-template #end>
+                    <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
+                        <diagnostics-indicator></diagnostics-indicator>
+                        @if (copyright.length) {
+                            <div class="copyright-info" (click)="openLegalInfo()">
+                                {{ copyright }}
+                            </div>
+                        }
+                    </div>
+                </ng-template>
+            </p-menubar>
+        } @else {
+            <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="desktopMenubarBreakpoint">
+                <ng-template #start>
+                    @if (!environment.visualizationOnly) {
+                        <search-panel></search-panel>
                     }
-                </div>
-            </ng-template>
-        </p-menubar>
+                </ng-template>
+                <ng-template #item let-item let-root="root">
+                    <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
+                        <span class="material-symbols-outlined">{{ item.icon }}</span>
+                        <span>{{ item.name }}</span>
+                        @if (!root && item.items?.length) {
+                            <span class="pi submenu-indicator pi-angle-right"></span>
+                        }
+                    </a>
+                </ng-template>
+                <ng-template #end>
+                    <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
+                        <diagnostics-indicator></diagnostics-indicator>
+                        @if (copyright.length) {
+                            <div class="copyright-info" (click)="openLegalInfo()">
+                                {{ copyright }}
+                            </div>
+                        }
+                    </div>
+                </ng-template>
+            </p-menubar>
+        }
     `,
     styles: [
         `
@@ -68,154 +105,31 @@ import {MenuItem} from "primeng/api";
     standalone: false
 })
 export class MainBarComponent implements AfterViewInit, OnDestroy {
-    @ViewChild('mainBarMenubar', {read: ElementRef})
-    private menubarRef?: ElementRef<HTMLElement>;
-    private menubarClassObserver?: MutationObserver;
     private readonly subscriptions = new Subscription();
+    private mediaQueryList?: MediaQueryList;
+    private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
+    private viewerLayoutResizeObserver?: ResizeObserver;
+    private viewerLayoutElement?: HTMLElement;
+    private viewportMobileMenubar = false;
+    private viewerLayoutMobileMenubar = false;
 
-    menuItems: MenuItem[] = [
-        {
-            name: 'Edit',
-            icon: 'tune',
-            items: [
-                {
-                    name: 'Styles Configurator',
-                    icon: 'palette',
-                    command: () => { this.openStylesDialog(); }
-                },
-                {
-                    name: 'Datasources',
-                    icon: 'data_table',
-                    command: () => { this.openDatasources(); }
-                },
-                {
-                    name: 'Settings',
-                    icon: 'settings',
-                    command: () => { this.showPreferencesDialog(); },
-                }
-            ]
-        },
-        {
-            name: 'View',
-            icon: 'view_column',
-            items: [
-                {
-                    name: 'Split View',
-                    icon: 'add_column_right',
-                    command: () => { this.stateService.numViews = 2; }
-                },
-                {
-                    name: 'Close Right View',
-                    icon: 'tab_close',
-                    command: () => { this.stateService.numViews = 1; }
-                },
-                {
-                    name: 'Sync Views',
-                    icon: 'sync',
-                    items: [
-                        {
-                            name: "Position",
-                            icon: "location_on",
-                            command: () => {
-                                this.stateService.syncOptions.forEach(option => {
-                                    if (option.code === VIEW_SYNC_POSITION) {
-                                        option.value = !option.value;
-                                    }
-                                });
-                                this.stateService.updateSelectedSyncOptions();
-                            }
-                        },
-                        {
-                            name: "Movement",
-                            icon: "drag_pan",
-                            command: () => {
-                                this.stateService.syncOptions.forEach(option => {
-                                    if (option.code === VIEW_SYNC_MOVEMENT) {
-                                        option.value = !option.value;
-                                    }
-                                });
-                                this.stateService.updateSelectedSyncOptions();
-                            }
-                        },
-                        {
-                            name: "Projection",
-                            icon: "3d_rotation",
-                            command: () => {
-                                this.stateService.syncOptions.forEach(option => {
-                                    if (option.code === VIEW_SYNC_PROJECTION) {
-                                        option.value = !option.value;
-                                    }
-                                });
-                                this.stateService.updateSelectedSyncOptions();
-                            }
-                        },
-                        {
-                            name: "Layers",
-                            icon: "layers",
-                            command: () => {
-                                this.stateService.syncOptions.forEach(option => {
-                                    if (option.code === VIEW_SYNC_LAYERS) {
-                                        option.value = !option.value;
-                                    }
-                                });
-                                this.stateService.updateSelectedSyncOptions();
-                            }
-                        }
-                    ]
-                }
-            ]
-        },
-        {
-            name: 'Tools',
-            icon: 'build',
-            items: [
-                {
-                    name: 'Performance Statistics',
-                    icon: 'insights',
-                    command: () => { this.openDiagnosticsPerformance(); }
-                },
-                {
-                    name: 'Export Diagnostics',
-                    icon: 'download',
-                    command: () => { this.openDiagnosticsExport(); }
-                },
-                {
-                    name: 'Logs',
-                    icon: 'list_alt',
-                    command: () => { this.openDiagnosticsLog(); }
-                }
-            ]
-        },
-        {
-            name: 'Help',
-            icon: 'question_mark',
-            items: [
-                {
-                    name: 'Controls',
-                    icon: 'keyboard',
-                    command: () => { this.showControlsDialog(); }
-                },
-                {
-                    name: 'Help',
-                    icon: 'question_mark',
-                    command: () => { this.openHelp(); }
-                },
-                {
-                    name: 'About',
-                    icon: 'info',
-                    command: () => { this.openAboutDialog(); }
-                }
-            ]
-        }
-    ];
-
+    protected isMobileMenubar = false;
+    protected readonly desktopMenubarBreakpoint = MAIN_BAR_BREAKPOINT;
+    protected readonly forcedMobileMenubarBreakpoint = MAIN_BAR_FORCED_MOBILE_BREAKPOINT;
+    protected readonly environment = environment;
+    menuItems: MenuItem[] = [];
     copyright: string = '';
 
     constructor(public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
-                private diagnostics: DiagnosticsFacadeService) {
+                private diagnostics: DiagnosticsFacadeService,
+                private elementRef: ElementRef<HTMLElement>,
+                private ngZone: NgZone) {
+        this.setupMobileMenuTracking();
+        this.initializeViewerLayoutMobileState();
+        this.rebuildMenuItems();
         this.subscriptions.add(this.mapService.legalInformationUpdated.subscribe(_ => {
             this.copyright = '';
             let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
@@ -228,34 +142,40 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     .replace(' ', ' ');
             }
         }));
-        this.updateViewMenuItemsVisibility(this.stateService.numViews);
         this.subscriptions.add(this.stateService.numViewsState.subscribe(numViews => {
-            this.updateViewMenuItemsVisibility(numViews);
+            this.rebuildMenuItems(numViews);
         }));
         this.subscriptions.add(this.stateService.viewSyncState.subscribe(() => {
-            this.menuItems = [...this.menuItems];
+            this.rebuildMenuItems();
         }));
     }
 
     ngAfterViewInit() {
-        const menubar = this.menubarRef?.nativeElement;
-        if (!menubar) {
-            return;
-        }
-        this.syncMobileMapsMenuItem(menubar.classList.contains('p-menubar-mobile'));
-        this.menubarClassObserver = new MutationObserver(records => {
-            for (const record of records) {
-                if (record.type === 'attributes' && record.attributeName === 'class') {
-                    this.syncMobileMapsMenuItem(menubar.classList.contains('p-menubar-mobile'));
-                }
-            }
-        });
-        this.menubarClassObserver.observe(menubar, {attributes: true, attributeFilter: ['class']});
+        this.setupViewerLayoutTracking();
     }
 
     ngOnDestroy() {
-        this.menubarClassObserver?.disconnect();
+        this.teardownMobileMenuTracking();
+        this.teardownViewerLayoutTracking();
         this.subscriptions.unsubscribe();
+    }
+
+    private setupMobileMenuTracking() {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return;
+        }
+        this.mediaQueryList = window.matchMedia(MAIN_BAR_MEDIA_QUERY);
+        this.viewportMobileMenubar = this.mediaQueryList.matches;
+        this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
+        this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
+            this.viewportMobileMenubar = event.matches;
+            this.updateMobileMenubarState();
+        };
+        if (typeof this.mediaQueryList.addEventListener === 'function') {
+            this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
+        } else {
+            this.mediaQueryList.addListener(this.mediaQueryChangeListener);
+        }
     }
 
     showPreferencesDialog() {
@@ -311,38 +231,222 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.stateService.legalInfoDialogVisible = true;
     }
 
-    private syncMobileMapsMenuItem(isMobileMenubar: boolean) {
-        const hasMobileMapsMenuItem = this.menuItems[0]["name"] === 'Maps';
-        if (isMobileMenubar && !hasMobileMapsMenuItem) {
-            this.menuItems = [{
-                name: 'Maps',
-                icon: 'stacks',
-                command: () => { this.showMapsPanel(); }
-            }, ...this.menuItems];
+    private teardownMobileMenuTracking() {
+        if (!this.mediaQueryList || !this.mediaQueryChangeListener) {
             return;
         }
-        if (!isMobileMenubar && hasMobileMapsMenuItem) {
-            this.menuItems = this.menuItems.slice(1);
+        if (typeof this.mediaQueryList.removeEventListener === 'function') {
+            this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
+        } else {
+            this.mediaQueryList.removeListener(this.mediaQueryChangeListener);
+        }
+        this.mediaQueryChangeListener = undefined;
+        this.mediaQueryList = undefined;
+    }
+
+    private initializeViewerLayoutMobileState() {
+        const viewerLayoutElement = this.findViewerLayoutElement();
+        if (!viewerLayoutElement) {
+            return;
+        }
+
+        this.viewerLayoutElement = viewerLayoutElement;
+        const width = viewerLayoutElement.getBoundingClientRect().width;
+        if (typeof width !== 'number' || width <= 0) {
+            return;
+        }
+
+        this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
+        this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
+    }
+
+    private setupViewerLayoutTracking() {
+        const viewerLayoutElement = this.viewerLayoutElement ?? this.findViewerLayoutElement();
+        if (!viewerLayoutElement) {
+            return;
+        }
+
+        this.viewerLayoutElement = viewerLayoutElement;
+        if (typeof ResizeObserver !== 'undefined') {
+            this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
+                this.ngZone.run(() => {
+                    const [entry] = entries;
+                    const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
+                    if (typeof width === 'number') {
+                        this.updateViewerLayoutMobileState(width);
+                    }
+                });
+            });
+            this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
         }
     }
 
-    private updateViewMenuItemsVisibility(numViews: number): void {
-        const viewMenu = this.menuItems.find(item => item['name'] === 'View');
-        if (!viewMenu?.items) {
+    private teardownViewerLayoutTracking() {
+        this.viewerLayoutResizeObserver?.disconnect();
+        this.viewerLayoutResizeObserver = undefined;
+        this.viewerLayoutElement = undefined;
+    }
+
+    private updateViewerLayoutMobileState(width: number) {
+        this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
+        this.updateMobileMenubarState();
+    }
+
+    private updateMobileMenubarState() {
+        const isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
+        if (this.isMobileMenubar === isMobileMenubar) {
             return;
         }
+        this.isMobileMenubar = isMobileMenubar;
+        this.rebuildMenuItems();
+    }
 
-        const splitViewItem = viewMenu.items.find(item => item['name'] === 'Split View');
-        if (splitViewItem) {
-            splitViewItem.visible = numViews <= 1;
+    private findViewerLayoutElement(): HTMLElement | undefined {
+        const viewerLayoutElement = this.elementRef.nativeElement.closest('.viewer-layout');
+        return viewerLayoutElement instanceof HTMLElement ? viewerLayoutElement : undefined;
+    }
+
+    private getViewerLayoutMobileBreakpointPx(): number {
+        if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+            return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * 16;
         }
 
-        const closeViewItem = viewMenu.items.find(item => item['name'] === 'Close Right View');
-        if (closeViewItem) {
-            closeViewItem.visible = numViews > 1;
-        }
+        const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+        const effectiveRootFontSize = Number.isFinite(rootFontSize) ? rootFontSize : 16;
+        return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * effectiveRootFontSize;
+    }
 
-        this.menuItems = [...this.menuItems];
+    private rebuildMenuItems(numViews: number = this.stateService.numViews): void {
+        this.menuItems = this.buildMenuItems(numViews, this.isMobileMenubar);
+    }
+
+    private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
+        const menuItems: MenuItem[] = [
+            {
+                name: 'Edit',
+                icon: 'tune',
+                items: [
+                    {
+                        name: 'Styles Configurator',
+                        icon: 'palette',
+                        command: () => { this.openStylesDialog(); }
+                    },
+                    {
+                        name: 'Datasources',
+                        icon: 'data_table',
+                        command: () => { this.openDatasources(); }
+                    },
+                    {
+                        name: 'Settings',
+                        icon: 'settings',
+                        command: () => { this.showPreferencesDialog(); },
+                    }
+                ]
+            },
+            {
+                name: 'View',
+                icon: 'view_column',
+                items: [
+                    {
+                        name: 'Split View',
+                        icon: 'add_column_right',
+                        visible: numViews <= 1,
+                        command: () => { this.stateService.numViews = 2; }
+                    },
+                    {
+                        name: 'Close Right View',
+                        icon: 'tab_close',
+                        visible: numViews > 1,
+                        command: () => { this.stateService.numViews = 1; }
+                    },
+                    {
+                        name: 'Sync Views',
+                        icon: 'sync',
+                        items: [
+                            {
+                                name: "Position",
+                                icon: "location_on",
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_POSITION); }
+                            },
+                            {
+                                name: "Movement",
+                                icon: "drag_pan",
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_MOVEMENT); }
+                            },
+                            {
+                                name: "Projection",
+                                icon: "3d_rotation",
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_PROJECTION); }
+                            },
+                            {
+                                name: "Layers",
+                                icon: "layers",
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_LAYERS); }
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                name: 'Tools',
+                icon: 'build',
+                items: [
+                    {
+                        name: 'Performance Statistics',
+                        icon: 'insights',
+                        command: () => { this.openDiagnosticsPerformance(); }
+                    },
+                    {
+                        name: 'Export Diagnostics',
+                        icon: 'download',
+                        command: () => { this.openDiagnosticsExport(); }
+                    },
+                    {
+                        name: 'Logs',
+                        icon: 'list_alt',
+                        command: () => { this.openDiagnosticsLog(); }
+                    }
+                ]
+            },
+            {
+                name: 'Help',
+                icon: 'question_mark',
+                items: [
+                    {
+                        name: 'Controls',
+                        icon: 'keyboard',
+                        command: () => { this.showControlsDialog(); }
+                    },
+                    {
+                        name: 'Help',
+                        icon: 'question_mark',
+                        command: () => { this.openHelp(); }
+                    },
+                    {
+                        name: 'About',
+                        icon: 'info',
+                        command: () => { this.openAboutDialog(); }
+                    }
+                ]
+            }
+        ];
+        if (includeMobileMaps) {
+            menuItems.unshift({
+                name: 'Maps',
+                icon: 'stacks',
+                command: () => { this.showMapsPanel(); }
+            });
+        }
+        return menuItems;
+    }
+
+    private toggleSyncOption(code: string): void {
+        this.stateService.syncOptions.forEach(option => {
+            if (option.code === code) {
+                option.value = !option.value;
+            }
+        });
+        this.stateService.updateSelectedSyncOptions();
     }
 
     protected isSyncViewOptionActive(item: MenuItem): boolean {
@@ -360,6 +464,4 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 return false;
         }
     }
-
-    protected readonly environment = environment;
 }
