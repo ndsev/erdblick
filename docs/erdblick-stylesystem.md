@@ -73,7 +73,6 @@ options:
 | `billboard` | Optional `true`/`false` override for camera-facing rendering. When omitted, erdblick keeps the primitive-specific default (for example paths stay world-oriented, while labels/icons stay billboarded). |
 | `flat` | Clamp geometry to ground, ignoring heights. |
 | `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
-| `near-far-scale` | `[near, nearValue, far, farValue]` scaling curve. |
 | `offset` / `vertical-offset` | `[x, y, z]` offsets in meters (or a single vertical offset). Useful for stacking multiple representations. |
 | `icon-url` / `icon-url-expression` | Static path or Simfil expression for billboard icons. |
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
@@ -89,16 +88,6 @@ options:
 | `label-color`, `label-outline-color`, `label-background-color`, `label-font`, `label-style`, `label-scale` | Standard deck.gl label attributes. |
 | `label-outline-width`, `label-background-padding` | Outline/padding controls. |
 | `label-horizontal-origin`, `label-vertical-origin`, `label-height-reference`, `label-eye-offset`, `label-pixel-offset` | Advanced deck.gl label positioning knobs. |
-
-### Distance-Based Properties
-
-Each entry accepts `[near, nearValue, far, farValue]`:
-
-| Field | Description |
-| --- | --- |
-| `translucency-by-distance` | Fades primitives based on camera distance. |
-| `scale-by-distance` | Scales points or billboards. |
-| `offset-scale-by-distance` | Adjusts offsets according to distance. |
 
 ### Relation-Specific Fields (`aspect: relation`)
 
@@ -172,7 +161,7 @@ SourceData panels and the inspection tree mirror the same validity information; 
 When you move beyond basic coloring and start visualizing relations or labels, a few patterns make styles easier to reason about:
 
 - **Relations**: use `aspect: relation` plus `relation-recursive: true` when you want the UI to traverse relation chains (for example lane groups). Recursion stops at tile boundaries and only follows relations within the same layer. Combine this with separate rules for `mode: hover` or `mode: selection` if relation highlighting should only appear on hover or selection.
-- **Labels**: to keep labels legible, consider combining `label-text-expression` with `scale-by-distance`. When stacking multiple labels, adjust `label-eye-offset` to avoid z-fighting.
+- **Labels**: use `label-text-expression` to keep labels concise and data-driven. When stacking multiple labels, adjust `label-eye-offset` to avoid z-fighting.
 - **Source references**: rules inherit the same hover/selection colors used in the inspector. If you need a dedicated highlight color, create a `mode: selection` rule with the desired `color`/`opacity`.
 
 ## Performance Considerations

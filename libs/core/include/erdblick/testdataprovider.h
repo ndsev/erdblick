@@ -262,7 +262,6 @@ public:
             label-text: "abc"
             label-style: "FILL_AND_OUTLINE"
             label-scale: 1
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -282,7 +281,6 @@ public:
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
             label-style: "FILL_AND_OUTLINE"
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -302,7 +300,6 @@ public:
             label-text-expression: "**.wayType as string"
             label-text: "abc"
             label-style: "OUTLINE"
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -322,7 +319,6 @@ public:
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
             label-style: "FILL"
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -346,7 +342,6 @@ public:
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
             label-style: "FILL"
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - polygon
@@ -394,7 +389,6 @@ public:
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
             label-style: "OUTLINE"
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - mesh
@@ -412,7 +406,6 @@ public:
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
             label-style: "FILL"
-            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - type: "Diamond"
             aspect: relation
@@ -431,7 +424,6 @@ public:
             # Catch-all default fallback
             - outline-color: orange
               outline-width: 3
-              near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
               width: 5
         )yaml"));
     }

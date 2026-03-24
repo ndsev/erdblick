@@ -192,17 +192,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse option for the width of the feature outline color.
         outlineWidth_ = yaml["outline-width"].as<float>();
     }
-    if (yaml["near-far-scale"].IsDefined()) {
-        // Parse option for the scale of the feature depending on camera distance.
-        auto components = yaml["near-far-scale"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            nearFarScale_ = {.0};
-            std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
-        }
-    }
     if (yaml["vertical-offset"].IsDefined()) {
-        // Parse option for the width of the feature outline color.
-        offset_.y = yaml["vertical-offset"].as<double>();
+        // Convenience alias for the "up" component of the local offset.
+        offset_.z = yaml["vertical-offset"].as<double>();
     }
     if (yaml["offset"].IsDefined() && yaml["offset"].size() >= 1) {
         offset_.x = yaml["offset"][0].as<double>();
@@ -317,7 +309,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         else
             std::cout << "Unsupported validity requirement: " << reqValidityStr << std::endl;
     }
-
     /////////////////////////////////////
     /// Label Rule Fields
     /////////////////////////////////////
@@ -383,31 +374,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             labelEyeOffset_ = std::tuple<float, float, float>{coordinates.at(0), coordinates.at(1), coordinates.at(2)};
         }
     }
-    if (yaml["translucency-by-distance"].IsDefined()) {
-        // Parse option for near and far translucency properties of a Label based on the Label's distance from the camera.
-        auto components = yaml["translucency-by-distance"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            translucencyByDistance_ = {.0};
-            std::copy(components.begin(), components.begin()+4, translucencyByDistance_->begin());
-        }
-    }
-    if (yaml["scale-by-distance"].IsDefined()) {
-        // Parse option for near and far scale properties of a Label based on the Label's distance from the camera.
-        auto components = yaml["scale-by-distance"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            scaleByDistance_ = {.0};
-            std::copy(components.begin(), components.begin()+4, scaleByDistance_->begin());
-        }
-    }
-    if (yaml["offset-scale-by-distance"].IsDefined()) {
-        // Parse option for near and far offset scale properties of a Label based on the Label's distance from the camera.
-        auto components = yaml["offset-scale-by-distance"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            offsetScaleByDistance_ = {.0};
-            std::copy(components.begin(), components.begin()+4, offsetScaleByDistance_->begin());
-        }
-    }
-
     /////////////////////////////////////
     /// Sub-Rule Fields
     /////////////////////////////////////
@@ -588,11 +554,6 @@ float FeatureStyleRule::outlineWidth() const
     return outlineWidth_;
 }
 
-std::optional<std::array<float, 4>> const& FeatureStyleRule::nearFarScale() const
-{
-    return nearFarScale_;
-}
-
 float FeatureStyleRule::relationLineHeightOffset() const
 {
     return relationLineHeightOffset_;
@@ -748,21 +709,6 @@ std::optional<std::pair<float, float>> const& FeatureStyleRule::labelPixelOffset
 std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEyeOffset() const
 {
     return labelEyeOffset_;
-}
-
-std::optional<std::array<float, 4>> const& FeatureStyleRule::translucencyByDistance() const
-{
-    return translucencyByDistance_;
-}
-
-std::optional<std::array<float, 4>> const& FeatureStyleRule::scaleByDistance() const
-{
-    return scaleByDistance_;
-}
-
-std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistance() const
-{
-    return offsetScaleByDistance_;
 }
 
 glm::dvec3 const& FeatureStyleRule::offset() const

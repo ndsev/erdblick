@@ -76,7 +76,6 @@ public:
     [[nodiscard]] Arrow arrow(BoundEvalFun const& evalFun) const;
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
-    [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
     [[nodiscard]] glm::dvec3 const& offset() const;
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
@@ -95,7 +94,6 @@ public:
     [[nodiscard]] std::optional<std::string> const& attributeFilter() const;
     [[nodiscard]] std::optional<std::regex> const& attributeLayerType() const;
     [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
-
     [[nodiscard]] bool hasLabel() const;
     [[nodiscard]] std::string const& labelFont() const;
     [[nodiscard]] glm::fvec4 const& labelColor() const;
@@ -113,9 +111,6 @@ public:
     [[nodiscard]] float labelScale() const;
     [[nodiscard]] std::optional<std::pair<float, float>> const& labelPixelOffset() const;
     [[nodiscard]] std::optional<std::tuple<float, float, float>> const& labelEyeOffset() const;
-    [[nodiscard]] std::optional<std::array<float, 4>> const& translucencyByDistance() const;
-    [[nodiscard]] std::optional<std::array<float, 4>> const& scaleByDistance() const;
-    [[nodiscard]] std::optional<std::array<float, 4>> const& offsetScaleByDistance() const;
 
     [[nodiscard]] uint32_t const& index() const;
 
@@ -148,7 +143,6 @@ private:
     std::string arrowExpression_;
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
-    std::optional<std::array<float, 4>> nearFarScale_;
     glm::dvec3 offset_{.0, .0, .0};
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
@@ -169,9 +163,6 @@ private:
     float labelScale_ = 1.;
     std::optional<std::pair<float, float>> labelPixelOffset_;
     std::optional<std::tuple<float, float, float>> labelEyeOffset_;
-    std::optional<std::array<float, 4>> translucencyByDistance_;
-    std::optional<std::array<float, 4>> scaleByDistance_;
-    std::optional<std::array<float, 4>> offsetScaleByDistance_;
 
     std::string iconUrl_;
     std::string iconUrlExpression_;
@@ -188,7 +179,6 @@ private:
     std::optional<std::string> attributeFilter_;
     std::optional<std::regex> attributeLayerType_;
     std::optional<bool> attributeValidityGeometry_;
-
     std::vector<FeatureStyleRule> firstOfRules_;
 
     // Index of the rule within the style sheet
