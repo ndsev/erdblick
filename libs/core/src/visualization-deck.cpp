@@ -197,9 +197,19 @@ JsValue DeckFeatureLayerVisualization::pathBuffersToJs(PathBuffers const& buffer
 
 JsValue DeckFeatureLayerVisualization::geometryBuffersToJs(GeometryBuffers const& buffers)
 {
+    auto labelWorld = JsValue::List();
+    for (auto const& label : buffers.labelWorld) {
+        labelWorld.push(label);
+    }
+    auto labelBillboard = JsValue::List();
+    for (auto const& label : buffers.labelBillboard) {
+        labelBillboard.push(label);
+    }
     return JsValue::Dict({
         {"pointWorld", pointBuffersToJs(buffers.pointWorld)},
         {"pointBillboard", pointBuffersToJs(buffers.pointBillboard)},
+        {"labelWorld", labelWorld},
+        {"labelBillboard", labelBillboard},
         {"surface", surfaceBuffersToJs(buffers.surfaces)},
         {"pathWorld", pathBuffersToJs(buffers.pathWorld, true)},
         {"pathBillboard", pathBuffersToJs(buffers.pathBillboard, true)},
@@ -336,6 +346,8 @@ bool DeckFeatureLayerVisualization::hasGeometry(GeometryBuffers const& buffers)
 {
     return hasGeometry(buffers.pointWorld)
         || hasGeometry(buffers.pointBillboard)
+        || !buffers.labelWorld.empty()
+        || !buffers.labelBillboard.empty()
         || hasGeometry(buffers.surfaces)
         || hasGeometry(buffers.pathWorld)
         || hasGeometry(buffers.pathBillboard)
@@ -468,6 +480,46 @@ void DeckFeatureLayerVisualization::emitIcon(
     BoundEvalFun& evalFun)
 {
     appendPointGeometry(pointFromJsValue(xyzPos), rule, tileFeatureId, evalFun);
+}
+
+void DeckFeatureLayerVisualization::emitLabel(
+    JsValue const& xyzPos,
+    std::string const& text,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    (void) evalFun;
+    auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
+    auto params = JsValue::Dict({
+        {"featureAddress", JsValue(selectableFeatureId)},
+        {"position", xyzPos},
+        {"text", JsValue(text)},
+        {"fillColor", rgbaBytesFromColor(rule.labelColor())},
+        {"outlineColor", rgbaBytesFromColor(rule.labelOutlineColor())},
+        {"outlineWidth", JsValue(rule.labelOutlineWidth())},
+        {"scale", JsValue(rule.labelScale())},
+        {"billboard", JsValue(resolveLabelBillboard(rule))}
+    });
+    if (auto const& pixelOffset = rule.labelPixelOffset()) {
+        params.set("pixelOffset", JsValue::List({
+            JsValue(pixelOffset->first),
+            JsValue(pixelOffset->second),
+        }));
+    }
+    auto const billboard = resolveLabelBillboard(rule);
+    auto appendToBuffers = [&](GeometryBuffers& buffers)
+    {
+        (billboard ? buffers.labelBillboard : buffers.labelWorld).push_back(params);
+    };
+    if (emitToAggregateForCurrentFeatureLod()) {
+        appendToBuffers(aggregateBuffers_);
+    }
+    if (lowFiBundleModeEnabled()) {
+        auto const featureLod = static_cast<size_t>(activeLodBucket());
+        appendToBuffers(lowFiBuffersForLod(featureLod));
+    }
+    featuresAdded_ = true;
 }
 
 JsValue DeckFeatureLayerVisualization::makeMergedPointPointParams(

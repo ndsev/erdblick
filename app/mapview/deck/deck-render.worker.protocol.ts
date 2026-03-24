@@ -66,9 +66,23 @@ export interface DeckPathBucketBuffers {
     dashArrays?: Float32Array;
 }
 
+export interface DeckLabelDatum {
+    featureAddress: number;
+    position: {x: number, y: number, z: number};
+    text: string;
+    fillColor: [number, number, number, number];
+    outlineColor: [number, number, number, number];
+    outlineWidth: number;
+    scale: number;
+    pixelOffset?: [number, number];
+    billboard: boolean;
+}
+
 export interface DeckGeometryBucketBuffers {
     pointWorld: DeckPointBucketBuffers;
     pointBillboard: DeckPointBucketBuffers;
+    labelWorld: DeckLabelDatum[];
+    labelBillboard: DeckLabelDatum[];
     surface: DeckSurfaceBucketBuffers;
     pathWorld: DeckPathBucketBuffers;
     pathBillboard: DeckPathBucketBuffers;

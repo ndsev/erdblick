@@ -67,6 +67,12 @@ private:
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun) override;
+    void emitLabel(
+        JsValue const& xyzPos,
+        std::string const& text,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun) override;
     JsValue makeMergedPointPointParams(
         JsValue const& xyzPos,
         FeatureStyleRule const& rule,
@@ -152,6 +158,8 @@ public:
     struct GeometryBuffers {
         PointBuffers pointWorld;
         PointBuffers pointBillboard;
+        std::vector<JsValue> labelWorld;
+        std::vector<JsValue> labelBillboard;
         SurfaceBuffers surfaces;
         PathBuffers pathWorld;
         PathBuffers pathBillboard;

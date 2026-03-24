@@ -162,6 +162,72 @@ describe("DeckTileVisualization", () => {
         expect(deck.commits[1]).toHaveLength(0);
     });
 
+    it("removes label layers on destroy", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            peekAsync: async () => undefined,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = makeStyle();
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            1,
+            true,
+            null,
+            {value: 0} as any
+        ) as any;
+
+        visu.renderWasm = async () => {
+            visu.latestLabelLayerData = [{
+                length: 1,
+                billboard: false,
+                coordinateOrigin: [11, 48, 0],
+                data: [{
+                    featureAddress: 123,
+                    position: [0, 0, 0],
+                    text: "LG-1",
+                    fillColor: [255, 255, 255, 255],
+                    outlineColor: [0, 0, 0, 255],
+                    outlineWidth: 1,
+                    scale: 1
+                }]
+            }];
+            return [];
+        };
+
+        const rendered = await visu.render({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+        registry.flush();
+
+        expect(rendered).toBe(true);
+        expect(deck.commits).toHaveLength(1);
+        expect(deck.commits[0]).toHaveLength(1);
+        expect(deck.commits[0][0].id).toContain("/label");
+
+        visu.destroy({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+        registry.flush();
+
+        expect(deck.commits).toHaveLength(2);
+        expect(deck.commits[1]).toHaveLength(0);
+    });
+
     it("renders arrows as a dedicated deck path layer", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);

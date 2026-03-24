@@ -8,7 +8,7 @@ import {
 } from "../../../build/libs/core/erdblick-core";
 import {SceneMode} from "../../integrations/geo";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
-import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer} from "@deck.gl/layers";
+import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {Matrix4} from "@math.gl/core";
@@ -23,6 +23,7 @@ import {
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
     DeckGeometryBucketBuffers,
+    DeckLabelDatum,
     DeckGeometryOutputMode,
     DeckLowFiBundleBuffers,
     DeckPathBucketBuffers,
@@ -109,6 +110,17 @@ interface DeckSurfaceLayerData {
     };
 }
 
+interface DeckLabelLayerData {
+    length: number;
+    billboard: boolean;
+    coordinateOrigin: [number, number, number];
+    data: DeckRenderableLabelDatum[];
+}
+
+type DeckRenderableLabelDatum = Omit<DeckLabelDatum, "position"> & {
+    position: [number, number, number];
+};
+
 interface DeckPathRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
@@ -139,6 +151,7 @@ interface DeckWasmRenderOutput {
     surfaceLayerData: DeckSurfaceLayerData[];
     pathLayerData: DeckPathLayerData[];
     pointLayerData: DeckPointLayerData[];
+    labelLayerData: DeckLabelLayerData[];
     arrowLayerData: DeckPathLayerData[];
     lowFiBundles: DeckLowFiBundleData[];
     mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
@@ -151,6 +164,7 @@ interface DeckLowFiBundleData {
     surfaceLayerData: DeckSurfaceLayerData[];
     pathLayerData: DeckPathLayerData[];
     pointLayerData: DeckPointLayerData[];
+    labelLayerData: DeckLabelLayerData[];
     arrowLayerData: DeckPathLayerData[];
 }
 
@@ -219,6 +233,7 @@ interface DeckLayerKeys {
     surfaceLayerKey: string;
     pathLayerKey: string;
     pointLayerKey: string;
+    labelLayerKey: string;
     arrowLayerKey: string;
 }
 
@@ -228,6 +243,7 @@ interface DeckLayerRenderEntry {
     surfaceLayerData: DeckSurfaceLayerData[];
     pathLayerData: DeckPathLayerData[];
     pointLayerData: DeckPointLayerData[];
+    labelLayerData: DeckLabelLayerData[];
     arrowLayerData: DeckPathLayerData[];
 }
 
@@ -260,6 +276,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private readonly surfaceLayerKeys = new Set<string>();
     private readonly pointLayerKeys = new Set<string>();
     private readonly pathLayerKeys = new Set<string>();
+    private readonly labelLayerKeys = new Set<string>();
     private readonly arrowLayerKeys = new Set<string>();
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
@@ -268,6 +285,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private latestWorkerTimings: DeckWorkerTimings | null = null;
     private latestSurfaceLayerData: DeckSurfaceLayerData[] = [];
     private latestPointLayerData: DeckPointLayerData[] = [];
+    private latestLabelLayerData: DeckLabelLayerData[] = [];
     private latestArrowLayerData: DeckPathLayerData[] = [];
     private latestLowFiBundleData: DeckLowFiBundleData[] = [];
     private lowFiBundleByLod = new Map<number, DeckLowFiBundleData>();
@@ -325,6 +343,7 @@ export class DeckTileVisualization implements ITileVisualization {
 
             this.latestSurfaceLayerData = [];
             this.latestPointLayerData = [];
+            this.latestLabelLayerData = [];
             this.latestArrowLayerData = [];
             this.latestLowFiBundleData = [];
             this.latestMergedPointFeatures = null;
@@ -332,6 +351,7 @@ export class DeckTileVisualization implements ITileVisualization {
             let pathLayerData = await this.renderWasm(fidelity);
             let surfaceLayerData = this.latestSurfaceLayerData;
             let pointLayerData = this.latestPointLayerData;
+            let labelLayerData = this.latestLabelLayerData;
             let arrowLayerData = this.latestArrowLayerData;
             let activeLowFiLods: number[] = [];
             let selectedLowFiBundles: DeckLowFiBundleData[] = [];
@@ -349,6 +369,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     surfaceLayerData = [];
                     pathLayerData = [];
                     pointLayerData = [];
+                    labelLayerData = [];
                     arrowLayerData = [];
                     activeLowFiLods = selectedLowFiBundles.map((bundle) => bundle.lod);
                 }
@@ -359,6 +380,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 surfaceLayerData,
                 pathLayerData,
                 pointLayerData,
+                labelLayerData,
                 arrowLayerData,
                 mergedPointFeatures
             )) {
@@ -376,6 +398,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     surfaceLayerData,
                     pathLayerData,
                     pointLayerData,
+                    labelLayerData,
                     arrowLayerData
                 );
             }
@@ -427,6 +450,13 @@ export class DeckTileVisualization implements ITileVisualization {
                 kind: "point",
                 variant
             }),
+            labelLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "label",
+                variant
+            }),
             arrowLayerKey: makeDeckLayerKey({
                 tileKey: this.tile.mapTileKey,
                 styleId: this.styleId,
@@ -470,6 +500,7 @@ export class DeckTileVisualization implements ITileVisualization {
         surfaceLayerData: DeckSurfaceLayerData[],
         pathLayerData: DeckPathLayerData[],
         pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
         arrowLayerData: DeckPathLayerData[]
     ): void {
         this.applyLayerEntriesToRegistry(sceneHandle, registry, [{
@@ -478,6 +509,7 @@ export class DeckTileVisualization implements ITileVisualization {
             surfaceLayerData,
             pathLayerData,
             pointLayerData,
+            labelLayerData,
             arrowLayerData
         }]);
     }
@@ -493,6 +525,7 @@ export class DeckTileVisualization implements ITileVisualization {
             surfaceLayerData: bundle.surfaceLayerData,
             pathLayerData: bundle.pathLayerData,
             pointLayerData: bundle.pointLayerData,
+            labelLayerData: bundle.labelLayerData,
             arrowLayerData: bundle.arrowLayerData
         })));
     }
@@ -505,6 +538,7 @@ export class DeckTileVisualization implements ITileVisualization {
         const desiredSurfaceLayerKeys = new Set<string>();
         const desiredPointLayerKeys = new Set<string>();
         const desiredPathLayerKeys = new Set<string>();
+        const desiredLabelLayerKeys = new Set<string>();
         const desiredArrowLayerKeys = new Set<string>();
         const modelMatrix = this.modelMatrixForScene(sceneHandle);
         const surfaceParameters = this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value
@@ -562,6 +596,35 @@ export class DeckTileVisualization implements ITileVisualization {
                 });
                 registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset);
                 desiredPointLayerKeys.add(layerKeys.pointLayerKey);
+            }
+
+            for (const labelLayerData of entry.labelLayerData) {
+                if (labelLayerData.length <= 0) {
+                    continue;
+                }
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(entry.variantSuffix, "label", labelLayerData.billboard)
+                );
+                const labelLayer = new TextLayer({
+                    id: layerKeys.labelLayerKey,
+                    data: labelLayerData.data,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: labelLayerData.coordinateOrigin,
+                    getPosition: (d: DeckRenderableLabelDatum) => d.position,
+                    getText: (d: DeckRenderableLabelDatum) => d.text,
+                    getColor: (d: DeckRenderableLabelDatum) => d.fillColor,
+                    getOutlineColor: (d: DeckRenderableLabelDatum) => d.outlineColor,
+                    getOutlineWidth: (d: DeckRenderableLabelDatum) => d.outlineWidth,
+                    getSize: (d: DeckRenderableLabelDatum) => 14 * d.scale,
+                    sizeUnits: "pixels",
+                    getPixelOffset: (d: DeckRenderableLabelDatum) => d.pixelOffset ?? [0, 0],
+                    billboard: labelLayerData.billboard,
+                    modelMatrix,
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey
+                } as any) as any;
+                registry.upsert(layerKeys.labelLayerKey, labelLayer, 475 + entry.orderOffset);
+                desiredLabelLayerKeys.add(layerKeys.labelLayerKey);
             }
 
             for (const pathLayerData of entry.pathLayerData) {
@@ -627,6 +690,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.reconcileLayerKeys(registry, this.surfaceLayerKeys, desiredSurfaceLayerKeys);
         this.reconcileLayerKeys(registry, this.pointLayerKeys, desiredPointLayerKeys);
         this.reconcileLayerKeys(registry, this.pathLayerKeys, desiredPathLayerKeys);
+        this.reconcileLayerKeys(registry, this.labelLayerKeys, desiredLabelLayerKeys);
         this.reconcileLayerKeys(registry, this.arrowLayerKeys, desiredArrowLayerKeys);
     }
 
@@ -686,11 +750,13 @@ export class DeckTileVisualization implements ITileVisualization {
         surfaceLayerData: DeckSurfaceLayerData[],
         pathLayerData: DeckPathLayerData[],
         pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
         arrowLayerData: DeckPathLayerData[]
     ): boolean {
         return surfaceLayerData.some((data) => data.length > 0)
             || pathLayerData.some((data) => data.length > 0)
             || pointLayerData.some((data) => data.length > 0)
+            || labelLayerData.some((data) => data.length > 0)
             || arrowLayerData.some((data) => data.length > 0);
     }
 
@@ -708,6 +774,7 @@ export class DeckTileVisualization implements ITileVisualization {
         surfaceLayerData: DeckSurfaceLayerData[],
         pathLayerData: DeckPathLayerData[],
         pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
         arrowLayerData: DeckPathLayerData[],
         mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
     ): boolean {
@@ -716,7 +783,7 @@ export class DeckTileVisualization implements ITileVisualization {
             || this.activeRenderedLowFiLods.length === 0) {
             return false;
         }
-        return !this.hasRenderableLayerData(surfaceLayerData, pathLayerData, pointLayerData, arrowLayerData)
+        return !this.hasRenderableLayerData(surfaceLayerData, pathLayerData, pointLayerData, labelLayerData, arrowLayerData)
             && !this.hasRenderableMergedPointFeatures(mergedPointFeatures);
     }
 
@@ -834,13 +901,18 @@ export class DeckTileVisualization implements ITileVisualization {
         for (const pathLayerKey of this.pathLayerKeys) {
             registry.remove(pathLayerKey);
         }
+        for (const labelLayerKey of this.labelLayerKeys) {
+            registry.remove(labelLayerKey);
+        }
         for (const arrowLayerKey of this.arrowLayerKeys) {
             registry.remove(arrowLayerKey);
         }
         this.surfaceLayerKeys.clear();
         this.pointLayerKeys.clear();
         this.pathLayerKeys.clear();
+        this.labelLayerKeys.clear();
         this.arrowLayerKeys.clear();
+        this.latestLabelLayerData = [];
         this.latestLowFiBundleData = [];
         this.lowFiBundleByLod.clear();
         this.activeRenderedFidelity = null;
@@ -925,6 +997,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestWorkerTimings = fullMainThread.workerTimings;
             this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
             this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestLabelLayerData = fullMainThread.labelLayerData;
             this.latestArrowLayerData = fullMainThread.arrowLayerData;
             this.latestLowFiBundleData = fullMainThread.lowFiBundles;
             this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
@@ -937,6 +1010,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestWorkerTimings = fullMainThread.workerTimings;
             this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
             this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestLabelLayerData = fullMainThread.labelLayerData;
             this.latestArrowLayerData = fullMainThread.arrowLayerData;
             this.latestLowFiBundleData = fullMainThread.lowFiBundles;
             this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
@@ -949,6 +1023,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestWorkerTimings = workerOutput.workerTimings;
             this.latestSurfaceLayerData = workerOutput.surfaceLayerData;
             this.latestPointLayerData = workerOutput.pointLayerData;
+            this.latestLabelLayerData = workerOutput.labelLayerData;
             this.latestArrowLayerData = workerOutput.arrowLayerData;
             this.latestLowFiBundleData = workerOutput.lowFiBundles;
             this.latestMergedPointFeatures = workerOutput.mergedPointFeatures;
@@ -960,6 +1035,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestWorkerTimings = fullMainThread.workerTimings;
             this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
             this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestLabelLayerData = fullMainThread.labelLayerData;
             this.latestArrowLayerData = fullMainThread.arrowLayerData;
             this.latestLowFiBundleData = fullMainThread.lowFiBundles;
             this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
@@ -1127,8 +1203,9 @@ export class DeckTileVisualization implements ITileVisualization {
                 ? Math.max(0, Math.min(7, Math.floor(rawBundle.lod)))
                 : 0;
             const geometryLayerData = this.buildGeometryLayerData(coordinateOrigin, rawBundle);
-            const {surfaceLayerData, pathLayerData, pointLayerData, arrowLayerData} = geometryLayerData;
-            if (!surfaceLayerData.length && !pathLayerData.length && !pointLayerData.length && !arrowLayerData.length) {
+            const {surfaceLayerData, pathLayerData, pointLayerData, labelLayerData, arrowLayerData} = geometryLayerData;
+            if (!surfaceLayerData.length && !pathLayerData.length && !pointLayerData.length
+                && !labelLayerData.length && !arrowLayerData.length) {
                 continue;
             }
             bundlesByLod.set(lod, {
@@ -1136,6 +1213,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 surfaceLayerData,
                 pathLayerData,
                 pointLayerData,
+                labelLayerData,
                 arrowLayerData
             });
         }
@@ -1145,7 +1223,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private buildGeometryLayerData(
         coordinateOrigin: Float64Array,
         geometry: DeckGeometryBucketBuffers
-    ): Pick<DeckWasmRenderOutput, "surfaceLayerData" | "pathLayerData" | "pointLayerData" | "arrowLayerData"> {
+    ): Pick<DeckWasmRenderOutput, "surfaceLayerData" | "pathLayerData" | "pointLayerData" | "labelLayerData" | "arrowLayerData"> {
         return {
             surfaceLayerData: this.buildSurfaceLayerData({
                 coordinateOrigin,
@@ -1160,6 +1238,11 @@ export class DeckTileVisualization implements ITileVisualization {
                 coordinateOrigin,
                 geometry.pointWorld,
                 geometry.pointBillboard
+            ),
+            labelLayerData: this.buildCombinedLabelLayerData(
+                coordinateOrigin,
+                geometry.labelWorld,
+                geometry.labelBillboard
             ),
             arrowLayerData: this.buildCombinedPathLayerData(
                 coordinateOrigin,
@@ -1192,6 +1275,17 @@ export class DeckTileVisualization implements ITileVisualization {
         return [
             ...this.buildPointLayerData({coordinateOrigin, ...worldRaw}, false),
             ...this.buildPointLayerData({coordinateOrigin, ...billboardRaw}, true)
+        ];
+    }
+
+    private buildCombinedLabelLayerData(
+        coordinateOrigin: Float64Array,
+        worldRaw: DeckLabelDatum[],
+        billboardRaw: DeckLabelDatum[]
+    ): DeckLabelLayerData[] {
+        return [
+            ...this.buildLabelLayerData(coordinateOrigin, worldRaw, false),
+            ...this.buildLabelLayerData(coordinateOrigin, billboardRaw, true)
         ];
     }
 
@@ -1342,6 +1436,27 @@ export class DeckTileVisualization implements ITileVisualization {
                 getFillColor: {value: raw.colors, size: 4},
                 getRadius: {value: raw.radii, size: 1}
             }
+        }];
+    }
+
+    private buildLabelLayerData(
+        coordinateOriginRaw: Float64Array,
+        data: DeckLabelDatum[],
+        billboard: boolean
+    ): DeckLabelLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(coordinateOriginRaw);
+        if (!coordinateOrigin || data.length <= 0) {
+            return [];
+        }
+        const normalizedData: DeckRenderableLabelDatum[] = data.map((entry) => ({
+            ...entry,
+            position: [entry.position.x, entry.position.y, entry.position.z]
+        }));
+        return [{
+            length: normalizedData.length,
+            billboard,
+            coordinateOrigin,
+            data: normalizedData
         }];
     }
 
