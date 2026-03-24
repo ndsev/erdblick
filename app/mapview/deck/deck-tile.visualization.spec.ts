@@ -529,6 +529,46 @@ describe("DeckTileVisualization", () => {
         expect(visu.isDirty()).toBe(false);
     });
 
+    it("uses low render context when low fidelity is preferred even without explicit low-fidelity rules", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Road/42",
+            layerName: "Road",
+            tileId: 42n,
+            numFeatures: 2,
+            hasData: () => true,
+            highestLoadedStage: () => 0,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = makeStyle({
+            minimumStage: () => 0,
+            hasExplicitLowFidelityRules: () => false
+        });
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            1,
+            false,
+            null,
+            {value: 0} as any
+        ) as any;
+
+        let requestedFidelity: string | null = null;
+        visu.renderWasm = async (fidelity: "low" | "high" | "any" | null) => {
+            requestedFidelity = fidelity;
+            return [];
+        };
+
+        await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
+        expect(requestedFidelity).toBe("low");
+    });
+
     it("in high-fidelity mode tracks newly loaded stages", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);

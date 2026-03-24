@@ -28,7 +28,7 @@ rules:
     filter: showLine
     color: moccasin
     opacity: 1.0
-    width: 5.0
+    width: 2.0
     offset: [0, 0, -0.02]
   - geometry: ["point"]
     point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
@@ -50,7 +50,7 @@ rules:
   - geometry: ["line"]
     color: green
     opacity: 0.8
-    width: 10.0
+    width: 4.0
     mode: hover
     offset: [0, 0, -0.01]
   - aspect: attribute
@@ -58,13 +58,13 @@ rules:
     geometry: ["line"]
     color: green
     opacity: 0.8
-    width: 10.0
+    width: 4.0
     mode: hover
     offset: [0, 0, -0.01]
   - geometry: ["point"]
     color: green
     opacity: 0.8
-    width: 20.0
+    width: 10.0
     mode: hover
   - geometry: ["mesh", "polygon"]
     color-expression: selectableFeatureHighlightColor

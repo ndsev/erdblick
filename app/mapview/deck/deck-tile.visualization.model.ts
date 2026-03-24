@@ -1434,9 +1434,6 @@ export class DeckTileVisualization implements ITileVisualization {
             highestLoadedStage >= this.resolvedHighFidelityStage()) {
             return "high";
         }
-        if (!this.styleHasExplicitLowFidelityRules) {
-            return "any";
-        }
         return "low";
     }
 
