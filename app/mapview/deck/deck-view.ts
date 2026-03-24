@@ -7,11 +7,11 @@ import {
     type PickingInfo,
     WebMercatorViewport
 } from "@deck.gl/core";
+import {TileLayer, type TileLayerProps} from "@deck.gl/geo-layers";
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
-import {TileLayer} from "../../integrations/deckgl";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
@@ -982,7 +982,9 @@ export abstract class DeckMapView implements IRenderView {
             updateTriggers: {
                 renderSubLayers: [clampedOpacity]
             },
-            renderSubLayers: (props) => {
+            renderSubLayers: (
+                props: Parameters<NonNullable<TileLayerProps<string>["renderSubLayers"]>>[0]
+            ) => {
                 const boundingBox = props.tile?.boundingBox;
                 if (!boundingBox || !props.data) {
                     return null;
