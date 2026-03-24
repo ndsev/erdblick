@@ -603,7 +603,7 @@ describe('MapDataService', () => {
             {
                 mapId: 'm1',
                 layerId: 'layerA',
-                tileIds: [42],
+                tileIdsByNextStage: [[42]],
             },
         ]);
 

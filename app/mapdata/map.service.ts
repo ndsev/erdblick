@@ -1861,13 +1861,6 @@ export class MapDataService {
             for (const [tileId, nextMissingStage] of entry.tileIdToNextMissingStage.entries()) {
                 tileIdsByNextStage[nextMissingStage].push(tileId);
             }
-            if (tileIdsByNextStage.length <= 1) {
-                return {
-                    mapId: entry.mapId,
-                    layerId: entry.layerId,
-                    tileIds: tileIdsByNextStage[0],
-                };
-            }
             return {
                 mapId: entry.mapId,
                 layerId: entry.layerId,
