@@ -94,8 +94,6 @@ Open **Edit -> Styles Configurator** to manage style sheets:
 - reset built-in styles
 - import or remove styles
 
-Use the [Built-in Style Workflows](erdblick-style-workflows.md) guide for the day-to-day UI flow, and the [Style System Guide](erdblick-stylesystem.md) when you need the YAML rule language.
-
 ## Inspection Dock
 
 Selecting a feature opens it in the inspection dock:

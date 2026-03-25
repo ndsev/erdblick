@@ -2,9 +2,6 @@
 
 Erdblick visualizes every feature through YAML-defined style sheets. This guide explains how to manage styles in the UI, how the YAML schema works, and which rule fields are available for advanced styling.
 
-!!! note "Need the built-in workflow first?"
-    If you mainly work with the bundled styles from the UI, start with the [Built-in Style Workflows](erdblick-style-workflows.md) guide. This page is the lower-level YAML and rule reference.
-
 ![erdblick UI](screenshots/style-controls.png)
 
 ## Managing Styles in the UI
@@ -21,7 +18,8 @@ Most day-to-day style work happens directly inside the Styles dialog, where you 
 
 Built-in styles that were edited locally show a **Modified** tag. Click it to open the **compare dialog** against the shipped version.
 
-In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options (`StyleOptionNode`s). That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
+In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options.
+That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
 
 ## Style Sheet Anatomy
 
