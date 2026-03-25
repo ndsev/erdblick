@@ -14,7 +14,7 @@ import {environment} from "../environments/environment";
                       Unfortunately, the prime-ng splitter seems to be badly maintained 
                       (see https://github.com/primefaces/primeng/issues/13300) -->
                 @for (v of [version()]; track v) {
-                    <p-splitter [panelSizes]="vm.panelSizes" class="mb-8">
+                    <p-splitter [panelSizes]="vm.panelSizes" class="mb-8" data-testid="mapview-container">
                         @for (idx of vm.viewIndices; track idx) {
                             <ng-template pTemplate="panel">
                                 <map-view [viewIndex]="idx"></map-view>

@@ -6,7 +6,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
 @Component({
     selector: 'inspection-container',
     template: `
-        <div #dockContainer class="inspection-container"
+        <div #dockContainer class="inspection-container" data-testid="inspection-container"
              [ngClass]="{'reordering': isReordering, 'single-panel': dockedPanels.length === 1, 'multi-panel': dockedPanels.length > 1}">
             @if (dockedPanels.length > 0) {
                 <div class="dock-filter">

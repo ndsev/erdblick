@@ -15,7 +15,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog #featureSearchDialog class="feature-search-dialog" header="Search Loaded Features"
+        <p-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
                   [closeOnEscape]="false"
                   [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
                   (onShow)="onDialogShow($event)"
@@ -42,7 +42,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                     [style]="{ width: '1em', height: '1em', margin: '0' }"/>
             </div>
 
-            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
+            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" data-testid="feature-search-panel" scrollable>
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results </span>
@@ -77,7 +77,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 
                         <!-- Results Tree -->
                         <div style="height: 100%">
-                            <p-tree #tree [value]="resultsTree"
+                            <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
                                     selectionMode="single"
                                     [metaKeySelection]="false"
                                     [lazy]="true"

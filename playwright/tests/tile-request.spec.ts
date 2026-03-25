@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
-import {enableMapLayer, navigateToArea, navigateToRoot} from '../utils/ui-helpers';
+import { enableMapLayer, navigateToArea, navigateToRoot } from '../utils/ui-helpers';
 
 /**
  * Integration tests for the Python example datasource.

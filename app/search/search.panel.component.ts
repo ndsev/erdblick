@@ -25,6 +25,7 @@ interface ExtendedSearchTarget extends SearchTarget {
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
+                          data-testid="search-input"
                           [(ngModel)]="searchInputValue"
                           (click)="showSearchOverlay()"
                           (ngModelChange)="setSearchValue(searchInputValue)"
@@ -62,9 +63,9 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
 
             <div class="resizable-container" #searchcontrols>
-                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
+                <p-dialog #actionsdialog class="search-menu-dialog" data-testid="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
-                    <div>
+                    <div data-testid="search-menu-panel">
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">

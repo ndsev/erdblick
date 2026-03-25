@@ -22,16 +22,16 @@ import {filter} from "rxjs/operators";
     selector: 'erdblick-view-ui',
     template: `
         @if (!appModeService.isVisualizationOnly) {
-            <div class="view-ui-container" [ngClass]="{'mirrored': isPrimary()}">
+            <div class="view-ui-container" [ngClass]="{'mirrored': isPrimary()}" [attr.data-testid]="viewUiTestId()">
                 <div class="navigation-controls">
                     <div class="nav-control-group">
-                        <p-button icon="pi pi-plus" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
+                        <p-button icon="pi pi-plus" data-testid="zoom-in-button" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
                                   size="small" pTooltip="Zoom In (Q)" class="move-button"></p-button>
                         <p-button icon="pi pi-minus" (onClick)="mapView()?.zoomOut()" [rounded]="true" severity="secondary"
                                   size="small" pTooltip="Zoom Out (E)" class="move-button"></p-button>
                     </div>
                     <div class="nav-control-group">
-                        <p-button icon="pi pi-arrow-up" (onClick)="mapView()?.moveUp()" [rounded]="true" severity="secondary"
+                        <p-button icon="pi pi-arrow-up" data-testid="move-up-button" (onClick)="mapView()?.moveUp()" [rounded]="true" severity="secondary"
                                   size="small" pTooltip="Move Up (W)" class="move-button"></p-button>
                         <div class="nav-horizontal">
                             <p-button icon="pi pi-arrow-left" (onClick)="mapView()?.moveLeft()" [rounded]="true"
@@ -50,7 +50,7 @@ import {filter} from "rxjs/operators";
                     <div class="compass-label west">W</div>
                     <div class="compass-needle" #compassNeedle (click)="mapView()?.resetOrientation()"></div>
                 </div>
-                <div class="scene-mode-toggle">
+                <div class="scene-mode-toggle" data-testid="scene-mode-toggle">
                     <p-selectButton [options]="projectionOptions" [(ngModel)]="projection"
                                     (ngModelChange)="toggleSceneMode()" optionLabel="mode">
                         <ng-template #item let-item>
@@ -155,5 +155,10 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         this.stateService.focusedView = mapView.viewIndex;
         const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
         this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
+    }
+
+    viewUiTestId(): string {
+        const mapView = this.mapView();
+        return `view-ui-container-${mapView ? mapView.viewIndex : 'unknown'}`;
     }
 }

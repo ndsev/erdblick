@@ -1,7 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import {
     navigateToArea,
-    openLayerDialog,
     setupTwoViewsWithPositionSync
 } from '../utils/ui-helpers';
 
@@ -17,34 +16,32 @@ test.describe('Multi-view synchronisation', () => {
     test('second view can be added and synchronised', async ({ page, request }) => {
         await setupTwoViewsWithPositionSync(page, request);
         // Both views should be represented as tabs in the layer dialog.
-        const dialog = page.locator('.map-layer-dialog .p-dialog-content');
-        const tabs = dialog.locator('.map-tab');
-        await expect(tabs).toHaveCount(2);
-        const leftTab = tabs.nth(0);
-        const rightTab = tabs.nth(1);
+        const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
+        const leftTab = dialog.getByTestId('map-tab-0');
+        const rightTab = dialog.getByTestId('map-tab-1');
         const leftLayerNode = leftTab.locator('[data-id="TestMap/WayLayer"]').first();
         const rightLayerNode = rightTab.locator('[data-id="TestMap/WayLayer"]').first();
         await expect(leftLayerNode).toBeVisible();
         await expect(rightLayerNode).toBeVisible();
 
         // Disable OSM background on the right view to differentiate them.
-        const rightOsmButton = rightTab.locator('.osm-controls .osm-button').first();
+        const rightOsmButton = rightTab.getByTestId('osm-toggle-1');
         await expect(rightOsmButton).toBeVisible();
         await rightOsmButton.click();
 
-        const secondViewCanvas = page.locator('#mapViewContainer-1 canvas').first();
+        const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
         await expect(secondViewCanvas).toBeVisible();
 
         await navigateToArea(page, 42.5, 11.615, 13);
 
-        const rightUiControls = page.locator('.view-ui-container:not(.mirrored)').first();
+        const rightUiControls = page.getByTestId('view-ui-container-1');
         await expect(rightUiControls).toBeVisible();
 
         // Use the UI controls to change zoom / pitch on the right view.
-        await rightUiControls.locator('.navigation-controls > div > p-button').first().click();
-        await rightUiControls.locator('.navigation-controls > div:nth-child(2) > p-button').first().click();
+        await rightUiControls.getByTestId('zoom-in-button').click();
+        await rightUiControls.getByTestId('move-up-button').click();
 
-        const syncGroup = page.locator('.viewsync-select').first();
+        const syncGroup = page.getByTestId('viewsync-select');
         await expect(syncGroup).toBeVisible();
         const projectionToggle = syncGroup.locator('.material-symbols-outlined', {
             hasText: '3d_rotation'
@@ -52,14 +49,12 @@ test.describe('Multi-view synchronisation', () => {
         await expect(projectionToggle).toBeVisible();
         await projectionToggle.click();
 
-        const projectionSelect = rightUiControls.locator('.p-selectbutton').first();
+        const projectionSelect = rightUiControls.getByTestId('scene-mode-toggle');
         await projectionSelect.getByText('2D').first().click();
 
         // Both UIs should now show the same projection mode.
-        const viewUIs = page.locator('.view-ui-container');
-        await expect(viewUIs).toHaveCount(2);
-        for (let i = 0; i < 2; i++) {
-            const ui = viewUIs.nth(i);
+        for (const viewTestId of ['view-ui-container-0', 'view-ui-container-1']) {
+            const ui = page.getByTestId(viewTestId);
             const activeButton = ui.locator('.p-togglebutton-checked').first();
             await expect(activeButton).toHaveText('2D');
         }
@@ -83,7 +78,7 @@ test.describe('Multi-view synchronisation', () => {
             return !left && !right;
         }, { timeout: 3000 }).toBe(true);
 
-        const leftOsmButton = leftTab.locator('.osm-controls .osm-button').first();
+        const leftOsmButton = leftTab.getByTestId('osm-toggle-0');
         await expect(leftOsmButton).toBeVisible();
         await leftOsmButton.click();
 

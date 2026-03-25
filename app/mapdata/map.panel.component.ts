@@ -16,7 +16,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 @Component({
     selector: 'map-panel',
     template: `
-        <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
+        <p-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
                   [position]="'left'" [draggable]="false" [resizable]="false" 
                   (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
@@ -25,7 +25,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
                       (mousedown)="$event.stopPropagation()"/>
             <ng-container *ngFor="let index of viewIndices">
-                <p-fieldset class="map-tab" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
+                <p-fieldset class="map-tab" [attr.data-testid]="getMapTabTestId(index)" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
                     <ng-template #header>
                         <div>
                             @if (stateService.numViews > 1) {
@@ -81,6 +81,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                         <div class="osm-controls">
                             <span style="font-size: 0.9em">OSM Overlay:</span>
                             <p-button onEnterClick (click)="toggleOSMOverlay(index)"
+                                      [attr.data-testid]="getOsmToggleTestId(index)"
                                       [styleClass]="osmEnabled[index] ? 'osm-button p-button-success' : 'osm-button p-button-primary'"
                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                       icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -240,7 +241,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </ng-container>
                 </p-fieldset>
                 @if (viewIndices.length < 2) {
-                    <p-button onEnterClick class="add-view-button" (click)="addView()" icon="" label="Add View"
+                    <p-button onEnterClick class="add-view-button" data-testid="add-view-button" (click)="addView()" icon="" label="Add View"
                               pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
                         <span class="material-symbols-outlined" style="margin: 0 auto;">
                             add_column_right
@@ -505,6 +506,14 @@ export class MapPanelComponent {
 
     toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
         this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
+    }
+
+    getMapTabTestId(viewIndex: number): string {
+        return `map-tab-${viewIndex}`;
+    }
+
+    getOsmToggleTestId(viewIndex: number): string {
+        return `osm-toggle-${viewIndex}`;
     }
 
     toggleViewTileBorders(viewIndex: number) {
