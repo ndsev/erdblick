@@ -18,7 +18,7 @@ test.describe('Debug tile integration', () => {
         await expect(spinner).toBeHidden();
 
         // The initial map view container should now be visible.
-        const mapContainer = page.locator('#mapViewContainer-0');
+        const mapContainer = page.getByTestId('mapViewContainer-0');
         await expect(mapContainer).toBeVisible();
     });
 
@@ -35,7 +35,7 @@ test.describe('Debug tile integration', () => {
         });
 
         // A canvas should be present inside the primary map view.
-        const mapContainer = page.locator('#mapViewContainer-0 canvas');
+        const mapContainer = page.getByTestId('mapViewContainer-0').locator('canvas');
         await expect(mapContainer.first()).toBeVisible();
     });
 });

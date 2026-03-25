@@ -9,7 +9,11 @@
     "test": "ng test",
     "test:vitest": "vitest run",
     "lint": "eslint app",
-    "test:integration": "playwright test"
+    "test:integration": "playwright test",
+    "test:integration:list": "playwright test --list",
+    "test:integration:headed": "playwright test --headed",
+    "test:integration:visual": "playwright test playwright/snap-tests",
+    "test:integration:update-snapshots": "playwright test playwright/snap-tests --update-snapshots"
   },
   "private": true,
   "dependencies": {

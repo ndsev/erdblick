@@ -29,7 +29,7 @@ interface InspectionPanelContentAdapter {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="inspect-panel" [value]="accordionValue" [transitionOptions]="accordionTransitionOptions">
+        <p-accordion class="inspect-panel" data-testid="inspection-panel" [value]="accordionValue" [transitionOptions]="accordionTransitionOptions">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">

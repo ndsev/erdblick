@@ -1,11 +1,7 @@
 import { expect, test } from '../fixtures/test';
-import { requireTestMapSource } from '../utils/backend-helpers';
 import {
-    addComparisonView,
-    enableMapLayer,
     navigateToArea,
-    navigateToRoot, setupTwoViewsWithPositionSync,
-    waitForAppReady
+    setupTwoViewsWithPositionSync
 } from '../utils/ui-helpers';
 
 /**
@@ -22,7 +18,7 @@ test.describe('Snapshot – multi-view sync layout', () => {
         await navigateToArea(page, 42.5, 11.615, 13);
 
         // The map view container should present both synchronised views.
-        const mapContainer = page.locator('mapview-container');
+        const mapContainer = page.getByTestId('mapview-container');
         await expect(mapContainer).toBeVisible();
 
         await expect(mapContainer).toHaveScreenshot('map-multiview-sync.png', {

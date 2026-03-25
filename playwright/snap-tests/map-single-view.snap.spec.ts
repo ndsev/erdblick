@@ -19,7 +19,7 @@ test.describe('Snapshot – single map view', () => {
         await navigateToArea(page, 42.5, 11.615, 13);
 
         // Capture the rendered single-view map container for comparison.
-        const mapContainer = page.locator('#mapViewContainer-0');
+        const mapContainer = page.getByTestId('mapViewContainer-0');
         await expect(mapContainer).toBeVisible();
 
         await expect(mapContainer).toHaveScreenshot('map-single-view.png', {

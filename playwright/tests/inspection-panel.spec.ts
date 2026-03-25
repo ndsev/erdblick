@@ -31,7 +31,7 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await clickSearchResultLeaf(page, 0);
 
         // An inspection panel should appear for the selected feature.
-        const panel = page.locator('.inspection-container .inspect-panel').first();
+        const panel = page.getByTestId('inspection-container').getByTestId('inspection-panel').first();
         await expect(panel).toBeVisible();
 
         const treeBody = panel.locator('.p-treetable-tbody');
@@ -56,7 +56,7 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
 
         // Selecting another result should open a second inspection panel.
         await clickSearchResultLeaf(page, 1);
-        const panels = page.locator('.inspection-container .inspect-panel');
+        const panels = page.getByTestId('inspection-container').getByTestId('inspection-panel');
         await expect(panels).toHaveCount(2);
     });
 
@@ -70,7 +70,7 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await runFeatureSearch(page, '**.name');
         await clickSearchResultLeaf(page, 0);
 
-        const panel = page.locator('.inspection-container .inspect-panel').first();
+        const panel = page.getByTestId('inspection-container').getByTestId('inspection-panel').first();
         await expect(panel).toBeVisible();
 
         const accordionPanel = panel.locator('.p-accordionpanel').first();

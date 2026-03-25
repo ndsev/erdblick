@@ -1,4 +1,3 @@
-import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
 import {
@@ -29,7 +28,7 @@ test.describe('Snapshot – inspection panel', () => {
         await clickSearchResultLeaf(page, 0);
 
         // The inspection container should reflect the selected TestMap feature.
-        const inspectionContainer = page.locator('.inspection-container');
+        const inspectionContainer = page.getByTestId('inspection-container');
         await expect(inspectionContainer).toBeVisible();
 
         await expect(inspectionContainer).toHaveScreenshot('inspection-panel-testmap.png', {

@@ -27,13 +27,10 @@ export async function waitForAppReady(page: Page): Promise<void> {
 
 export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: string): Promise<void> {
     // Open the layer dialog through the toolbar button.
-    const menuBar = page.locator('.main-bar').first()
-    const mapsButton = menuBar.locator('span', {
-        hasText: 'Maps'
-    }).first();
+    const mapsButton = page.getByTestId('maps-toggle');
     await mapsButton.click({ force: true });
 
-    const dialog = page.locator('.map-layer-dialog').locator('.p-dialog-content');
+    const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
     await expect(dialog).toBeVisible();
     await dialog.click();
 
@@ -51,15 +48,10 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
  * "WGS84 Lon-Lat Coordinates" search option.
  */
 export async function navigateToArea(page: Page, lon: number, lat: number, level: number): Promise<void> {
-    const searchInput = page.locator('textarea[placeholder="Search"]');
+    const searchInput = page.getByTestId('search-input');
     await searchInput.click();
     await searchInput.fill(`${lon} ${lat} ${level}`);
-    const searchMenuContainer = page.locator('.resizable-container').filter({
-        has: page.locator('.search-menu-dialog')
-    }).first();
-
-    // Inside this container, .p-dialog-content is our search menu
-    const searchMenu = searchMenuContainer.locator('.p-dialog-content');
+    const searchMenu = page.getByTestId('search-menu-panel');
     await expect(searchMenu).toBeVisible();
     const jumpToWGS84 = searchMenu.locator('.search-menu', {
         hasText: 'WGS84 Lon-Lat Coordinates'
@@ -70,16 +62,13 @@ export async function navigateToArea(page: Page, lon: number, lat: number, level
 }
 
 export async function openLayerDialog(page: Page): Promise<void> {
-    const dialog = page.locator('.map-layer-dialog .p-dialog-content');
+    const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
     if (await dialog.isVisible()) {
         // Dialog is already open; nothing to do.
         return;
     }
 
-    const menuBar = page.locator('.main-bar').first()
-    const mapsButton = menuBar.locator('span', {
-        hasText: 'Maps'
-    }).first();
+    const mapsButton = page.getByTestId('maps-toggle');
     await mapsButton.click({ force: true });
     await expect(dialog).toBeVisible();
 }
@@ -87,13 +76,13 @@ export async function openLayerDialog(page: Page): Promise<void> {
 export async function addComparisonView(page: Page): Promise<void> {
     await openLayerDialog(page);
 
-    const dialog = page.locator('.map-layer-dialog .p-dialog-content');
-    const addViewButton = dialog.locator('.add-view-button').first();
+    const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
+    const addViewButton = dialog.getByTestId('add-view-button');
     await expect(addViewButton).toBeVisible();
     await addViewButton.click();
 
     // A second map canvas should appear for the comparison view.
-    const secondViewCanvas = page.locator('#mapViewContainer-1 canvas').first();
+    const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
     await expect(secondViewCanvas).toBeVisible();
 }
 
@@ -102,13 +91,10 @@ export async function addComparisonView(page: Page): Promise<void> {
  * appears in the feature search dialog.
  */
 export async function runFeatureSearch(page: Page, query: string): Promise<void> {
-    const searchInput = page.locator('textarea[placeholder="Search"]');
+    const searchInput = page.getByTestId('search-input');
     await searchInput.click();
 
-    const searchMenuContainer = page.locator('.resizable-container').filter({
-        has: page.locator('.search-menu-dialog')
-    }).first();
-    const searchMenu = searchMenuContainer.locator('.p-dialog-content');
+    const searchMenu = page.getByTestId('search-menu-panel');
     await expect(searchMenu).toBeVisible();
 
     const searchLoadedFeatures = searchMenu.locator('.search-menu .search-option-name', {
@@ -120,11 +106,10 @@ export async function runFeatureSearch(page: Page, query: string): Promise<void>
     await searchInput.focus();
     await page.keyboard.press('Enter');
 
-    const featureSearch = page.locator('.feature-search-dialog').first();
-    const featureSearchContent = featureSearch.locator('.p-dialog-content').first();
-    await expect(featureSearchContent).toBeVisible();
+    const featureSearch = page.getByTestId('feature-search-panel');
+    await expect(featureSearch).toBeVisible();
 
-    const resultsBadge = featureSearchContent.locator('.p-badge').first();
+    const resultsBadge = featureSearch.locator('.p-badge').first();
     // Wait until the badge reports at least one search result.
     await expect.poll(async () => {
         const text = await resultsBadge.innerText();
@@ -134,7 +119,7 @@ export async function runFeatureSearch(page: Page, query: string): Promise<void>
         timeout: 10000
     }).toBeGreaterThan(0);
 
-    const emptyMessage = featureSearchContent.locator('.p-tree-empty-message');
+    const emptyMessage = featureSearch.locator('.p-tree-empty-message');
     // When results are available, the "empty tree" message should disappear.
     await expect(emptyMessage).toHaveCount(0);
 }
@@ -144,9 +129,7 @@ export async function runFeatureSearch(page: Page, query: string): Promise<void>
  * test early when no results are available.
  */
 export async function clickSearchResultLeaf(page: Page, index: number): Promise<void> {
-    const featureSearch = page.locator('.feature-search-dialog').first();
-    const featureSearchContent = featureSearch.locator('.p-dialog-content').first();
-    const tree = featureSearchContent.locator('.p-tree').first();
+    const tree = page.getByTestId('feature-search-tree');
     const leafNodes = tree.locator('.p-tree-node-leaf');
     const count = await leafNodes.count();
     if (count === 0) {
@@ -172,7 +155,7 @@ export async function setupTwoViewsWithPositionSync(page: Page, request: APIRequ
 
     await addComparisonView(page);
 
-    const syncGroup = page.locator('.viewsync-select').first();
+    const syncGroup = page.getByTestId('viewsync-select');
     await expect(syncGroup).toBeVisible();
 
     // Enable position synchronisation between the two map views.

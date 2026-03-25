@@ -1,11 +1,14 @@
 import { defineConfig } from '@playwright/test';
 
-const baseURL = process.env["EB_APP_URL"] || 'http://localhost:9000';
+const port = process.env["EB_APP_PORT"] || '9000';
+const baseURL = process.env["EB_APP_URL"] || `http://localhost:${port}`;
 
 export default defineConfig({
     testDir: './playwright',
     snapshotDir: './playwright/reference',
     timeout: 240000,
+    forbidOnly: !!process.env["CI"],
+    retries: process.env["CI"] ? 1 : 0,
     expect: {
         timeout: 80000
     },
@@ -13,6 +16,7 @@ export default defineConfig({
     use: {
         baseURL,
         headless: true,
+        testIdAttribute: 'data-testid',
         viewport: {
             width: 1600,
             height: 900
@@ -20,6 +24,7 @@ export default defineConfig({
         actionTimeout: 80000,
         navigationTimeout: 80000,
         screenshot: 'only-on-failure',
+        trace: 'retain-on-failure',
         video: 'retain-on-failure',
         launchOptions: {
             args: [

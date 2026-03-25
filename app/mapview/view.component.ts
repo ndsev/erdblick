@@ -39,10 +39,11 @@ import {coreLib} from "../integrations/wasm";
         <div #viewer
              [ngClass]="{'border': outlined}"
              [id]="canvasId"
+             [attr.data-testid]="canvasId"
              class="mapviewer-renderlayer"
              style="z-index: 0"></div>
         @if (!environment.visualizationOnly && showSyncMenu) {
-            <p-buttonGroup class="viewsync-select">
+            <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
                 @for (option of stateService.syncOptions; track $index) {
                     <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
                                     [(ngModel)]="option.value" (ngModelChange)="stateService.updateSelectedSyncOptions()"
