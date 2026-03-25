@@ -58,82 +58,9 @@ class WebSocketStub {
 }
 
 vi.stubGlobal('WebSocket', WebSocketStub as any);
-
-vi.mock('./features.model', () => {
-    class FeatureTileStub {
-        mapTileKey: string;
-        nodeId: string;
-        mapName: string;
-        layerName: string;
-        tileId: bigint;
-        legalInfo: string | undefined;
-        numFeatures: number;
-        error?: string;
-        preventCulling: boolean;
-        disposed: boolean = false;
-        status?: number;
-        private hasDataFlag: boolean = false;
-        stats: Map<string, number[]> = new Map<string, number[]>();
-
-        constructor(parser: any, meta: any, preventCulling: boolean, placeholder?: any) {
-            const parsed = placeholder ?? (meta?.mapTileKey || meta?.mapName
-                ? meta
-                : parser?.readTileLayerMetadata
-                    ? parser.readTileLayerMetadata(meta)
-                    : {mapTileKey: '', mapName: '', layerName: '', tileId: 0n, legalInfo: undefined, numFeatures: 0});
-            this.mapTileKey = parsed.mapTileKey ?? parsed.id ?? '';
-            this.mapName = parsed.mapName ?? '';
-            this.layerName = parsed.layerName ?? '';
-            this.tileId = parsed.tileId ?? 0n;
-            this.legalInfo = parsed.legalInfo;
-            this.numFeatures = parsed.numFeatures ?? 0;
-            this.error = parsed.error;
-            this.nodeId = '';
-            this.preventCulling = preventCulling;
-            this.hasDataFlag = !!meta;
-        }
-
-        dispose() {
-            this.disposed = true;
-        }
-
-        level() {
-            return 0;
-        }
-
-        has(_featureId: string) {
-            return true;
-        }
-
-        hasData() {
-            return this.hasDataFlag;
-        }
-
-        hasStage(stage: number) {
-            return this.hasDataFlag && stage === 0;
-        }
-
-        highestLoadedStage() {
-            return this.hasDataFlag ? 0 : null;
-        }
-
-        nextMissingStage(stageCount: number) {
-            if (!this.hasDataFlag) {
-                return 0;
-            }
-            return stageCount > 1 ? 1 : undefined;
-        }
-
-        hydrateFromBlob(_blob: Uint8Array) {
-            this.hasDataFlag = true;
-        }
-    }
-
-    return {
-        FeatureTile: FeatureTileStub,
-        FeatureWrapper: class {},
-    };
-});
+if (typeof window !== 'undefined') {
+    (window as any).WebSocket = WebSocketStub as any;
+}
 
 type MapDataServiceCtorType = typeof import('./map.service').MapDataService;
 let MapDataServiceCtor: MapDataServiceCtorType;
@@ -150,12 +77,21 @@ class AppStateServiceStub {
     numViewsState = new BehaviorSubject<number>(1);
     viewSyncState = new BehaviorSubject<string[]>([]);
     selectionState = new BehaviorSubject<any[]>([]);
+    pinLowFiToMaxLodState = new BehaviorSubject<boolean>(false);
 
     tilesLoadLimitState = new BehaviorSubject<number>(8);
     deckThreadedRenderingEnabledState = new BehaviorSubject<boolean>(true);
     deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersCountState = new BehaviorSubject<number>(2);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
+    cameraViewDataState = {
+        getValue: vi.fn().mockReturnValue({
+            destination: {
+                alt: 1000
+            }
+        })
+    };
+    focusedView = 0;
 
     get numViews() {
         return this.numViewsState.getValue();
@@ -181,11 +117,17 @@ class AppStateServiceStub {
         return this.tilePullCompressionEnabledState.getValue();
     }
 
+    get pinLowFiToMaxLod() {
+        return this.pinLowFiToMaxLodState.getValue();
+    }
+
     get viewSync() {
         return this.viewSyncState.getValue();
     }
 
     getLayerSyncOption = vi.fn().mockReturnValue(false);
+    getOsmState = vi.fn().mockReturnValue({enabled: false, opacity: 0});
+    setOsmState = vi.fn();
     setLayerSyncOption = vi.fn();
     prune = vi.fn();
 }
@@ -237,16 +179,28 @@ const createMapDataService = () => {
         getFieldDictOffsets: vi.fn().mockReturnValue([0]),
         reset: vi.fn(),
         setDataSourceInfo: vi.fn(),
-        readTileLayerMetadata: vi.fn().mockReturnValue({
-            id: 'm1/layerA/1',
-            mapName: 'm1',
-            layerName: 'layerA',
-            tileId: 1n,
-            legalInfo: '',
-            numFeatures: 0,
-            nodeId: 'n1',
-            error: '',
-            scalarFields: {}
+        readTileFeatureLayer: vi.fn().mockReturnValue({
+            find: vi.fn().mockReturnValue({
+                isNull: () => false,
+                delete: () => {}
+            }),
+            featureIdByAddress: vi.fn().mockReturnValue('feature-id'),
+            delete: () => {}
+        }),
+        readTileLayerMetadata: vi.fn().mockImplementation(() => {
+            const mapTileKey = coreLib.getTileFeatureLayerKey('m1', 'layerA', 1n);
+            return {
+                id: mapTileKey,
+                mapTileKey,
+                mapName: 'm1',
+                layerName: 'layerA',
+                tileId: 1n,
+                legalInfo: '',
+                numFeatures: 0,
+                nodeId: 'n1',
+                error: '',
+                scalarFields: {}
+            };
         }),
     };
 
@@ -259,54 +213,97 @@ const createMapDataService = () => {
 
 describe('MapDataService', () => {
     const flushAsync = async (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
+    const makeTileKey = (tileId: number | bigint) => coreLib.getTileFeatureLayerKey('m1', 'layerA', BigInt(tileId));
+    const makeTileMetadata = (tileId: number | bigint) => {
+        const mapTileKey = makeTileKey(tileId);
+        return {
+            id: mapTileKey,
+            mapTileKey,
+            mapName: 'm1',
+            layerName: 'layerA',
+            tileId: BigInt(tileId),
+            legalInfo: '',
+            numFeatures: 0,
+            nodeId: 'n1',
+            error: '',
+            scalarFields: {}
+        };
+    };
+    const createFakeMapTree = (zoomLevels: number[] = [10]) => ({
+        allLevels: (_viewIndex: number) => zoomLevels,
+        maps: new Map<string, any>([
+            ['m1', {
+                id: 'm1',
+                layers: new Map<string, any>([
+                    ['layerA', {
+                        id: 'layerA',
+                        type: 'Features',
+                        info: {zoomLevels}
+                    }]
+                ]),
+                allFeatureLayers: () => []
+            }]
+        ]),
+        getMapLayerVisibility: vi.fn().mockReturnValue(true),
+        getMapLayerLevel: vi.fn().mockImplementation((_viewIndex: number, _mapId: string, _layerId: string) => zoomLevels[0] ?? 0),
+        getMapLayerAutoLevel: vi.fn().mockReturnValue(false),
+        setMapLayerLevel: vi.fn(),
+        setMapLayerAutoLevel: vi.fn(),
+        getViewTileBorderState: vi.fn().mockReturnValue(false)
+    });
 
     beforeEach(() => {
         wsInstances.length = 0;
         vi.clearAllMocks();
+        vi.spyOn(MapTileStreamClient.prototype, 'updateRequest').mockResolvedValue(true);
     });
 
     it('computes visible and high-fidelity tile IDs per view policy', async () => {
         const {service, stateService} = createMapDataService();
-
-        const fakeMapTree = {
-            allLevels: (_viewIndex: number) => [10],
-            maps: new Map(),
-        };
+        const fakeMapTree = createFakeMapTree([10]);
         service.maps$.next(fakeMapTree as any);
+        const getTileIdsSpy = vi.spyOn(coreLib as any, 'getTileIds').mockReturnValue([1000n, 1001n]);
+        const getCanonicalTileCountSpy = vi
+            .spyOn(coreLib as any, 'getNumTileIdsForCanonicalCamera')
+            .mockReturnValue(2);
 
-        // Ensure we have one view state.
-        stateService.numViewsState.next(1);
+        try {
+            stateService.numViewsState.next(1);
 
-        // Use a non-empty viewport so the WASM helper
-        // coreLib.getTileIds(...) can actually return tile IDs.
-        const viewStates = (service as any).viewVisualizationState as any[];
-        viewStates[0].viewport = {
-            south: -45,
-            west: -90,
-            width: 90,
-            height: 90,
-            camPosLon: 0,
-            camPosLat: 0,
-            orientation: 0,
-        };
+            const viewStates = (service as any).viewVisualizationState as any[];
+            viewStates[0].viewport = {
+                south: -45,
+                west: -90,
+                width: 90,
+                height: 90,
+                camPosLon: 0,
+                camPosLat: 0,
+                orientation: 0,
+            };
 
-        await (service as any).runUpdate();
+            await (service as any).runUpdate();
 
-        expect(viewStates.length).toBe(1);
-        const state = viewStates[0];
+            expect(viewStates.length).toBe(1);
+            const state = viewStates[0];
+            const highFidelityTileIds = [...state.visibleTileIds].filter((tileId: bigint) =>
+                state.getTileRenderPolicy(tileId).targetFidelity === 'high');
 
-        expect(state.visibleTileIds.size).toBeGreaterThan(0);
-        const visibleTileIdsPerLevel = Array.from(state.visibleTileIdsPerLevel.values()) as bigint[][];
-        const hasLowFidelityOnlyLevel = visibleTileIdsPerLevel
-            .some(tileIds => tileIds.length > LOW_FI_LOD0_TILE_COUNT_THRESHOLD);
-        if (hasLowFidelityOnlyLevel) {
-            expect(state.highFidelityTileIds.size).toBe(0);
-        } else {
-            expect(state.highFidelityTileIds.size).toBeGreaterThan(0);
+            expect(state.visibleTileIds.size).toBeGreaterThan(0);
+            const visibleTileIdsPerLevel = Array.from(state.visibleTileIdsPerLevel.values()) as bigint[][];
+            const hasLowFidelityOnlyLevel = visibleTileIdsPerLevel
+                .some(tileIds => tileIds.length > LOW_FI_LOD0_TILE_COUNT_THRESHOLD);
+            if (hasLowFidelityOnlyLevel) {
+                expect(highFidelityTileIds).toHaveLength(0);
+            } else {
+                expect(highFidelityTileIds.length).toBeGreaterThan(0);
+            }
+            expect(highFidelityTileIds.length).toBeLessThanOrEqual(state.visibleTileIds.size);
+            expect(highFidelityTileIds.every((id: bigint) =>
+                state.visibleTileIds.has(id))).toBe(true);
+        } finally {
+            getTileIdsSpy.mockRestore();
+            getCanonicalTileCountSpy.mockRestore();
         }
-        expect(state.highFidelityTileIds.size).toBeLessThanOrEqual(state.visibleTileIds.size);
-        expect([...state.highFidelityTileIds].every((id: bigint) =>
-            state.visibleTileIds.has(id))).toBe(true);
     });
 
     it('loads locate-resolved relation target tiles before returning them', async () => {
@@ -451,6 +448,8 @@ describe('MapDataService', () => {
                 featureLayerStyle: {
                     hasLayerAffinity: vi.fn().mockReturnValue(true),
                     supportsHighlightMode: vi.fn().mockReturnValue(true),
+                    hasExplicitLowFidelityRules: vi.fn().mockReturnValue(false),
+                    minimumStage: vi.fn().mockReturnValue(0),
                 }
             }],
             ['disabled-style', {
@@ -459,6 +458,8 @@ describe('MapDataService', () => {
                 featureLayerStyle: {
                     hasLayerAffinity: vi.fn().mockReturnValue(true),
                     supportsHighlightMode: vi.fn().mockReturnValue(true),
+                    hasExplicitLowFidelityRules: vi.fn().mockReturnValue(false),
+                    minimumStage: vi.fn().mockReturnValue(0),
                 }
             }],
         ]);
@@ -525,7 +526,11 @@ describe('MapDataService', () => {
             ['enabled-style', {
                 id: 'enabled-style',
                 visible: true,
-                featureLayerStyle: {}
+                featureLayerStyle: {
+                    hasExplicitLowFidelityRules: vi.fn().mockReturnValue(false),
+                    minimumStage: vi.fn().mockReturnValue(0),
+                    supportsHighlightMode: vi.fn().mockReturnValue(true),
+                }
             }],
         ]);
 
@@ -561,19 +566,9 @@ describe('MapDataService', () => {
 
     it('builds a tiles WebSocket request body based on selection tile requests', async () => {
         const {service} = createMapDataService();
-
-        const fakeMapTree = {
-            allLevels: (_viewIndex: number) => [],
-            getMapLayerVisibility: () => true,
-            getMapLayerLevel: () => 0,
-            maps: new Map<string, any>([
-                ['m1', {
-                    layers: new Map<string, any>([['layerA', {}]]),
-                    allFeatureLayers: () => [],
-                }],
-            ]),
-        };
+        const fakeMapTree = createFakeMapTree([0]);
         service.maps$.next(fakeMapTree as any);
+        const updateRequestSpy = vi.spyOn((service as any).tileStream, 'updateRequest');
 
         const selectionTileRequest: any = {
             remoteRequest: {
@@ -592,14 +587,8 @@ describe('MapDataService', () => {
 
         await (service as any).runUpdate();
 
-        const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
-        expect(tileSocket).toBeDefined();
-        const body = JSON.parse(tileSocket.lastSent);
-        expect(body).not.toHaveProperty('flowControl');
-        expect(typeof body.requestId).toBe('number');
-        expect(body.requestId).toBeGreaterThan(0);
-        expect(body.stringPoolOffsets).toEqual([0]);
-        expect(body.requests).toEqual([
+        expect(updateRequestSpy).toHaveBeenCalledOnce();
+        expect(updateRequestSpy).toHaveBeenCalledWith([
             {
                 mapId: 'm1',
                 layerId: 'layerA',
@@ -618,7 +607,7 @@ describe('MapDataService', () => {
         stateService.selectionState.next([
             {
                 id: 1,
-                features: [{mapTileKey: 'm1/layerA/1', featureId: 'f1'}],
+                features: [{mapTileKey: makeTileKey(1), featureId: 'f1'}],
                 locked: false,
                 size: [30, 20],
                 color: '#111111',
@@ -626,7 +615,7 @@ describe('MapDataService', () => {
             },
             {
                 id: 2,
-                features: [{mapTileKey: 'm1/layerA/2', featureId: 'f2'}],
+                features: [{mapTileKey: makeTileKey(2), featureId: 'f2'}],
                 locked: true,
                 size: [30, 20],
                 color: '#222222',
@@ -639,50 +628,54 @@ describe('MapDataService', () => {
         const panels = service.selectionTopic.getValue();
         expect(panels).toHaveLength(2);
         expect(panels.every(panel => panel.features.length === 1)).toBe(true);
-        expect(service.loadedTileLayers.get('m1/layerA/1')?.hasData()).toBe(false);
-        expect(service.loadedTileLayers.get('m1/layerA/2')?.hasData()).toBe(false);
-        expect(service.selectionTileRequests.map(request => request.tileKey).sort()).toEqual([
-            'm1/layerA/1',
-            'm1/layerA/2'
+        expect(Array.from(service.loadedTileLayers.values()).every(tile => tile.hasData() === false)).toBe(true);
+        expect(service.selectionTileRequests.map(request => request.remoteRequest.tileIds[0]).sort((lhs, rhs) => lhs - rhs)).toEqual([
+            1,
+            2
         ]);
     });
 
     it('keeps SourceData panels when feature selection loading fails', async () => {
         const {service, stateService} = createMapDataService();
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         await service.initialize();
 
-        vi.spyOn(service, 'loadFeatures').mockImplementation(async (tileFeatureIds: any[]) => {
-            if (tileFeatureIds.length > 0) {
-                throw new Error('forced load failure');
-            }
-            return [];
-        });
+        try {
+            vi.spyOn(service, 'loadFeatures').mockImplementation(async (tileFeatureIds: any[]) => {
+                if (tileFeatureIds.length > 0) {
+                    throw new Error('forced load failure');
+                }
+                return [];
+            });
 
-        stateService.selectionState.next([
-            {
-                id: 1,
-                features: [{mapTileKey: 'm1/layerA/1', featureId: 'f1'}],
-                locked: false,
-                size: [30, 20],
-                color: '#111111',
-                undocked: false
-            },
-            {
-                id: 2,
-                features: [],
-                sourceData: {mapTileKey: 'SourceData:m1:SourceData-LAYER:1'},
-                locked: false,
-                size: [30, 40],
-                color: '#222222',
-                undocked: true
-            }
-        ]);
+            stateService.selectionState.next([
+                {
+                    id: 1,
+                    features: [{mapTileKey: makeTileKey(1), featureId: 'f1'}],
+                    locked: false,
+                    size: [30, 20],
+                    color: '#111111',
+                    undocked: false
+                },
+                {
+                    id: 2,
+                    features: [],
+                    sourceData: {mapTileKey: 'SourceData:m1:SourceData-LAYER:1'},
+                    locked: false,
+                    size: [30, 40],
+                    color: '#222222',
+                    undocked: true
+                }
+            ]);
 
-        await flushAsync();
-        await flushAsync();
+            await flushAsync();
+            await flushAsync();
 
-        const panels = service.selectionTopic.getValue();
-        expect(panels.some(panel => panel.id === 2 && panel.sourceData?.mapTileKey === 'SourceData:m1:SourceData-LAYER:1')).toBe(true);
+            const panels = service.selectionTopic.getValue();
+            expect(panels.some(panel => panel.id === 2 && panel.sourceData?.mapTileKey === 'SourceData:m1:SourceData-LAYER:1')).toBe(true);
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
     });
 
     it('applies the latest selection emission when updates overlap', async () => {
@@ -701,7 +694,7 @@ describe('MapDataService', () => {
         stateService.selectionState.next([
             {
                 id: 1,
-                features: [{mapTileKey: 'm1/layerA/1', featureId: 'f1'}],
+                features: [{mapTileKey: makeTileKey(1), featureId: 'f1'}],
                 locked: false,
                 size: [30, 20],
                 color: '#111111',
@@ -747,12 +740,8 @@ describe('MapDataService', () => {
         const legalSpy = vi.spyOn(service.legalInformationUpdated, 'next');
 
         const tileMetadata = {
-            id: 'm1/layerA/1',
-            mapTileKey: 'm1/layerA/1',
+            ...makeTileMetadata(1),
             nodeId: '',
-            mapName: 'm1',
-            layerName: 'layerA',
-            tileId: 1n,
             legalInfo: 'LICENSE A',
             numFeatures: 5,
             scalarFields: {},

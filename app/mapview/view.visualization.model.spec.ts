@@ -43,11 +43,13 @@ describe("ViewVisualizationState", () => {
         ]);
 
         const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
-            .mockImplementation((_viewport: any, level: number, _limit: number) => {
+            .mockImplementation((...args: unknown[]) => {
+                const [, level] = args as [unknown, number, number];
                 return tileIdsForLevel.get(level) ?? [];
             });
         const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
-            .mockImplementation((altitudeMeters: number, level: number) => {
+            .mockImplementation((...args: unknown[]) => {
+                const [altitudeMeters, level] = args as [number, number];
                 expect(altitudeMeters).toBe(1234);
                 return canonicalTileCountsByLevel.get(level) ?? 0;
             });

@@ -20,6 +20,10 @@ export class CoordinatesService {
         });
     }
 
+    protected loadJumpTargetsModule(path: string): Promise<any> {
+        return import(/* @vite-ignore */ path);
+    }
+
     initialize() {
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
@@ -29,7 +33,7 @@ export class CoordinatesService {
                         if (jumpTargetsConfig !== undefined) {
                             const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
                             // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
-                            import(/* @vite-ignore */ jumpTargetsPath).then((plugin) => {
+                            this.loadJumpTargetsModule(jumpTargetsPath).then((plugin) => {
                                 const { getAuxCoordinates, getAuxTileIds } = plugin;
                                 if (getAuxCoordinates) {
                                     this.auxiliaryCoordinatesFun = getAuxCoordinates;

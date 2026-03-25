@@ -393,7 +393,8 @@ describe('StyleService', () => {
             }
             throw new Error(`Unexpected URL ${url}`);
         });
-        vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((source: string) => {
+        vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((...args: unknown[]) => {
+            const [source] = args as [string];
             const match = source.match(/^\s*name\s*:\s*([^\n]+)/m);
             const styleName = (match?.[1] ?? 'BuiltinStyle').trim();
             return [{
@@ -427,7 +428,8 @@ describe('StyleService', () => {
             modified: false,
             visible: true,
         } as any);
-        vi.spyOn(service as any, 'initializeStyle').mockImplementation((_source: string, styleUrl: string) => {
+        vi.spyOn(service as any, 'initializeStyle').mockImplementation((...args: unknown[]) => {
+            const [, styleUrl] = args as [string, string];
             service.styles.set('StyleOne', {
                 id: 'StyleOne',
                 url: styleUrl,
@@ -468,7 +470,8 @@ describe('StyleService', () => {
             isModified: true,
             isUpdated: true
         });
-        vi.spyOn(service as any, 'initializeStyle').mockImplementation((source: string, styleUrl: string) => {
+        vi.spyOn(service as any, 'initializeStyle').mockImplementation((...args: unknown[]) => {
+            const [source, styleUrl] = args as [string, string];
             service.styles.set('StyleOne', {
                 id: 'StyleOne',
                 url: styleUrl,

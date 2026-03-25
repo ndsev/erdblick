@@ -312,14 +312,17 @@
                         "runner": "vitest",
                         "tsConfig": "tsconfig.spec.json",
                         "buildTarget": "erdblick:build:test",
-                        "codeCoverage": true,
-                        "codeCoverageReporters": [
+                        "setupFiles": [
+                            "test/vitest.setup.ts"
+                        ],
+                        "coverage": true,
+                        "coverageReporters": [
                             "text-summary",
                             "html",
                             "lcov",
                             "json-summary"
                         ],
-                        "codeCoverageExclude": [
+                        "coverageExclude": [
                         ],
                         "exclude": [
                             "app/app.component.spec.ts"

@@ -272,13 +272,18 @@ describe('StyleState', () => {
         const layers = ['Bavaria/Island2/Lane'];
         createLayerAndViewStates(pool, layers, 2);
         const styles = new StyleState(pool);
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
-        styles.next(new Map([[k, [true]]]));
+        try {
+            const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
+            styles.next(new Map([[k, [true]]]));
 
-        const encoded = styles.serialize(true)!;
-        // Underfilled values are skipped; no params produced for this style/option
-        expect(Object.keys(encoded).length).toBe(0);
+            const encoded = styles.serialize(true)!;
+            // Underfilled values are skipped; no params produced for this style/option
+            expect(Object.keys(encoded).length).toBe(0);
+        } finally {
+            consoleWarnSpy.mockRestore();
+        }
     });
 
     it('slices extra per-view values beyond the current number of views', () => {

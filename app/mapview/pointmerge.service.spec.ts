@@ -11,8 +11,8 @@ import {MergedPointsTile, PointMergeService} from './pointmerge.service';
 class DeckStub implements DeckLike {
     readonly commits: DeckLayerLike[][] = [];
 
-    setProps(props: { layers: DeckLayerLike[] }): void {
-        this.commits.push(props.layers);
+    setProps(props: Parameters<DeckLike['setProps']>[0]): void {
+        this.commits.push((props.layers ?? []) as DeckLayerLike[]);
     }
 }
 

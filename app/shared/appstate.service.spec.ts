@@ -1,43 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
-vi.mock('@angular/router', () => {
-    class NavigationStart {
-        constructor(
-            public id: number,
-            public url: string,
-        ) {}
-    }
-
-    class NavigationEnd {
-        constructor(
-            public id: number,
-            public url: string,
-            public urlAfterRedirects: string,
-        ) {}
-    }
-
-    return {
-        NavigationStart,
-        NavigationEnd,
-        Router: class {},
-        Params: {} as any,
-    };
-});
-
-vi.mock('../inspection/inspection.service', () => ({
-    SelectedSourceData: class {},
-}));
-
-vi.mock('../mapdata/features.model', () => ({
-    FeatureWrapper: class {},
-    FeatureTile: class {},
-}));
-
-vi.mock('../mapdata/map.model', () => ({
-    MapTreeNode: class {},
-}));
-
 import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';

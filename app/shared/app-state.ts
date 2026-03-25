@@ -766,7 +766,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             }
 
             for (let oi = 0; oi < optionIds.length; oi++) {
-                const optionId = optionIds[oi];
+                const optionId = this.normalizeStyleOptionId(optionIds[oi]);
                 const optionBody = optionValueSegments[oi] ?? '';
                 const perView = optionBody.split(':'); // per-view strings
                 const effectivePerView = perView.length === 1 && numViews > 1
@@ -821,6 +821,13 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
 
     private styleOptionKeyFromMapLayer(mapLayerId: string, shortStyleId: string, optionId: string): string {
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
+    }
+
+    private normalizeStyleOptionId(optionId: string): string {
+        if (optionId.startsWith(".")) {
+            return `show${optionId.slice(1)}`;
+        }
+        return optionId;
     }
 
     private expandStyleRunLengthTokens(tokens: string[]): string[] {

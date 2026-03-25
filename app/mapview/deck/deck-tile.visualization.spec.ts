@@ -8,8 +8,8 @@ import {FeatureTile} from "../../mapdata/features.model";
 class DeckStub implements DeckLike {
     readonly commits: DeckLayerLike[][] = [];
 
-    setProps(props: { layers: DeckLayerLike[] }): void {
-        this.commits.push(props.layers);
+    setProps(props: Parameters<DeckLike['setProps']>[0]): void {
+        this.commits.push((props.layers ?? []) as DeckLayerLike[]);
     }
 }
 
@@ -82,6 +82,8 @@ function emptyRenderResult(): any {
             featureAddresses: new Uint32Array()
         },
         coordinateOrigin: new Float64Array([0, 0, 0]),
+        labelWorld: [],
+        labelBillboard: [],
         lowFiBundles: [],
         mergedPointFeatures: {}
     };
@@ -1178,7 +1180,9 @@ describe("DeckTileVisualization", () => {
             processResolvedExternalReferences: vi.fn(),
             delete: vi.fn()
         };
-        const deckVisualizationCtor = attachDeckVisualizationStatics(vi.fn(() => fakeDeckVisualization));
+        const deckVisualizationCtor = attachDeckVisualizationStatics(vi.fn(function () {
+            return fakeDeckVisualization;
+        }));
         const previousDeckVisualizationCtor = (coreLib as any).DeckFeatureLayerVisualization;
         const previousPeekMany = FeatureTile.peekMany;
         (coreLib as any).DeckFeatureLayerVisualization = deckVisualizationCtor;
@@ -1248,7 +1252,9 @@ describe("DeckTileVisualization", () => {
             delete: vi.fn()
         };
         const deckVisualizationCtor = attachDeckVisualizationStatics(
-            vi.fn().mockImplementation(() => deckVisualization)
+            vi.fn(function () {
+                return deckVisualization;
+            })
         );
         const previousDeckVisualizationCtor = (coreLib as any).DeckFeatureLayerVisualization;
         const previousPeekMany = FeatureTile.peekMany;
