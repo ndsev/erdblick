@@ -1,131 +1,134 @@
 # UI Basics
 
-Erdblick centers its UI around a single deck.gl map canvas with docked utility panels. This section explains the controls that erdblick users rely on most often.
+Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock that can host inspection or SourceData panels. This guide explains the controls most users touch first.
 
 !!! note "Focus on the layout before advanced features"
-    If you are new to the viewer, first get comfortable with the overall layout and basic navigation. The search, inspection, and SourceData features build directly on the concepts introduced in this guide.
+    If you are new to the viewer, get comfortable with the shell, map navigation, and Maps & Layers first. Search, inspection, SourceData, and diagnostics all build on those basics.
 
 ![erdblick UI](screenshots/layout.png)
 
 ## Layout at a Glance
 
-1. **Quick menu** – burger menu for settings, statistics and styles buttons. Clicking the menu button opens the "Maps and Layers" panel.
-2. **Search bar** – focused with `Ctrl+K` and used for both jump actions and feature search.
-3. **Maps & Layers panel** – lists data sources, their feature layers, and focus buttons that jump to the configured coverage area.
-4. **Styles dialog** – opens from the toolbar and shows all bundled/imported style sheets.
-5. **Inspector area** – collapsible column that can host up to three inspection panels.
-6. **Status indicators** – tile and performance statistics plus a coordinate readout.
+1. **Maps button** – the floating `stacks` button opens or closes the **Maps & Layers** panel.
+2. **Main bar** – the top menu bar contains the search panel plus the main entry points for editing, view management, tools, and help.
+3. **Map view** – one or two active views, depending on whether split view is enabled.
+4. **Maps & Layers panel** – shows maps, feature layers, metadata actions, per-layer style options, and per-view layer controls.
+5. **Inspection dock** – hosts feature panels and SourceData panels. Panels can stay docked or be undocked into separate dialogs.
+6. **Diagnostics indicator** – summarizes tile progress, backend connectivity, and error presence.
+7. **Coordinate readout** – shows cursor coordinates and tile IDs and lets you place a shared marker.
 
 ## Navigating the Map
 
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
 
-- **Mouse**: left drag pans, middle-drag tilts, right drag zooms, scroll zooms.
-- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses the search field, `Ctrl+J` zooms to the currently selected feature, and `M` toggles the Maps & Layers panel.
+- **Mouse**: left drag pans, right drag tilts, scroll zooms.
+- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses search, `Ctrl+J` zooms to the selected feature, and `M` toggles the Maps & Layers panel.
 - **Compass widget**: click to reset heading or drag to rotate.
-- **Camera control buttons**: Use the arrow and plus/minus-buttons over the compass to zoom or pan with simple clicks.
-- **Perspective control buttons**: The `2D`/`3D` toggle under the buttons may be used to switch the view perspective:
-  - **3D Mode**: Full 3D visualization with feature height information. Any features with elevation data are displayed at their actual heights. This mode provides the most accurate spatial representation but can make it challenging to compare features at different elevations with each other or flat overlays like OpenStreetMap.
-  - **2D Mode**: Applies a Web Mercator projection (similar to Google Maps) where all features are projected onto a flat surface. This mode is ideal when:
-      - Comparing data sources with and without height information.
-      - Working with overlays (like OSM) that need to align with 3D features.
-      - Focusing on horizontal spatial relationships without elevation complexity.
-- **Map focus buttons**: use the focus icons in the `Maps & Layers` panel to jump directly to the coverage area advertised for a map or layer instead of manually panning and zooming.
-- In [Split View](erdblick-split.md), all camera moves target the currently focused view. Normally this is the view which you most recently interacted with, marked with a blue frame. Press `Ctrl+Left/Right` to switch focus in split view explicitly.
+- **Camera control buttons**: use the arrow and plus/minus buttons near the compass for simple pan/zoom actions.
+- **2D / 3D toggle**: switch between flat Web Mercator-style rendering and the full 3D view.
+- **Focus buttons**: use the target icon in **Maps & Layers** to jump to a map or layer coverage area advertised by the backend.
 
-## Main Button Menu and Quick Actions
+In [split view](erdblick-split.md), navigation targets the currently focused pane. The focused view is outlined in blue. Use `Ctrl+Left` / `Ctrl+Right` to move focus explicitly.
 
-Hover over the floating stacks icon in the upper-left corner to reveal a quick menu. Each icon opens a core dialog without covering the map:
+## Main Bar
 
-- **Help** – opens the documentation link configured for the build.
-- **Preferences** – tile limits, dark mode, experimental settings, storage resets.
-- **Controls** – keyboard shortcut reference.
-- **Datasources** – opens the [DataSource editor](erdblick-datasource-editor.md) when the backend exposes the `/config` endpoint.
-- **Styles** – edit and activate style sheets via the dedicated dialog.
-- **Statistics** – an advanced dialogue to inspect performance characteristics for the current viewport.
+The main bar replaces the older quick-menu workflow. Its top-level entries are:
 
-Click the stacks icon (or press `M`) to open or hide the Maps & Layers dialog itself.
+- **Edit** – open the **Styles Configurator**, **Datasources**, or **Settings** dialog.
+- **View** – open or close split view and control **Sync Views** for position, movement, projection, and layers.
+- **Tools** – open **Performance Statistics**, **Export Diagnostics**, or **Logs**.
+- **Help** – open the controls reference, external help, or the about dialog.
+
+On narrower screens, the main bar collapses into a more compact mobile layout. In that mode, the **Maps** action also appears in the menu bar itself.
 
 ## Maps, Layers, and Base Content
 
-Use the `Maps & Layers` panel to:
+Use the **Maps & Layers** panel to:
 
-- Turn maps and their feature layers on or off.
-- Use the **Focus Icon** to focus on a map or layer; clicking it zooms to the coverage area advertised by the backend.
-- Adjust **per-layer Style Options** using the checkboxes rendered beneath each layer. These options come from the active style sheets and only affect the selected layer and view.
-- Use the **Sync Layers** button (circular arrows next to each view tab) to clone the current visibility, zoom level, and all per-layer style option values across every compatible layer, and to sync the tile-border flag for that view. When layer synchronization is enabled in split view, those settings propagate to the opposite pane as well.
-- Control the **Background Map** with the OSM overlay toggle and opacity slider shown per view.
-- Inspect **Service Metadata** for each datasource: use the menu which appears when clicking the `{}`-Button which appears to the right of the map name.
-- Enable **Tile Borders** by clicking the respective button when hovering over a map layer node.
-- Change the **Tile Level** which is loaded for a particular layer, the controls appear when hovering over the layer node.
+- turn maps and layers on or off
+- focus a map or layer using the target icon
+- open map-level metadata from the **`[{}]`** button
+- choose the loaded tile level for each feature layer
+- enable **AUTO** per layer so erdblick chooses the level automatically
+- adjust **per-layer style options** exposed by active styles
+- copy one view’s visibility and style-option state with **Sync visualization options**
+- toggle tile borders per view
+- switch the tile grid  mode between **NDS** and **XYZ**
+- control the OSM overlay and its opacity per view
+- add the right-hand split view for side-by-side comparison
 
-!!! note "Map Grouping is controlled by mapviewer.yaml"
-    Slash-separated group names in the `mapId` can be used to nest related maps
-    in the map layer tree. E.g. `NDS.Live/Europe` will put the `Europe` map and its
-    layers under the `NDS.Live` parent group node. Note: Whole map groups can also
-    be turned on or off using the checkbox in the tree.
-
-Finally, at the bottom of the dialog, the `Add View` button may be used to open a [Split View](erdblick-split.md) for map comparison/side-by-side navigation.
+!!! note "Map grouping is controlled by map IDs"
+    Slash-separated `mapId` values create group nodes in the layer tree. For example, `NDS.Live/Europe` places `Europe` under the parent group `NDS.Live`.
 
 ![erdblick UI](screenshots/maps-and-layers.png)
 
-## Tile Load Status Overlay
+## Loading and Status Indicators
 
-Erdblick visualizes tile load progress directly on the map. These overlays are shown even when tile borders are disabled, and they update as the backend streams data and the renderer catches up.
+Erdblick exposes loading state both on the map and in the main bar:
 
-- **LoadingQueued** – thin, slightly inset orange outline.
-- **BackendFetching** – inset rectangle filled with diagonal orange stripes.
-- **BackendConverting** – inset rectangle with denser diagonal orange stripes.
-- **RenderingQueued** – inset rectangle filled with a translucent orange tint.
-- **Empty** – full tile rectangle filled with a translucent gray tint.
-- **Error** – full tile rectangle filled with a translucent red tint.
+- The **diagnostics indicator** shows whether tiles are still loading, whether the backend is connected, and whether errors have occurred.
+- Tile-state overlays are only visible when tile borders are enabled.
 
-## Coordinate panel and markers
+Tile overlays use these states:
 
-- The compact panel in the status bar shows the current cursor position. While you move the mouse over the map, it streams WGS‑84 longitude/latitude plus pre-computed MapViewer tile IDs for levels 0–15. Click any label to copy that value.
-- Use the dropdown to choose which systems to display. When an extension module provides extra conversions (for example NDS coordinates or custom tile IDs), those appear as additional toggleable entries.
-- The left marker button toggles placement mode. When enabled, the next map click drops a single marker at that position, freezes the coordinate readout, and turns the button into a reset icon. A second button appears to focus the current view on the stored marker.
-- Marker state is shared across views: enabling or resetting it updates both panes, and focusing uses the currently active view tab. Disabling the marker clears it from the scene and resumes live coordinate updates.
+- **Empty** – translucent gray fill
+- **Error** – translucent red fill
 
-## Styles Dialog
+Click the diagnostics indicator to open its progress popover. From there you can jump into the full statistics, log, and export tools. For the detailed workflow, see the [Diagnostics and Status Guide](erdblick-diagnostics.md).
 
-Open the **Styles** dialog via the quick action menu:
+## Coordinate Panel and Marker
 
-- Activate or deactivate entire style sheets.
-- Launch the style editor dialog to inspect or adjust YAML style definitions.
-- Import/export styles to/from the browser's local storage.
+- The coordinate panel shows the current cursor position plus derived tile IDs. Click any value to copy it.
+- The dropdown lets you enable additional coordinate systems provided by extension modules.
+- The marker button turns the next click into a shared bookmark position.
+- Once a marker exists, a second button focuses the active view on that stored marker.
 
-See the [Style System Guide](erdblick-stylesystem.md) for deep dives on YAML structures and GUI workflows.
+Marker state is shared across views, so split-view comparisons can reference the same point.
 
-## Inspector Column
+## Styles in the UI
 
-Selecting a feature opens its details in the inspection column:
+Open **Edit -> Styles Configurator** to manage style sheets:
 
-- Hold `Ctrl` while clicking to spawn additional panels and pin them immediately (three panels by default; you can lift this limit in the Preferences dialog).
-- Pin panels to keep their content while exploring the map; unpinned panels always show the most recent selection.
-- Use the filtering input at the top of each panel to locate attributes quickly.
-- Follow related feature links or open SourceData from the context menu.
+- enable or disable styles
+- open the style editor
+- reset built-in styles
+- import or remove styles
 
-Read the [Inspection Guide](erdblick-inspection.md) for feature-focused workflows.
+Use the [Built-in Style Workflows](erdblick-style-workflows.md) guide for the day-to-day UI flow, and the [Style System Guide](erdblick-stylesystem.md) when you need the YAML rule language.
+
+## Inspection Dock
+
+Selecting a feature opens it in the inspection dock:
+
+- Hold `Ctrl` while clicking to open additional panels and lock them immediately.
+- Locked panels keep their content; unlocked panels are reused by the next selection.
+- Panels can be undocked into separate dialogs.
+- Feature panels and SourceData panels are only reused for features or source data, respectively.
+- The panel action menu can open the side-by-side comparison dialog.
+
+For the feature workflow, continue with the [Feature Inspection Guide](erdblick-inspection.md). For raw payload inspection, see the [SourceData Inspection Guide](erdblick-sourcedata.md).
 
 ## Search, Jump, and History
 
-`Ctrl+K` (or clicking into the text field) focuses the search control. The panel combines:
+`Ctrl+K` focuses the search panel. It combines:
 
-- Jump-to actions (coordinates, tiles, feature identifiers, SourceData shortcuts).
-- Feature search queries with Simfil expressions.
-- Search history with inline remove buttons so you can re-run prior inputs or tidy the list.
+- jump actions for coordinates, tiles, feature IDs, and SourceData
+- feature search using Simfil expressions
+- search history and inline validation
 
-When a feature is selected, `Ctrl+J` zooms the active view to that feature’s extent without changing the currently active search entry.
-
-The dedicated [Search Guide](erdblick-search.md) documents every action plus language tips.
+The dedicated [Search Guide](erdblick-search.md) covers the available targets and query language in detail.
 
 ## Preferences and Resets
 
-Open the Preferences dialog from the quick menu:
+Open **Edit -> Settings** to access the main viewer preferences:
 
-- Adjust tile load/visualization limits and switch dark mode on, off, or automatic.
-- Allow unlimited inspected features when you need more than three inspection panels.
-- Clear stored viewer properties, search history, and style overrides if the UI behaves unexpectedly.
+- **Max Tiles to Load** limits how much data the current view may page in
+- **Max Inspections** controls how many locked inspection panels can stay open
+- **Tile pull compression** toggles compressed tile downloads
+- **Threaded tile rendering** and **Render worker count override** control deck.gl-side rendering parallelism
+- **Pin low-fi rendering to max LOD** changes the low-fidelity culling policy
+- **Dark Mode** switches between on, off, and automatic
+- **Collapse Dock automatically** controls the inspection dock behavior
+- the **Clear** actions reset viewer/search state, imported styles, or modified built-in styles
 
-![erdblick UI](screenshots/preferences.png)
+![preferences](screenshots/preferences.png)

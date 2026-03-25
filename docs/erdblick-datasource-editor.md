@@ -21,7 +21,7 @@ See the [Advanced mapget Configuration](../../docs/mv-config.md#advanced-mapget-
 
 Once the editor is available, you can adjust data sources directly from within erdblick instead of editing files by hand:
 
-1. Open the quick menu (stacks icon) and click **Datasources**.
+1. Open **Edit -> Datasources** from the main bar.
 2. Erdblick loads the current configuration from the `/config` endpoint and shows it in the editor panel.
 3. Update fields such as data source `type`, `uri`, `mapId`, coverage settings, or HTTP scopes according to your backend’s schema.
 4. Click **Apply** to send the edited configuration back to the backend and refresh the list of maps and layers.

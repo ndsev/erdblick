@@ -548,7 +548,7 @@ A few implementation details matter for contributors:
 
 - `FeatureSearchService` owns the worker pool, work queue, and result aggregation logic. It creates up to `navigator.hardwareConcurrency` workers and keeps them hot across searches.
 - Tasks posted to workers carry the serialized tile blob, the current field dictionary blob, and `dataSourceInfo` so that each worker can build a local `TileLayerParser` and `TileFeatureLayer` instance.
-- The quad tree inside `FeatureSearchService` clusters search results into per-tile buckets and computes billboard positions, which are then rendered via Cesium in `MapView`.
+- The quad tree inside `FeatureSearchService` clusters search results into per-tile buckets and computes billboard positions, which are then rendered through the deck.gl-based `MapView`.
 - Completion and diagnostics follow the same structure with `CompletionWorkerTask` messages; the worker invokes `FeatureLayerSearch.complete` and `FeatureLayerSearch.diagnostics` respectively.
 
 When touching this area, keep web worker pitfalls in mind:

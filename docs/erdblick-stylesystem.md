@@ -2,19 +2,24 @@
 
 Erdblick visualizes every feature through YAML-defined style sheets. This guide explains how to manage styles in the UI, how the YAML schema works, and which rule fields are available for advanced styling.
 
+!!! note "Need the built-in workflow first?"
+    If you mainly work with the bundled styles from the UI, start with the [Built-in Style Workflows](erdblick-style-workflows.md) guide. This page is the lower-level YAML and rule reference.
+
 ![erdblick UI](screenshots/style-controls.png)
 
 ## Managing Styles in the UI
 
 Most day-to-day style work happens directly inside the Styles dialog, where you can toggle, edit, and reset style sheets without touching files on disk:
 
-1. **Open the Styles dialog** via the quick action menu → **Styles**.
+1. **Open the Styles dialog** via **Edit -> Styles Configurator** in the main bar.
 2. **Activate/deactivate style sheets** to control which rules run.
-4. **Use the style editor** (pencil icon) for live editing:
+3. **Use the style editor** (pencil icon) for live editing:
    - Syntax-highlighting with validation messages for YAML errors.
    - Auto-complete based on the current schema.
    - Import/Export buttons to move styles in and out of the browser’s `localStorage`.
-5. **Reset browser-stored versions** via the Preferences dialog: use the “Clear” buttons for imported styles and modified built‑in styles if the UI behaves unexpectedly.
+4. **Reset browser-stored versions** via the Preferences dialog: use the “Clear” buttons for imported styles and modified built-in styles if the UI behaves unexpectedly.
+
+Built-in styles that were edited locally show a **Modified** tag. Click it to open the **compare dialog** against the shipped version.
 
 In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options (`StyleOptionNode`s). That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
 
@@ -244,5 +249,5 @@ To control which style sheets are available in a given deployment, configure the
     ]
   }
   ```
-- Containerized deployments can mount their own directories over the bundle’s `config/styles` path (for example by binding a host directory to `/app/erdblick/bundle/styles` or the equivalent location in your image).
+- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`).
 - Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.

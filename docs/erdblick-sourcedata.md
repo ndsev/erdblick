@@ -1,38 +1,47 @@
 # SourceData Inspection Guide
 
-The SourceData inspector lets you read raw blobs which are the underlying data of the visible features. Use it to debug encoding issues or verify backend responses.
+The SourceData inspector lets you read the raw payloads that underlie the visible features. Use it when you need to verify converter input, inspect service metadata, or debug why a feature looks different from its original source.
 
-![SourceData inspector](screenshots/sourcedata-inspection.svg)
+![SourceData inspector](screenshots/sourcedata-inspection.png)
 
 ## Ways to Open SourceData
 
-You can reach the SourceData inspector from several different entry points, depending on where you start your investigation:
+You can open SourceData from several entry points:
 
-1. **Context menu** – right-click anywhere on the map and choose **Inspect Source Data**. The UI pre-fills the tile ID under the cursor.
-2. **Inspector links** – many feature attributes show a source icon. Clicking it opens SourceData with the correct map, tile, and layer already highlighted.
-3. **Search command** – type `<tileId> "<Map Id>" "<Source Layer>"` into the search bar and execute the action. Example:
+1. **Map context menu** – right-click a location on the map and choose **Inspect Source Data**.
+2. **Inspection links** – many feature nodes expose a source-data action that opens the matching raw payload.
+3. **Search command** – enter `<tileId> "<Map Id>" "<Source Layer>"` into the search panel. Example:
    ```text
    37443649601549 "Road 4 Test Data" "SourceData-road.layer.RoadLayer-1"
    ```
-4. **Map-level metadata** – in the Maps & Layers panel, use the metadata actions for a map to open SourceData directly on service- and module-level blobs such as `ServiceDefinition`, `SpatialExtent`, or registry metadata.
+4. **Map metadata** – use the metadata action in **Maps & Layers** to open service- and module-level blobs such as `ServiceDefinition`, `SpatialExtent`, or registry metadata.
 
-![Shortcut from inspector to SourceData](screenshots/goto-sourcedata.svg)
+![Shortcut from inspector to SourceData](screenshots/goto-sourcedata.png)
 
-_[Screenshot placeholder: Context menu path that opens the SourceData inspector.]_
+## Dedicated SourceData Panels
 
-## Navigating SourceData
+SourceData is no longer treated as just another branch inside the feature inspection tree. When you open it, erdblick uses a dedicated panel mode:
 
-Once the panel is open, the tree view and filter controls make it easier to zero in on the parts of a blob that matter:
+- the header shows the current map and tile context
+- the panel content is restricted to SourceData display
+- the source-layer dropdown lets you switch between compatible raw layers for the same tile
 
-- Use the filter box to highlight field names or values (supports case-insensitive search).
-- Expand nodes to see value, type, and offsets.
-- When SourceData is opened from a feature inspection tree link (e.g. for `Attribute Validity`), a corresponding region in the source data tree is highlighted in light green.
+This separation keeps feature inspection and raw-payload inspection from competing for the same panel slot.
+
+## Navigating the Raw Payload
+
+Once the panel is open:
+
+- use the filter box to find field names or values
+- expand nodes to inspect structure, offsets, and values
+- switch between raw layers with the dropdown when a tile exposes several SourceData entries
+- inspect metadata-only layers such as service definition or registry metadata without leaving the same overall workflow
+
+When SourceData is opened from a feature node, erdblick tries to preselect the matching address range in the raw tree so you can line up the interpreted feature view with the original payload faster.
 
 ## Hints for Efficient Debugging
 
-A few SourceData inspection habits pay off quickly when you debug tricky encoding or backend problems:
-
-- Enable tile borders and the statistics dialog when chasing missing tiles; copy the tile ID from the statistics view and feed it into SourceData.
-- Combine with feature inspection: Keep SourceData open in one panel while you inspect features in the other.
-- Document interesting blobs by copying the current erdblick URL. It encodes the selected map, tile, and layer so colleagues can open the same view.
-- Use the browser’s Back and Forward buttons to walk through previously inspected SourceData states.
+- Combine SourceData with a locked feature inspection so you can compare interpreted and raw views side by side.
+- Enable tile borders when you need exact tile IDs for follow-up searches or bug reports.
+- Use map-level metadata actions to inspect Smart Layer service metadata, not just feature blobs.
+- Copy the URL when you want to share a specific map/tile/layer SourceData state with a colleague.
