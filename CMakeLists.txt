@@ -37,6 +37,7 @@ if (NOT COMMAND CPMAddPackage)
     unset(${_erdblick_cpm_var})
   endforeach()
   add_subdirectory(cmake/CPM.cmake)
+endif ()
 include(cmake/deps.cmake)
 
 # Erdblick Core Library
