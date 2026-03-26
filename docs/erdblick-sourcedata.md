@@ -20,11 +20,11 @@ You can open SourceData from several entry points:
 
 ## Dedicated SourceData Panels
 
-SourceData is no longer treated as just another branch inside the feature inspection tree. When you open it, erdblick uses a dedicated panel mode:
+SourceData panels are treated differently than feature inspection panels:
 
 - the header shows the current map and tile context
 - the panel content is restricted to SourceData display
-- the source-layer dropdown lets you switch between compatible raw layers for the same tile
+- the source-layer dropdown lets you switch between compatible raw layers for the same tile (or different metadata blobs)
 
 This separation keeps feature inspection and raw-payload inspection from competing for the same panel slot.
 

@@ -32,7 +32,7 @@ In [split view](erdblick-split.md), navigation targets the currently focused pan
 
 ## Main Bar
 
-The main bar replaces the older quick-menu workflow. Its top-level entries are:
+The main bar provides these top-level entries:
 
 - **Edit** – open the **Styles Configurator**, **Datasources**, or **Settings** dialog.
 - **View** – open or close split view and control **Sync Views** for position, movement, projection, and layers.

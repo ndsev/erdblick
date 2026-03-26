@@ -51,7 +51,7 @@ Erdblick also applies a few presentation rules that matter in practice:
 
 When you hover validity-aware nodes in the tree, erdblick tries to highlight the most specific validity that matches the hovered attribute or subnode. If no single validity is the right match, it falls back to showing all validities attached to that node.
 
-`COMPLETE` means the attribute applies to the complete referenced geometry or feature scope. It replaces the older `NULL` presentation for full validity.
+`COMPLETE` means the attribute applies to the complete referenced geometry or feature scope.
 
 ## Comparison Dialog
 
@@ -69,7 +69,7 @@ The comparison dialog keeps one column per inspected feature and preserves the i
 
 ## SourceData Handoff
 
-Feature inspection and SourceData inspection are now separated more clearly:
+Feature inspection and SourceData inspection use distinct panel modes:
 
 - feature panels stay feature-focused
 - SourceData opens in its own dedicated panel mode
