@@ -5,19 +5,18 @@ import {
     ElementRef,
     input,
     InputSignal,
+    NgZone,
     OnDestroy,
     Signal,
     ViewChild
 } from "@angular/core";
 import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {CesiumMath} from "../integrations/cesium";
-import {MapView} from "./view";
+import {IRenderView} from "./render-view.model";
 import {AppStateService} from "../shared/appstate.service";
 import {toObservable, toSignal} from "@angular/core/rxjs-interop";
 import {Observable, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
-import {SceneMode} from "../integrations/cesium";
 
 @Component({
     selector: 'erdblick-view-ui',
@@ -69,7 +68,7 @@ import {SceneMode} from "../integrations/cesium";
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
 
-    mapView: InputSignal<MapView | undefined> = input<MapView | undefined>(undefined);
+    mapView: InputSignal<IRenderView | undefined> = input<IRenderView | undefined>(undefined);
     is2D: InputSignal<boolean> = input<boolean>(false);
     private readonly numViews: Signal<number>;
     readonly isPrimary = computed(() => {
@@ -86,11 +85,13 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     projection: {icon: string, label: string, mode: string} = this.projectionOptions[0];
 
     private mapViewSubscription = new Subscription();
-    private mapView$: Observable<MapView | undefined>;
+    private mapView$: Observable<IRenderView | undefined>;
+    private compassTickByView = new WeakMap<IRenderView, () => void>();
 
     constructor(public appModeService: AppModeService,
                 public stateService: AppStateService,
-                private keyboardService: KeyboardService) {
+                private keyboardService: KeyboardService,
+                private ngZone: NgZone) {
         this.numViews = toSignal(this.stateService.numViewsState, {initialValue: this.stateService.numViewsState.getValue()});
         this.mapView$ = toObservable(this.mapView);
     }
@@ -99,13 +100,17 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         const needle = this.needleRef.nativeElement;
         this.mapViewSubscription.add(this.mapView$.pipe(
             filter(mv=> mv !== undefined)).subscribe(mapView => {
-                this.projection = mapView?.getSceneMode() === SceneMode.SCENE2D ?
+                this.projection = this.is2D() ?
                     { icon: '2d', label: '2D', mode: '2D projection' } :
                     { icon: '3d', label: '3D', mode: '3D projection' };
                 let currentRotationDeg = 0;
-                mapView.viewer.clock.onTick.addEventListener(() => {
+                const oldTick = this.compassTickByView.get(mapView);
+                if (oldTick) {
+                    this.ngZone.runOutsideAngular(() => mapView.offTick(oldTick));
+                }
+                const tick = () => {
                     if (needle && mapView.isAvailable()) {
-                        let headingDeg = CesiumMath.toDegrees(mapView.viewer.camera.heading);
+                        let headingDeg = mapView.getCameraHeadingDegrees();
                         headingDeg = (headingDeg % 360 + 360) % 360; // Normalize the heading to [0, 360)
 
                         // Calculate the shortest rotation direction (avoid needle spinning unnecessarily)
@@ -121,7 +126,9 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
                         currentRotationDeg = (currentRotationDeg % 360 + 360) % 360;
                         needle.style.transform = `rotate(${currentRotationDeg}deg)`;
                     }
-                });
+                };
+                this.compassTickByView.set(mapView, tick);
+                this.ngZone.runOutsideAngular(() => mapView.onTick(tick));
             })
         );
 
@@ -129,6 +136,14 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     }
 
     ngOnDestroy(): void {
+        const mapView = this.mapView();
+        if (mapView) {
+            const tick = this.compassTickByView.get(mapView);
+            if (tick) {
+                this.ngZone.runOutsideAngular(() => mapView.offTick(tick));
+                this.compassTickByView.delete(mapView);
+            }
+        }
         this.mapViewSubscription.unsubscribe();
     }
 

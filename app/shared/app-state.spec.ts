@@ -36,6 +36,38 @@ describe('AppState', () => {
         });
     });
 
+    it('serializes enum arrays as CSV when targeting the URL', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState(pool, {
+            name: 'tileGridMode',
+            defaultValue: ['xyz'],
+            schema: z.array(z.enum(['xyz', 'nds'])),
+            urlParamName: 'tgm',
+        });
+
+        state.next(['nds']);
+
+        expect(state.serialize(true)).toEqual({
+            tgm: 'nds',
+        });
+    });
+
+    it('serializes string arrays without pre-encoding URL-permitted separators', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'selection',
+            defaultValue: [] as string[],
+            schema: z.array(z.string()),
+            urlParamName: 'sel',
+        });
+
+        state.next(['SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0']);
+
+        expect(state.serialize(true)).toEqual({
+            sel: 'SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0',
+        });
+    });
+
     it('serializes arrays of primitive arrays using colon-separated CSV groups', () => {
         const pool = new Map<string, AppState<unknown>>();
         const state = new AppState(pool, {
@@ -91,6 +123,48 @@ describe('AppState', () => {
         state.deserialize({ mx: '4,5:6,7:' });
 
         expect(state.getValue()).toEqual([[4, 5], [6, 7], []]);
+    });
+
+    it('deserializes pre-encoded CSV payloads for backward compatibility', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'selection',
+            defaultValue: [] as string[],
+            schema: z.array(z.string()),
+            urlParamName: 'sel',
+        });
+
+        state.deserialize({ sel: 'SourceData%3Amap%3Alayer' });
+
+        expect(state.getValue()).toEqual(['SourceData:map:layer']);
+    });
+
+    it('deserializes run-length tokens for numeric arrays', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState(pool, {
+            name: 'numbers',
+            defaultValue: [0],
+            schema: z.array(z.number()),
+            urlParamName: 'n',
+        });
+
+        state.deserialize({ n: '5x3,2' });
+
+        expect(state.getValue()).toEqual([5, 5, 5, 2]);
+    });
+
+    it('does not treat string-array tokens as run-length compressed values', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'labels',
+            defaultValue: [],
+            schema: z.array(z.string()),
+            urlParamName: 'l',
+        });
+
+        state.deserialize({ l: 'ax2,b' });
+
+        expect(state.getValue()).toEqual(['ax2', 'b']);
     });
 
     it('exposes field names for form-encoded objects', () => {
@@ -198,13 +272,18 @@ describe('StyleState', () => {
         const layers = ['Bavaria/Island2/Lane'];
         createLayerAndViewStates(pool, layers, 2);
         const styles = new StyleState(pool);
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
-        styles.next(new Map([[k, [true]]]));
+        try {
+            const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
+            styles.next(new Map([[k, [true]]]));
 
-        const encoded = styles.serialize(true)!;
-        // Underfilled values are skipped; no params produced for this style/option
-        expect(Object.keys(encoded).length).toBe(0);
+            const encoded = styles.serialize(true)!;
+            // Underfilled values are skipped; no params produced for this style/option
+            expect(Object.keys(encoded).length).toBe(0);
+        } finally {
+            consoleWarnSpy.mockRestore();
+        }
     });
 
     it('slices extra per-view values beyond the current number of views', () => {
@@ -317,5 +396,24 @@ describe('StyleState', () => {
         styles.deserialize('{"NY0X~0~opt":"1"}');
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
         expect(styles.getValue().get(k)).toEqual(['1']);
+    });
+
+    it('deserialize accepts show-option shorthand with broadcast and run-length payloads', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
+        createLayerAndViewStates(pool, layers, 2);
+        const styles = new StyleState(pool);
+        styles.resetToDefault();
+
+        styles.deserialize({
+            'NY0X~0-1~.Lanes': '1x2',
+        });
+
+        const k = (layer: string) => {
+            const [mapId, ...rest] = layer.split('/');
+            return styles.styleOptionKey(mapId, rest.join('/'), 'NY0X', 'showLanes');
+        };
+        expect(styles.getValue().get(k(layers[0]))).toEqual(['1', '1']);
+        expect(styles.getValue().get(k(layers[1]))).toEqual(['1', '1']);
     });
 });

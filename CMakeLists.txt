@@ -5,7 +5,7 @@ include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# Treat warnings as errors, with some exceptions for Cesium.
+# Treat warnings as errors.
 set(ERDBLICK_CXX_FLAGS
   "-Wall -Wno-error=sign-conversion -Wno-sign-compare -Wno-sign-conversion -Wno-unused-local-typedefs -Wno-comment -Wno-effc++")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -22,22 +22,23 @@ endif()
 # External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
-# TODO: Use next official release of mapget
-if (NOT TARGET mapget)
-  FetchContent_Declare(mapget
-    GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    GIT_TAG        "v2025.5.1"
-    GIT_SHALLOW    ON)
-  FetchContent_MakeAvailable(mapget)
-endif()
-
-FetchContent_Declare(yaml-cpp
-  GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "0.8.0"
-  GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(yaml-cpp)
-
-include(cmake/cesium.cmake)
+set(CPM_DOWNLOAD_ALL ON)
+set(CPM_USE_LOCAL_PACKAGES OFF)
+if (NOT COMMAND CPMAddPackage)
+  if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPM.cmake/CMakeLists.txt")
+    message(FATAL_ERROR
+      "Missing CPM submodule at cmake/CPM.cmake. "
+      "Run: git submodule update --init --recursive cmake/CPM.cmake")
+  endif()
+  # If this build tree previously used a different CPM checkout, stale cache
+  # variables can make CPM.cmake return early before defining CPMAddPackage.
+  foreach(_erdblick_cpm_var CPM_INITIALIZED CPM_DIRECTORY CPM_FILE CPM_VERSION CPM_PACKAGES)
+    unset(${_erdblick_cpm_var} CACHE)
+    unset(${_erdblick_cpm_var})
+  endforeach()
+  add_subdirectory(cmake/CPM.cmake)
+endif ()
+include(cmake/deps.cmake)
 
 # Erdblick Core Library
 add_subdirectory(libs/core)

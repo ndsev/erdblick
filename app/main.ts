@@ -1,15 +1,6 @@
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
 import { AppModule } from './app.module';
 
-// Window interface with additional Global variables.
-// Required so that Cesium can find its bundled resources.
-declare global {
-    interface Window {
-        CESIUM_BASE_URL: string
-    }
-}
-window.CESIUM_BASE_URL = 'bundle/cesium/';
-
 // Apply persisted dark mode before Angular bootstraps to avoid flicker
 (() => {
     try {

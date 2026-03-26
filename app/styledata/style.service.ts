@@ -21,6 +21,23 @@ interface StyleConfigEntry {
     url: string
 }
 
+interface BuiltinStyleBaseline {
+    id: string,
+    source: string
+}
+
+export interface StyleLifecycleState {
+    id: string,
+    sha256: string,
+    isModified: boolean,
+    isUpdated: boolean
+}
+
+export interface UpdatedModifiedStyleEntry {
+    id: string,
+    url: string
+}
+
 export type FeatureStyleOptionWithStringType = {
     label: string,
     id: string,
@@ -64,7 +81,7 @@ export class StyleService {
 
     stylesDialogVisible: boolean = false;
 
-    styleHashes: Map<string, {id: string, sha256: string, isModified: boolean, isUpdated: boolean}> = new Map();
+    styleHashes: Map<string, StyleLifecycleState> = new Map();
     styleUrls: StyleConfigEntry[] = [];
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     erroredStyleIds: Map<string, string> = new Map<string, string>();
@@ -80,6 +97,7 @@ export class StyleService {
     styleAddedForId: Subject<string> = new Subject<string>();
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
+    private readonly builtinStyleBaselines = new Map<string, BuiltinStyleBaseline>();
 
     constructor(private httpClient: HttpClient,
                 private stateService: AppStateService,
@@ -114,7 +132,8 @@ export class StyleService {
                         continue;
                     }
                     this.builtinStylesCount++;
-                    this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
+                    this.registerBuiltinServerSource(styleUrl, styleId, styleString, styleHashes);
+                    this.synchronizeLifecycleForStyle(this.styles.get(styleId));
                 }
                 this.loadModifiedBuiltinStyles();
             }
@@ -231,6 +250,8 @@ export class StyleService {
             if (!newStyleId) {
                 return;
             }
+            this.registerBuiltinServerSource(style.url, newStyleId, styleString);
+            this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
             this.reapplyStyle(newStyleId);
             this.saveModifiedBuiltinStyles();
         } catch (error) {
@@ -350,6 +371,8 @@ export class StyleService {
                     if (source) {
                         const restoredId = this.initializeStyle(source, builtinUrl!, styleId, false, false);
                         if (restoredId) {
+                            this.registerBuiltinServerSource(builtinUrl, restoredId, source);
+                            this.synchronizeLifecycleForStyle(this.styles.get(restoredId));
                             this.reapplyStyle(restoredId);
                         }
                     }
@@ -370,6 +393,7 @@ export class StyleService {
         if (!newStyleId) {
             return undefined;
         }
+        this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
 
         if (style.imported) {
             this.saveImportedStyles();
@@ -378,6 +402,49 @@ export class StyleService {
         }
         this.reapplyStyle(newStyleId);
         return newStyleId;
+    }
+
+    resetModifiedBuiltinStyle(styleIdOrUrl: string): string | undefined {
+        const style = this.resolveBuiltinStyle(styleIdOrUrl);
+        if (!style) {
+            return undefined;
+        }
+        const baseline = this.builtinStyleBaselines.get(style.url);
+        if (!baseline) {
+            return undefined;
+        }
+        const restoredStyleId = this.initializeStyle(baseline.source, style.url, style.id, false, false);
+        if (!restoredStyleId) {
+            return undefined;
+        }
+        const baselineHash = sipHash64Hex(baseline.source);
+        const existingLifecycle = this.styleHashes.get(style.url);
+        this.styleHashes.set(style.url, {
+            id: restoredStyleId,
+            sha256: baselineHash,
+            isModified: false,
+            isUpdated: existingLifecycle?.isUpdated ?? baselineHash !== this.loadStyleHashes().get(style.url)
+        });
+        this.saveModifiedBuiltinStyles();
+        this.reapplyStyle(restoredStyleId);
+        return restoredStyleId;
+    }
+
+    getBuiltinBaselineSource(styleIdOrUrl: string): string | undefined {
+        const style = this.resolveBuiltinStyle(styleIdOrUrl);
+        if (style && this.builtinStyleBaselines.has(style.url)) {
+            return this.builtinStyleBaselines.get(style.url)!.source;
+        }
+        if (this.builtinStyleBaselines.has(styleIdOrUrl)) {
+            return this.builtinStyleBaselines.get(styleIdOrUrl)!.source;
+        }
+        return undefined;
+    }
+
+    getUpdatedModifiedStyles(): UpdatedModifiedStyleEntry[] {
+        return [...this.styleHashes.entries()]
+            .filter(([, state]) => state.isUpdated && state.isModified)
+            .map(([url, state]) => ({id: state.id, url}));
     }
 
     saveModifiedBuiltinStyles() {
@@ -413,24 +480,19 @@ export class StyleService {
     loadModifiedBuiltinStyles() {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
-            for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
+            for (const [, style] of JSON.parse(modifiedBuiltinStyleData)) {
                 // A modified style will only be applied if there is a matching builtin style by the URL.
-                const matchingBuiltinStyle = this.styles.values().filter(style => style.url === style.url).toArray();
-                if (!matchingBuiltinStyle.length) {
+                const matchingBuiltinStyle = Array.from(this.styles.values()).find(
+                    builtinStyle => builtinStyle.url === style.url
+                );
+                if (!matchingBuiltinStyle) {
                     continue;
                 }
-                if (!this.initializeStyle(style.source, style.url, matchingBuiltinStyle[0].id, true, style.imported)) {
+                const newStyleId = this.initializeStyle(style.source, style.url, matchingBuiltinStyle.id, true, style.imported);
+                if (!newStyleId) {
                     continue;
                 }
-                const hash = this.styleHashes.get(style.url);
-                if (hash) {
-                    this.styleHashes.set(style.url, {
-                        id: style.id,
-                        sha256: hash.sha256,
-                        isModified: true,
-                        isUpdated: hash.isUpdated
-                    });
-                }
+                this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
             }
         }
     }
@@ -613,10 +675,10 @@ export class StyleService {
         }
         const style = this.styles.get(styleId)!;
         style.visible = enabled !== undefined ? enabled : !style.visible;
+        this.stateService.setStyleVisibility(styleId, style.visible);
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
-        this.stateService.setStyleVisibility(styleId, style.visible);
     }
 
     private loadStyleHashes(): Map<string, string> {
@@ -630,20 +692,69 @@ export class StyleService {
         return styleHashes;
     }
 
-    private compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
-        const styleHash = sipHash64Hex(style.source);
-        this.styleHashes.set(style.url, {
-            id: style.id,
-            sha256: styleHash,
-            isModified: false,
-            isUpdated: styleHash !== styleHashes.get(style.url)
-        });
-    }
-
     updateStyleHashes() {
         localStorage.removeItem('styleHashes');
         const pairs = Array.from(this.styleHashes, ([styleUrl, status]) => [styleUrl, status.sha256]);
         localStorage.setItem('styleHashes', JSON.stringify(pairs));
-        this.styleHashes.clear();
+        for (const [styleUrl, status] of this.styleHashes.entries()) {
+            this.styleHashes.set(styleUrl, {
+                id: status.id,
+                sha256: status.sha256,
+                isModified: status.isModified,
+                isUpdated: false
+            });
+        }
+    }
+
+    private registerBuiltinServerSource(
+        styleUrl: string,
+        styleId: string,
+        styleSource: string,
+        persistedHashes?: Map<string, string>
+    ) {
+        if (!this.isBuiltinUrl(styleUrl)) {
+            return;
+        }
+        this.builtinStyleBaselines.set(styleUrl, {
+            id: styleId,
+            source: styleSource
+        });
+        const styleHash = sipHash64Hex(styleSource);
+        const persistedStyleHashes = persistedHashes ?? this.loadStyleHashes();
+        const existing = this.styleHashes.get(styleUrl);
+        this.styleHashes.set(styleUrl, {
+            id: styleId,
+            sha256: styleHash,
+            isModified: existing?.isModified ?? false,
+            isUpdated: styleHash !== persistedStyleHashes.get(styleUrl)
+        });
+    }
+
+    private synchronizeLifecycleForStyle(style?: ErdblickStyle) {
+        if (!style || style.imported || !this.isBuiltinUrl(style.url)) {
+            return;
+        }
+        const existing = this.styleHashes.get(style.url);
+        this.styleHashes.set(style.url, {
+            id: style.id,
+            sha256: existing?.sha256 ?? sipHash64Hex(style.source),
+            isModified: style.modified,
+            isUpdated: existing?.isUpdated ?? false
+        });
+    }
+
+    private isBuiltinUrl(styleUrl: string): boolean {
+        return this.styleUrls.some(entry => entry.url === styleUrl);
+    }
+
+    private resolveBuiltinStyle(styleIdOrUrl: string): ErdblickStyle | undefined {
+        const exactStyle = this.styles.get(styleIdOrUrl);
+        if (exactStyle && !exactStyle.imported && this.isBuiltinUrl(exactStyle.url)) {
+            return exactStyle;
+        }
+        const matchedByUrl = Array.from(this.styles.values()).find(
+            style => !style.imported && style.url === styleIdOrUrl && this.isBuiltinUrl(style.url)
+        );
+        return matchedByUrl;
     }
 }

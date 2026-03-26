@@ -1,34 +1,6 @@
 import {describe, it, expect, vi} from 'vitest';
 import {of} from 'rxjs';
 
-vi.mock('../integrations/cesium', () => {
-    class Cartographic {
-        constructor(
-            public longitude: number,
-            public latitude: number,
-            public height: number,
-        ) {}
-    }
-
-    return {Cartographic};
-});
-
-vi.mock('/config/jump_plugin.js', () => ({
-    default: () => ([
-        {
-            icon: 'pi-mock',
-            color: 'green',
-            name: 'Mock Jump Target',
-            label: 'Mock jump target',
-            enabled: false,
-            jump: () => [1, 2],
-            validate: () => true,
-        },
-    ]),
-    getAuxCoordinates: () => null,
-    getAuxTileIds: () => null,
-}));
-
 import {CoordinatesService} from './coordinates.service';
 
 class HttpClientStub {
@@ -61,23 +33,34 @@ describe('CoordinatesService', () => {
 
     it('calls config.json during initialization when auxiliary plugin is configured', async () => {
         const {service, httpClient} = createService();
-
-        httpClient.get.mockImplementation((url: string) => {
-            if (url === 'config.json') {
-                return of({
-                    extensionModules: {
-                        jumpTargets: 'jump_plugin',
-                    },
-                });
-            }
-            throw new Error(`Unexpected URL ${url}`);
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const loaderSpy = vi.spyOn(CoordinatesService.prototype as any, 'loadJumpTargetsModule').mockResolvedValue({
+            getAuxCoordinates: () => null,
+            getAuxTileIds: () => null,
         });
 
-        service.initialize();
+        try {
+            httpClient.get.mockImplementation((url: string) => {
+                if (url === 'config.json') {
+                    return of({
+                        extensionModules: {
+                            jumpTargets: 'jump_plugin',
+                        },
+                    });
+                }
+                throw new Error(`Unexpected URL ${url}`);
+            });
 
-        await new Promise(resolve => setTimeout(resolve, 0));
+            service.initialize();
 
-        expect(httpClient.get).toHaveBeenCalledWith('config.json', {responseType: 'json'});
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            expect(httpClient.get).toHaveBeenCalledWith('config.json', {responseType: 'json'});
+            expect(loaderSpy).toHaveBeenCalledWith('/config/jump_plugin.js');
+        } finally {
+            loaderSpy.mockRestore();
+            consoleErrorSpy.mockRestore();
+        }
     });
 }
 );

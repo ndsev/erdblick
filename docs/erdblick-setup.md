@@ -92,6 +92,6 @@ _[Screenshot placeholder: Styles dialog showing built-in entries and one custom 
 A few practical browser and platform choices can make erdblick feel noticeably smoother and more reliable:
 
 - Chromium-based browsers usually offer the highest WebGL throughput. Firefox and Safari work but may require higher tile limits to reach the same detail levels.
-- Enable GPU acceleration in the browser to keep Cesium responsive.
+- Enable GPU acceleration in the browser to keep deck.gl responsive.
 - Always serve the bundle through HTTP. Opening `index.html` directly from the filesystem fails because the UI fetches `config.json` via XHR.
 - In air-gapped deployments, host erdblick and the mapget backend on the same LAN and point `config.json` to internal URLs for extension modules so the UI avoids external lookups.

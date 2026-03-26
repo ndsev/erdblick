@@ -27,11 +27,6 @@
                         "assets": [
                             {
                                 "glob": "**/*",
-                                "input": "node_modules/cesium/Build/CesiumUnminified",
-                                "output": "/bundle/cesium"
-                            },
-                            {
-                                "glob": "**/*",
                                 "input": "config/styles",
                                 "output": "/bundle/styles"
                             },
@@ -78,7 +73,6 @@
                         ],
                         "styles": [
                             "node_modules/primeicons/primeicons.css",
-                            "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
                             "node_modules/material-symbols/index.css",
                             "app/styles.scss"
                         ],
@@ -101,11 +95,6 @@
                             ],
                             "outputHashing": "all",
                             "assets": [
-                                {
-                                    "glob": "**/*",
-                                    "input": "node_modules/cesium/Build/Cesium",
-                                    "output": "/bundle/cesium"
-                                },
                                 {
                                     "glob": "**/*",
                                     "input": "config/styles",
@@ -194,12 +183,7 @@
                             "namedChunks": true,
                             "tsConfig": "tsconfig.spec.json",
                             "browser": "app/main.ts",
-                            "fileReplacements": [
-                              {
-                                "replace": "app/integrations/cesium.prod.ts",
-                                "with": "app/integrations/cesium.test.ts"
-                              }
-                            ]
+                            "fileReplacements": []
                         },
                         "visualization-only": {
                             "outputPath": "static-visualization-only",
@@ -217,11 +201,6 @@
                             ],
                             "outputHashing": "all",
                             "assets": [
-                                {
-                                    "glob": "**/*",
-                                    "input": "node_modules/cesium/Build/Cesium",
-                                    "output": "/bundle/cesium"
-                                },
                                 {
                                     "glob": "**/*",
                                     "input": "config/styles",
@@ -333,16 +312,17 @@
                         "runner": "vitest",
                         "tsConfig": "tsconfig.spec.json",
                         "buildTarget": "erdblick:build:test",
-                        "codeCoverage": true,
-                        "codeCoverageReporters": [
+                        "setupFiles": [
+                            "test/vitest.setup.ts"
+                        ],
+                        "coverage": true,
+                        "coverageReporters": [
                             "text-summary",
                             "html",
                             "lcov",
                             "json-summary"
                         ],
-                        "codeCoverageExclude": [
-                            "**/bundle/cesium/**",
-                            "**/dist/**/bundle/cesium/**"
+                        "coverageExclude": [
                         ],
                         "exclude": [
                             "app/app.component.spec.ts"

@@ -1,166 +1,154 @@
-import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
-import {EditorService} from "../shared/editor.service";
+import {
+    MAX_NUM_TILES_TO_LOAD,
+    MAX_SIMULTANEOUS_INSPECTIONS,
+    MAX_DECK_STYLE_WORKERS,
+    AppStateService,
+    DEFAULT_DECK_STYLE_WORKER_COUNT
+} from "../shared/appstate.service";
+import {Dialog} from "primeng/dialog";
+import {DialogStackService} from "../shared/dialog-stack.service";
+import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.pool";
 
 @Component({
-    selector: 'pref-components',
+    selector: 'preferences',
     template: `
-        <div class="pref-buttons-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
-            <div class="pref-button-subcontainer" (click)="openHelp()">
-                <span class="material-symbols-outlined">question_mark</span>
-                <span>Help</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showPreferencesDialog()">
-                <span class="material-symbols-outlined">settings</span>
-                <span>Preferences</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showControlsDialog()">
-                <span class="material-symbols-outlined">keyboard</span>
-                <span>Controls</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showStatsDialog()">
-                <span class="material-symbols-outlined">bar_chart_4_bars</span>
-                <span>Statistics</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="openDatasources()">
-                <span class="material-symbols-outlined">data_table</span>
-                <span>Datasources</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="openStylesDialog()" >
-                <span class="material-symbols-outlined">palette</span>
-                <span>Styles</span>
-            </div>
-        </div>
-        <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #pref class="pref-dialog">
+        <p-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
+                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
+                  (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
-                <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
-                <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
-                    <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                <label [for]="tilesToLoadInput">Max Tiles to Load</label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="tilesToLoadInput"
+                               (ngModelChange)="onTilesToLoadInputChange($event)"
+                               (keydown.enter)="applyTileLimits()"/>
+                        <p-slider [(ngModel)]="tilesToLoadInput"
+                                  (ngModelChange)="onTilesToLoadSliderChange($event)"
+                                  class="w-full"
+                                  [min]="0"
+                                  [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                    </div>
+                    <p-button (click)="applyTileLimits()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!tilesToLoadChanged"></p-button>
                 </div>
             </div>
-            <!-- Label and input field for MAX_NUM_TILES_TO_VISUALIZE -->
+            <p-divider></p-divider>
             <div class="slider-container">
-                <label [for]="tilesToVisualizeInput">Max Tiles to Visualize:</label>
-                <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToVisualizeInput" (keydown.enter)="applyTileLimits()"/>
-                    <p-slider [(ngModel)]="tilesToVisualizeInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_VISUALIZE"></p-slider>
+                <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="limitSimultaneousInspectionsInput"
+                               (ngModelChange)="onInspectionsLimitInputChange($event)"
+                               (keydown.enter)="applyInspectionsLimits()"/>
+                        <p-slider [(ngModel)]="limitSimultaneousInspectionsInput"
+                                  (ngModelChange)="onInspectionsLimitSliderChange($event)"
+                                  class="w-full"
+                                  [min]="1"
+                                  [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                    </div>
+                    <p-button (click)="applyInspectionsLimits()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!inspectionsLimitChanged"></p-button>
                 </div>
             </div>
-            <!-- Apply button -->
-            <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Dark Mode:</label>
+                <label>Tile pull compression 
+                    <i class="pi pi-info-circle" pTooltip="Use only when the bandwith is low" tooltipPosition="top"></i>
+                </label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="tilePullCompressionEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Threaded tile rendering</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="deckThreadedRenderingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Pin low-fi rendering to max LOD</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="pinLowFiToMaxLodSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setPinLowFiToMaxLod($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Render worker count override 
+                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues" tooltipPosition="top"></i>
+                </label>
+                <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
+                                [disabled]="!deckThreadedRenderingEnabledSetting"
+                                (ngModelChange)="setDeckStyleWorkersOverride($event)" />
+            </div>
+            <div class="slider-container">
+                <label [for]="deckStyleWorkersCountInput">Worker count</label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="deckStyleWorkersCountInput"
+                               (ngModelChange)="onDeckStyleWorkersCountInputChange($event)"
+                               [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
+                               (keydown.enter)="applyDeckStyleWorkersCount()"/>
+                        <p-slider [(ngModel)]="deckStyleWorkersCountInput"
+                                  (ngModelChange)="onDeckStyleWorkersCountSliderChange($event)"
+                                  class="w-full"
+                                  [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
+                                  [min]="1"
+                                  [max]="MAX_DECK_STYLE_WORKERS"></p-slider>
+                    </div>
+                    <p-button (click)="applyDeckStyleWorkersCount()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting || !deckStyleWorkersCountChanged">
+                    </p-button>
+                </div>
+            </div>
+            <p-divider></p-divider>
+            <div class="button-container">
+                <label>Dark Mode</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Allow unlimited inspected features <span style="color: var(--p-badge-danger-background)">EXPERIMENTAL!</span>:</label>
-                <p-toggleswitch [(ngModel)]="stateService.isNumSelectionsUnlimited" />
+                <label>Collapse Dock automatically</label>
+                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"/>
             </div>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Storage for Viewer properties and search history:</label>
+                <label>Storage for Viewer properties and search history</label>
                 <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">
-                <label>Storage for imported styles:</label>
+                <label>Storage for imported styles</label>
                 <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">
-                <label>Storage for modified built-in styles:</label>
+                <label>Storage for modified built-in styles</label>
                 <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
-            <p-divider></p-divider>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
-        </p-dialog>
-        <p-dialog header="Keyboard Controls" [(visible)]="controlsDialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #controls class="pref-dialog">
-            <div class="keyboard-dialog">
-                <ul class="keyboard-list">
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">K</span>
-                        </div>
-                        <div class="control-desc">Open Search</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">J</span>
-                        </div>
-                        <div class="control-desc">Zoom to Target Feature</div>
-                    </li>
-                    <li>
-                        <span class="key">M</span>
-                        <div class="control-desc">Open Maps & Styles Panel</div>
-                    </li>
-                    <li>
-                        <span class="key">W</span>
-                        <div class="control-desc">Move Camera Up</div>
-                    </li>
-                    <li>
-                        <span class="key">A</span>
-                        <div class="control-desc">Move Camera Left</div>
-                    </li>
-                    <li>
-                        <span class="key">S</span>
-                        <div class="control-desc">Move Camera Down</div>
-                    </li>
-                    <li>
-                        <span class="key">D</span>
-                        <div class="control-desc">Move Camera Right</div>
-                    </li>
-                    <li>
-                        <span class="key">Q</span>
-                        <div class="control-desc">Zoom In</div>
-                    </li>
-                    <li>
-                        <span class="key">E</span>
-                        <div class="control-desc">Zoom Out</div>
-                    </li>
-                    <li>
-                        <span class="key">R</span>
-                        <div class="control-desc">Reset Camera Orientation</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">X</span>
-                        </div>
-                        <div class="control-desc">Open Viewport Statistics</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Left <-</span>
-                        </div>
-                        <div class="control-desc">Cycle through Viewers to the left</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Right -></span>
-                        </div>
-                        <div class="control-desc">Cycle through Viewers to the right</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Left Click</span>
-                        </div>
-                        <div class="control-desc">Open inspection and pin it immediately</div>
-                    </li>
-                </ul>
-            </div>
-            <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
     `,
     styles: [
@@ -169,8 +157,8 @@ import {EditorService} from "../shared/editor.service";
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                width: 29em;
-                margin: 1em 0;
+                margin: 0.5em 0;
+                width: 100%;
             }
 
             .tiles-input {
@@ -178,71 +166,6 @@ import {EditorService} from "../shared/editor.service";
                 text-align: center;
                 width: 17em;
                 padding: 0.5em;
-            }
-
-            .keyboard-dialog {
-                width: 25em;
-                text-align: center;
-                background-color: var(--p-content-background);
-            }
-
-            h2 {
-                font-size: 1.5em;
-                color: #333;
-                margin-bottom: 1em;
-                font-weight: bold;
-            }
-
-            .keyboard-list {
-                list-style-type: none;
-                padding: 0;
-            }
-
-            .keyboard-list li {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 1em;
-            }
-
-            .keyboard-list li span {
-                display: inline-block;
-                background-color: var(--p-highlight-background);
-                padding: 0.5em 0.75em;
-                border-radius: 0.5em;
-                color: var(--p-content-color);
-                font-weight: bold;
-                min-width: 4em;
-                text-align: center;
-            }
-
-            .control-desc {
-                color: var(--p-surface-500);
-                font-size: 0.9em;
-            }
-
-            /* Keyboard key styling */
-            .key {
-                border-radius: 0.5em;
-                background-color: #ffcc00;
-                font-size: 1em;
-                padding: 0.5em 0.75em;
-                color: #333;
-            }
-
-            .key-multi {
-                display: flex;
-                gap: 0.25em;
-            }
-
-            .key-multi .key {
-                background-color: #00bcd4;
-                padding: 0.3em 0.6em;
-            }
-
-            .highlight {
-                background-color: #ff5722;
-                color: white;
             }
 
             @media only screen and (max-width: 56em) {
@@ -257,11 +180,22 @@ import {EditorService} from "../shared/editor.service";
 })
 export class PreferencesComponent implements OnInit, OnDestroy {
 
-    tilesToLoadInput: number = 0;
-    tilesToVisualizeInput: number = 0;
+    @ViewChild('pref') preferencesDialog?: Dialog;
 
-    controlsDialogVisible = false;
-    stylesDialogVisible = false;
+    tilesToLoadInput: number | string = 0;
+    limitSimultaneousInspectionsInput: number | string = 0;
+    tilePullCompressionEnabledSetting: boolean = false;
+    deckThreadedRenderingEnabledSetting: boolean = true;
+    pinLowFiToMaxLodSetting: boolean = false;
+    deckStyleWorkersOverrideSetting: boolean = false;
+    deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
+    tilesToLoadChanged: boolean = false;
+    inspectionsLimitChanged: boolean = false;
+    deckStyleWorkersCountChanged: boolean = false;
+    toggleOptions = [
+        {label: 'Off', value: false},
+        {label: 'On', value: true}
+    ];
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -283,13 +217,29 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService) {
+                private dialogStack: DialogStackService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
-        this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
-            this.tilesToVisualizeInput = limit;
+        this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
+            this.limitSimultaneousInspectionsInput = limit;
         }));
+        this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
+            this.tilePullCompressionEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
+            this.deckThreadedRenderingEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
+            this.pinLowFiToMaxLodSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
+            this.deckStyleWorkersOverrideSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckStyleWorkersCountState.subscribe(count => {
+            this.deckStyleWorkersCountInput = count;
+        }));
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
     ngOnInit() {
@@ -303,34 +253,31 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.cleanupMediaQueryListener();
     }
 
+    onDialogShow() {
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
+        this.tilesToLoadInput = this.stateService.tilesLoadLimit;
+        this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
+        this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
+        this.tilesToLoadChanged = false;
+        this.inspectionsLimitChanged = false;
+        this.deckStyleWorkersCountChanged = false;
+        this.dialogStack.bringToFront(this.preferencesDialog);
+    }
+
     applyTileLimits() {
-        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) ||
-            this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
+        if (!this.tilesToLoadChanged) {
+            return;
+        }
+        const limit = Number(this.tilesToLoadInput);
+        if (!Number.isFinite(limit) || limit < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
-        this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
-        this.mapService.update().then();
+        this.tilesToLoadInput = limit;
+        this.stateService.tilesLoadLimit = limit;
+        this.tilesToLoadChanged = false;
+        this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
-    }
-
-    dialogVisible: boolean = false;
-    showPreferencesDialog() {
-        this.dialogVisible = true;
-    }
-
-    showControlsDialog() {
-        this.controlsDialogVisible = true;
-    }
-
-    showStatsDialog() {
-        this.mapService.statsDialogVisible = true;
-        this.mapService.statsDialogNeedsUpdate.next();
-    }
-
-    openHelp() {
-        window.open("https://developer.nds.live/tools/mapviewer/user-guide", "_blank");
     }
 
     clearURLProperties() {
@@ -353,6 +300,42 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
+    }
+
+    setTilePullCompressionEnabled(enabled: boolean) {
+        this.tilePullCompressionEnabledSetting = enabled;
+        this.stateService.tilePullCompressionEnabled = enabled;
+    }
+
+    setDeckThreadedRenderingEnabled(enabled: boolean) {
+        this.deckThreadedRenderingEnabledSetting = enabled;
+        this.stateService.deckThreadedRenderingEnabled = enabled;
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    }
+
+    setPinLowFiToMaxLod(enabled: boolean) {
+        this.pinLowFiToMaxLodSetting = enabled;
+        this.stateService.pinLowFiToMaxLod = enabled;
+    }
+
+    setDeckStyleWorkersOverride(enabled: boolean) {
+        this.deckStyleWorkersOverrideSetting = enabled;
+        this.stateService.deckStyleWorkersOverride = enabled;
+        this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    }
+
+    applyDeckStyleWorkersCount() {
+        if (!this.deckThreadedRenderingEnabledSetting || !this.deckStyleWorkersOverrideSetting || !this.deckStyleWorkersCountChanged) {
+            return;
+        }
+        const count = Number(this.deckStyleWorkersCountInput);
+        if (!Number.isInteger(count) || count < 1 || count > MAX_DECK_STYLE_WORKERS) {
+            this.messageService.showError(`Please enter a worker count between 1 and ${MAX_DECK_STYLE_WORKERS}.`);
+            return;
+        }
+        this.deckStyleWorkersCountInput = count;
+        this.stateService.deckStyleWorkersCount = count;
+        this.deckStyleWorkersCountChanged = false;
     }
 
     setDarkMode(setting: 'off' | 'on' | 'auto') {
@@ -397,15 +380,71 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
-    openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
+    protected applyInspectionsLimits() {
+        if (!this.inspectionsLimitChanged) {
+            return;
+        }
+        const limit = Number(this.limitSimultaneousInspectionsInput);
+        if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_SIMULTANEOUS_INSPECTIONS) {
+            this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
+            return;
+        }
+        this.stateService.inspectionsLimit = limit;
+        this.inspectionsLimitChanged = false;
+        this.messageService.showSuccess("Successfully updated inspections limit!");
     }
 
-    openStylesDialog() {
-        this.styleService.stylesDialogVisible = true;
+    protected onTilesToLoadSliderChange(value: number) {
+        this.tilesToLoadInput = value;
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+    }
+
+    protected onInspectionsLimitSliderChange(value: number) {
+        this.limitSimultaneousInspectionsInput = value;
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    protected onDeckStyleWorkersCountSliderChange(value: number) {
+        this.deckStyleWorkersCountInput = value;
+        this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
+    }
+
+    protected onTilesToLoadInputChange(value: number | string) {
+        this.tilesToLoadInput = value;
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+    }
+
+    protected onInspectionsLimitInputChange(value: number | string) {
+        this.limitSimultaneousInspectionsInput = value;
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    protected onDeckStyleWorkersCountInputChange(value: number | string) {
+        this.deckStyleWorkersCountInput = value;
+        this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
+    }
+
+    private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
+        if (typeof value === "string" && value.trim().length === 0) {
+            return true;
+        }
+        const parsedValue = Number(value);
+        return !Number.isFinite(parsedValue) || parsedValue !== currentValue;
+    }
+
+    private syncDeckStyleWorkersCountToAutoIfNeeded(): void {
+        if (this.stateService.deckStyleWorkersOverride) {
+            return;
+        }
+        const autoCount = getDeckRenderAutoWorkerCount();
+        this.deckStyleWorkersCountInput = autoCount;
+        this.deckStyleWorkersCountChanged = false;
+        if (this.stateService.deckStyleWorkersCount !== autoCount) {
+            this.stateService.deckStyleWorkersCount = autoCount;
+        }
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
-    protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
+    protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
+    protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
 }

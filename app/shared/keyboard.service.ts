@@ -28,14 +28,6 @@ export class KeyboardService {
         this.listenToKeyboardEvents();
     }
 
-    dialogOnShow(event: Dialog) {
-        this.dialogStack.push(event);
-    }
-
-    dialogOnHide(event: Dialog) {
-        this.dialogStack = this.dialogStack.filter(dialog => event !== dialog);
-    }
-
     private listenToKeyboardEvents() {
         this.renderer.listen('window', 'keydown', (event: KeyboardEvent) => {
             const target = event.target as HTMLElement;

@@ -80,9 +80,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
-    if (yaml["geometry-name"].IsDefined()) {
-        geometryName_ = yaml["geometry-name"].as<std::string>();
-    }
     if (yaml["aspect"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();
@@ -116,6 +113,40 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::cout << "Unsupported mode: " << modeStr << std::endl;
         }
     }
+    if (yaml["fidelity"].IsDefined()) {
+        auto fidelityStr = yaml["fidelity"].as<std::string>();
+        if (fidelityStr == "any") {
+            fidelity_ = AnyFidelity;
+        }
+        else if (fidelityStr == "high") {
+            fidelity_ = HighFidelity;
+        }
+        else if (fidelityStr == "low") {
+            fidelity_ = LowFidelity;
+        }
+        else {
+            std::cout << "Unsupported fidelity: " << fidelityStr << std::endl;
+        }
+    }
+    if (yaml["stage"].IsDefined()) {
+        auto const parsedStage = yaml["stage"].as<int>();
+        if (parsedStage < 0) {
+            std::cout << "Unsupported stage: " << parsedStage << std::endl;
+        }
+        else {
+            stage_ = static_cast<uint32_t>(parsedStage);
+        }
+    }
+    if (yaml["lod"].IsDefined()) {
+        auto const parsedLod = yaml["lod"].as<int>();
+        auto const maxLod = static_cast<int>(mapget::Feature::MAX_LOD);
+        if (parsedLod < 0 || parsedLod > maxLod) {
+            std::cout << "Unsupported lod: " << parsedLod << std::endl;
+        }
+        else {
+            lod_ = static_cast<uint8_t>(parsedLod);
+        }
+    }
     if (yaml["type"].IsDefined()) {
         // Parse a feature type regular expression, e.g. `Lane|Boundary`
         type_ = yaml["type"].as<std::string>();
@@ -145,6 +176,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse a line width, defaults to pixels
         width_ = yaml["width"].as<float>();
     }
+    if (yaml["billboard"].IsDefined()) {
+        // Parse whether the rendered primitive should face the camera.
+        billboard_ = yaml["billboard"].as<bool>();
+    }
     if (yaml["flat"].IsDefined()) {
         // Parse option to clamp feature to ground (ignoring height), defaults to false
         flat_ = yaml["flat"].as<bool>();
@@ -157,17 +192,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse option for the width of the feature outline color.
         outlineWidth_ = yaml["outline-width"].as<float>();
     }
-    if (yaml["near-far-scale"].IsDefined()) {
-        // Parse option for the scale of the feature depending on camera distance.
-        auto components = yaml["near-far-scale"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            nearFarScale_ = {.0};
-            std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
-        }
-    }
     if (yaml["vertical-offset"].IsDefined()) {
-        // Parse option for the width of the feature outline color.
-        offset_.y = yaml["vertical-offset"].as<double>();
+        // Convenience alias for the "up" component of the local offset.
+        offset_.z = yaml["vertical-offset"].as<double>();
     }
     if (yaml["offset"].IsDefined() && yaml["offset"].size() >= 1) {
         offset_.x = yaml["offset"][0].as<double>();
@@ -282,7 +309,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         else
             std::cout << "Unsupported validity requirement: " << reqValidityStr << std::endl;
     }
-
     /////////////////////////////////////
     /// Label Rule Fields
     /////////////////////////////////////
@@ -348,31 +374,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             labelEyeOffset_ = std::tuple<float, float, float>{coordinates.at(0), coordinates.at(1), coordinates.at(2)};
         }
     }
-    if (yaml["translucency-by-distance"].IsDefined()) {
-        // Parse option for near and far translucency properties of a Label based on the Label's distance from the camera.
-        auto components = yaml["translucency-by-distance"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            translucencyByDistance_ = {.0};
-            std::copy(components.begin(), components.begin()+4, translucencyByDistance_->begin());
-        }
-    }
-    if (yaml["scale-by-distance"].IsDefined()) {
-        // Parse option for near and far scale properties of a Label based on the Label's distance from the camera.
-        auto components = yaml["scale-by-distance"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            scaleByDistance_ = {.0};
-            std::copy(components.begin(), components.begin()+4, scaleByDistance_->begin());
-        }
-    }
-    if (yaml["offset-scale-by-distance"].IsDefined()) {
-        // Parse option for near and far offset scale properties of a Label based on the Label's distance from the camera.
-        auto components = yaml["offset-scale-by-distance"].as<std::vector<float>>();
-        if (components.size() >= 4) {
-            offsetScaleByDistance_ = {.0};
-            std::copy(components.begin(), components.begin()+4, offsetScaleByDistance_->begin());
-        }
-    }
-
     /////////////////////////////////////
     /// Sub-Rule Fields
     /////////////////////////////////////
@@ -388,6 +389,13 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
 
 FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundEvalFun const& evalFun) const
 {
+    if (lod_) {
+        auto const featureLod = static_cast<uint8_t>(feature.lod());
+        if (featureLod != *lod_) {
+            return nullptr;
+        }
+    }
+
     // Filter by feature type regular expression.
     if (type_) {
         auto typeId = feature.typeId();
@@ -416,28 +424,44 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
     return this;
 }
 
-bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::string_view> geometryName) const
+bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
 {
-    // Ensure that the geometry type is supported by the rule.
-    if (!(geometryTypes_ & geomTypeBit(g))) {
+    if (type_) {
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
+            return false;
+        }
+    }
+
+    if (!firstOfRules_.empty()) {
+        for (auto const& rule : firstOfRules_) {
+            if (rule.maybeMatchesType(typeId)) {
+                return true;
+            }
+        }
         return false;
     }
 
-    // Ensure that the geometry name matches the rule's requirements
-    if (geometryName_) {
+    return true;
+}
 
-        // Empty regex: explicitly match features without a geometry name
-        // TODO: Check if there is any recognizable performance impact
-        if (std::regex_match("", *geometryName_)) {
-            return !geometryName || geometryName->empty();
-        }
+uint32_t FeatureStyleRule::geometryTypesMask() const
+{
+    return geometryTypes_;
+}
 
-        if (!geometryName) {
+bool FeatureStyleRule::supports(
+    const mapget::GeomType& g,
+    std::optional<uint32_t> geometryStage) const
+{
+    if (stage_) {
+        if (!geometryStage || *geometryStage != *stage_) {
             return false;
         }
-        if (!std::regex_match(geometryName->begin(), geometryName->end(), *geometryName_)) {
-            return false;
-        }
+    }
+
+    // Ensure that the geometry type is supported by the rule.
+    if (!(geometryTypes_ & geomTypeBit(g))) {
+        return false;
     }
 
     return true;
@@ -472,6 +496,11 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 float FeatureStyleRule::width() const
 {
     return width_;
+}
+
+std::optional<bool> const& FeatureStyleRule::billboard() const
+{
+    return billboard_;
 }
 
 bool FeatureStyleRule::flat() const
@@ -525,11 +554,6 @@ float FeatureStyleRule::outlineWidth() const
     return outlineWidth_;
 }
 
-std::optional<std::array<float, 4>> const& FeatureStyleRule::nearFarScale() const
-{
-    return nearFarScale_;
-}
-
 float FeatureStyleRule::relationLineHeightOffset() const
 {
     return relationLineHeightOffset_;
@@ -573,6 +597,21 @@ bool FeatureStyleRule::selectable() const
 FeatureStyleRule::HighlightMode FeatureStyleRule::mode() const
 {
     return mode_;
+}
+
+FeatureStyleRule::Fidelity FeatureStyleRule::fidelity() const
+{
+    return fidelity_;
+}
+
+std::optional<uint32_t> FeatureStyleRule::stage() const
+{
+    return stage_;
+}
+
+std::optional<uint8_t> FeatureStyleRule::lod() const
+{
+    return lod_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::relationType() const
@@ -670,21 +709,6 @@ std::optional<std::pair<float, float>> const& FeatureStyleRule::labelPixelOffset
 std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEyeOffset() const
 {
     return labelEyeOffset_;
-}
-
-std::optional<std::array<float, 4>> const& FeatureStyleRule::translucencyByDistance() const
-{
-    return translucencyByDistance_;
-}
-
-std::optional<std::array<float, 4>> const& FeatureStyleRule::scaleByDistance() const
-{
-    return scaleByDistance_;
-}
-
-std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistance() const
-{
-    return offsetScaleByDistance_;
 }
 
 glm::dvec3 const& FeatureStyleRule::offset() const

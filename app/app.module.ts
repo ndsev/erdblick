@@ -66,11 +66,13 @@ import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {ProgressBarModule} from "primeng/progressbar";
 import {ButtonModule} from "primeng/button";
 import {TooltipModule} from "primeng/tooltip";
-import {StatsDialogComponent} from "./auxiliaries/stats.component";
-import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedataselection.dialog.component";
+import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
+import {AboutComponent} from "./auxiliaries/about.component";
+import {KeyboardComponent} from "./auxiliaries/keyboard.component";
+import {MainBarComponent} from "./app.mainbar.component";
 import {IconFieldModule} from 'primeng/iconfield';
 import {InputIconModule} from 'primeng/inputicon';
 import {PopoverModule} from "primeng/popover";
@@ -87,9 +89,22 @@ import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
+import {InspectionComparisonDialogComponent} from "./inspection/inspection-comparison.dialog.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
+import {DockableLayoutComponent} from "./app.dockable.layout.component";
+import {Menubar} from "primeng/menubar";
+import {DynamicDialogModule} from "primeng/dynamicdialog";
+import {DialogService} from "primeng/dynamicdialog";
+import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
+import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
+import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
+import {DiagnosticsProgressComponent} from "./diagnostics/diagnostics.progress.component";
+import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.perf.component";
+import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
+import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
+import {Tag} from "primeng/tag";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -109,16 +124,37 @@ export const ErdblickTheme = definePreset(Aura, {
     }
 });
 
+const updateGlobalSpinner = (message: string) => {
+    const messageEl = document.getElementById('global-spinner-message');
+    if (messageEl) {
+        messageEl.textContent = message;
+    }
+    const detailsEl = document.getElementById('global-spinner-details');
+    if (detailsEl) {
+        const line = document.createElement('div');
+        line.className = 'spinner-line';
+        line.textContent = message;
+        detailsEl.appendChild(line);
+    }
+};
+
 export const initializeServices = () => {
     const styleService = inject(StyleService);
     const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
+    const searchService = inject(FeatureSearchService);
 
     return (async () => {
+        updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
+        updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
+        updateGlobalSpinner('Loading styles');
         await styleService.initializeStyles();
+        updateGlobalSpinner('Initializing map data');
         await mapService.initialize();
+        updateGlobalSpinner('Starting search workers');
+        await searchService.initializeWorkers();
     })();
 }
 
@@ -139,16 +175,26 @@ export const initializeServices = () => {
         HighlightSearch,
         HighlightRegion,
         TreeTableFilterPatchDirective,
-        StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
         LegalInfoDialogComponent,
+        AboutComponent,
+        KeyboardComponent,
+        MainBarComponent,
         ErdblickViewUIComponent,
         StyleComponent,
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,
         InspectionTreeComponent,
-        SurveyComponent
+        DockableLayoutComponent,
+        InspectionPanelDialogComponent,
+        InspectionComparisonDialogComponent,
+        SurveyComponent,
+        DiagnosticsIndicatorComponent,
+        DiagnosticsProgressComponent,
+        DiagnosticsPerformanceDialogComponent,
+        DiagnosticsLogDialogComponent,
+        DiagnosticsExportDialogComponent
     ],
     bootstrap: [
         AppComponent
@@ -160,6 +206,7 @@ export const initializeServices = () => {
         AppRoutingModule,
         SpeedDialModule,
         DialogModule,
+        DynamicDialogModule,
         FormsModule,
         ScrollPanelModule,
         BadgeModule,
@@ -202,7 +249,10 @@ export const initializeServices = () => {
         ChipModule,
         Splitter,
         ToggleSwitch,
-        ToggleButton
+        ToggleButton,
+        Menubar,
+        Ripple,
+        Tag
     ],
     providers: [
         provideAppInitializer(initializeServices),
@@ -215,6 +265,7 @@ export const initializeServices = () => {
         ClipboardService,
         EditorService,
         RightClickMenuService,
+        DialogService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

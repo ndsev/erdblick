@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <unordered_map>
-#include "cesium-interface/object.h"
+#include "interop/js-object.h"
 #include "mapget/model/feature.h"
 #include "sfl/small_vector.hpp"
 #include "simfil/model/string-pool.h"
@@ -76,7 +76,10 @@ public:
     void convertAttributeLayer(std::string_view const& name, mapget::model_ptr<mapget::AttributeLayer> const& l);
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     void convertGeometry(JsValue const& key, mapget::model_ptr<mapget::Geometry> const& r);
-    void convertValidity(JsValue const& key, mapget::model_ptr<mapget::MultiValidity> const& r);
+    void convertValidity(
+        JsValue const& key,
+        mapget::model_ptr<mapget::MultiValidity> const& r,
+        std::string const* hoverIdPrefix = nullptr);
 
     OptionalValueAndType convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
@@ -89,7 +92,6 @@ public:
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
-    uint32_t nextAttributeIndex_ = 0;
     InspectionNode root_;
     std::vector<InspectionNode*> stack_ = {&root_};
     InspectionNode* current_ = &root_;

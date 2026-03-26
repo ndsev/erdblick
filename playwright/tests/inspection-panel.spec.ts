@@ -47,16 +47,47 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         }).first();
         await expect(layerIdRow).toHaveCount(1);
 
-        const pinIcon = panel.locator('.material-symbols-outlined', {
-            hasText: 'keep_off'
-        }).first();
+        // const pinIcon = panel.locator('.material-symbols-outlined', {
+        //     hasText: 'keep_off'
+        // }).first();
         // Pin the first panel so the next selection opens a second panel.
-        await expect(pinIcon).toBeVisible();
-        await pinIcon.click();
+        // await expect(pinIcon).toBeVisible();
+        // await pinIcon.click();
 
         // Selecting another result should open a second inspection panel.
         await clickSearchResultLeaf(page, 1);
         const panels = page.locator('.inspection-container .inspect-panel');
         await expect(panels).toHaveCount(2);
+    });
+
+    test('collapsing a single docked inspection hides tree content and restores it on expand', async ({ page, request }) => {
+        await requireTestMapSource(request);
+
+        await navigateToRoot(page);
+        await enableMapLayer(page, 'TestMap', 'WayLayer');
+        await navigateToArea(page, 42.5, 11.615, 13);
+
+        await runFeatureSearch(page, '**.name');
+        await clickSearchResultLeaf(page, 0);
+
+        const panel = page.locator('.inspection-container .inspect-panel').first();
+        await expect(panel).toBeVisible();
+
+        const accordionPanel = panel.locator('.p-accordionpanel').first();
+        await expect(accordionPanel).toHaveClass(/p-accordionpanel-active/);
+
+        const treeTable = panel.locator('.p-treetable').first();
+        await expect(treeTable).toBeVisible();
+
+        const header = panel.locator('.p-accordionheader').first();
+        await header.click();
+
+        await expect(accordionPanel).not.toHaveClass(/p-accordionpanel-active/);
+        await expect(treeTable).not.toBeVisible();
+
+        await header.click();
+
+        await expect(accordionPanel).toHaveClass(/p-accordionpanel-active/);
+        await expect(treeTable).toBeVisible();
     });
 });

@@ -2,6 +2,7 @@
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 
@@ -39,6 +40,36 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
     return node;
 }
 
+auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
+{
+    if (auto decoded = value.decodeBigEndianI64())
+        return std::to_string(*decoded);
+    return "0x" + value.toHex(false);
+}
+
+uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
+{
+    auto const layerInfo = layer.layerInfo();
+    auto const stages = std::max<uint32_t>(1U, layerInfo ? layerInfo->stages_ : 1U);
+    auto const fallback = stages > 1U ? 1U : 0U;
+    auto const configured = layerInfo ? layerInfo->highFidelityStage_ : fallback;
+    return std::min(stages - 1U, configured);
+}
+
+std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
+{
+    auto const layerInfo = layer.layerInfo();
+    if (layerInfo && stage < layerInfo->stageLabels_.size()) {
+        return layerInfo->stageLabels_[stage];
+    }
+    return fmt::format("Stage {}", stage);
+}
+
+bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
+{
+    return stage > highFidelityStage(layer);
+}
+
 }
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
@@ -47,30 +78,15 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     featureId_ = featurePtr->id()->toString();
     tile_ = &featurePtr->model();
 
-    // Top-Level Feature Item
-    auto featureScope = push("Feature", "", ValueType::Section);
-    featureScope->value_ = JsValue(featurePtr->id()->toString());
-    convertSourceDataReferences(featurePtr->sourceDataReferences(), *featureScope);
-
     // Identifiers section.
     {
         auto scope = push(convertString("Identifiers"), "", ValueType::Section);
+        convertSourceDataReferences(featurePtr->sourceDataReferences(), *scope);
         push("type", "typeId", ValueType::String)->value_ = convertString(featurePtr->typeId());
 
         // Add map and layer names to the Identifiers section.
         push("mapId", "mapId", ValueType::String)->value_ = convertString(featurePtr->model().mapId());
         push("layerId", "layerId", ValueType::String)->value_ = convertString(featurePtr->model().layerInfo()->layerId_);
-
-        // TODO: Investigate and fix the issue for "index out of bounds" error.
-        //   Affects boundaries and lane connectors
-        //  if (auto prefix = featurePtr->model().getIdPrefix()) {
-        //      for (auto const& [k, v] : prefix->fields()) {
-        //          convertField(k, v);
-        //      }
-        //  }
-        //  for (auto const& [k, v] : featurePtr->id()->fields()) {
-        //      convertField(k, v);
-        //  }
 
         for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
             auto &field = current_->children_.emplace_back();
@@ -82,11 +98,12 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     }
 
     // Basic attributes section.
-    if (auto attrs = featurePtr->attributesOrNull())
-    {
+    if (auto mergedBasicAttrs = featurePtr->mergedAttributesOrNull()) {
         auto scope = push(convertString("Basic Attributes"), "properties", ValueType::Section);
-        for (auto const& [k, v] : attrs->fields()) {
-            convertField(k, v);
+        for (auto i = 0U; i < mergedBasicAttrs->size(); ++i) {
+            convertField(
+                mergedBasicAttrs->keyAt(static_cast<int64_t>(i)),
+                mergedBasicAttrs->at(static_cast<int64_t>(i)));
         }
     }
 
@@ -116,8 +133,13 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto geomCollection = featurePtr->geomOrNull())
     {
         auto scope = push(convertString("Geometry"), "geometry", ValueType::Section);
+        const auto highFiStage = highFidelityStage(featurePtr->model());
         uint32_t geomIndex = 0;
-        geomCollection->forEachGeometry([this, &geomIndex](model_ptr<Geometry> const& geom) -> bool {
+        geomCollection->forEachGeometry([this, &geomIndex, highFiStage](model_ptr<Geometry> const& geom) -> bool {
+            const auto geometryStage = geom->model().stage().value_or(0U);
+            if (geometryStage < highFiStage) {
+                return true;
+            }
             convertGeometry(JsValue(geomIndex++), geom);
             return true;
         });
@@ -188,7 +210,7 @@ void InspectionConverter::convertAttributeLayer(
         OptionalValueAndType singleValue;
         attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val){
             auto singleValueForField = convertField(fieldName, val);
-            if (singleValueForField && fieldName != "schemaValidity" && fieldName != "origValidity") {
+            if (singleValueForField) {
                 ++numValues;
                 singleValue = singleValueForField;
             }
@@ -203,14 +225,12 @@ void InspectionConverter::convertAttributeLayer(
             current_->type_ = ValueType::Boolean;
         }
 
-        if (auto validity = attr->validityOrNull()) {
-            convertValidity(convertString("validity"), validity);
-        }
-
         attrScope->mapId_ = JsValue(tile_->mapId());
-        attrScope->hoverId_ = featureId_+":attribute#"+std::to_string(nextAttributeIndex_);
-
-        ++nextAttributeIndex_;
+        attrScope->hoverId_ = featureId_ + ":attribute#" +
+                              std::to_string(static_cast<uint32_t>(attr->addr().index()));
+        if (auto validity = attr->validityOrNull()) {
+            convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
+        }
         return true;
     });
 }
@@ -252,19 +272,19 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     case GeomType::Polygon: typeString = "Polygon"; break;
     case GeomType::Mesh: typeString = "Mesh"; break;
     }
-    if (g->name()) {
-        typeString += fmt::format(" ({})", *g->name());
-    }
     geomScope->value_ = convertString(typeString);
+    if (auto geometryName = g->name()) {
+        push("name", "name", ValueType::String)->value_ = convertString(*geometryName);
+    }
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
 
     uint32_t index = 0;
     g->forEachPoint(
-        [this, &geomScope, &index](auto&& pt)
+        [this, &index](auto&& pt)
         {
             auto ptScope = push(
-                JsValue(geomScope->children_.size()),
+                JsValue(index),
                 index++,
                 ValueType::Number | ValueType::ArrayBit);
             ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
@@ -274,14 +294,11 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
 
 void InspectionConverter::convertValidity(
     JsValue const& key,
-    model_ptr<MultiValidity> const& multiValidity)
+    model_ptr<MultiValidity> const& multiValidity,
+    std::string const* hoverIdPrefix)
 {
     auto scope = push(key, key.as<std::string>());
-    uint32_t valIndex = 0;
-    multiValidity->forEach([this, &valIndex](Validity const& v) -> bool {
-        auto validityScope = push(
-            JsValue(valIndex),
-            valIndex);
+    auto renderValidity = [this](Validity const& v) -> bool {
 
         if (auto direction = v.direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
@@ -293,7 +310,7 @@ void InspectionConverter::convertValidity(
                 dirScope->value_ = convertString("NEGATIVE");
                 break;
             case Validity::Both:
-                dirScope->value_ = convertString("BOTH");
+                dirScope->value_ = convertString("COMPLETE");
                 break;
             case Validity::None:
                 dirScope->value_ = convertString("NONE");
@@ -303,16 +320,50 @@ void InspectionConverter::convertValidity(
         }
 
         if (auto featureId = v.featureId()) {
-            push("featureId", "featureId", ValueType::FeatureId)->value_ = convertString(featureId_);
+            auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
+            featureIdScope->value_ = convertString(featureId->toString());
+            featureIdScope->mapId_ = JsValue(tile_->mapId());
         }
 
-        if (auto geom = v.simpleGeometry()) {
-            convertGeometry(JsValue("simpleGeometry"), geom);
+        if (auto transitionNumber = v.transitionNumber()) {
+            push("transitionNumber", "transitionNumber", ValueType::Number)->value_ =
+                JsValue(*transitionNumber);
+            if (auto fromFeature = v.transitionFromFeature()) {
+                auto fromScope = push("from", "from", ValueType::FeatureId);
+                fromScope->value_ = convertString(fromFeature->id()->toString());
+                fromScope->mapId_ = JsValue(fromFeature->model().mapId());
+            }
+            if (auto fromConnectedEnd = v.transitionFromConnectedEnd()) {
+                push("fromConnectedEnd", "fromConnectedEnd", ValueType::String)->value_ =
+                    convertString(*fromConnectedEnd == Validity::End ? "END" : "START");
+            }
+            if (auto toFeature = v.transitionToFeature()) {
+                auto toScope = push("to", "to", ValueType::FeatureId);
+                toScope->value_ = convertString(toFeature->id()->toString());
+                toScope->mapId_ = JsValue(toFeature->model().mapId());
+            }
+            if (auto toConnectedEnd = v.transitionToConnectedEnd()) {
+                push("toConnectedEnd", "toConnectedEnd", ValueType::String)->value_ =
+                    convertString(*toConnectedEnd == Validity::End ? "END" : "START");
+            }
             return true;
         }
 
-        if (auto geomName = v.geometryName()) {
-            push("geometryName", "geometryName", ValueType::String)->value_ = convertString(*geomName);
+        if (auto geom = v.simpleGeometry()) {
+            auto const highFiStage = highFidelityStage(v.model());
+            auto const geometryStage = geom->model().stage().value_or(0U);
+            if (geometryStage >= highFiStage) {
+                convertGeometry(JsValue("simpleGeometry"), geom);
+            }
+            return true;
+        }
+
+        if (auto geometryStage = v.geometryStage()) {
+            push("geometryStage", "geometryStage", ValueType::Number)->value_ = JsValue(*geometryStage);
+            if (shouldDisplayStageLabel(v.model(), *geometryStage)) {
+                push("geometryStageLabel", "geometryStageLabel", ValueType::String)->value_ =
+                    convertString(stageLabel(v.model(), *geometryStage));
+            }
         }
 
         auto renderOffset = [this, &v](Point const& data, std::string_view const& name)
@@ -350,6 +401,26 @@ void InspectionConverter::convertValidity(
         }
 
         return true;
+    };
+
+    if (multiValidity->size() == 1) {
+        if (hoverIdPrefix) {
+            scope->hoverId_ = *hoverIdPrefix + ":validity#0";
+        }
+        multiValidity->forEach(renderValidity);
+        return;
+    }
+
+    uint32_t valIndex = 0;
+    multiValidity->forEach([&](Validity const& v) -> bool {
+        auto validityScope = push(
+            JsValue(valIndex),
+            valIndex);
+        if (hoverIdPrefix) {
+            validityScope->hoverId_ = *hoverIdPrefix + ":validity#" + std::to_string(valIndex);
+        }
+        ++valIndex;
+        return renderValidity(v);
     });
 }
 
@@ -375,7 +446,7 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     OptionalValueAndType singleValue;
 
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds) {
-        singleValue = {convertString(tile_->resolveFeatureId(*value)->toString()), ValueType::FeatureId};
+        singleValue = {convertString(tile_->resolve<FeatureId>(*value)->toString()), ValueType::FeatureId};
         fieldScope->mapId_ = JsValue(tile_->mapId());
     }
     else {
@@ -394,6 +465,9 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
                 singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
             break;
         }
+        case simfil::ValueType::Bytes:
+            singleValue = {JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value()))), ValueType::String};
+            break;
         case simfil::ValueType::Object: break;
         case simfil::ValueType::Array: isArray = true; break;
         }

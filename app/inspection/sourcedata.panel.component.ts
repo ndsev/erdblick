@@ -1,12 +1,16 @@
-import {Component, output, input, effect} from "@angular/core";
+import {Component, output, input, effect, ViewChild} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {Fetch} from "../mapdata/fetch";
-import {Column} from "./inspection.tree.component";
+import {
+    MapTileRequestStatus,
+    MapTileStreamClient,
+} from "../mapdata/tilestream";
+import {MapDataService} from "../mapdata/map.service";
+import {Column, InspectionTreeComponent} from "./inspection.tree.component";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -15,8 +19,14 @@ import {Column} from "./inspection.tree.component";
             <div class="spinner">
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
+        } @else if (errorMessage) {
+            <div>
+                <strong>Error</strong><br>{{ errorMessage }}
+            </div>
         } @else {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                             [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                             [showFilter]="showFilter()"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -27,9 +37,13 @@ import {Column} from "./inspection.tree.component";
 export class SourceDataPanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
     error = output<string>({ alias: 'errorOccurred' });
 
     loading: boolean = true;
+    errorMessage: string = "";
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
@@ -42,11 +56,16 @@ export class SourceDataPanelComponent {
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     firstHighlightedItemIndex: number = 0;
 
-    constructor() {
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
+
+    constructor(private mapService: MapDataService) {
         effect(() => {
             if (!this.panel().sourceData) {
                 return;
             }
+            this.loading = true;
+            this.treeData = [];
+            this.errorMessage = "";
 
             this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
                 .then(layer => {
@@ -55,12 +74,13 @@ export class SourceDataPanelComponent {
 
                     layer.delete();
 
-                    if (root) {
-                        this.treeData = root.children ? root.children : [root];
+                    const treeData = this.treeDataFromRoot(root);
+                    if (treeData.length) {
+                        this.treeData = treeData;
                         this.selectItemWithAddress(this.panel().sourceData!.address);
                     } else {
                         this.treeData = [];
-                        this.setError('Empty layer.');
+                        this.setError(this.noSourceDataMessage(this.panel().sourceData!.mapTileKey));
                     }
                 })
                 .catch(error => {
@@ -73,49 +93,104 @@ export class SourceDataPanelComponent {
     }
 
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
-        const parser = new coreLib.TileLayerParser();
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
-        const newRequestBody = JSON.stringify({
+        const requestBody = {
             requests: [{
                 mapId: mapId,
                 layerId: layerId,
                 tileIds: [Number(tileId)]
             }]
+        };
+
+        let layer: TileSourceDataLayer | null = null;
+        let sourceDataParseError: Error | null = null;
+        const socket = new MapTileStreamClient("/tiles");
+        const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
+        if (dataSourceInfoJson) {
+            socket.setDataSourceInfoJson(dataSourceInfoJson);
+        }
+
+        socket.withSourceDataCallback((payload) => {
+            try {
+                const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
+                    return socket.parser.readTileSourceDataLayer(wasmBlob);
+                }, payload);
+                if (parsedLayer) {
+                    const currentLayer = layer as TileSourceDataLayer | null;
+                    currentLayer?.delete();
+                    layer = parsedLayer;
+                }
+            } catch (err) {
+                sourceDataParseError = err instanceof Error ? err : new Error(`${err}`);
+            }
         });
 
-        let layer: TileSourceDataLayer | undefined;
-        let fetch = new Fetch("tiles")
-            .withChunkProcessing()
-            .withMethod("POST")
-            .withBody(newRequestBody)
-            .withBufferCallback((message: any, messageType: any) => {
-                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                    uint8ArrayToWasm((wasmBuffer: any) => {
-                        parser.readFieldDictUpdate(wasmBuffer);
-                    }, message);
-                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
-                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                    layer = uint8ArrayToWasm((wasmBlob: any) => {
-                        return parser.readTileSourceDataLayer(wasmBlob);
-                    }, blob);
-                } else {
-                    throw new Error(`Unknown message type ${messageType}.`)
-                }
-            });
+        let status;
+        try {
+            socket.sendRequest(requestBody);
+            status = await socket.waitForCompletion();
 
-        return fetch.go()
-            .then(_ => {
-                if (!layer)
-                    throw new Error(`Unknown error while loading layer.`);
-                const error = layer.getError();
-                if (error) {
-                    layer.delete();
-                    throw new Error(`Error while loading layer: ${error}`);
-                }
-                return layer;
-            }).finally(() => {
-                parser.delete();
-            });
+            const waitUntil = Date.now() + 5000;
+            while (!layer && !sourceDataParseError && Date.now() < waitUntil) {
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+        } catch (err) {
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
+            throw err instanceof Error ? err : new Error(`${err}`);
+        } finally {
+            socket.destroy();
+        }
+
+        if (sourceDataParseError) {
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
+            throw sourceDataParseError;
+        }
+
+        const statusMessage = status.message || "";
+        const failures = (status.requests || []).filter(req => req.status !== MapTileRequestStatus.Success);
+        if (failures.length) {
+            const summary = failures
+                .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
+                .join(", ");
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
+            throw new Error(`Tile request failed: ${summary}`);
+        }
+
+        const loadedLayer = layer as TileSourceDataLayer | null;
+        if (!loadedLayer) {
+            throw new Error(statusMessage || this.noSourceDataMessage(mapTileKey));
+        }
+
+        const error = loadedLayer.getError();
+        if (error) {
+            loadedLayer.delete();
+            throw new Error(`Error while loading layer: ${error}`);
+        }
+
+        return loadedLayer;
+    }
+
+    private treeDataFromRoot(root: any): TreeTableNode[] {
+        if (!root) {
+            return [];
+        }
+        if (Array.isArray(root.children)) {
+            return root.children.filter((node: any) => this.hasTreeNodeContent(node));
+        }
+        return this.hasTreeNodeContent(root) ? [root] : [];
+    }
+
+    private hasTreeNodeContent(node: any): boolean {
+        return !!node && (node.data !== undefined || (Array.isArray(node.children) && node.children.length > 0));
+    }
+
+    private noSourceDataMessage(mapTileKey: string): string {
+        const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        const layerName = this.mapService.layerNameForSourceDataLayerId(String(layerId), String(layerId).startsWith("Metadata"));
+        return `No source data for tile ${tileId} (${layerName}) of map ${mapId}.`;
     }
 
     /**
@@ -127,6 +202,7 @@ export class SourceDataPanelComponent {
     setError(message: string) {
         this.loading = false;
         this.treeData = [];
+        this.errorMessage = message;
         this.error.emit(message);
     }
 
@@ -195,7 +271,6 @@ export class SourceDataPanelComponent {
                 }
             }
         }
-
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
         let firstHighlightedItemIndex: number | undefined;
 
@@ -211,8 +286,9 @@ export class SourceDataPanelComponent {
             if (node.data.address && addressInRange && addressInRange(node.data.address)) {
                 highlight = true;
 
-                if (!firstHighlightedItemIndex)
+                if (!firstHighlightedItemIndex) {
                     firstHighlightedItemIndex = virtualRowIndex;
+                }
 
                 node.data.styleClass = "highlight";
                 parents.forEach((parent: TreeTableNode) =>{
@@ -230,7 +306,9 @@ export class SourceDataPanelComponent {
             }
 
             if (node.children) {
-                node.children.forEach((item: TreeTableNode, index) => { select(item, [...parents, node], highlight, 1 + virtualRowIndex + index) })
+                node.children.forEach((item: TreeTableNode, index) => {
+                    select(item, [...parents, node], highlight, 1 + virtualRowIndex + index);
+                });
             }
         };
 
@@ -252,5 +330,21 @@ export class SourceDataPanelComponent {
         }
 
         this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
+    }
+
+    refreshLayout() {
+        this.inspectionTree?.refreshLayout();
+    }
+
+    measurePreferredHeightEm(): number | undefined {
+        return this.inspectionTree?.measurePreferredContentHeightEm();
+    }
+
+    freezeTree() {
+        this.inspectionTree?.freeze();
+    }
+
+    unfreezeTree() {
+        this.inspectionTree?.unfreeze();
     }
 }

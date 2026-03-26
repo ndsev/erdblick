@@ -4,7 +4,7 @@ import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 export interface SearchWorkerTask {
     type: 'SearchWorkerTask';
     tileId: bigint;
-    tileBlob: Uint8Array;
+    tileBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     query: string;
     dataSourceInfo: Uint8Array;
@@ -15,25 +15,13 @@ export interface SearchWorkerTask {
 
 export interface CompletionWorkerTask {
     type: 'CompletionWorkerTask';
-    blob: Uint8Array;
+    tileBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     dataSourceInfo: Uint8Array;
     query: string; // Query prefix to complete
     point: number; // Cursor position to complete at
     nodeId: string;
     limit: number | undefined;
-    taskId: string;
-    groupId: string;
-}
-
-export interface DiagnosticsWorkerTask {
-    type: 'DiagnosticsWorkerTask';
-    blob: Uint8Array;
-    fieldDictBlob: Uint8Array;
-    dataSourceInfo: Uint8Array;
-    nodeId: string;
-    query: string;
-    diagnostics: Array<Uint8Array>; // List of diagnostic data
     taskId: string;
     groupId: string;
 }
@@ -90,16 +78,46 @@ export interface CompletionCandidatesForTile {
     groupId?: string;
 }
 
-export interface DiagnosticsResultsForTile {
-    type: 'DiagnosticsResultsForTile';
-    query: string;
-    messages: DiagnosticsMessage[];
-    taskId?: string;
-    groupId?: string;
+export interface WorkerInitMessage {
+    type: 'WorkerInit';
 }
 
-export type WorkerTask = SearchWorkerTask | CompletionWorkerTask | DiagnosticsWorkerTask;
-export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile | DiagnosticsResultsForTile;
+export interface WorkerReadyMessage {
+    type: 'WorkerReady';
+    scriptUrl: string;
+}
+
+export type WorkerTask = SearchWorkerTask | CompletionWorkerTask;
+export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile;
+export type WorkerInboundMessage = WorkerTask | WorkerInitMessage;
+export type WorkerOutboundMessage = WorkerResult | WorkerReadyMessage;
+
+function parseTileWithOverlays(parser: any, tileBlobs: Uint8Array[]): TileFeatureLayer | null {
+    if (!tileBlobs.length) {
+        return null;
+    }
+    const baseTile: TileFeatureLayer | null = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), tileBlobs[0]);
+    if (!baseTile) {
+        return null;
+    }
+    try {
+        for (let i = 1; i < tileBlobs.length; i++) {
+            const overlay = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), tileBlobs[i]) as TileFeatureLayer | null;
+            if (!overlay) {
+                continue;
+            }
+            try {
+                baseTile.attachOverlay(overlay);
+            } finally {
+                overlay.delete();
+            }
+        }
+    } catch (error) {
+        baseTile.delete();
+        throw error;
+    }
+    return baseTile;
+}
 
 function processSearch(task: SearchWorkerTask) {
     let postError = (name: string, message: string) => {
@@ -123,7 +141,10 @@ function processSearch(task: SearchWorkerTask) {
         let parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.tileBlob);
+        let tile = parseTileWithOverlays(parser, task.tileBlobs);
+        if (!tile) {
+            throw new Error("No tile blobs provided for search task.");
+        }
         const numFeatures = tile.numFeatures();
         const tileId = tile.tileId();
 
@@ -164,7 +185,10 @@ function processCompletion(task: CompletionWorkerTask) {
         let parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        let tile = parseTileWithOverlays(parser, task.tileBlobs);
+        if (!tile) {
+            throw new Error("No tile blobs provided for completion task.");
+        }
 
         // Get the query results from the tile.
         let search = new coreLib.FeatureLayerSearch(tile);
@@ -206,49 +230,23 @@ function processCompletion(task: CompletionWorkerTask) {
     }
 }
 
-function processDiagnostics(task: DiagnosticsWorkerTask) {
-    try {
-        // Parse the tile.
-        let parser = new coreLib.TileLayerParser();
-        uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
-        uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
-
-        // Get the query results from the tile.
-        let search = new coreLib.FeatureLayerSearch(tile);
-
-        let messages = search.diagnostics(task.query, task.diagnostics);
-        if (messages["error"]) {
-            console.error("Diagnostics error", messages["error"]);
-            messages = null;
-        }
-
-        search.delete();
-        tile.delete();
-
-        postMessage({
-            type: 'DiagnosticsResultsForTile',
-            query: task.query,
-            messages: messages || [],
-            taskId: task.taskId,
-            groupId: task.groupId
-        } as DiagnosticsResultsForTile);
-    }
-    catch (exc: any) {
-        console.error("Diagnostics error", exc);
-    }
-}
-
 addEventListener('message', async ({data}) => {
+    const task = (data as WorkerInboundMessage);
+
+    if (task?.type === 'WorkerInit') {
+        postMessage({
+            type: 'WorkerReady',
+            scriptUrl: self.location.href
+        } as WorkerReadyMessage);
+        return;
+    }
+
     await initializeLibrary();
 
-    let task = (data as WorkerTask);
     switch (task['type']) {
         case 'SearchWorkerTask':
             return processSearch(task as SearchWorkerTask);
         case 'CompletionWorkerTask':
             return processCompletion(task as CompletionWorkerTask);
-        case 'DiagnosticsWorkerTask':
-            return processDiagnostics(task as DiagnosticsWorkerTask);
     }
 })

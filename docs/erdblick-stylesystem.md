@@ -8,15 +8,18 @@ Erdblick visualizes every feature through YAML-defined style sheets. This guide 
 
 Most day-to-day style work happens directly inside the Styles dialog, where you can toggle, edit, and reset style sheets without touching files on disk:
 
-1. **Open the Styles dialog** via the quick action menu → **Styles**.
+1. **Open the Styles dialog** via **Edit -> Styles Configurator** in the main bar.
 2. **Activate/deactivate style sheets** to control which rules run.
-4. **Use the style editor** (pencil icon) for live editing:
+3. **Use the style editor** (pencil icon) for live editing:
    - Syntax-highlighting with validation messages for YAML errors.
    - Auto-complete based on the current schema.
    - Import/Export buttons to move styles in and out of the browser’s `localStorage`.
-5. **Reset browser-stored versions** via the Preferences dialog: use the “Clear” buttons for imported styles and modified built‑in styles if the UI behaves unexpectedly.
+4. **Reset browser-stored versions** via the Preferences dialog: use the “Clear” buttons for imported styles and modified built-in styles if the UI behaves unexpectedly.
 
-In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options (`StyleOptionNode`s). That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
+Built-in styles that were edited locally show a **Modified** tag. Click it to open the **compare dialog** against the shipped version.
+
+In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options.
+That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
 
 ## Style Sheet Anatomy
 
@@ -39,6 +42,10 @@ options:
 
 - `name` – Mandatory. Free to set. May contain slash-separated grouping.
 - `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
+- `stage` – Optional minimum tile stage required before any rule in the style can render.
+- High-vs-low fidelity stage cutover now comes from layer metadata (`LayerInfo.highFidelityStage`), not from style-sheet YAML.
+- Low-fidelity rendering uses stages below that metadata threshold; high-fidelity rendering uses stages at/above it. The frontend may additionally apply a per-view `lod` cap (`LOD_0..LOD_7`) before rules run.
+- Do not infer fidelity from the stage label alone. Some staged layers intentionally use labels like `Low-Fi` / `High-Fi` for UI continuity while still publishing `highFidelityStage: 0`, meaning all stages are treated as high-fidelity for rule selection and later stages are enrichment-only.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
 
@@ -50,9 +57,12 @@ options:
 | --- | --- |
 | `type` | Regex that matches the feature type ID (e.g., `LaneGroup`). |
 | `filter` | Simfil expression that runs against the current feature/relation/attribute. |
-| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. Optional `geometry-name` narrows it to specific geometry identifiers. |
+| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. |
 | `aspect` | `feature` (default), `relation`, or `attribute`. Controls how the rule interprets the current entity. |
 | `mode` | `none`, `hover`, or `selection`. Use separate rules for hover/selection-specific rendering. |
+| `fidelity` | `low`, `high`, or `any` (default). Lets one style sheet define separate rules for zoomed-out low-fi rendering and high-fi rendering. In low-fi mode, erdblick may additionally cull features by backend-provided `lod`. |
+| `stage` | Optional exact tile stage match for geometry rules (for example `stage: 0` for low-fi geometry, `stage: 1` for full geometry). |
+| `lod` | Optional exact feature LOD match (`0..7`). Useful inside `first-of` chains to style coarse and fine features differently. |
 | `selectable` | `true`/`false` flag that decides whether the feature can be selected or will be skipped when the user clicks it. |
 | `first-of` | Array of child rules; erdblick evaluates them top-to-bottom and applies only the first match. Remaining child rules are skipped. |
 
@@ -63,9 +73,9 @@ options:
 | `color` / `color-expression` | Solid color or Simfil expression for meshes/lines/polygons. Accepts CSS colors or RGBA arrays. |
 | `opacity` | Convenience alpha override for `color`. |
 | `width` | Width in pixels (lines/points) or meters (meshes). |
+| `billboard` | Optional `true`/`false` override for camera-facing rendering. When omitted, erdblick keeps the primitive-specific default (for example paths stay world-oriented, while labels/icons stay billboarded). |
 | `flat` | Clamp geometry to ground, ignoring heights. |
 | `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
-| `near-far-scale` | `[near, nearValue, far, farValue]` scaling curve. |
 | `offset` / `vertical-offset` | `[x, y, z]` offsets in meters (or a single vertical offset). Useful for stacking multiple representations. |
 | `icon-url` / `icon-url-expression` | Static path or Simfil expression for billboard icons. |
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
@@ -78,19 +88,9 @@ options:
 | --- | --- |
 | `label-text` | Static string used as the label. |
 | `label-text-expression` | Simfil expression returning the label text (e.g., `**.name`). |
-| `label-color`, `label-outline-color`, `label-background-color`, `label-font`, `label-style`, `label-scale` | Standard Cesium label attributes. |
+| `label-color`, `label-outline-color`, `label-background-color`, `label-font`, `label-style`, `label-scale` | Standard deck.gl label attributes. |
 | `label-outline-width`, `label-background-padding` | Outline/padding controls. |
-| `label-horizontal-origin`, `label-vertical-origin`, `label-height-reference`, `label-eye-offset`, `label-pixel-offset` | Advanced Cesium label positioning knobs. |
-
-### Distance-Based Properties
-
-Each entry accepts `[near, nearValue, far, farValue]`:
-
-| Field | Description |
-| --- | --- |
-| `translucency-by-distance` | Fades primitives based on camera distance. |
-| `scale-by-distance` | Scales points or billboards. |
-| `offset-scale-by-distance` | Adjusts offsets according to distance. |
+| `label-horizontal-origin`, `label-vertical-origin`, `label-height-reference`, `label-eye-offset`, `label-pixel-offset` | Advanced deck.gl label positioning knobs. |
 
 ### Relation-Specific Fields (`aspect: relation`)
 
@@ -164,7 +164,7 @@ SourceData panels and the inspection tree mirror the same validity information; 
 When you move beyond basic coloring and start visualizing relations or labels, a few patterns make styles easier to reason about:
 
 - **Relations**: use `aspect: relation` plus `relation-recursive: true` when you want the UI to traverse relation chains (for example lane groups). Recursion stops at tile boundaries and only follows relations within the same layer. Combine this with separate rules for `mode: hover` or `mode: selection` if relation highlighting should only appear on hover or selection.
-- **Labels**: to keep labels legible, consider combining `label-text-expression` with `scale-by-distance`. When stacking multiple labels, adjust `label-eye-offset` to avoid z-fighting.
+- **Labels**: use `label-text-expression` to keep labels concise and data-driven. When stacking multiple labels, adjust `label-eye-offset` to avoid z-fighting.
 - **Source references**: rules inherit the same hover/selection colors used in the inspector. If you need a dedicated highlight color, create a `mode: selection` rule with the desired `color`/`opacity`.
 
 ## Performance Considerations
@@ -247,5 +247,5 @@ To control which style sheets are available in a given deployment, configure the
     ]
   }
   ```
-- Containerized deployments can mount their own directories over the bundle’s `config/styles` path (for example by binding a host directory to `/app/erdblick/bundle/styles` or the equivalent location in your image).
+- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`).
 - Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.

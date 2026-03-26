@@ -1,31 +1,66 @@
 import {Injectable} from "@angular/core";
-import {
-    PointPrimitiveCollection,
-    LabelCollection,
-    Viewer,
-    Entity,
-    BillboardCollection
-} from "../integrations/cesium";
+import {COORDINATE_SYSTEM} from "@deck.gl/core";
+import {IconLayer, ScatterplotLayer, TextLayer} from "@deck.gl/layers";
 import {coreLib} from "../integrations/wasm";
-import {TileFeatureId} from "../shared/appstate.service";
 import {HighlightMode} from "../../build/libs/core/erdblick-core";
+import {IRenderSceneHandle} from "./render-view.model";
+import {DeckLayerRegistry} from "./deck/deck-layer-registry";
 
 export type MapViewLayerStyleRule = string;
 type PositionHash = string;
 type Cartographic = {x: number, y: number, z: number};
 
+type DeckColor = [number, number, number, number];
+type DeckPosition = [number, number, number];
+type DeckScene = {layerRegistry?: DeckLayerRegistry};
+
+interface DeckMergedPoint {
+    featureAddresses: number[];
+    featureTileKeys: string[];
+    position: DeckPosition;
+    color: DeckColor;
+    outlineColor: DeckColor;
+    outlineWidth: number;
+    pixelSize: number;
+    billboard: boolean;
+}
+
+interface DeckMergedIcon {
+    featureAddresses: number[];
+    featureTileKeys: string[];
+    position: DeckPosition;
+    image: string;
+    width: number;
+    height: number;
+    color: DeckColor;
+    billboard: boolean;
+}
+
+interface DeckMergedLabel {
+    featureAddresses: number[];
+    featureTileKeys: string[];
+    position: DeckPosition;
+    text: string;
+    color: DeckColor;
+    outlineColor: DeckColor;
+    outlineWidth: number;
+    scale: number;
+    pixelOffset: [number, number];
+    billboard: boolean;
+}
+
 /**
  * Class which represents a set of merged point features for one location.
  * Each merged point feature may be visualized as a label or a point.
- * To this end, the visualization retains visualization parameters for
- * calls to either/both Cesium PointPrimitiveCollection.add() and/or LabelCollection.add().
+ * To this end, the visualization retains style parameters consumed by deck layers.
  */
 export interface MergedPointVisualization {
     position: Cartographic,
     positionHash: PositionHash,
-    pointParameters: any,  // Point Visualization Parameters for call to PointPrimitiveCollection.add().
-    labelParameters: any,  // Label Visualization Parameters for call to LabelCollection.add().
-    featureIds: Array<TileFeatureId>
+    pointParameters: any,
+    labelParameters: any,
+    featureAddresses: Array<number>,
+    featureTileKeys?: Array<string>
 }
 
 /**
@@ -37,13 +72,11 @@ export interface MergedPointVisualization {
 export class MergedPointsTile {
     referencingTiles: Array<bigint> = [];
 
-    billboardPrimitives: BillboardCollection|null = null;
-    pointPrimitives: PointPrimitiveCollection|null = null;
-    labelPrimitives: LabelCollection|null = null;
-    debugEntity: Entity|null = null;
-
     features: Map<PositionHash, MergedPointVisualization> = new Map<PositionHash, MergedPointVisualization>;
     readonly viewIndex: number
+    private readonly deckPointLayerKeys = new Set<string>();
+    private readonly deckIconLayerKeys = new Set<string>();
+    private readonly deckLabelLayerKeys = new Set<string>();
 
     constructor(
         public readonly tileId: bigint,  // NW tile ID
@@ -52,20 +85,39 @@ export class MergedPointsTile {
         this.viewIndex = Number(mapViewLayerStyleRuleId.split(":")[0]);
     }
 
-    add(point: MergedPointVisualization) {
+    add(point: MergedPointVisualization, sourceTileKey: string) {
+        const normalizedFeatureAddresses = point.featureAddresses
+            .filter((featureAddress): featureAddress is number =>
+                Number.isInteger(featureAddress) && featureAddress >= 0);
+        const normalizedFeatureTileKeys = normalizedFeatureAddresses.map((_, i) => {
+            const featureTileKey = point.featureTileKeys?.[i];
+            return typeof featureTileKey === "string" ? featureTileKey : sourceTileKey;
+        });
+
         let existingPoint = this.features.get(point.positionHash);
         if (!existingPoint) {
-            this.features.set(point.positionHash, point);
+            this.features.set(point.positionHash, {
+                ...point,
+                featureAddresses: normalizedFeatureAddresses,
+                featureTileKeys: normalizedFeatureTileKeys,
+            });
         }
         else {
-            let anyNewFeatureIdAdded = false;
-            for (let fid of point.featureIds) {
-                if (existingPoint.featureIds.findIndex(v => v.featureId == fid.featureId) == -1) {
-                    existingPoint.featureIds.push(fid);
-                    anyNewFeatureIdAdded = true;
+            let anyNewFeatureAddressAdded = false;
+            if (!Array.isArray(existingPoint.featureTileKeys)) {
+                existingPoint.featureTileKeys = existingPoint.featureAddresses.map(() => sourceTileKey);
+            }
+            for (let i = 0; i < normalizedFeatureAddresses.length; i++) {
+                const featureAddress = normalizedFeatureAddresses[i];
+                const featureTileKey = normalizedFeatureTileKeys[i];
+                if (existingPoint.featureAddresses.findIndex((v, idx) =>
+                    v === featureAddress && existingPoint.featureTileKeys?.[idx] === featureTileKey) == -1) {
+                    existingPoint.featureAddresses.push(featureAddress);
+                    existingPoint.featureTileKeys!.push(featureTileKey);
+                    anyNewFeatureAddressAdded = true;
                 }
             }
-            if (anyNewFeatureIdAdded) {
+            if (anyNewFeatureAddressAdded) {
                 if (point.pointParameters) {
                     existingPoint.pointParameters = point.pointParameters;
                 }
@@ -76,87 +128,33 @@ export class MergedPointsTile {
         }
     }
 
-    count(positionHash: PositionHash) {
-        return this.features.has(positionHash) ? this.features.get(positionHash)!.featureIds.length : 0;
-    }
-
-    render(viewer: Viewer) {
-        if (this.pointPrimitives || this.labelPrimitives || this.billboardPrimitives) {
-            this.remove(viewer);
+    count(positionHash: PositionHash, excludedSourceTileKey?: string) {
+        const feature = this.features.get(positionHash);
+        if (!feature) {
+            return 0;
         }
-
-        this.billboardPrimitives = new BillboardCollection();
-        this.pointPrimitives = new PointPrimitiveCollection();
-        this.labelPrimitives = new LabelCollection();
-
-        for (let [_, feature] of this.features) {
-            if (feature.pointParameters) {
-                feature.pointParameters["id"] = feature.featureIds;
-                if (feature.pointParameters.hasOwnProperty("image")) {
-                    this.billboardPrimitives.add(feature.pointParameters);
-                }
-                else {
-                    this.pointPrimitives.add(feature.pointParameters);
-                }
-            }
-            if (feature.labelParameters) {
-                feature.labelParameters["id"] = feature.featureIds;
-                this.labelPrimitives.add(feature.labelParameters);
+        if (!excludedSourceTileKey) {
+            return feature.featureAddresses.length;
+        }
+        const featureTileKeys = feature.featureTileKeys ?? [];
+        if (!featureTileKeys.length) {
+            return feature.featureAddresses.length;
+        }
+        let count = 0;
+        for (let index = 0; index < feature.featureAddresses.length; index++) {
+            if (featureTileKeys[index] !== excludedSourceTileKey) {
+                count += 1;
             }
         }
-
-        if (this.pointPrimitives.length) {
-            viewer.scene.primitives.add(this.pointPrimitives)
-        }
-        if (this.billboardPrimitives.length) {
-            viewer.scene.primitives.add(this.billboardPrimitives)
-        }
-        if (this.labelPrimitives.length) {
-            viewer.scene.primitives.add(this.labelPrimitives)
-        }
-
-        // TODO: Move under debug api
-        // On-demand debug visualization:
-        // Adding debug bounding box and label for tile ID and feature count
-        // const tileBounds = coreLib.getCornerTileBox(this.tileId);
-        // this.debugEntity = viewer.entities.add({
-        //     rectangle: {
-        //         coordinates: Rectangle.fromDegrees(...tileBounds),
-        //         material: Color.BLUE.withAlpha(0.2),
-        //         outline: true,
-        //         outlineColor: Color.BLUE,
-        //         outlineWidth: 3,
-        //         height: HeightReference.CLAMP_TO_GROUND,
-        //     },
-        //     position: Cartesian3.fromDegrees(
-        //         (tileBounds[0]+tileBounds[2])*.5,
-        //         (tileBounds[1]+tileBounds[3])*.5
-        //     ),
-        //     label: {
-        //         text: `Tile ID: ${this.tileId.toString()}\nPoints: ${this.features.size}\nreferencingTiles: ${this.referencingTiles}`,
-        //         showBackground: true,
-        //         font: '14pt monospace',
-        //         eyeOffset: new Cartesian3(0, 0, -10), // Ensures label visibility at a higher altitude
-        //         fillColor: Color.YELLOW,
-        //         outlineColor: Color.BLACK,
-        //         outlineWidth: 2,
-        //     }
-        // });
+        return count;
     }
 
-    remove(viewer: Viewer) {
-        if (this.pointPrimitives && this.pointPrimitives.length) {
-            viewer.scene.primitives.remove(this.pointPrimitives)
-        }
-        if (this.billboardPrimitives && this.billboardPrimitives.length) {
-            viewer.scene.primitives.remove(this.billboardPrimitives)
-        }
-        if (this.labelPrimitives && this.labelPrimitives.length) {
-            viewer.scene.primitives.remove(this.labelPrimitives)
-        }
-        if (this.debugEntity) {
-            viewer.entities.remove(this.debugEntity);
-        }
+    renderScene(sceneHandle: IRenderSceneHandle) {
+        this.renderDeck(sceneHandle.scene as DeckScene);
+    }
+
+    removeScene(sceneHandle: IRenderSceneHandle) {
+        this.removeDeck(sceneHandle.scene as DeckScene);
     }
 
     /**
@@ -166,6 +164,237 @@ export class MergedPointsTile {
         if (this.referencingTiles.findIndex(v => v == sourceTileId) == -1) {
             this.referencingTiles.push(sourceTileId);
         }
+    }
+
+    removeSource(sourceTileKey: string) {
+        for (const [positionHash, feature] of this.features.entries()) {
+            const featureTileKeys = feature.featureTileKeys ?? [];
+            if (!featureTileKeys.length) {
+                continue;
+            }
+
+            const remainingFeatureAddresses: number[] = [];
+            const remainingFeatureTileKeys: string[] = [];
+            for (let index = 0; index < feature.featureAddresses.length; index++) {
+                if (featureTileKeys[index] === sourceTileKey) {
+                    continue;
+                }
+                remainingFeatureAddresses.push(feature.featureAddresses[index]);
+                remainingFeatureTileKeys.push(featureTileKeys[index]);
+            }
+
+            if (!remainingFeatureAddresses.length) {
+                this.features.delete(positionHash);
+                continue;
+            }
+
+            feature.featureAddresses = remainingFeatureAddresses;
+            feature.featureTileKeys = remainingFeatureTileKeys;
+        }
+    }
+
+    private renderDeck(scene: DeckScene) {
+        const registry = scene.layerRegistry;
+        if (!registry) {
+            return;
+        }
+
+        this.removeDeck(scene);
+
+        const pointsByBillboard = new Map<boolean, DeckMergedPoint[]>();
+        const iconsByBillboard = new Map<boolean, DeckMergedIcon[]>();
+        const labelsByBillboard = new Map<boolean, DeckMergedLabel[]>();
+
+        for (const feature of this.features.values()) {
+            const featureAddresses = feature.featureAddresses;
+            const featureTileKeys = feature.featureTileKeys ?? [];
+            const defaultPosition: DeckPosition = [
+                feature.position.x,
+                feature.position.y,
+                feature.position.z
+            ];
+
+            if (feature.pointParameters) {
+                const params = feature.pointParameters;
+                const position = defaultPosition;
+                const color = this.toDeckColor(params.color, [255, 255, 255, 255]);
+
+                if (typeof params.image === "string" && params.image.length > 0) {
+                    const width = Number(params.width ?? params.pixelSize ?? 12);
+                    const height = Number(params.height ?? params.pixelSize ?? 12);
+                    const billboard = params.billboard !== false;
+                    const bucket = iconsByBillboard.get(billboard) ?? [];
+                    bucket.push({
+                        featureAddresses,
+                        featureTileKeys,
+                        position,
+                        image: params.image,
+                        width: Number.isFinite(width) && width > 0 ? width : 12,
+                        height: Number.isFinite(height) && height > 0 ? height : 12,
+                        color,
+                        billboard
+                    });
+                    iconsByBillboard.set(billboard, bucket);
+                } else {
+                    const pixelSize = Number(params.pixelSize ?? 6);
+                    const outlineWidth = Number(params.outlineWidth ?? 0);
+                    const billboard = params.billboard === true;
+                    const bucket = pointsByBillboard.get(billboard) ?? [];
+                    bucket.push({
+                        featureAddresses,
+                        featureTileKeys,
+                        position,
+                        color,
+                        outlineColor: this.toDeckColor(params.outlineColor, [0, 0, 0, 0]),
+                        outlineWidth: Number.isFinite(outlineWidth) && outlineWidth > 0 ? outlineWidth : 0,
+                        pixelSize: Number.isFinite(pixelSize) && pixelSize > 0 ? pixelSize : 6,
+                        billboard
+                    });
+                    pointsByBillboard.set(billboard, bucket);
+                }
+            }
+
+            if (feature.labelParameters) {
+                const params = feature.labelParameters;
+                const text = typeof params.text === "string" ? params.text : "";
+                if (!text.length) {
+                    continue;
+                }
+                const position = defaultPosition;
+                const offset = Array.isArray(params.pixelOffset) ? params.pixelOffset : [0, 0];
+                const scale = Number(params.scale ?? 1);
+                const outlineWidth = Number(params.outlineWidth ?? 0);
+                const billboard = params.billboard !== false;
+                const bucket = labelsByBillboard.get(billboard) ?? [];
+                bucket.push({
+                    featureAddresses,
+                    featureTileKeys,
+                    position,
+                    text,
+                    color: this.toDeckColor(params.fillColor, [255, 255, 255, 255]),
+                    outlineColor: this.toDeckColor(params.outlineColor, [0, 0, 0, 255]),
+                    outlineWidth: Number.isFinite(outlineWidth) && outlineWidth > 0 ? outlineWidth : 0,
+                    scale: Number.isFinite(scale) && scale > 0 ? scale : 1,
+                    pixelOffset: [
+                        Number(offset[0] ?? 0),
+                        Number(offset[1] ?? 0)
+                    ],
+                    billboard
+                });
+                labelsByBillboard.set(billboard, bucket);
+            }
+        }
+
+        for (const [billboard, points] of pointsByBillboard.entries()) {
+            if (!points.length) {
+                continue;
+            }
+            const layerKey = this.makeDeckLayerKey(`merged-point-${billboard ? "billboard" : "world"}`);
+            this.deckPointLayerKeys.add(layerKey);
+            registry.upsert(layerKey, new ScatterplotLayer({
+                id: layerKey,
+                data: points,
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                getPosition: (d: DeckMergedPoint) => d.position,
+                getRadius: (d: DeckMergedPoint) => d.pixelSize,
+                radiusUnits: "pixels",
+                getFillColor: (d: DeckMergedPoint) => d.color,
+                getLineColor: (d: DeckMergedPoint) => d.outlineColor,
+                getLineWidth: (d: DeckMergedPoint) => d.outlineWidth,
+                lineWidthUnits: "pixels",
+                billboard,
+                stroked: true,
+                filled: true,
+                pickable: true,
+                getId: (d: DeckMergedPoint) => d.featureAddresses
+            } as any) as any, 500);
+        }
+
+        for (const [billboard, icons] of iconsByBillboard.entries()) {
+            if (!icons.length) {
+                continue;
+            }
+            const layerKey = this.makeDeckLayerKey(`merged-icon-${billboard ? "billboard" : "world"}`);
+            this.deckIconLayerKeys.add(layerKey);
+            registry.upsert(layerKey, new IconLayer({
+                id: layerKey,
+                data: icons,
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                getPosition: (d: DeckMergedIcon) => d.position,
+                getColor: (d: DeckMergedIcon) => d.color,
+                getSize: (d: DeckMergedIcon) => Math.max(d.width, d.height),
+                sizeUnits: "pixels",
+                getIcon: (d: DeckMergedIcon) => ({
+                    url: d.image,
+                    width: d.width,
+                    height: d.height,
+                    anchorX: d.width / 2,
+                    anchorY: d.height / 2
+                }),
+                billboard,
+                pickable: true,
+                getId: (d: DeckMergedIcon) => d.featureAddresses
+            } as any) as any, 510);
+        }
+
+        for (const [billboard, labels] of labelsByBillboard.entries()) {
+            if (!labels.length) {
+                continue;
+            }
+            const layerKey = this.makeDeckLayerKey(`merged-label-${billboard ? "billboard" : "world"}`);
+            this.deckLabelLayerKeys.add(layerKey);
+            registry.upsert(layerKey, new TextLayer({
+                id: layerKey,
+                data: labels,
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                getPosition: (d: DeckMergedLabel) => d.position,
+                getText: (d: DeckMergedLabel) => d.text,
+                getColor: (d: DeckMergedLabel) => d.color,
+                getOutlineColor: (d: DeckMergedLabel) => d.outlineColor,
+                getOutlineWidth: (d: DeckMergedLabel) => d.outlineWidth,
+                getSize: (d: DeckMergedLabel) => 14 * d.scale,
+                sizeUnits: "pixels",
+                getPixelOffset: (d: DeckMergedLabel) => d.pixelOffset,
+                billboard,
+                pickable: true,
+                getId: (d: DeckMergedLabel) => d.featureAddresses
+            } as any) as any, 520);
+        }
+    }
+
+    private removeDeck(scene: DeckScene) {
+        const registry = scene.layerRegistry;
+        if (!registry) {
+            return;
+        }
+        for (const layerKey of this.deckPointLayerKeys) {
+            registry.remove(layerKey);
+        }
+        this.deckPointLayerKeys.clear();
+        for (const layerKey of this.deckIconLayerKeys) {
+            registry.remove(layerKey);
+        }
+        this.deckIconLayerKeys.clear();
+        for (const layerKey of this.deckLabelLayerKeys) {
+            registry.remove(layerKey);
+        }
+        this.deckLabelLayerKeys.clear();
+    }
+
+    private makeDeckLayerKey(kind: string): string {
+        return `merged/${this.mapViewLayerStyleRuleId}/${this.tileId.toString()}/${kind}`;
+    }
+
+    private toDeckColor(input: any, fallback: DeckColor): DeckColor {
+        if (Array.isArray(input) && input.length >= 4) {
+            return [
+                Number(input[0]),
+                Number(input[1]),
+                Number(input[2]),
+                Number(input[3])
+            ];
+        }
+        return fallback;
     }
 }
 
@@ -178,10 +407,55 @@ export class PointMergeService
     mergedPointsTiles: Map<MapViewLayerStyleRule, Map<bigint, MergedPointsTile>> = new Map<MapViewLayerStyleRule, Map<bigint, MergedPointsTile>>();
 
     /**
+     * Build a snapshot of merge counts for the corner tiles touched by sourceTileId.
+     * Keys are encoded as `${mapViewLayerStyleRuleId}|${positionHash}`.
+     */
+    makeMergeCountSnapshot(
+        sourceTileId: bigint,
+        mapViewLayerStyleId: string,
+        excludedSourceTileKey?: string
+    ): Record<string, number> {
+        const result: Record<string, number> = {};
+        const cornerTileIds = [
+            sourceTileId,
+            coreLib.getTileNeighbor(sourceTileId, -1, 0),
+            coreLib.getTileNeighbor(sourceTileId, 0, -1),
+            coreLib.getTileNeighbor(sourceTileId, -1, -1),
+        ];
+
+        for (const [mapViewLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {
+            if (!mapViewLayerStyleRuleId.startsWith(mapViewLayerStyleId)) {
+                continue;
+            }
+            for (const cornerTileId of cornerTileIds) {
+                const cornerTile = tiles.get(cornerTileId);
+                if (!cornerTile) {
+                    continue;
+                }
+                for (const [positionHash] of cornerTile.features.entries()) {
+                    result[`${mapViewLayerStyleRuleId}|${positionHash}`] =
+                        cornerTile.count(positionHash, excludedSourceTileKey);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Count how many points have been merged for the given position and style rule so far.
      */
-    count(geoPos: Cartographic, hashPos: PositionHash, level: number, mapViewLayerStyleRuleId: MapViewLayerStyleRule): number {
-        return this.getCornerTileByPosition(geoPos, level, mapViewLayerStyleRuleId).count(hashPos);
+    count(
+        geoPos: Cartographic,
+        hashPos: PositionHash,
+        level: number,
+        mapViewLayerStyleRuleId: MapViewLayerStyleRule,
+        excludedSourceTileKey?: string
+    ): number {
+        return this.getCornerTileByPosition(geoPos, level, mapViewLayerStyleRuleId).count(
+            hashPos,
+            excludedSourceTileKey
+        );
     }
 
     /**
@@ -230,12 +504,12 @@ export class PointMergeService
      * the missingTiles of each. MergedPointsTiles with empty referencingTiles (requiring render)
      * are yielded. The sourceTileId is also added to the MergedPointsTiles referencingTiles set.
      */
-    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, mapViewLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
+    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, sourceTileKey: string, mapViewLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
         // Insert the points into the relevant corner tiles.
         let level = coreLib.getTileLevel(sourceTileId);
         for (let point of points) {
             let mergedPointsTile = this.getCornerTileByPosition(point.position, level, mapViewLayerStyleRuleId);
-            mergedPointsTile.add(point);
+            mergedPointsTile.add(point, sourceTileKey);
         }
 
         // Add the sourceTileId as a reference to the affected corner tile IDs.
@@ -253,18 +527,22 @@ export class PointMergeService
     }
 
     /**
-     * Remove a sourceTileId reference from each surrounding corner tile whose mapViewLayerStyleRuleId has a
-     * prefix-match with the mapViewLayerStyleId. Yields MergedPointsTiles which now have empty referencingTiles,
-     * and whose visualization (if existing) must therefore be removed from the scene.
+     * Remove a source tile contribution from each surrounding corner tile whose mapViewLayerStyleRuleId has a
+     * prefix-match with the mapViewLayerStyleId. Yields all touched corner tiles so callers can refresh their scene
+     * representation. Tiles whose references become empty are removed from the service map.
      */
-    *remove(sourceTileId: bigint, mapViewLayerStyleId: string): Generator<MergedPointsTile> {
+    *remove(sourceTileId: bigint, sourceTileKey: string, mapViewLayerStyleId: string): Generator<MergedPointsTile> {
         for (let [mapViewLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {
             if (mapViewLayerStyleRuleId.startsWith(mapViewLayerStyleId)) {
                 for (let [tileId, tile] of tiles) {
-                    // Yield the corner tile as to-be-deleted, if it does not have any referencing tiles.
+                    const hadReference = tile.referencingTiles.includes(sourceTileId);
+                    if (!hadReference) {
+                        continue;
+                    }
+                    tile.removeSource(sourceTileKey);
                     tile.referencingTiles = tile.referencingTiles.filter(val => val != sourceTileId);
+                    yield tile;
                     if (!tile.referencingTiles.length) {
-                        yield tile;
                         tiles.delete(tileId);
                     }
                 }
@@ -274,8 +552,8 @@ export class PointMergeService
 
     /**
      * Clear all merged points for a particular mapViewLayerStyle prefix.
-     * Yields MergedPointsTiles which should be removed from the dedicated
-     * Cesium viewer.
+     * Yields MergedPointsTiles which should be removed from the active
+     * renderer scene.
      */
     *clear(mapViewLayerStyleId: string): Generator<MergedPointsTile> {
         for (let [mapViewLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {

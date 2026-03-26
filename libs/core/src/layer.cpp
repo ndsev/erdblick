@@ -4,6 +4,18 @@
 #include "mapget/model/feature.h"
 #include <iostream>
 
+namespace
+{
+
+auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
+{
+    if (auto decoded = value.decodeBigEndianI64())
+        return std::to_string(*decoded);
+    return "0x" + value.toHex(false);
+}
+
+}
+
 namespace erdblick
 {
 
@@ -32,6 +44,11 @@ uint64_t TileFeatureLayer::tileId() const
     return model_->tileId().value_;
 }
 
+uint32_t TileFeatureLayer::stage() const
+{
+    return model_->stage().value_or(0U);
+}
+
 /**
  * Gets the number of features in the tile.
  * @return The number of features.
@@ -39,6 +56,11 @@ uint64_t TileFeatureLayer::tileId() const
 uint32_t TileFeatureLayer::numFeatures() const
 {
     return model_->numRoots();
+}
+
+uint64_t TileFeatureLayer::numVertices() const
+{
+    return model_->numVertices();
 }
 
 /**
@@ -71,6 +93,14 @@ mapget::model_ptr<mapget::Feature> TileFeatureLayer::find(const std::string& id)
     return model_->find(id);
 }
 
+void TileFeatureLayer::attachOverlay(TileFeatureLayer const& overlay)
+{
+    if (!model_ || !overlay.model_) {
+        return;
+    }
+    model_->attachOverlay(overlay.model_);
+}
+
 /**
  * Finds the index of a feature based on its type and ID parts.
  * @param type The type of the feature.
@@ -83,6 +113,38 @@ int32_t TileFeatureLayer::findFeatureIndex(std::string type, NativeJsValue idPar
     if (auto result = model_->find(type, idPartsKvp))
         return result->addr().index();
     return -1;
+}
+
+std::string TileFeatureLayer::featureIdByAddress(uint32_t address) const
+{
+    if (address >= model_->numRoots()) {
+        return {};
+    }
+    uint32_t currentIndex = 0;
+    for (auto&& feature : *model_) {
+        if (currentIndex++ != address) {
+            continue;
+        }
+        if (auto featureId = feature->id()) {
+            return featureId->toString();
+        }
+        return {};
+    }
+    return {};
+}
+
+mapget::model_ptr<mapget::Feature> TileFeatureLayer::featureByAddress(uint32_t address) const
+{
+    if (address >= model_->numRoots()) {
+        return {};
+    }
+    uint32_t currentIndex = 0;
+    for (auto&& feature : *model_) {
+        if (currentIndex++ == address) {
+            return feature;
+        }
+    }
+    return {};
 }
 
 TileFeatureLayer::~TileFeatureLayer() = default;
@@ -155,6 +217,13 @@ NativeJsValue TileSourceDataLayer::toObject() const
                     return JsValue(*vv);
                 if (auto vv = std::get_if<std::string_view>(&v))
                     return JsValue(std::string(*vv));
+                return JsValue();
+            }
+            case simfil::ValueType::Bytes: {
+                auto v = node.value();
+                if (auto vv = std::get_if<simfil::ByteArray>(&v))
+                    return JsValue(byteArrayToDisplayString(*vv));
+                return JsValue();
             }
             default:
                 return JsValue();
@@ -210,8 +279,7 @@ NativeJsValue TileSourceDataLayer::toObject() const
         data.set("key", std::move(key));
 
         if (node.addr().column() == mapget::TileSourceDataLayer::Compound) {
-            auto compound = model_->resolveCompound(*ModelNode::Ptr::make(model_->shared_from_this(), node.addr()));
-
+            auto compound = model_->resolve<SourceDataCompoundNode>(node);
             data.set("address", visitAddress(compound->sourceDataAddress()));
             data.set("type", JsValue(std::string(compound->schemaName())));
         }

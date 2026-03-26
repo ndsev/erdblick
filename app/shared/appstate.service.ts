@@ -2,23 +2,31 @@ import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
 import {BehaviorSubject, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
-import {Cartographic, CesiumMath} from "../integrations/cesium";
+import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
+import type {FeatureWrapper} from "../mapdata/features.model";
+import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
 
-export const MAX_NUM_TILES_TO_LOAD = 2048;
-export const MAX_NUM_TILES_TO_VISUALIZE = 512;
+const COORDINATE_STATE_DECIMAL_PLACES = 8;
+const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
+
+export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
+export const MAX_COMPARE_PANELS = 4;
+export const MAX_NUM_TILES_TO_LOAD = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
 export const VIEW_SYNC_LAYERS = "lay";
-export const MAX_NUM_SELECTIONS = 3;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
+export const DEFAULT_DOCKED_EM_HEIGHT = 20;
+export const MAX_DECK_STYLE_WORKERS = 32;
+export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -31,6 +39,12 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+export interface Versions {
+    name: string;
+    tag: string;
+    whatsnew?: string;
+}
 
 export interface TileFeatureId {
     featureId: string;
@@ -45,10 +59,40 @@ export interface SelectedSourceData {
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
-    pinned: boolean;
+    locked: boolean;
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
+    undocked: boolean;
+    inspectionDialogLayoutEntry?: InspectionDialogLayoutEntry;
+}
+
+export interface InspectionDialogPosition {
+    left: number;
+    top: number;
+}
+
+export interface InspectionDialogLayoutEntry {
+    panelId: number;
+    slot: number;
+    position: InspectionDialogPosition;
+}
+
+export interface InspectionComparisonEntry {
+    panelId: number;
+    mapId: string;
+    label: string;
+    featureIds: TileFeatureId[];
+}
+
+export interface InspectionComparisonModel {
+    base: InspectionComparisonEntry;
+    others: InspectionComparisonEntry[];
+}
+
+export interface InspectionComparisonOption {
+    label: string;
+    value: number;
 }
 
 export interface CameraViewState {
@@ -56,18 +100,55 @@ export interface CameraViewState {
     orientation: { heading: number, pitch: number, roll: number };
 }
 
+export interface OsmViewState {
+    enabled: boolean;
+    opacity: number;
+}
+
 export interface LayerViewConfig {
+    autoLevel: boolean;
     level: number;
     visible: boolean;
-    tileBorders: boolean;
 }
+
+export interface ViewSyncOption {
+    name: string;
+    code: string;
+    value: boolean;
+    icon: string;
+    tooltip: string;
+}
+
+export type TileGridMode = "xyz" | "nds";
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
 }
 
+function roundCoordinateStateValue(value: number): number {
+    if (!Number.isFinite(value)) {
+        return value;
+    }
+    return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
+}
+
+function clampOsmOpacity(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 30;
+    }
+    const rounded = Math.round(value);
+    return Math.max(0, Math.min(100, rounded));
+}
+
 @Injectable({providedIn: 'root'})
+/**
+ * Central application state coordinator.
+ *
+ * Responsibilities:
+ * - hydrate from local storage + URL,
+ * - serialize state changes back to storage/URL.
+ */
 export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
@@ -84,7 +165,12 @@ export class AppStateService implements OnDestroy {
     private pendingStorageSyncStates = new Set<AppState<any>>;
     private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
+    private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
+    private lastMergedUrlSyncAt = 0;
+    // One-shot guard used to keep inbound v1 links stable during passive startup.
+    private skipNextUrlSync = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
+    private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
 
     // Base UI metrics
     get baseFontSize(): number {
@@ -123,10 +209,9 @@ export class AppStateService implements OnDestroy {
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        schema: z.union([
-            z.tuple([]),
-            z.tuple([z.coerce.number(), z.coerce.number()]),
-        ]),
+        schema: z.array(z.coerce.number()).max(2),
+        toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
+        fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
         urlParamName: 'mp',
         urlIncludeInVisualizationOnly: false
     });
@@ -140,12 +225,20 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
-                let s = `${state.id}~${state.pinned ? 1 : 0}~`;
+                let s = `${state.id}~${state.locked ? 1 : 0}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
-                s += `${state.size[0]}:${state.size[1]}~${state.color}`;
+                // Remove # character from hex color
+                const color = state.color.startsWith('#') ? state.color.slice(1) : state.color;
+                // size ~ [optional layout slot:left:top] ~ color ~ undockedFlag
+                if (state.inspectionDialogLayoutEntry) {
+                    const entry = state.inspectionDialogLayoutEntry;
+                    s += `${state.size[0]}:${state.size[1]}~${entry.slot}:${entry.position.left}:${entry.position.top}~${color}~${state.undocked ? 1 : 0}`;
+                } else {
+                    s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
+                }
                 return s;
             });
         },
@@ -156,21 +249,36 @@ export class AppStateService implements OnDestroy {
             }
             for (const panelStateStr of payload) {
                 const parts: string[] = panelStateStr.split('~');
-                if (parts.length < 6) {
+                if (parts.length < 7) {
                     continue;
                 }
                 const id = Number(parts.shift()!);
-                const pinState = parts.shift() === "1";
-                const color = parts.pop()!;
-                const sizeParts = parts.pop()!.split(':');
+                const lockState = parts.shift() === "1";
+                const undocked = parts.pop()! === "1";
+                const colorToken = parts.pop()!;
+                const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
+                let sizeToken = parts.pop()!;
+                let inspectionDialogLayoutEntry: InspectionDialogLayoutEntry | undefined;
+                if (sizeToken.split(':').length === 3) {
+                    const [slot, left, top] = sizeToken.split(':').map(Number);
+                    inspectionDialogLayoutEntry = {
+                        panelId: id,
+                        slot,
+                        position: {left, top}
+                    };
+                    sizeToken = parts.pop() ?? '';
+                }
+                const sizeParts = sizeToken.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
 
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     id: id,
                     features: [],
-                    pinned: pinState,
+                    locked: lockState || !undocked,
                     size: size as [number, number],
-                    color: color
+                    color: color,
+                    undocked: undocked,
+                    inspectionDialogLayoutEntry
                 };
 
                 // Check if the first MapTileKey is for SourceData.
@@ -225,7 +333,7 @@ export class AppStateService implements OnDestroy {
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 6.0, pitch: -1.55, roll: 0.25}
+            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0}
         },
         schema: z.object({
             lon: z.coerce.number().optional(),
@@ -236,23 +344,23 @@ export class AppStateService implements OnDestroy {
             r: z.coerce.number().optional()
         }),
         toStorage: (value: any) => ({
-            lon: value.destination.lon,
-            lat: value.destination.lat,
-            alt: value.destination.alt,
-            h: value.orientation.heading,
-            p: value.orientation.pitch,
-            r: value.orientation.roll
+            lon: roundCoordinateStateValue(value.destination.lon),
+            lat: roundCoordinateStateValue(value.destination.lat),
+            alt: roundCoordinateStateValue(value.destination.alt),
+            h: roundCoordinateStateValue(value.orientation.heading),
+            p: roundCoordinateStateValue(value.orientation.pitch),
+            r: roundCoordinateStateValue(value.orientation.roll)
         }),
         fromStorage: (payload: any, currentValue: CameraViewState) => ({
             destination: {
-                lon: payload.lon ?? currentValue.destination.lon,
-                lat: payload.lat ?? currentValue.destination.lat,
-                alt: payload.alt ?? currentValue.destination.alt,
+                lon: roundCoordinateStateValue(payload.lon ?? currentValue.destination.lon),
+                lat: roundCoordinateStateValue(payload.lat ?? currentValue.destination.lat),
+                alt: roundCoordinateStateValue(payload.alt ?? currentValue.destination.alt),
             },
             orientation: {
-                heading: payload.h ?? currentValue.orientation.heading,
-                pitch: payload.p ?? currentValue.orientation.pitch,
-                roll: payload.r ?? currentValue.orientation.roll,
+                heading: roundCoordinateStateValue(payload.h ?? currentValue.orientation.heading),
+                pitch: roundCoordinateStateValue(payload.p ?? currentValue.orientation.pitch),
+                roll: roundCoordinateStateValue(payload.r ?? currentValue.orientation.roll),
             }
         }),
         urlFormEncode: true
@@ -266,6 +374,36 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
+    readonly deckStyleWorkersOverrideState = this.createState<boolean>({
+        name: 'deckStyleWorkersOverride',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly deckThreadedRenderingEnabledState = this.createState<boolean>({
+        name: 'deckThreadedRenderingEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly pinLowFiToMaxLodState = this.createState<boolean>({
+        name: 'pinLowFiToMaxLod',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly deckStyleWorkersCountState = this.createState<number>({
+        name: 'deckStyleWorkersCount',
+        defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
+        schema: z.coerce.number().int().min(1).max(MAX_DECK_STYLE_WORKERS)
+    });
+
+    readonly tilePullCompressionEnabledState = this.createState<boolean>({
+        name: 'tilePullCompressionEnabled',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
         name: 'layerSyncOptions',
         defaultValue: false,
@@ -273,18 +411,21 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly osmEnabledState = this.createMapViewState<boolean>({
+    readonly osmState = this.createMapViewState<OsmViewState>({
         name: 'osm',
-        defaultValue: true,
-        schema: Boolish,
+        defaultValue: {
+            enabled: true,
+            opacity: 6,
+        },
+        schema: z.string(),
+        toStorage: (value: OsmViewState) => `${value.enabled ? 1 : 0}~${clampOsmOpacity(value.opacity)}`,
+        fromStorage: (payload: any, currentValue: OsmViewState): OsmViewState => {
+            const parts = String(payload).split('~');
+            const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
+            const opacity = parts[1] === undefined ? currentValue.opacity : clampOsmOpacity(Number(parts[1]));
+            return {enabled, opacity};
+        },
         urlParamName: 'osm'
-    });
-
-    readonly osmOpacityState = this.createMapViewState<number>({
-        name: 'osmOpacity',
-        defaultValue: 30,
-        schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
-        urlParamName: 'osmOp'
     });
 
     readonly layerNamesState = this.createState<Array<string>>({
@@ -301,11 +442,18 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'v'
     });
 
-    readonly layerTileBordersState = this.createMapViewState<Array<boolean>>({
+    readonly viewTileBordersState = this.createMapViewState<boolean>({
         name: "tileBorders",
-        defaultValue: [],
-        schema: z.array(Boolish),
+        defaultValue: true,
+        schema: Boolish,
         urlParamName: 'tb'
+    });
+
+    readonly viewTileGridModeState = this.createMapViewState<TileGridMode>({
+        name: "tileGridMode",
+        defaultValue: "nds",
+        schema: z.enum(["xyz", "nds"]),
+        urlParamName: 'tgm'
     });
 
     readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
@@ -313,6 +461,13 @@ export class AppStateService implements OnDestroy {
         defaultValue: [],
         schema: z.array(z.number().min(0).max(15)),
         urlParamName: 'z'
+    });
+
+    readonly layerAutoZoomLevelState = this.createMapViewState<Array<boolean>>({
+        name: "autoZoomLevel",
+        defaultValue: [],
+        schema: z.array(Boolish),
+        urlParamName: 'az'
     });
 
     readonly stylesState = new StyleState(this.statePool);
@@ -330,13 +485,6 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'tll'
     });
 
-    readonly tilesVisualizeLimitState = this.createState<number>({
-        name: 'tilesVisualizeLimit',
-        defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
-        schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tvl'
-    });
-
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
@@ -349,6 +497,80 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly aboutDialogVisibleState = this.createState<boolean>({
+        name: 'aboutDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly preferencesDialogVisibleState = this.createState<boolean>({
+        name: 'preferencesDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly controlsDialogVisibleState = this.createState<boolean>({
+        name: 'controlsDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsPerformanceDialogVisibleState = this.createState<boolean>({
+        name: 'diagnosticsPerformanceDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsLogDialogVisibleState = this.createState<boolean>({
+        name: 'diagnosticsLogDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsExportDialogVisibleState = this.createState<boolean>({
+        name: 'diagnosticsExportDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
+        name: 'diagnosticsLogFilter',
+        defaultValue: {
+            info: true,
+            warn: true,
+            error: true
+        },
+        schema: z.object({
+            info: Boolish,
+            warn: Boolish,
+            error: Boolish
+        })
+    });
+
+    readonly diagnosticsExportOptionsState = this.createState<DiagnosticsExportOptions>({
+        name: 'diagnosticsExportOptions',
+        defaultValue: {
+            includeProgress: true,
+            includePerformance: true,
+            includeLogs: true,
+            logFilter: {
+                info: true,
+                warn: true,
+                error: true
+            }
+        },
+        schema: z.object({
+            includeProgress: Boolish,
+            includePerformance: Boolish,
+            includeLogs: Boolish,
+            logFilter: z.object({
+                info: Boolish,
+                warn: Boolish,
+                error: Boolish
+            })
+        })
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -358,11 +580,77 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
-    readonly unlimitNumSelections = this.createState<boolean>({
-        name: 'unlimitNumSelections',
+    readonly mapsOpenState = this.createState<boolean>({
+        name: 'mapsOpenState',
         defaultValue: false,
         schema: Boolish
     });
+
+    readonly dockOpenState = this.createState<boolean>({
+        name: 'dockOpenState',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly dockAutoCollapse = this.createState<boolean>({
+        name: 'dockAutoCollapse',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly distributionVersions = this.createState<Versions[]>({
+        name: 'distributionVersions',
+        defaultValue: [],
+        schema: z.array(z.record(z.string(), z.string()))
+    });
+
+    readonly erdblickVersion = this.createState<string>({
+        name: 'erdblickVersion',
+        defaultValue: "",
+        schema: z.string()
+    });
+
+    readonly inspectionsLimitState = this.createState<number>({
+        name: 'inspectionsLimitState',
+        defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
+        schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
+    });
+
+    readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
+        name: 'inspectionComparisonState',
+        defaultValue: null,
+        schema: z.union([
+            z.null(),
+            z.object({
+                base: z.object({
+                    panelId: z.coerce.number(),
+                    mapId: z.string().optional().default(''),
+                    label: z.string(),
+                    featureIds: z.array(z.object({
+                        featureId: z.string(),
+                        mapTileKey: z.string()
+                    }))
+                }),
+                others: z.array(z.object({
+                    panelId: z.coerce.number(),
+                    mapId: z.string().optional().default(''),
+                    label: z.string(),
+                    featureIds: z.array(z.object({
+                        featureId: z.string(),
+                        mapTileKey: z.string()
+                    }))
+                }))
+            })
+        ])
+    });
+
+    // TODO: merge this functionality with the state?
+    readonly syncOptions: ViewSyncOption[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
+    ];
 
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
@@ -372,6 +660,8 @@ export class AppStateService implements OnDestroy {
             this.hydrateFromStorage();
             this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
             this.isHydrating = false;
+            // Keep inbound links stable during passive startup hydration.
+            this.skipNextUrlSync = true;
 
             // Ensure that the merged app state after hydration is reflected in local storage and URL.
             this.syncAllStates();
@@ -385,6 +675,9 @@ export class AppStateService implements OnDestroy {
             if (event instanceof NavigationStart) {
                 const nav = this.router.getCurrentNavigation();
                 this.pendingPopstateHydration = nav?.trigger === 'popstate';
+                if (this.pendingPopstateHydration) {
+                    this.cancelPendingStateSync();
+                }
             } else if (event instanceof NavigationEnd) {
                 if (!this.pendingPopstateHydration) {
                     return;
@@ -393,6 +686,7 @@ export class AppStateService implements OnDestroy {
                 if (!this.isReady) {
                     return;
                 }
+                this.cancelPendingStateSync();
                 this.withHydration(() => {
                     this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
                 });
@@ -420,6 +714,10 @@ export class AppStateService implements OnDestroy {
 
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
+        if (this.urlSyncHandle !== null) {
+            clearTimeout(this.urlSyncHandle);
+            this.urlSyncHandle = null;
+        }
     }
 
     get replaceUrl() {
@@ -473,8 +771,18 @@ export class AppStateService implements OnDestroy {
                 return;
             }
             this.syncStorage();
-            this.syncUrl();
+            this.scheduleUrlSync();
         });
+    }
+
+    private cancelPendingStateSync(): void {
+        // Prevent stale, queued writes from a previous URL hydration cycle.
+        this.pendingStorageSyncStates.clear();
+        this.pendingUrlSyncStates.clear();
+        if (this.urlSyncHandle !== null) {
+            clearTimeout(this.urlSyncHandle);
+            this.urlSyncHandle = null;
+        }
     }
 
     private syncStorage(): void {
@@ -494,7 +802,50 @@ export class AppStateService implements OnDestroy {
         this.pendingStorageSyncStates.clear();
     }
 
-    private syncUrl(): void {
+    private scheduleUrlSync(): void {
+        if (!this.pendingUrlSyncStates.size) {
+            return;
+        }
+        if (this.urlSyncHandle !== null) {
+            return;
+        }
+        // Browsers can reject rapid History API updates; keep merge syncs below that threshold.
+        const elapsed = Date.now() - this.lastMergedUrlSyncAt;
+        const delay = Math.max(0, AppStateService.URL_SYNC_MIN_INTERVAL_MS - elapsed);
+        if (delay === 0) {
+            this.flushUrlSync();
+            return;
+        }
+        this.urlSyncHandle = setTimeout(() => {
+            this.urlSyncHandle = null;
+            this.flushUrlSync();
+        }, delay);
+    }
+
+    private flushUrlSync(): void {
+        if (this.isHydrating) {
+            this.pendingUrlSyncStates.clear();
+            return;
+        }
+        if (!this.pendingUrlSyncStates.size) {
+            return;
+        }
+        if (this.skipNextUrlSync) {
+            this.skipNextUrlSync = false;
+            this.pendingUrlSyncStates.clear();
+            return;
+        }
+        const queryParamsHandling = this.syncUrl();
+        if (queryParamsHandling === 'merge') {
+            this.lastMergedUrlSyncAt = Date.now();
+        }
+        if (this.pendingUrlSyncStates.size) {
+            this.scheduleUrlSync();
+        }
+    }
+
+    private syncUrl(): 'replace' | 'merge' {
+        // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
         const params: Record<string, string> = {};
         for (const state of this.pendingUrlSyncStates) {
             const serialized = state.serialize(true);
@@ -519,6 +870,7 @@ export class AppStateService implements OnDestroy {
         }).catch(error => {
             console.error('[AppStateService] Failed to sync URL parameters', error);
         });
+        return queryParamsHandling;
     }
 
     private hydrateFromStorage(): void {
@@ -534,6 +886,10 @@ export class AppStateService implements OnDestroy {
 
     private hydrateFromUrl(params: Params): void {
         this.withHydration(() => {
+            if (Object.keys(params).length === 0) {
+                return;
+            }
+
             for (const state of this.statePool.values()) {
                 state.deserialize(params);
             }
@@ -556,12 +912,22 @@ export class AppStateService implements OnDestroy {
 
     get numViews() {return this.numViewsState.getValue();}
     set numViews(val: number) {this.numViewsState.next(val);};
+    get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
+    set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
+    get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
+    set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
+    get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
+    set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
+    get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
+    set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
+    get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
+    set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get search() {return this.searchState.getValue();}
     set search(val: [number, string] | []) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
-    set markedPosition(val: number[]) {this.markedPositionState.next(val);};
+    set markedPosition(val: number[]) {this.markedPositionState.next(val.map(v => roundCoordinateStateValue(v)));};
     get selection() {return this.selectionState.getValue();}
     set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
@@ -573,12 +939,50 @@ export class AppStateService implements OnDestroy {
     set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
-    get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
-    set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
+    get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
+    set inspectionsLimit(val: number) {
+        const numeric = Number(val);
+        if (!Number.isFinite(numeric)) {
+            return;
+        }
+        const normalized = Math.min(MAX_SIMULTANEOUS_INSPECTIONS, Math.max(1, Math.trunc(numeric)));
+        this.inspectionsLimitState.next(normalized);
+    };
+    get inspectionComparison() {return this.inspectionComparisonState.getValue();}
+    set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
+    get isDockOpen() {return this.dockOpenState.getValue();}
+    set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
+    get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
+    set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
+    get mapsDialogVisible() {return this.mapsOpenState.getValue();};
+    set mapsDialogVisible(val: boolean) {this.mapsOpenState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
+    get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
+    set aboutDialogVisible(val: boolean) {this.aboutDialogVisibleState.next(val);};
+    get preferencesDialogVisible() {return this.preferencesDialogVisibleState.getValue();}
+    set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
+    get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
+    set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
+    get diagnosticsPerformanceDialogVisible() {return this.diagnosticsPerformanceDialogVisibleState.getValue();}
+    set diagnosticsPerformanceDialogVisible(val: boolean) {this.diagnosticsPerformanceDialogVisibleState.next(val);};
+    get diagnosticsLogDialogVisible() {return this.diagnosticsLogDialogVisibleState.getValue();}
+    set diagnosticsLogDialogVisible(val: boolean) {this.diagnosticsLogDialogVisibleState.next(val);};
+    get diagnosticsExportDialogVisible() {return this.diagnosticsExportDialogVisibleState.getValue();}
+    set diagnosticsExportDialogVisible(val: boolean) {this.diagnosticsExportDialogVisibleState.next(val);};
+    get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
+    set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
+        this.diagnosticsLogFilterState.next({...val});
+    };
+    get diagnosticsExportOptions() {return this.diagnosticsExportOptionsState.getValue();}
+    set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
+        this.diagnosticsExportOptionsState.next({
+            ...val,
+            logFilter: {...val.logFilter}
+        });
+    };
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -609,8 +1013,39 @@ export class AppStateService implements OnDestroy {
     setLayerSyncOption(viewIndex: number, enabled: boolean): void {
         this.layerSyncOptionsState.next(viewIndex, enabled);
     }
-    get isNumSelectionsUnlimited() {return this.unlimitNumSelections.getValue();}
-    set isNumSelectionsUnlimited(val: boolean) {this.unlimitNumSelections.next(val);}
+
+    getOsmState(viewIndex: number): OsmViewState {
+        const value = this.osmState.getValue(viewIndex);
+        return {
+            enabled: value.enabled,
+            opacity: clampOsmOpacity(value.opacity),
+        };
+    }
+
+    setOsmState(viewIndex: number, enabled: boolean, opacity: number): void {
+        this.osmState.next(viewIndex, {
+            enabled,
+            opacity: clampOsmOpacity(opacity),
+        });
+    }
+
+    getOsmEnabled(viewIndex: number): boolean {
+        return this.getOsmState(viewIndex).enabled;
+    }
+
+    setOsmEnabled(viewIndex: number, enabled: boolean): void {
+        const current = this.getOsmState(viewIndex);
+        this.setOsmState(viewIndex, enabled, current.opacity);
+    }
+
+    getOsmOpacity(viewIndex: number): number {
+        return this.getOsmState(viewIndex).opacity;
+    }
+
+    setOsmOpacity(viewIndex: number, opacity: number): void {
+        const current = this.getOsmState(viewIndex);
+        this.setOsmState(viewIndex, current.enabled, opacity);
+    }
 
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
@@ -626,14 +1061,14 @@ export class AppStateService implements OnDestroy {
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
         const view: CameraViewState = {
             destination: {
-                lon: CesiumMath.toDegrees(destination.longitude),
-                lat: CesiumMath.toDegrees(destination.latitude),
-                alt: destination.height,
+                lon: roundCoordinateStateValue(GeoMath.toDegrees(destination.longitude)),
+                lat: roundCoordinateStateValue(GeoMath.toDegrees(destination.latitude)),
+                alt: roundCoordinateStateValue(destination.height),
             },
             orientation: {
-                heading: orientation.heading,
-                pitch: orientation.pitch,
-                roll: orientation.roll,
+                heading: roundCoordinateStateValue(orientation.heading),
+                pitch: roundCoordinateStateValue(orientation.pitch),
+                roll: roundCoordinateStateValue(orientation.roll),
             }
         };
         this.cameraViewDataState.next(viewIndex, view);
@@ -658,8 +1093,8 @@ export class AppStateService implements OnDestroy {
 
             if (syncMovement) {
                 const previous = this.cameraViewDataState.getValue(viewIndex).destination;
-                const destLon = CesiumMath.toDegrees(destination.longitude);
-                const destLat = CesiumMath.toDegrees(destination.latitude);
+                const destLon = GeoMath.toDegrees(destination.longitude);
+                const destLat = GeoMath.toDegrees(destination.latitude);
                 const deltaLon = destLon - previous.lon;
                 const deltaLat = destLat - previous.lat;
 
@@ -717,60 +1152,141 @@ export class AppStateService implements OnDestroy {
      */
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
-        const allPanels = this.selectionState.getValue();
+        let allPanels = this.selectionState.getValue();
+        const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
+        const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
-        // If a panel index was passed, change the SourceData-selection in that panel.
-        if (id !== undefined) {
-            const panelIndex = allPanels.findIndex(panel => panel.id === id);
-            if (panelIndex !== -1) {
-                allPanels[panelIndex].sourceData = sourceDataSelection;
-                this.selectionState.next(allPanels);
-                return id;
-            }
-        }
-        // Filter out features which are already selected. If there are none left, we don't need to do anything.
+        const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
+        const isSourceDataPanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData !== undefined;
+        const isClearSourceDataRequest =
+            originPanel !== undefined &&
+            sourceDataSelection === undefined &&
+            originPanel.sourceData !== undefined;
+
+        // Filter out features which are already selected. If there are none left, we don't need to do anything
+        // unless we are explicitly clearing a source data selection.
         if (featureSelection.length) {
             featureSelection = featureSelection.filter(feature =>
                 !allPanels.some(panel =>
+                    isFeaturePanel(panel) &&
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
-            if (!featureSelection.length) {
+            if (!featureSelection.length && !isClearSourceDataRequest) {
                 this._replaceUrl = true;
                 return;
             }
         }
-        const mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
+
+        // Decide whether to reuse an existing panel or create a new one.
+        let targetPanelId: number | undefined = undefined;
+        let mustCreateNewPanel = forceNewPanel;
+
+        // Explicit SourceData updates from a SourceData panel stay in that panel, even when locked.
+        if (!forceNewPanel && originPanel && isSourceDataSelection && isSourceDataPanel(originPanel)) {
+            targetPanelId = originPanel.id;
+        }
+
+        // Explicit feature updates from an unlocked feature panel stay in that panel.
+        if (!forceNewPanel &&
+            targetPanelId === undefined &&
+            originPanel &&
+            !isSourceDataSelection &&
+            isFeaturePanel(originPanel) &&
+            (isClearSourceDataRequest || !originPanel.locked)) {
+            targetPanelId = originPanel.id;
+        }
+
+        // Inspection strategy:
+        // Feature selection (default path): reuse the last unlocked feature panel and close all other unlocked feature panels.
+        // Otherwise: reuse unlocked docked panel of the same inspection type, then unlocked undocked dialog, else create new.
+        if (!mustCreateNewPanel && targetPanelId === undefined) {
+            const isDefaultFeatureSelectionRequest = !isSourceDataSelection && id === undefined;
+            if (isDefaultFeatureSelectionRequest) {
+                let lastUnlockedFeaturePanelId: number | undefined;
+                for (let index = allPanels.length - 1; index >= 0; index--) {
+                    const panel = allPanels[index];
+                    if (isFeaturePanel(panel) && !panel.locked) {
+                        lastUnlockedFeaturePanelId = panel.id;
+                        break;
+                    }
+                }
+                if (lastUnlockedFeaturePanelId !== undefined) {
+                    allPanels = allPanels.filter(panel =>
+                        !isFeaturePanel(panel) ||
+                        panel.locked ||
+                        panel.id === lastUnlockedFeaturePanelId
+                    );
+                    targetPanelId = lastUnlockedFeaturePanelId;
+                } else {
+                    mustCreateNewPanel = true;
+                }
+            } else {
+                const firstUnlockedDockedPanel = allPanels.find(panel =>
+                    !panel.undocked &&
+                    !panel.locked &&
+                    (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
+                );
+                if (firstUnlockedDockedPanel) {
+                    targetPanelId = firstUnlockedDockedPanel.id;
+                } else {
+                    const firstUnlockedUndockedPanel = allPanels.find(panel =>
+                        panel.undocked &&
+                        !panel.locked &&
+                        (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
+                    );
+                    if (firstUnlockedUndockedPanel) {
+                        targetPanelId = firstUnlockedUndockedPanel.id;
+                    } else {
+                        mustCreateNewPanel = true;
+                    }
+                }
+            }
+        }
+
         if (mustCreateNewPanel) {
-            if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
-                this.infoMessageService.showError(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
+            const limit = this.inspectionsLimit;
+            if (allPanels.length >= limit) {
+                this.infoMessageService.showWarning(`Maximum of ${limit} inspections reached. Close an existing inspection to add more.`);
                 this._replaceUrl = true;
                 return;
             }
-            id = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
+            const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
             allPanels.push({
-                id: id,
-                features: featureSelection,
+                id: newId,
+                features: isSourceDataSelection ? [] : featureSelection,
                 sourceData: sourceDataSelection,
-                pinned: false,
-                size: this.defaultInspectionPanelSize,
-                color: DEFAULT_HIGHLIGHT_COLORS[id % DEFAULT_HIGHLIGHT_COLORS.length]
+                locked: false,
+                size: [DEFAULT_EM_WIDTH, isSourceDataSelection ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
+                color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
+                undocked: isSourceDataSelection
             });
             this.selectionState.next(allPanels);
-            return id;
+            this.sanitizeInspectionComparisonForSelection(allPanels);
+            return newId;
         }
-        // Find the first unpinned panel and change the selection there.
-        for (let i = 0; i < allPanels.length; i++) {
-            if (allPanels[i].pinned) {
-                continue;
+
+        if (targetPanelId !== undefined) {
+            const panelIndex = allPanels.findIndex(panel => panel.id === targetPanelId);
+            if (panelIndex === -1) {
+                this._replaceUrl = true;
+                return;
             }
-            id = allPanels[i].id;
-            allPanels[i].features = featureSelection;
-            allPanels[i].sourceData = sourceDataSelection;
-            break;
+            if (sourceDataSelection !== undefined) {
+                allPanels[panelIndex].features = [];
+                allPanels[panelIndex].sourceData = sourceDataSelection;
+            } else {
+                if (featureSelection.length) {
+                    allPanels[panelIndex].features = featureSelection;
+                }
+                allPanels[panelIndex].sourceData = undefined;
+            }
+            this.selectionState.next(allPanels);
+            this.sanitizeInspectionComparisonForSelection(allPanels);
+            return targetPanelId;
         }
-        this.selectionState.next(allPanels);
-        return id;
+
+        return;
     }
 
     setInspectionPanelSize(id: number, size: [number, number]) {
@@ -783,18 +1299,98 @@ export class AppStateService implements OnDestroy {
         this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
     }
 
-    setInspectionPanelPinnedState(id: number, isPinned: boolean) {
+    setInspectionPanelLockedState(id: number, isLocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
         if (index === -1) {
             return;
         }
-        if (isPinned && !this.isNumSelectionsUnlimited &&
-            allPanels.filter(panel => panel.pinned).length >= MAX_NUM_SELECTIONS - 1) {
-            this.infoMessageService.showError(`To pin more than ${MAX_NUM_SELECTIONS-1} panels, enable unlimited selections in the settings.`);
-        }
-        allPanels[index].pinned = isPinned;
+        allPanels[index].locked = isLocked;
         this.selectionState.next(allPanels);
+    }
+
+    setInspectionPanelUndockedState(id: number, undocked: boolean) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index === -1) {
+            return;
+        }
+        allPanels[index].undocked = undocked;
+        allPanels[index].size = [
+            allPanels[index].size[0],
+            undocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT
+        ];
+        if (!undocked) {
+            allPanels[index].locked = true;
+        }
+        this.selectionState.next(allPanels);
+    }
+
+    getInspectionDialogLayoutEntry(panelId: number): InspectionDialogLayoutEntry | undefined {
+        return this.selectionState.getValue().find(panel => panel.id === panelId)?.inspectionDialogLayoutEntry;
+    }
+
+    ensureInspectionDialogSlot(panelId: number, preferredIndex: number): number {
+        return this.getInspectionDialogLayoutEntry(panelId)?.slot ?? preferredIndex;
+    }
+
+    setInspectionDialogPosition(panelId: number, position: InspectionDialogPosition, preferredIndex?: number): void {
+        const allPanels = this.selectionState.getValue();
+        const panelIndex = allPanels.findIndex(panel => panel.id === panelId);
+        if (panelIndex === -1) {
+            return;
+        }
+        const existing = allPanels[panelIndex].inspectionDialogLayoutEntry;
+        const slot = existing === undefined
+            ? this.ensureInspectionDialogSlot(panelId, preferredIndex ?? panelId)
+            : existing.slot;
+        allPanels[panelIndex].inspectionDialogLayoutEntry = {
+            panelId,
+            slot,
+            position: {left: position.left, top: position.top}
+        };
+        this.onStateChanged(this.selectionState, true);
+    }
+
+    pruneInspectionDialogLayout(_activePanelIds: number[]) {
+        // Layout is stored directly on the corresponding selection panel.
+    }
+
+    openInspectionComparison(model: InspectionComparisonModel): void {
+        this.inspectionComparisonState.next(model);
+    }
+
+    closeInspectionComparison(): void {
+        this.inspectionComparisonState.next(null);
+    }
+
+    reorderInspectionPanels(dockedDisplayOrder: number[]) {
+        const allPanels = this.selectionState.getValue();
+        const dockedPanels = allPanels.filter(panel => !panel.undocked);
+        if (dockedPanels.length < 2) {
+            return;
+        }
+        const dockedById = new Map(dockedPanels.map(panel => [panel.id, panel]));
+        const normalizedDisplayOrder = dockedDisplayOrder.filter(id => dockedById.has(id));
+        if (normalizedDisplayOrder.length !== dockedPanels.length) {
+            dockedPanels.forEach(panel => {
+                if (!normalizedDisplayOrder.includes(panel.id)) {
+                    normalizedDisplayOrder.push(panel.id);
+                }
+            });
+        }
+        const rawOrder = normalizedDisplayOrder.toReversed();
+        let dockedIndex = 0;
+        const nextPanels = allPanels.map(panel => {
+            if (panel.undocked) {
+                return panel;
+            }
+            const nextId = rawOrder[dockedIndex++];
+            return dockedById.get(nextId)!;
+        });
+        if (!this.panelOrderEquals(allPanels, nextPanels)) {
+            this.selectionState.next(nextPanels);
+        }
     }
 
     setInspectionPanelColor(id: number, color: string) {
@@ -807,8 +1403,12 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
-    unsetUnpinnedSelections() {
-        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.pinned));
+    unsetUnlockedSelections() {
+        const nextSelection = this.selectionState.getValue().filter(panel =>
+            panel.locked || panel.sourceData !== undefined
+        );
+        this.selectionState.next(nextSelection);
+        this.sanitizeInspectionComparisonForSelection(nextSelection);
     }
 
     unsetPanel(id: number) {
@@ -819,10 +1419,19 @@ export class AppStateService implements OnDestroy {
         }
         allPanels.splice(index, 1);
         this.selectionState.next(allPanels);
+        this.sanitizeInspectionComparisonForSelection(allPanels);
     }
 
-    getNumSelections(): number {
-        return this.selectionState.getValue().length;
+    private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i].id !== b[i].id) {
+                return false;
+            }
+        }
+        return true;
     }
 
     setMarkerState(enabled: boolean) {
@@ -834,11 +1443,11 @@ export class AppStateService implements OnDestroy {
 
     setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
         if (position) {
-            const longitude = CesiumMath.toDegrees(position.longitude);
-            const latitude = CesiumMath.toDegrees(position.latitude);
-            this.markedPositionState.next([longitude, latitude]);
+            const longitude = GeoMath.toDegrees(position.longitude);
+            const latitude = GeoMath.toDegrees(position.latitude);
+            this.markedPosition = [longitude, latitude];
         } else {
-            this.markedPositionState.next([]);
+            this.markedPosition = [];
         }
         if (!delayUpdate) {
             this._replaceUrl = false;
@@ -868,9 +1477,9 @@ export class AppStateService implements OnDestroy {
 
         for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
             result.push({
+                autoLevel: layerStateValue(this.layerAutoZoomLevelState, viewIndex, true),
                 visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
-                tileBorders: layerStateValue(this.layerTileBordersState, viewIndex, false),
             });
         }
         return result;
@@ -898,9 +1507,9 @@ export class AppStateService implements OnDestroy {
         };
 
         for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
+            insertLayerState(this.layerAutoZoomLevelState, viewIndex, viewConfig[viewIndex].autoLevel, true);
             insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
             insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
-            insertLayerState(this.layerTileBordersState, viewIndex, viewConfig[viewIndex].tileBorders,false);
         }
     }
 
@@ -1028,17 +1637,22 @@ export class AppStateService implements OnDestroy {
     prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
         // 1) Build sets of present maps, layers and styles
         const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+        const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
         for (const [mapId, mapNode] of presentMaps.entries()) {
             // Use feature layers (exclude SourceData) via children
             for (const layer of mapNode.children) {
                 presentLayerIds.add(`${mapId}/${layer.id}`);
+            }
+            // Selection pruning must keep SourceData inspections too.
+            for (const layerId of mapNode.layers.keys()) {
+                presentSelectionLayerIds.add(`${mapId}/${layerId}`);
             }
         }
 
         const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
         const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
 
-        // 2) Prune layerNames and per-view layer arrays (visibility, borders, zoom levels)
+        // 2) Prune layerNames and per-view layer arrays (visibility, zoom levels)
         const oldLayerNames = this.layerNames;
         if (oldLayerNames.length) {
             const keepIndices: number[] = [];
@@ -1062,11 +1676,11 @@ export class AppStateService implements OnDestroy {
                 const views = this.numViews;
                 for (let v = 0; v < views; v++) {
                     const vis = this.layerVisibilityState.getValue(v);
-                    const borders = this.layerTileBordersState.getValue(v);
                     const levels = this.layerZoomLevelState.getValue(v);
+                    const autoLevels = this.layerAutoZoomLevelState.getValue(v);
                     this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
-                    this.layerTileBordersState.next(v, filterLayerArray<boolean>(borders ?? [], false));
                     this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
+                    this.layerAutoZoomLevelState.next(v, filterLayerArray<boolean>(autoLevels ?? [], true));
                 }
             }
         }
@@ -1114,12 +1728,13 @@ export class AppStateService implements OnDestroy {
             }
         };
         pruneViews(this.mode2dState);
-        pruneViews(this.osmEnabledState);
-        pruneViews(this.osmOpacityState);
+        pruneViews(this.osmState);
+        pruneViews(this.viewTileBordersState);
+        pruneViews(this.viewTileGridModeState);
         pruneViews(this.cameraViewDataState);
         pruneViews(this.layerVisibilityState);
-        pruneViews(this.layerTileBordersState);
         pruneViews(this.layerZoomLevelState);
+        pruneViews(this.layerAutoZoomLevelState);
 
         // Also prune view-dimension from style option arrays
         for (const [k, vals] of stylesMap.entries()) {
@@ -1150,10 +1765,21 @@ export class AppStateService implements OnDestroy {
             const updated: InspectionPanelModel<TileFeatureId> = {
                 id: panel.id,
                 features: [],
-                pinned: panel.pinned,
+                locked: panel.locked,
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
-                color: panel.color
+                color: panel.color,
+                undocked: panel.undocked,
+                inspectionDialogLayoutEntry: panel.inspectionDialogLayoutEntry
+                    ? {
+                        panelId: panel.id,
+                        slot: panel.inspectionDialogLayoutEntry.slot,
+                        position: {
+                            left: panel.inspectionDialogLayoutEntry.position.left,
+                            top: panel.inspectionDialogLayoutEntry.position.top
+                        }
+                    }
+                    : undefined
             };
 
             // Filter features
@@ -1167,7 +1793,7 @@ export class AppStateService implements OnDestroy {
             // Validate sourceData if present
             if (updated.sourceData) {
                 const mapLayerId = parseKey(updated.sourceData.mapTileKey);
-                if (!mapLayerId || !presentLayerIds.has(mapLayerId)) {
+                if (!mapLayerId || !presentSelectionLayerIds.has(mapLayerId)) {
                     delete updated.sourceData;
                 }
             }
@@ -1180,8 +1806,124 @@ export class AppStateService implements OnDestroy {
         if (nextPanels.length !== panels.length) {
             this.selectionState.next(nextPanels);
         }
+        this.sanitizeInspectionComparisonForSelection(nextPanels);
 
         // Sync all states, so the URL is replaced.
         this.syncAllStates();
+    }
+
+    private sanitizeInspectionComparisonForSelection(panels: InspectionPanelModel<TileFeatureId>[]): void {
+        const model = this.inspectionComparisonState.getValue();
+        if (!model) {
+            return;
+        }
+        const eligiblePanelIds = new Set(
+            panels
+                .filter(panel => panel.sourceData === undefined && panel.features.length > 0)
+                .map(panel => panel.id)
+        );
+        const nextModel = this.sanitizeInspectionComparisonModel(model, eligiblePanelIds);
+        if (nextModel === model) {
+            return;
+        }
+        this.inspectionComparisonState.next(nextModel);
+    }
+
+    private sanitizeInspectionComparisonModel(model: InspectionComparisonModel, eligiblePanelIds: Set<number>): InspectionComparisonModel | null {
+        const entries = [model.base, ...model.others];
+        const remainingEntries = entries.filter(entry => eligiblePanelIds.has(entry.panelId));
+        if (remainingEntries.length === entries.length) {
+            return model;
+        }
+        if (remainingEntries.length === 0) {
+            return null;
+        }
+        return {
+            base: remainingEntries[0],
+            others: remainingEntries.slice(1)
+        };
+    }
+
+    buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
+        return panels
+            .filter(panel => excludePanelId === undefined || panel.id !== excludePanelId)
+            .filter(panel => this.isFeaturePanel(panel))
+            .map(panel => ({
+                label: this.formatFeatureLabel(panel.features),
+                value: panel.id
+            }));
+    }
+
+    private isFeaturePanel(panel: InspectionPanelModel<FeatureWrapper> | undefined): panel is InspectionPanelModel<FeatureWrapper> {
+        return !!panel && panel.features.length > 0 && panel.sourceData === undefined;
+    }
+
+    private formatFeatureLabel(features: FeatureWrapper[]): string {
+        return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
+    }
+
+    private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
+        return {
+            panelId: panel.id,
+            mapId: panel.features[0]?.featureTile.mapName ?? '',
+            label: this.formatFeatureLabel(panel.features),
+            featureIds: panel.features.map(feature => ({
+                mapTileKey: feature.mapTileKey,
+                featureId: feature.featureId
+            }))
+        };
+    }
+
+    createComparisonModel(basePanelId: number, otherPanelIds: number[], panels: InspectionPanelModel<FeatureWrapper>[]): InspectionComparisonModel | null {
+        const panelsById = new Map(
+            panels
+                .filter(this.isFeaturePanel)
+                .map(panel => [panel.id, panel] as const)
+        );
+        const basePanel = panelsById.get(basePanelId);
+        if (!basePanel) {
+            return null;
+        }
+        const others = Array.from(new Set(otherPanelIds))
+            .filter(panelId => panelId !== basePanelId)
+            .slice(0, MAX_COMPARE_PANELS - 1)
+            .map(panelId => panelsById.get(panelId))
+            .filter((panel): panel is InspectionPanelModel<FeatureWrapper> => !!panel)
+            .map(panel => this.createComparisonEntryFromPanel(panel));
+
+        return {
+            base: this.createComparisonEntryFromPanel(basePanel),
+            others
+        };
+    }
+
+    updateSelectedSyncOptions() {
+        const previousSelection = new Set(this.viewSync);
+        const hasMovement = this.syncOptions.some(option =>
+            option.code === VIEW_SYNC_MOVEMENT && option.value);
+        const hasPosition = this.syncOptions.some(option =>
+            option.code === VIEW_SYNC_POSITION && option.value);
+
+        if (hasMovement && hasPosition) {
+            let valueToRemove = VIEW_SYNC_POSITION;
+            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                valueToRemove = VIEW_SYNC_MOVEMENT;
+            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
+                valueToRemove = VIEW_SYNC_POSITION;
+            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                valueToRemove = VIEW_SYNC_POSITION;
+            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
+                valueToRemove = VIEW_SYNC_MOVEMENT;
+            }
+            for (const option of this.syncOptions) {
+                if (option.code === valueToRemove) {
+                    option.value = false;
+                }
+            }
+        }
+
+        this.viewSync = this.syncOptions.filter(option =>
+            option.value).map(option=> option.code);
+        this.syncViews();
     }
 }

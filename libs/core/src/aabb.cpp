@@ -9,6 +9,8 @@ namespace erdblick
 namespace
 {
 
+constexpr double ANTIMERIDIAN_EPSILON = 1e-9;
+
 inline glm::dvec3 vec(Wgs84Point const& p)
 {
     return {p.x, p.y, p.z};
@@ -25,6 +27,11 @@ Wgs84AABB::Wgs84AABB(const Wgs84Point& sw, glm::dvec2 size) : sw_(sw.x, sw.y), s
 {
     if (!valid())
         return;
+
+    while (sw_.x < -180.)
+        sw_.x += 360.;
+    while (sw_.x > 180.)
+        sw_.x -= 360.;
 
     auto excessHeight = 90. - sw_.y - size_.y;
     if (excessHeight < 0)
@@ -78,7 +85,7 @@ std::vector<Wgs84Point> Wgs84AABB::vertices() const
 
 bool Wgs84AABB::containsAntiMeridian() const
 {
-    return sw_.x + size_.x > 180.;
+    return sw_.x + size_.x > 180. + ANTIMERIDIAN_EPSILON;
 }
 
 Wgs84Point Wgs84AABB::center() const
@@ -88,9 +95,13 @@ Wgs84Point Wgs84AABB::center() const
 
 std::pair<Wgs84AABB, Wgs84AABB> Wgs84AABB::splitOverAntiMeridian() const
 {
-    auto widthAfterAM = sw_.x + size_.x - 180.;
-    if (widthAfterAM > 0) {
-        auto widthBeforeAM = size_.x - widthAfterAM;
+    auto widthAfterAM = std::max(0.0, sw_.x + size_.x - 180.);
+    if (widthAfterAM > ANTIMERIDIAN_EPSILON) {
+        auto widthBeforeAM = std::max(0.0, 180. - sw_.x);
+        if (widthBeforeAM < ANTIMERIDIAN_EPSILON)
+            widthBeforeAM = 0.0;
+        if (widthAfterAM < ANTIMERIDIAN_EPSILON)
+            widthAfterAM = 0.0;
         return {
             Wgs84AABB{{sw_.x, sw_.y, .0}, {widthBeforeAM, size_.y}},
             Wgs84AABB{{-180., sw_.y, .0}, {widthAfterAM, size_.y}},
@@ -153,6 +164,7 @@ void Wgs84AABB::tileIdsWithPriority(
             !normalizedViewports.second.containsAntiMeridian());
         normalizedViewports.first.tileIdsWithPriority(level, tileIdsResult, prioFn);
         normalizedViewports.second.tileIdsWithPriority(level, tileIdsResult, prioFn);
+        return;
     }
 
     auto const tileWidth = 180. / static_cast<double>(1 << level);

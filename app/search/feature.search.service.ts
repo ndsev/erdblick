@@ -1,8 +1,8 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapDataService} from "../mapdata/map.service";
-import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
-import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "../integrations/cesium";
+import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
+import {Cartographic, Cartesian3, GeoMath, Rectangle} from "../integrations/geo";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager, JobGroupType} from "./job-group";
@@ -17,8 +17,15 @@ export interface SearchResultPrimitiveId {
     index: number
 }
 
+export interface SearchResultPoint {
+    coordinates: [number, number];
+    mapId: string;
+    layerId: string;
+    featureId: string;
+    featureKey: string;
+}
+
 const TASK_SEARCH = 'SearchWorkerTask' as const;
-const TASK_DIAGNOSTICS = 'DiagnosticsWorkerTask' as const;
 const TASK_COMPLETION = 'CompletionWorkerTask' as const;
 
 function generateChildrenIds(parentTileId: bigint) {
@@ -173,9 +180,8 @@ class FeatureSearchQuadTree {
             targetNode.center = markersCenter;
             targetNode.addChildren(results);
             nodes = targetNode.children;
-            let next: Array<FeatureSearchQuadTreeNode> = [];
             while (currentLevel <= this.maxDepth) {
-                next = [];
+                const next: Array<FeatureSearchQuadTreeNode> = [];
                 for (const node of nodes) {
                     const containedMarkers = node.filterPointsForNode(results);
                     if (containedMarkers.length) {
@@ -224,16 +230,53 @@ class FeatureSearchQuadTree {
 }
 
 export class SearchState extends JobGroup {
+    private pendingTileKeys: Set<string> = new Set<string>();
+
     constructor(query: string, id: string, public paused = false) {
         super('search', query, id);
+    }
+
+    markTilePending(tileKey: string): void {
+        if (!tileKey) {
+            return;
+        }
+        this.pendingTileKeys.add(tileKey);
+    }
+
+    markTileReady(tileKey: string): void {
+        if (!tileKey) {
+            return;
+        }
+        this.pendingTileKeys.delete(tileKey);
+    }
+
+    getPendingTileCount(): number {
+        return this.pendingTileKeys.size;
+    }
+
+    override stop(): void {
+        this.pendingTileKeys.clear();
+        super.stop();
+    }
+
+    override isComplete(): boolean {
+        return super.isComplete() && !this.pendingTileKeys.size;
+    }
+
+    override getTaskCount(): number {
+        return super.getTaskCount() + this.pendingTileKeys.size;
     }
 }
 
 @Injectable({providedIn: 'root'})
 export class FeatureSearchService {
+    private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
+    private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
+    private static readonly LOCATION_MARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48"><path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="white"/></svg>`;
+
     workers: Array<Worker> = []
     private workerBusy: Array<boolean> = [];
-    private diagnosticsQueue: Array<WorkerTask> = [];
+    private workersReady: Promise<void> | null = null;
 
     jobGroupManager: JobGroupManager = new JobGroupManager();
     currentCompletion: JobGroup | null = null;
@@ -242,19 +285,22 @@ export class FeatureSearchService {
 
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
+    private pendingSearchTilesByKey = new Map<string, FeatureTile>();
+    private searchResultPointsByFeatureKey = new Map<string, SearchResultPoint>();
+    private searchResultPointsCache: SearchResultPoint[] = [];
+    private searchResultPointsCacheDirty = false;
+    private searchResultPointsVersionValue = 0;
 
     currentSearch: SearchState|null = null;
     pointColor: string = "#ea4336";
     timeElapsed: string = this.formatTime(0);
     totalFeatureCount: number = 0;
     progress: Subject<SearchState|null> = new Subject<SearchState|null>();
-    pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     searchResults: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     traceResults: Array<any> = [];
 
     diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
     diagnosticsMessageLimit: number = 25;
-    private diagnosticsMessagesList: DiagnosticsMessage[] = [];
 
     completionPending: Subject<boolean> = new Subject<boolean>();
     completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
@@ -263,107 +309,126 @@ export class FeatureSearchService {
 
     showFeatureSearchDialog: boolean = false;
 
-    pinTiers = [
-        9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
-        900, 800, 700, 600, 500, 400, 300, 200, 100,
-        90, 80, 70, 60, 50, 40, 30, 20, 10,
-        9, 8, 7, 6, 5, 4, 3, 2, 1
-    ];
-
     private startTime: number = 0;
     private endTime: number = 0;
     public errors: Set<string> = new Set();
+    private tintedAtlasByColor = new Map<string, string>();
+    private baseAtlasImagePromise: Promise<HTMLImageElement> | null = null;
+    private clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+    private locationMarkerGraphicUrl: string | null = null;
 
-    markerGraphics = () => {
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
-           <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z"
-            fill="white"/>
-        </svg>`
-        return `data:image/svg+xml;base64,${btoa(svg)}`;
-    };
+    public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
-        // Instantiate pin graphics
-        this.makeClusterPins();
+        this.updatePointColor();
+        this.mapService.statsDialogNeedsUpdate.subscribe(() => {
+            this.enqueueReadyPendingSearchTiles();
+        });
+    }
 
-        // Instantiate workers.
+    getSearchClusterIconAtlasUrl(): string {
+        return this.clusterIconAtlasUrl;
+    }
+
+    getSearchClusterIconMappingUrl(): string {
+        return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
+    }
+
+    /**
+     * Returns the legacy single-marker icon used for explicit coordinate marking.
+     */
+    markerGraphics(): string {
+        if (!this.locationMarkerGraphicUrl) {
+            this.locationMarkerGraphicUrl =
+                `data:image/svg+xml;base64,${btoa(FeatureSearchService.LOCATION_MARKER_SVG)}`;
+        }
+        return this.locationMarkerGraphicUrl;
+    }
+
+    get searchResultPointsVersion(): number {
+        return this.searchResultPointsVersionValue;
+    }
+
+    getSearchResultPoints(): SearchResultPoint[] {
+        if (this.searchResultPointsCacheDirty) {
+            this.searchResultPointsCache = Array.from(this.searchResultPointsByFeatureKey.values());
+            this.searchResultPointsCacheDirty = false;
+        }
+        return this.searchResultPointsCache;
+    }
+
+    public initializeWorkers(): Promise<void> {
+        if (!this.workersReady) {
+            this.workersReady = this.initWorkers();
+        }
+        return this.workersReady;
+    }
+
+    private async initWorkers(): Promise<void> {
         const maxWorkers = navigator.hardwareConcurrency || 4;
-        for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(new URL('./search.worker', import.meta.url), {
-                type: 'module'
-            });
-            this.workers.push(worker);
-            this.workerBusy.push(false);
-            worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-                this.workerBusy[i] = false;
+        if (maxWorkers <= 0) {
+            return;
+        }
+
+        const firstWorker = new Worker(new URL('./search.worker', import.meta.url), {type: 'module'});
+        const workerModuleUrl = await this.waitForWorkerReady(firstWorker);
+        this.registerWorker(firstWorker, 0);
+
+        const workerBlobUrl = await this.fetchWorkerBlobUrl(workerModuleUrl);
+        for (let i = 1; i < maxWorkers; i++) {
+            const worker = new Worker(workerBlobUrl, {type: 'module'});
+            this.registerWorker(worker, i);
+        }
+    }
+
+    private waitForWorkerReady(worker: Worker): Promise<string> {
+        return new Promise((resolve) => {
+            const handler = (event: MessageEvent<any>) => {
                 const result = event.data;
-
-                // Notify the job-group if the task has an id
-                if (result.taskId) {
-                    this.jobGroupManager.completeTask(result.taskId, result);
+                if (result?.type !== 'WorkerReady') {
+                    return;
                 }
-
-                switch (result.type) {
-                    case 'SearchResultForTile':
-                        this.addSearchResult(result as SearchResultForTile);
-                        break;
-                    case 'CompletionCandidatesForTile':
-                        this.addCompletionCandidates(result as CompletionCandidatesForTile);
-                        break;
-                    case 'DiagnosticsResultsForTile':
-                        this.addDiagnostics(result as DiagnosticsResultsForTile);
-                        break;
-                }
-
-                this.scheduleNextTask(i);
+                worker.removeEventListener('message', handler);
+                resolve(result.scriptUrl as string);
             };
-        }
+            worker.addEventListener('message', handler);
+            worker.postMessage({type: 'WorkerInit'});
+        });
     }
 
-    private createCustomPin(text: string): string {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-        const context = canvas.getContext('2d');
-        if (context) {
-            // Draw the triangle
-            context.fillStyle = this.pointColor;
-            context.beginPath();
-            context.moveTo(20, 16); // Top left point
-            context.lineTo(44, 16); // Top right point
-            context.lineTo(32, 64); // Bottom point
-            context.closePath();
-            context.fill();
-
-            // Draw the circle
-            context.fillStyle = this.pointColor;
-            context.beginPath();
-            context.arc(32, 24, 20, 0, 2 * Math.PI, false);
-            context.fill();
-
-            // Draw the text
-            context.fillStyle = "#ffffff";
-            context.font = "bold 12px sans-serif";
-            context.textAlign = "center";
-            context.textBaseline = "middle";
-            context.fillText(text, 32, 25);
+    private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
+        const response = await fetch(workerModuleUrl, {cache: 'force-cache'});
+        if (!response.ok) {
+            throw new Error(`Failed to fetch search worker module (${response.status} ${response.statusText})`);
         }
-        return canvas.toDataURL();
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
     }
 
-    private makeClusterPins() {
-        for (const n of this.pinTiers) {
-            let s = "";
-            if (n / 1000 >= 1) {
-                s = (n / 1000 | 0).toString().concat('k+');
-            } else if (n >= 10) {
-                s = n.toString().concat('+');
-            } else {
-                s = n.toString();
+    private registerWorker(worker: Worker, index: number) {
+        this.workers[index] = worker;
+        this.workerBusy[index] = false;
+        worker.onmessage = (event: MessageEvent<any>) => {
+            const result = event.data;
+            this.workerBusy[index] = false;
+
+            // Notify the job-group if the task has an id
+            if (result.taskId) {
+                this.jobGroupManager.completeTask(result.taskId, result);
             }
-            this.pinGraphicsByTier.set(n, this.createCustomPin(s));
-        }
+
+            switch (result.type) {
+                case 'SearchResultForTile':
+                    this.addSearchResult(result as SearchResultForTile);
+                    break;
+                case 'CompletionCandidatesForTile':
+                    this.addCompletionCandidates(result as CompletionCandidatesForTile);
+                    break;
+            }
+
+            this.scheduleNextTask(index);
+        };
     }
 
     run(query: string) {
@@ -374,44 +439,27 @@ export class FeatureSearchService {
         this.currentSearch = new SearchState(query, this.generateTaskGroupId());
         this.jobGroupManager.addGroup(this.currentSearch);
 
+        this.pendingSearchTilesByKey.clear();
+
+        for (const tile of this.orderedTilesForSearchProcessing()) {
+            if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
+                this.currentSearch.markTilePending(tile.mapTileKey);
+                continue;
+            }
+            this.enqueueSearchTask(tile, this.currentSearch);
+        }
+
         // Set up completion callback to trigger diagnostics after
         // all tasks of the group are done. Note: This will only ever
         // be called if a search truly finishes (is not superseded by a newer one).
         this.currentSearch.onComplete((group: JobGroup) => {
-            console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
-            this.startDiagnosticsForCompletedSearch(group.query, group.id);
+            this.getDiagnosticsForCompletedSearch(group.id);
         });
 
-        const tileParser = this.mapService.tileParser;
-        const makeTask = (tile: FeatureTile): SearchWorkerTask => {
-            const taskId = this.generateTaskId();
-            const task: SearchWorkerTask = {
-                type: TASK_SEARCH,
-                tileId: tile.tileId,
-                tileBlob: tile.tileFeatureLayerBlob as Uint8Array,
-                fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getFieldDict(buf, tile.nodeId)
-                })!,
-                query: query,
-                dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getDataSourceInfo(buf, tile.mapName)
-                })!,
-                nodeId: tile.nodeId,
-                taskId: taskId,
-                groupId: this.currentSearch!.id
-            };
-
-            this.jobGroupManager.addTask(task);
-            return task;
-        };
-
-        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
-            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
-                makeTask(tile);
-            });
-        }
-
         this.progress.next(this.currentSearch);
+        this.enqueueReadyPendingSearchTiles();
+        this.maybeStartDiagnosticsForCompletedSearch(this.currentSearch);
         this.runWorkers();
     }
 
@@ -450,6 +498,7 @@ export class FeatureSearchService {
         if (!this.currentSearch) {
             return;
         }
+        this.pendingSearchTilesByKey.clear();
         this.currentSearch.stop();
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
@@ -461,10 +510,11 @@ export class FeatureSearchService {
         this.stop();
         this.resultTree = new FeatureSearchQuadTree();
         this.resultsPerTile.clear();
+        this.pendingSearchTilesByKey.clear();
+        this.clearSearchResultPoints();
         this.progress.next(null);
         this.searchResults = [];
         this.traceResults = [];
-        this.diagnosticsMessagesList = [];
         this.diagnosticsMessages.next([]);
         this.totalFeatureCount = 0;
         this.startTime = 0;
@@ -492,47 +542,25 @@ export class FeatureSearchService {
         return `group_${Date.now()}_${++this.taskGroupIdCounter}`;
     }
 
-    private startDiagnosticsForCompletedSearch(query: string, searchGroupId: string) {
+    private getDiagnosticsForCompletedSearch(searchGroupId: string) {
         const completedSearchGroup = this.jobGroupManager.getGroup(searchGroupId);
         if (!completedSearchGroup || this.currentSearch?.id !== searchGroupId) {
             return;
         }
 
-        const diagnosticsGroup = this.jobGroupManager.createGroup('diagnostics', query, this.generateTaskGroupId());
+        const messages = coreLib.simfilGetDiagnostics(completedSearchGroup.query, Array.from(completedSearchGroup.getDiagnostics()))
+        this.diagnosticsMessages.next(messages.slice(0, this.diagnosticsMessageLimit));
+    }
 
-        const tileParser = this.mapService.tileParser;
-        const makeDiagnosticsTask = (tile: FeatureTile): DiagnosticsWorkerTask => {
-            const taskId = this.generateTaskId();
-            const task: DiagnosticsWorkerTask = {
-                type: TASK_DIAGNOSTICS,
-                blob: tile.tileFeatureLayerBlob as Uint8Array,
-                fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getFieldDict(buf, tile.nodeId)
-                })!,
-                query: query,
-                dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getDataSourceInfo(buf, tile.mapName)
-                })!,
-                nodeId: tile.nodeId,
-                diagnostics: Array.from(completedSearchGroup.getDiagnostics()),
-                taskId: taskId,
-                groupId: diagnosticsGroup.id,
-            };
-
-            this.jobGroupManager.addTask(task);
-            return task;
-        };
-
-        let diagTasks: DiagnosticsWorkerTask[] = [];
-        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
-            // TODO: Simplify this, see simfil issue #131
-            this.mapService.getPrioritisedTiles(viewIndex).some((tile: FeatureTile) => {
-                diagTasks.push(makeDiagnosticsTask(tile));
-                return true;
-            });
+    private maybeStartDiagnosticsForCompletedSearch(group: JobGroup): void {
+        if (group.type !== 'search' || !group.isComplete()) {
+            return;
         }
-        this.diagnosticsQueue.push(...diagTasks);
-        this.runWorkers();
+        if (!this.currentSearch || this.currentSearch.id !== group.id) {
+            return;
+        }
+        console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
+        this.getDiagnosticsForCompletedSearch(group.id);
     }
 
     public clearCurrentCompletion() {
@@ -554,13 +582,17 @@ export class FeatureSearchService {
         })
 
         // Build one task per tile
-        const tileParser = this.mapService.tileParser;
+        const tileParser = this.mapService.tileLayerParser;
         const limit = this.completionCandidateLimit;
-        const makeTask = (tile: FeatureTile): CompletionWorkerTask => {
+        const makeTask = (tile: FeatureTile): CompletionWorkerTask | null => {
+            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
+            if (!tileBlobs.length) {
+                return null;
+            }
             const taskId = this.generateTaskId();
             const task: CompletionWorkerTask = {
                 type: TASK_COMPLETION,
-                blob: tile.tileFeatureLayerBlob as Uint8Array,
+                tileBlobs,
                 fieldDictBlob: uint8ArrayFromWasm((buf) => {
                     tileParser?.getFieldDict(buf, tile.nodeId)
                 })!,
@@ -583,10 +615,8 @@ export class FeatureSearchService {
         this.completionPending.next(true);
         this.completionCandidates.next([]);
 
-        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
-            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
-                makeTask(tile);
-            });
+        for (const tile of this.orderedTilesForSearchProcessing()) {
+            makeTask(tile);
         }
         this.runWorkers();
     }
@@ -601,18 +631,6 @@ export class FeatureSearchService {
             .slice(0, this.completionCandidateLimit);
 
         this.completionCandidates.next(this.completionCandidateList);
-    }
-
-    private addDiagnostics(result : DiagnosticsResultsForTile) {
-        this.diagnosticsMessagesList = this.diagnosticsMessagesList
-            .concat(result.messages)
-            .filter((item, index, array) => {
-                return array.findIndex(other => {
-                    return other.message === item.message && other.location?.offset === item.location?.offset;
-                }) === index
-            })
-            .slice(0, this.diagnosticsMessageLimit);
-        this.diagnosticsMessages.next(this.diagnosticsMessagesList);
     }
 
     private addSearchResult(tileResult: SearchResultForTile) {
@@ -644,13 +662,36 @@ export class FeatureSearchService {
             this.currentSearch.addDiagnostics(tileResult.diagnostics);
         }
 
+        const seenFeatureKeys = new Set<string>();
+        const dedupedMatches = tileResult.matches.filter(([mapTileKey, featureId]) => {
+            const canonicalTileKey = (() => {
+                try {
+                    const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+                    return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+                } catch {
+                    return mapTileKey;
+                }
+            })();
+            const dedupeKey = `${canonicalTileKey}|${featureId}`;
+            if (seenFeatureKeys.has(dedupeKey)) {
+                return false;
+            }
+            seenFeatureKeys.add(dedupeKey);
+            return true;
+        });
+
         // Add visualizations and register the search result.
-        if (tileResult.matches.length && tileResult.tileId) {
-            const mapTileKey = tileResult.matches[0][0];
-            const [mapId, layerId, _] = coreLib.parseMapTileKey(mapTileKey);
+        if (dedupedMatches.length && tileResult.tileId) {
+            const mapTileKey = dedupedMatches[0][0];
+            const {mapId, layerId} = this.parseMapLayerIds(mapTileKey);
             const mapLayerId = `${mapId}/${layerId}`;
-            this.resultsPerTile.set(mapTileKey, tileResult);
-            this.resultTree.insert(tileResult.tileId, mapLayerId, tileResult.matches.map(result => {
+            this.resultsPerTile.set(mapTileKey, {
+                ...tileResult,
+                matches: dedupedMatches
+            });
+            let addedPoint = false;
+            const treeResults: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
+            for (const result of dedupedMatches) {
                 if (result[2].cartographic) {
                     result[2].cartographicRad = Cartographic.fromDegrees(
                         result[2].cartographic.x,
@@ -659,11 +700,16 @@ export class FeatureSearchService {
                     );
                 }
                 result[2].cartographic = null;
+                addedPoint = this.tryAddSearchResultPoint(mapId, layerId, result[1], result[2]) || addedPoint;
                 const featureId = result[1];
                 const id: SearchResultPrimitiveId = {type: "SearchResult", index: this.searchResults.length};
                 this.searchResults.push({label: `${featureId}`, mapId: mapId, layerId: layerId, featureId: featureId});
-                return [id, result[2], mapLayerId];
-            }));
+                treeResults.push([id, result[2], mapLayerId]);
+            }
+            if (addedPoint) {
+                this.searchResultPointsVersionValue += 1;
+            }
+            this.resultTree.insert(tileResult.tileId, mapLayerId, treeResults);
         }
 
         // Broadcast the search progress.
@@ -678,9 +724,6 @@ export class FeatureSearchService {
         if (this.currentSearch && !this.currentSearch.isComplete() && !this.currentSearch.paused) {
             nextTask = this.currentSearch.takeTask();
         }
-        else if (this.diagnosticsQueue.length) {
-            nextTask = this.diagnosticsQueue.shift();
-        }
         else if (this.currentCompletion && !this.currentCompletion.isComplete()) {
             nextTask = this.currentCompletion.takeTask();
         }
@@ -694,8 +737,222 @@ export class FeatureSearchService {
     }
 
     updatePointColor() {
-        this.makeClusterPins();
-        this.progress.next(this.currentSearch);
+        const normalizedColor = this.normalizeHexColor(this.pointColor);
+        this.pointColor = normalizedColor;
+        this.ensureTintedClusterAtlas(normalizedColor)
+            .then(atlasUrl => {
+                this.clusterIconAtlasUrl = atlasUrl;
+                this.progress.next(this.currentSearch);
+            })
+            .catch(() => {
+                this.clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+                this.progress.next(this.currentSearch);
+            });
+    }
+
+    private orderedTilesForSearchProcessing(): FeatureTile[] {
+        const viewCount = this.stateService.numViewsState.getValue();
+        if (viewCount <= 0) {
+            return [];
+        }
+        const focusedView = this.stateService.focusedView;
+        const viewIndex = Math.max(0, Math.min(viewCount - 1, focusedView));
+        return this.mapService.getPrioritisedTiles(viewIndex);
+    }
+
+    private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
+        const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
+        if (!tileBlobs.length) {
+            return null;
+        }
+        const tileParser = this.mapService.tileLayerParser;
+        return {
+            type: TASK_SEARCH,
+            tileId: tile.tileId,
+            tileBlobs,
+            fieldDictBlob: uint8ArrayFromWasm((buf) => {
+                tileParser?.getFieldDict(buf, tile.nodeId)
+            })!,
+            query: search.query,
+            dataSourceInfo: uint8ArrayFromWasm((buf) => {
+                tileParser?.getDataSourceInfo(buf, tile.mapName)
+            })!,
+            nodeId: tile.nodeId,
+            taskId: this.generateTaskId(),
+            groupId: search.id
+        };
+    }
+
+    private enqueueSearchTask(tile: FeatureTile, search: SearchState): boolean {
+        const task = this.createSearchTask(tile, search);
+        if (!task) {
+            return false;
+        }
+        this.jobGroupManager.addTask(task);
+        return true;
+    }
+
+    private enqueueReadyPendingSearchTiles() {
+        const activeSearch = this.currentSearch;
+        if (!activeSearch || !this.pendingSearchTilesByKey.size) {
+            return;
+        }
+
+        let stateChanged = false;
+        let enqueuedTask = false;
+
+        for (const [tileKey] of Array.from(this.pendingSearchTilesByKey.entries())) {
+            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            if (!tile || tile.disposed) {
+                this.pendingSearchTilesByKey.delete(tileKey);
+                activeSearch.markTileReady(tileKey);
+                stateChanged = true;
+                continue;
+            }
+            if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                continue;
+            }
+            this.pendingSearchTilesByKey.delete(tileKey);
+            activeSearch.markTileReady(tileKey);
+            enqueuedTask = this.enqueueSearchTask(tile, activeSearch) || enqueuedTask;
+            stateChanged = true;
+        }
+
+        if (!stateChanged) {
+            return;
+        }
+
+        this.progress.next(activeSearch);
+        this.maybeStartDiagnosticsForCompletedSearch(activeSearch);
+        if (enqueuedTask) {
+            this.runWorkers();
+        }
+    }
+
+    private normalizeHexColor(color: string): string {
+        const hex = (color || "").trim();
+        const validHex = /^#([0-9a-f]{6})$/i.exec(hex);
+        if (validHex) {
+            return `#${validHex[1].toLowerCase()}`;
+        }
+        const shortHex = /^#([0-9a-f]{3})$/i.exec(hex);
+        if (shortHex) {
+            const [r, g, b] = shortHex[1].split("");
+            return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+        }
+        return "#ea4336";
+    }
+
+    private parseHexRgb(color: string): [number, number, number] {
+        return [
+            parseInt(color.slice(1, 3), 16),
+            parseInt(color.slice(3, 5), 16),
+            parseInt(color.slice(5, 7), 16)
+        ];
+    }
+
+    private parseMapLayerIds(mapTileKey: string): {mapId: string; layerId: string} {
+        try {
+            const [mapId, layerId] = coreLib.parseMapTileKey(mapTileKey);
+            return {mapId: String(mapId), layerId: String(layerId)};
+        } catch (_error) {
+            const [mapId = "", layerId = ""] = mapTileKey.split("/");
+            return {mapId, layerId};
+        }
+    }
+
+    private tryAddSearchResultPoint(
+        mapId: string,
+        layerId: string,
+        featureId: string,
+        position: SearchResultPosition
+    ): boolean {
+        const cartographicRad = position.cartographicRad;
+        if (!cartographicRad) {
+            return false;
+        }
+        const lon = GeoMath.toDegrees(cartographicRad.longitude);
+        const lat = GeoMath.toDegrees(cartographicRad.latitude);
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+            return false;
+        }
+        const featureKey = `${mapId}/${layerId}/${featureId}`;
+        if (this.searchResultPointsByFeatureKey.has(featureKey)) {
+            return false;
+        }
+        this.searchResultPointsByFeatureKey.set(featureKey, {
+            coordinates: [lon, lat],
+            mapId,
+            layerId,
+            featureId,
+            featureKey
+        });
+        this.searchResultPointsCacheDirty = true;
+        return true;
+    }
+
+    private clearSearchResultPoints(): void {
+        if (!this.searchResultPointsByFeatureKey.size
+            && !this.searchResultPointsCache.length
+            && !this.searchResultPointsCacheDirty) {
+            return;
+        }
+        this.searchResultPointsByFeatureKey.clear();
+        this.searchResultPointsCache = [];
+        this.searchResultPointsCacheDirty = false;
+        this.searchResultPointsVersionValue += 1;
+    }
+
+    private async ensureTintedClusterAtlas(color: string): Promise<string> {
+        const cached = this.tintedAtlasByColor.get(color);
+        if (cached) {
+            return cached;
+        }
+        const baseAtlasImage = await this.loadBaseClusterAtlasImage();
+        const [targetR, targetG, targetB] = this.parseHexRgb(color);
+        const canvas = document.createElement("canvas");
+        canvas.width = baseAtlasImage.naturalWidth || baseAtlasImage.width;
+        canvas.height = baseAtlasImage.naturalHeight || baseAtlasImage.height;
+        const context = canvas.getContext("2d", {willReadFrequently: true});
+        if (!context) {
+            return FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+        }
+        context.drawImage(baseAtlasImage, 0, 0);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const alpha = data[i + 3];
+            if (alpha === 0) {
+                continue;
+            }
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            if (r > 235 && g > 235 && b > 235) {
+                continue;
+            }
+            data[i] = Math.round((r / 255) * targetR);
+            data[i + 1] = Math.round((g / 255) * targetG);
+            data[i + 2] = Math.round((b / 255) * targetB);
+        }
+        context.putImageData(imageData, 0, 0);
+        const tintedAtlasUrl = canvas.toDataURL("image/png");
+        this.tintedAtlasByColor.set(color, tintedAtlasUrl);
+        return tintedAtlasUrl;
+    }
+
+    private loadBaseClusterAtlasImage(): Promise<HTMLImageElement> {
+        if (this.baseAtlasImagePromise) {
+            return this.baseAtlasImagePromise;
+        }
+        this.baseAtlasImagePromise = new Promise((resolve, reject) => {
+            const image = new Image();
+            image.decoding = "async";
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error("Failed to load search cluster icon atlas."));
+            image.src = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+        });
+        return this.baseAtlasImagePromise;
     }
 
     private formatTime(milliseconds: number): string {
@@ -710,9 +967,4 @@ export class FeatureSearchService {
                 ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
     }
 
-    getPinGraphics(count: number) {
-        // Find the appropriate tier for the given count
-        let key = this.pinTiers.find(tier => count >= tier) || 1;
-        return this.pinGraphicsByTier.get(key);
-    }
 }

@@ -1,25 +1,29 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapDataService} from "./map.service";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
+import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
-import {Rectangle} from "../integrations/cesium";
+import {GeoMath, Rectangle} from "../integrations/geo";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 
 @Component({
     selector: 'map-panel',
     template: `
         <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false"
+                  [position]="'left'" [draggable]="false" [resizable]="false" 
+                  (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
+            <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
+                      (mousedown)="$event.stopPropagation()"/>
             <ng-container *ngFor="let index of viewIndices">
                 <p-fieldset class="map-tab" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
                     <ng-template #header>
@@ -56,9 +60,27 @@ import {Rectangle} from "../integrations/cesium";
                             </span>
                         </p-button>
                         <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
+                        <p-button onEnterClick (click)="toggleViewTileBorders(index)"
+                                  [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
+                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                  icon="" label="" pTooltip="Toggle tile borders"
+                                  tooltipPosition="bottom" tabindex="0">
+                            <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                {{ tileBordersEnabled[index] ? "border_outer" : "border_clear" }}
+                            </span>
+                        </p-button>
+                        <p-button onEnterClick (click)="toggleViewTileGridMode(index)"
+                                  [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-primary' : 'map-controls-button p-button-secondary'"
+                                  [style]="{'min-width': '3.5em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
+                                  [disabled]="!tileBordersEnabled[index]"
+                                  [label]="tileGridModes[index] ? tileGridModes[index].toUpperCase() : 'NDS'"
+                                  pTooltip="Switch tile grid mode (XYZ/NDS)"
+                                  tooltipPosition="bottom" tabindex="0">
+                        </p-button>
+                        <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                         <div class="osm-controls">
                             <span style="font-size: 0.9em">OSM Overlay:</span>
-                        <p-button onEnterClick (click)="toggleOSMOverlay(index)"
+                            <p-button onEnterClick (click)="toggleOSMOverlay(index)"
                                       [styleClass]="osmEnabled[index] ? 'osm-button p-button-success' : 'osm-button p-button-primary'"
                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                       icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -121,28 +143,28 @@ import {Rectangle} from "../integrations/cesium";
                                                     [name]="index + '_' + node.id" tabindex="0"/>
                                         <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
-                                    <div class="map-controls">
-                                        <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
-                                                  label="" pTooltip="Focus on map" tooltipPosition="bottom"
-                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                  tabindex="0"
-                                                  *ngIf="flatCoverage(node).length">
+                                        <div class="map-controls">
+                                            <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
+                                                      label="" pTooltip="Focus on map" tooltipPosition="bottom"
+                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                      tabindex="0"
+                                                      *ngIf="flatCoverage(node).length">
                                             <span class="material-symbols-outlined"
                                                   style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
-                                        </p-button>
-                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                  pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
-                                                  tooltipPosition="bottom"
-                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                  tabindex="0"
-                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                            </p-button>
+                                            <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
+                                                      pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
+                                                      tooltipPosition="bottom"
+                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                      tabindex="0"
+                                                      [disabled]="!metadataMenusEntries.get(node.id)?.length">
                                             <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                                 data_object
                                             </span>
-                                        </p-button>
+                                            </p-button>
+                                        </div>
                                     </div>
-                                </div>
-                            </ng-template>
+                                </ng-template>
                                 <!-- Template for Feature Layer nodes -->
                                 <ng-template let-node pTemplate="Features">
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
@@ -163,18 +185,6 @@ import {Rectangle} from "../integrations/cesium";
                                             </span>
                                         </div>
                                         <div class="tree-node-controls">
-                                            <p-button onEnterClick
-                                                      (click)="toggleTileBorders(index, node.mapId, node.id)"
-                                                      label="" pTooltip="Toggle tile borders"
-                                                      tooltipPosition="bottom"
-                                                      [styleClass]="node.viewConfig[index].tileBorders ? 'p-button-success' : 'p-button-primary'"
-                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                      tabindex="0">
-                                            <span class="material-symbols-outlined"
-                                                  style="font-size: 1.2em; margin: 0 auto;">
-                                                {{ node.viewConfig[index].tileBorders ? 'select_all' : 'deselect' }}
-                                            </span>
-                                            </p-button>
                                             <p-button onEnterClick *ngIf="node.info.coverage.length"
                                                       (click)="focus($event, index, node.info.coverage)"
                                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
@@ -183,7 +193,7 @@ import {Rectangle} from "../integrations/cesium";
                                             <span class="material-symbols-outlined"
                                                   style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                             </p-button>
-                                            <p-inputNumber [(ngModel)]="node.viewConfig[index].level"
+                                            <p-inputNumber [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"
                                                            (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
                                                            [showButtons]="true" [min]="0" [max]="15"
                                                            buttonLayout="horizontal" spinnerMode="horizontal"
@@ -195,19 +205,23 @@ import {Rectangle} from "../integrations/cesium";
                                                            pTooltip="Change zoom level" tooltipPosition="bottom"
                                                            tabindex="0">
                                             </p-inputNumber>
+                                            <p-button onEnterClick
+                                                      (click)="toggleLayerAutoLevel(index, node.mapId, node.id)"
+                                                      [styleClass]="node.viewConfig[index].autoLevel ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
+                                                      [style]="{'min-width': '3.75em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
+                                                      label="AUTO"
+                                                      pTooltip="Automatically select the layer level"
+                                                      tooltipPosition="bottom"
+                                                      tabindex="0">
+                                            </p-button>
                                         </div>
                                         <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                               [(ngModel)]="node.viewConfig[index].level"/>
+                                               [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"/>
                                     </div>
                                 </ng-template>
                                 <!-- Template for boolean style option nodes -->
                                 <ng-template let-node pTemplate="Bool">
                                     <div style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-symbols-outlined menu-toggler"
-                                              (click)="$event.stopPropagation()"
-                                              tabindex="0">
-                                            more_vert
-                                        </span>
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
@@ -237,27 +251,6 @@ import {Rectangle} from "../integrations/cesium";
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        <div class="main-button-controls" (mouseleave)="isMainButtonHovered = false"
-             [ngClass]="{'hovered': isMainButtonHovered}">
-            <p-button onEnterClick class="layers-button" (mouseenter)="isMainButtonHovered = true"
-                      (click)="isMainButtonHovered = false; toggleLayerDialog()"
-                      tooltipPosition="right"
-                      pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
-                      label="" tabindex="0">
-                <span *ngIf="!layerDialogVisible" class="material-symbols-outlined"
-                      style="font-size: 1.2em; margin: 0 auto;">
-                    stacks
-                </span>
-                <span *ngIf="layerDialogVisible" class="material-symbols-outlined"
-                      style="font-size: 1.2em; margin: 0 auto;">
-                    close
-                </span>
-            </p-button>
-            <div class="pref-buttons" *ngIf="!appModeService.isVisualizationOnly">
-                <pref-components *ngIf="!appModeService.isVisualizationOnly"></pref-components>
-            </div>
-        </div>
-        <datasources></datasources>
     `,
     styles: [`
         .disabled {
@@ -273,11 +266,12 @@ export class MapPanelComponent {
     subscriptions: Subscription[] = [];
     viewIndices: number[] = [];
 
-    isMainButtonHovered: boolean = false;
     mapsCollapsed: boolean[] = [];
 
     osmEnabled: boolean[] = [true];
     osmOpacityValue: number[] = [30];
+    tileBordersEnabled: boolean[] = [];
+    tileGridModes: TileGridMode[] = [];
 
     syncedOptions: boolean[] = [];
     layerDialogVisible: boolean = false;
@@ -288,12 +282,12 @@ export class MapPanelComponent {
     @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
 
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
-    private _reinitializingAfterPrune: boolean = false;
 
     constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
-                public keyboardService: KeyboardService) {
+                public keyboardService: KeyboardService,
+                private readonly dialogStack: DialogStackService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
@@ -314,28 +308,34 @@ export class MapPanelComponent {
                             }))
                     );
                 }
+                const numViews = this.stateService.numViews;
+                this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
+                    this.mapService.maps.getViewTileBorderState(index));
+                this.tileGridModes = Array.from({length: numViews}, (_, index) =>
+                    this.mapService.maps.getViewTileGridMode(index));
             })
         );
 
         this.subscriptions.push(
             this.stateService.numViewsState.subscribe(numViews => {
+                this.viewIndices = Array.from({length: numViews}, (_, i) => i);
                 this.osmEnabled = [];
                 this.osmOpacityValue = [];
-                const viewIndices = Array.from({length: numViews}, (_, i) => i);
-                viewIndices.forEach(viewIndex => {
-                    this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
-                    this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
+                this.tileBordersEnabled = [];
+                this.tileGridModes = [];
+                this.viewIndices.forEach(viewIndex => {
+                    this.osmEnabled.push(this.stateService.getOsmEnabled(viewIndex));
+                    this.osmOpacityValue.push(this.stateService.getOsmOpacity(viewIndex));
+                    this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
+                    this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
-                while (this.mapsCollapsed.length < viewIndices.length) {
+                while (this.mapsCollapsed.length < this.viewIndices.length) {
                     this.mapsCollapsed.push(false);
                 }
-                if (this.mapsCollapsed.length > viewIndices.length) {
-                    this.mapsCollapsed.length = viewIndices.length;
+                if (this.mapsCollapsed.length > this.viewIndices.length) {
+                    this.mapsCollapsed.length = this.viewIndices.length;
                 }
-                this.syncedOptions = viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
-                setTimeout(() => {
-                    this.viewIndices = viewIndices;
-                }, 150);
+                this.syncedOptions = this.viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
 
@@ -348,20 +348,38 @@ export class MapPanelComponent {
         );
 
         this.subscriptions.push(
-            this.stateService.osmEnabledState.appState.subscribe(_ => {
+            this.stateService.osmState.appState.subscribe(_ => {
                 const numViews = this.stateService.numViews;
                 this.osmEnabled = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.osmEnabledState.getValue(index));
+                    this.stateService.getOsmEnabled(index));
+                this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.getOsmOpacity(index));
             })
         );
 
         this.subscriptions.push(
-            this.stateService.osmOpacityState.appState.subscribe(_ => {
+            this.stateService.viewTileBordersState.appState.subscribe(_ => {
                 const numViews = this.stateService.numViews;
-                this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.osmOpacityState.getValue(index));
+                this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.viewTileBordersState.getValue(index));
             })
         );
+
+        this.subscriptions.push(
+            this.stateService.viewTileGridModeState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.tileGridModes = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.viewTileGridModeState.getValue(index));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.mapsOpenState.subscribe(isOpen => this.layerDialogVisible = isOpen)
+        );
+    }
+
+    onMapLayerDialogShow() {
+        this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
     onOsmOpacityInput(event: any, viewIndex: number) {
@@ -428,65 +446,6 @@ export class MapPanelComponent {
         ];
     }
 
-    showOptionsToggleMenu(event: MouseEvent, node: StyleOptionNode) {
-        this.toggleMenu.toggle(event);
-        /* this.toggleMenuItems = [
-            {
-                label: 'Toggle All off but This',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, id == optionId);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            },
-            {
-                label: 'Toggle All on but This',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, id != optionId);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            },
-            {
-                label: 'Toggle All Off',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, false);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            },
-            {
-                label: 'Toggle All On',
-                command: () => {
-                    const style = this.styleService.styles.get(styleId);
-                    if (style === undefined || style === null) {
-                        return;
-                    }
-                    // for (const id in style.params.options) {
-                    //     this.styleService.toggleOption(style.id, id, true);
-                    // }
-                    this.applyStyleConfig(style.id);
-                }
-            }
-        ];
-        */
-    }
-
     toggleLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
     }
@@ -509,7 +468,15 @@ export class MapPanelComponent {
         }
         this.stateService.focusedView = viewIndex;
         this.mapService.moveToRectangleTopic.next(
-            {targetView: viewIndex, rectangle: targetRect!}
+            {
+                targetView: viewIndex,
+                rectangle: {
+                    west: GeoMath.toDegrees(targetRect!.west),
+                    south: GeoMath.toDegrees(targetRect!.south),
+                    east: GeoMath.toDegrees(targetRect!.east),
+                    north: GeoMath.toDegrees(targetRect!.north),
+                }
+            }
         );
     }
 
@@ -527,8 +494,7 @@ export class MapPanelComponent {
     }
 
     updateOSMOverlay(viewIndex: number) {
-        this.stateService.osmEnabledState.next(viewIndex, this.osmEnabled[viewIndex]);
-        this.stateService.osmOpacityState.next(viewIndex, this.osmOpacityValue[viewIndex]);
+        this.stateService.setOsmState(viewIndex, this.osmEnabled[viewIndex], this.osmOpacityValue[viewIndex]);
         this.mapService.syncOsmSettings(viewIndex);
     }
 
@@ -541,12 +507,38 @@ export class MapPanelComponent {
         this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
-    toggleTileBorders(viewIndex: number, mapName: string, layerName: string) {
-        this.mapService.toggleLayerTileBorderVisibility(viewIndex, mapName, layerName);
+    toggleViewTileBorders(viewIndex: number) {
+        this.mapService.toggleViewTileBorderVisibility(viewIndex);
+        this.tileBordersEnabled[viewIndex] = this.mapService.maps.getViewTileBorderState(viewIndex);
     }
 
-    onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
-        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Number(event.toString()));
+    toggleViewTileGridMode(viewIndex: number) {
+        const currentMode = this.tileGridModes[viewIndex] ?? "nds";
+        const nextMode: TileGridMode = currentMode === "xyz" ? "nds" : "xyz";
+        this.tileGridModes[viewIndex] = nextMode;
+        this.mapService.setViewTileGridMode(viewIndex, nextMode);
+    }
+
+    onLayerLevelChanged(level: number | null, viewIndex: number, mapName: string, layerName: string) {
+        if (level === null || !Number.isFinite(level)) {
+            return;
+        }
+        if (this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
+            this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, false);
+        }
+        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Math.max(0, Math.floor(level)));
+    }
+
+    toggleLayerAutoLevel(viewIndex: number, mapName: string, layerName: string) {
+        const nextState = !this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName);
+        this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, nextState);
+    }
+
+    displayMapLayerLevel(viewIndex: number, mapName: string, layerName: string, fallbackLevel: number) {
+        if (!this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
+            return fallbackLevel;
+        }
+        return this.mapService.getEffectiveMapLayerLevel(viewIndex, mapName, layerName);
     }
 
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {
@@ -571,8 +563,6 @@ export class MapPanelComponent {
         }
     }
 
-    protected readonly removeGroupPrefix = removeGroupPrefix;
-
     syncOptionsForView(viewIndex: number) {
         const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
         this.mapService.setSyncOptionsForView(viewIndex, nextState);
@@ -580,4 +570,10 @@ export class MapPanelComponent {
         this.syncedOptions = Array.from({length: numViews}, (_, index) =>
             this.mapService.isSyncOptionsForViewEnabled(index));
     }
+
+    protected closeMapsPanel() {
+        this.stateService.mapsDialogVisible = false;
+    }
+
+    protected readonly removeGroupPrefix = removeGroupPrefix;
 }

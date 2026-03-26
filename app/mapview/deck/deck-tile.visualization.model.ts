@@ -1,0 +1,1658 @@
+import {FeatureTile} from "../../mapdata/features.model";
+import {
+    DeckFeatureLayerVisualization,
+    FeatureLayerStyle,
+    HighlightMode,
+    RuleFidelity,
+    TileFeatureLayer
+} from "../../../build/libs/core/erdblick-core";
+import {SceneMode} from "../../integrations/geo";
+import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
+import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer} from "@deck.gl/layers";
+import {PathStyleExtension} from "@deck.gl/extensions";
+import {COORDINATE_SYSTEM} from "@deck.gl/core";
+import {Matrix4} from "@math.gl/core";
+import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
+import {coreLib, type ErdblickCore_} from "../../integrations/wasm";
+import {
+    deckRenderWorkerPool,
+    isDeckRenderWorkerPipelineEnabled
+} from "./deck-render.worker.pool";
+import {
+    DECK_GEOMETRY_OUTPUT_ALL,
+    DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
+    DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
+    DeckGeometryBucketBuffers,
+    DeckLabelDatum,
+    DeckGeometryOutputMode,
+    DeckLowFiBundleBuffers,
+    DeckPathBucketBuffers,
+    DeckPointBucketBuffers,
+    DeckSurfaceBucketBuffers,
+    DeckVisualizationBufferResult,
+    DeckWorkerTimings
+} from "./deck-render.worker.protocol";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
+import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
+
+interface StyleWithIsDeleted extends FeatureLayerStyle {
+    isDeleted(): boolean;
+    hasExplicitLowFidelityRules(): boolean;
+    hasRelationRules(mode: HighlightMode): boolean;
+}
+
+interface DeckSceneHandle {
+    deck?: unknown;
+    layerRegistry?: DeckLayerRegistry;
+    sceneMode?: SceneMode;
+}
+
+interface MergeCountProvider {
+    count: (
+        geoPos: {x: number, y: number, z: number},
+        hashPos: string,
+        level: number,
+        mapViewLayerStyleRuleId: string
+    ) => number;
+}
+
+type DeckFeatureAddressBuffer = Uint32Array | Array<number | null>;
+
+interface DeckPickLayerMetadata {
+    tileKey: string;
+    featureAddresses?: DeckFeatureAddressBuffer;
+    featureAddressesByPath?: DeckFeatureAddressBuffer;
+}
+
+interface DeckPathLayerMetadata extends DeckPickLayerMetadata {
+    dashJustified?: boolean;
+}
+
+interface DeckBinaryAttribute<T extends ArrayLike<number>> {
+    value: T;
+    size: number;
+}
+
+interface DeckPathLayerData {
+    length: number;
+    billboard: boolean;
+    coordinateOrigin: [number, number, number];
+    startIndices: Uint32Array;
+    featureAddressesByPath: DeckFeatureAddressBuffer;
+    attributes: {
+        getPath: DeckBinaryAttribute<Float32Array>;
+        instanceColors: DeckBinaryAttribute<Uint8Array>;
+        instanceStrokeWidths: DeckBinaryAttribute<Float32Array>;
+        instanceDashArrays?: DeckBinaryAttribute<Float32Array>;
+    };
+}
+
+interface DeckPointLayerData {
+    length: number;
+    billboard: boolean;
+    coordinateOrigin: [number, number, number];
+    featureAddresses: DeckFeatureAddressBuffer;
+    attributes: {
+        getPosition: DeckBinaryAttribute<Float32Array>;
+        getFillColor: DeckBinaryAttribute<Uint8Array>;
+        getRadius: DeckBinaryAttribute<Float32Array>;
+    };
+}
+
+interface DeckSurfaceLayerData {
+    length: number;
+    coordinateOrigin: [number, number, number];
+    startIndices: Uint32Array;
+    featureAddresses: DeckFeatureAddressBuffer;
+    attributes: {
+        getPolygon: DeckBinaryAttribute<Float32Array>;
+        fillColors: DeckBinaryAttribute<Uint8Array>;
+    };
+}
+
+interface DeckLabelLayerData {
+    length: number;
+    billboard: boolean;
+    coordinateOrigin: [number, number, number];
+    data: DeckRenderableLabelDatum[];
+}
+
+type DeckRenderableLabelDatum = Omit<DeckLabelDatum, "position"> & {
+    position: [number, number, number];
+};
+
+interface DeckPathRawBuffers {
+    coordinateOrigin: Float64Array;
+    positions: Float32Array;
+    startIndices: Uint32Array;
+    colors: Uint8Array;
+    widths: Float32Array;
+    featureAddresses: Uint32Array;
+    dashArrays?: Float32Array;
+}
+
+interface DeckPointRawBuffers {
+    coordinateOrigin: Float64Array;
+    positions: Float32Array;
+    colors: Uint8Array;
+    radii: Float32Array;
+    featureAddresses: Uint32Array;
+}
+
+interface DeckSurfaceRawBuffers {
+    coordinateOrigin: Float64Array;
+    positions: Float32Array;
+    startIndices: Uint32Array;
+    colors: Uint8Array;
+    featureAddresses: Uint32Array;
+}
+
+interface DeckWasmRenderOutput {
+    surfaceLayerData: DeckSurfaceLayerData[];
+    pathLayerData: DeckPathLayerData[];
+    pointLayerData: DeckPointLayerData[];
+    labelLayerData: DeckLabelLayerData[];
+    arrowLayerData: DeckPathLayerData[];
+    lowFiBundles: DeckLowFiBundleData[];
+    mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
+    vertexCount: number;
+    workerTimings: DeckWorkerTimings | null;
+}
+
+interface DeckLowFiBundleData {
+    lod: number;
+    surfaceLayerData: DeckSurfaceLayerData[];
+    pathLayerData: DeckPathLayerData[];
+    pointLayerData: DeckPointLayerData[];
+    labelLayerData: DeckLabelLayerData[];
+    arrowLayerData: DeckPathLayerData[];
+}
+
+const MAX_DECK_PATH_COUNT = 1_000_000;
+const MAX_DECK_SURFACE_COUNT = 1_000_000;
+const MAX_DECK_VERTEX_COUNT = 20_000_000;
+const MAX_DECK_POINT_COUNT = 10_000_000;
+const DECK_UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
+const RENDER_RANK_PRIORITY_SWITCH_ONLY = 0;
+const RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA = 1;
+const RENDER_RANK_PRIORITY_DEFAULT = 2;
+const RENDER_RANK_HAS_DATA = 0;
+const RENDER_RANK_MISSING_DATA = 1;
+const RENDER_RANK_RENDER_ORDER_MAX = (2 ** 51) - 1;
+const RENDER_RANK_ORDER_STRIDE = 2;
+const RENDER_RANK_PRIORITY_STRIDE = 2 ** 52;
+const DECK_ARROW_ANGLE_SIGN = -1;
+const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
+const DECK_ARROW_ICON_SIZE = 64;
+const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
+const DECK_HIGHLIGHT_SURFACE_PARAMETERS = {
+    depthWriteEnabled: false,
+    depthCompare: "always",
+    cullMode: "none"
+} as const;
+const DECK_ARROW_ICON_ATLAS =
+    "data:image/svg+xml;charset=utf-8," +
+    encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${DECK_ARROW_ICON_SIZE}" height="${DECK_ARROW_ICON_SIZE}" viewBox="0 0 ${DECK_ARROW_ICON_SIZE} ${DECK_ARROW_ICON_SIZE}"><polygon points="32,0 60,60 4,60" fill="white"/></svg>`
+    );
+const DECK_ARROW_ICON_MAPPING = {
+    arrowhead: {
+        x: 0,
+        y: 0,
+        width: DECK_ARROW_ICON_SIZE,
+        height: DECK_ARROW_ICON_SIZE,
+        anchorX: DECK_ARROW_ICON_SIZE / 2,
+        anchorY: 0,
+        mask: true
+    }
+};
+
+type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
+type DeckRuleFidelityEnum = ErdblickCore_["RuleFidelity"];
+type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
+    renderResult(): DeckVisualizationBufferResult;
+};
+
+function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
+    return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
+}
+
+function deckRuleFidelityEnum(): DeckRuleFidelityEnum {
+    return coreLib.RuleFidelity as DeckRuleFidelityEnum;
+}
+
+interface DeckArrowMarker {
+    featureAddress: number | null;
+    position: [number, number, number];
+    color: [number, number, number, number];
+    sizePx: number;
+    angleDeg: number;
+}
+
+interface DeckLayerKeys {
+    surfaceLayerKey: string;
+    pathLayerKey: string;
+    pointLayerKey: string;
+    labelLayerKey: string;
+    arrowLayerKey: string;
+}
+
+interface DeckLayerRenderEntry {
+    variantSuffix: string;
+    orderOffset: number;
+    surfaceLayerData: DeckSurfaceLayerData[];
+    pathLayerData: DeckPathLayerData[];
+    pointLayerData: DeckPointLayerData[];
+    labelLayerData: DeckLabelLayerData[];
+    arrowLayerData: DeckPathLayerData[];
+}
+
+/**
+ * Deck tile visualization used during migration.
+ * It currently renders line geometry from DeckFeatureLayerVisualization.
+ */
+export class DeckTileVisualization implements ITileVisualization {
+    tile: FeatureTile;
+    highFidelityStage: number;
+    prefersHighFidelity: boolean;
+    maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
+    showTileBorder: boolean = false;
+    readonly viewIndex: number;
+    public readonly styleId: string;
+
+    private readonly style: StyleWithIsDeleted;
+    private readonly styleSource: string;
+    private readonly layerKeySuffix: string;
+    private readonly pointMergeService: PointMergeService;
+    private readonly highlightMode: HighlightMode;
+    private readonly featureIdSubset: string[];
+    private readonly options: Record<string, boolean | number | string>;
+    private readonly styleHasExplicitLowFidelityRules: boolean;
+    private readonly styleHasRelationRules: boolean;
+    private readonly relationExternalTileLoader: (requests: RelationLocateRequest[]) => Promise<RelationLocateResult>;
+    private renderQueued = false;
+    private deleted = false;
+    private rendered = false;
+    private readonly surfaceLayerKeys = new Set<string>();
+    private readonly pointLayerKeys = new Set<string>();
+    private readonly pathLayerKeys = new Set<string>();
+    private readonly labelLayerKeys = new Set<string>();
+    private readonly arrowLayerKeys = new Set<string>();
+    private lastSignature = "";
+    private hadTileDataAtLastRender = false;
+    private tileFeatureCountAtLastRender = 0;
+    private tileDataVersionAtLastRender = -1;
+    private latestWorkerTimings: DeckWorkerTimings | null = null;
+    private latestSurfaceLayerData: DeckSurfaceLayerData[] = [];
+    private latestPointLayerData: DeckPointLayerData[] = [];
+    private latestLabelLayerData: DeckLabelLayerData[] = [];
+    private latestArrowLayerData: DeckPathLayerData[] = [];
+    private latestLowFiBundleData: DeckLowFiBundleData[] = [];
+    private lowFiBundleByLod = new Map<number, DeckLowFiBundleData>();
+    private activeRenderedFidelity: "low" | "high" | "any" | null = null;
+    private activeRenderedLowFiLods: number[] = [];
+    private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
+
+
+    constructor(viewIndex: number,
+                tile: FeatureTile,
+                pointMergeService: PointMergeService,
+                style: FeatureLayerStyle,
+                styleSource: string,
+                highFidelityStage: number,
+                prefersHighFidelity: boolean,
+                maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
+                highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
+                featureIdSubset: string[] = [],
+                layerKeySuffix: string = "",
+                boxGrid?: boolean,
+                options?: Record<string, boolean | number | string>,
+                relationExternalTileLoader: (requests: RelationLocateRequest[]) => Promise<RelationLocateResult> =
+                    async () => ({responses: [], tiles: []})) {
+        this.tile = tile;
+        this.pointMergeService = pointMergeService;
+        this.style = style as StyleWithIsDeleted;
+        this.styleSource = styleSource;
+        this.styleId = this.style.name();
+        this.highFidelityStage = Math.max(0, Math.floor(highFidelityStage));
+        this.prefersHighFidelity = prefersHighFidelity;
+        this.maxLowFiLod = maxLowFiLod;
+        this.highlightMode = highlightMode;
+        this.featureIdSubset = [...featureIdSubset];
+        this.layerKeySuffix = layerKeySuffix;
+        this.showTileBorder = boxGrid === undefined ? false : boxGrid;
+        this.options = options || {};
+        this.relationExternalTileLoader = relationExternalTileLoader;
+        this.styleHasExplicitLowFidelityRules = this.style.hasExplicitLowFidelityRules();
+        this.styleHasRelationRules = this.style.hasRelationRules(this.highlightMode);
+        this.viewIndex = viewIndex;
+    }
+
+    async render(sceneHandle: IRenderSceneHandle): Promise<boolean> {
+        const registry = this.resolveRegistry(sceneHandle);
+        if (this.deleted || this.style.isDeleted()) {
+            return false;
+        }
+        this.latestWorkerTimings = null;
+        const startTime = performance.now();
+        try {
+            const fidelity = this.currentFidelity();
+            if (this.tryApplyCachedLowFiSwitch(sceneHandle, registry, fidelity)) {
+                return true;
+            }
+
+            this.latestSurfaceLayerData = [];
+            this.latestPointLayerData = [];
+            this.latestLabelLayerData = [];
+            this.latestArrowLayerData = [];
+            this.latestLowFiBundleData = [];
+            this.latestMergedPointFeatures = null;
+
+            let pathLayerData = await this.renderWasm(fidelity);
+            let surfaceLayerData = this.latestSurfaceLayerData;
+            let pointLayerData = this.latestPointLayerData;
+            let labelLayerData = this.latestLabelLayerData;
+            let arrowLayerData = this.latestArrowLayerData;
+            let activeLowFiLods: number[] = [];
+            let selectedLowFiBundles: DeckLowFiBundleData[] = [];
+            const mergedPointFeatures = this.latestMergedPointFeatures as
+                Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
+
+            if (this.deleted || this.style.isDeleted()) {
+                return false;
+            }
+
+            if (fidelity === "low") {
+                this.updateLowFiBundleCache(this.latestLowFiBundleData);
+                selectedLowFiBundles = this.selectLowFiBundlesForCurrentRequest();
+                if (selectedLowFiBundles.length > 0) {
+                    surfaceLayerData = [];
+                    pathLayerData = [];
+                    pointLayerData = [];
+                    labelLayerData = [];
+                    arrowLayerData = [];
+                    activeLowFiLods = selectedLowFiBundles.map((bundle) => bundle.lod);
+                }
+            }
+
+            if (this.shouldKeepActiveLowFiFallback(
+                fidelity,
+                surfaceLayerData,
+                pathLayerData,
+                pointLayerData,
+                labelLayerData,
+                arrowLayerData,
+                mergedPointFeatures
+            )) {
+                this.completeRender(fidelity, activeLowFiLods);
+                return true;
+            }
+
+            this.clearMergedPointVisualizations(sceneHandle);
+            if (fidelity === "low" && selectedLowFiBundles.length > 0) {
+                this.applyLowFiBundleDataToRegistry(sceneHandle, registry, selectedLowFiBundles);
+            } else {
+                this.applyLayerDataToRegistry(
+                    sceneHandle,
+                    registry,
+                    surfaceLayerData,
+                    pathLayerData,
+                    pointLayerData,
+                    labelLayerData,
+                    arrowLayerData
+                );
+            }
+
+            if (mergedPointFeatures) {
+                for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(mergedPointFeatures)) {
+                    for (const finishedCornerTile of this.pointMergeService.insert(
+                        mergedPointVisualizations as MergedPointVisualization[],
+                        this.tile.tileId,
+                        this.tile.mapTileKey,
+                        mapLayerStyleRuleId
+                    )) {
+                        finishedCornerTile.renderScene(sceneHandle);
+                    }
+                }
+            }
+
+            this.completeRender(fidelity, activeLowFiLods);
+            return true;
+        } finally {
+            const workerTimings = this.consumeLatestWorkerTimings();
+            const wallTimeMs = performance.now() - startTime;
+            this.recordRenderTimeSample(wallTimeMs, workerTimings?.totalMs);
+            this.recordWorkerParseTimeSample(workerTimings?.deserializeMs);
+        }
+    }
+
+    private resolveLayerKeys(variantSuffix = ""): DeckLayerKeys {
+        const variant = this.composeLayerVariant(variantSuffix);
+        return {
+            surfaceLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "surface",
+                variant
+            }),
+            pathLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "path",
+                variant
+            }),
+            pointLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "point",
+                variant
+            }),
+            labelLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "label",
+                variant
+            }),
+            arrowLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "arrow",
+                variant
+            })
+        };
+    }
+
+    private composeLayerVariant(variantSuffix: string): string | undefined {
+        const parts: string[] = [];
+        if (this.layerKeySuffix.length > 0) {
+            parts.push(this.layerKeySuffix);
+        }
+        if (variantSuffix.length > 0) {
+            parts.push(variantSuffix);
+        }
+        if (!parts.length) {
+            return undefined;
+        }
+        return parts.join("::");
+    }
+
+    private clearMergedPointVisualizations(sceneHandle: IRenderSceneHandle): void {
+        for (const affectedCornerTile of this.pointMergeService.remove(
+            this.tile.tileId,
+            this.tile.mapTileKey,
+            this.mapViewLayerStyleId()
+        )) {
+            affectedCornerTile.removeScene(sceneHandle);
+            if (affectedCornerTile.referencingTiles.length > 0) {
+                affectedCornerTile.renderScene(sceneHandle);
+            }
+        }
+    }
+
+    private applyLayerDataToRegistry(
+        sceneHandle: IRenderSceneHandle,
+        registry: DeckLayerRegistry,
+        surfaceLayerData: DeckSurfaceLayerData[],
+        pathLayerData: DeckPathLayerData[],
+        pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
+        arrowLayerData: DeckPathLayerData[]
+    ): void {
+        this.applyLayerEntriesToRegistry(sceneHandle, registry, [{
+            variantSuffix: "",
+            orderOffset: 0,
+            surfaceLayerData,
+            pathLayerData,
+            pointLayerData,
+            labelLayerData,
+            arrowLayerData
+        }]);
+    }
+
+    private applyLowFiBundleDataToRegistry(
+        sceneHandle: IRenderSceneHandle,
+        registry: DeckLayerRegistry,
+        lowFiBundles: DeckLowFiBundleData[]
+    ): void {
+        this.applyLayerEntriesToRegistry(sceneHandle, registry, lowFiBundles.map((bundle) => ({
+            variantSuffix: `lowfi-lod-${bundle.lod}`,
+            orderOffset: bundle.lod,
+            surfaceLayerData: bundle.surfaceLayerData,
+            pathLayerData: bundle.pathLayerData,
+            pointLayerData: bundle.pointLayerData,
+            labelLayerData: bundle.labelLayerData,
+            arrowLayerData: bundle.arrowLayerData
+        })));
+    }
+
+    private applyLayerEntriesToRegistry(
+        sceneHandle: IRenderSceneHandle,
+        registry: DeckLayerRegistry,
+        entries: DeckLayerRenderEntry[]
+    ): void {
+        const desiredSurfaceLayerKeys = new Set<string>();
+        const desiredPointLayerKeys = new Set<string>();
+        const desiredPathLayerKeys = new Set<string>();
+        const desiredLabelLayerKeys = new Set<string>();
+        const desiredArrowLayerKeys = new Set<string>();
+        const modelMatrix = this.modelMatrixForScene(sceneHandle);
+        const surfaceParameters = this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value
+            ? DECK_HIGHLIGHT_SURFACE_PARAMETERS
+            : undefined;
+
+        for (const entry of entries) {
+            for (const surfaceLayerData of entry.surfaceLayerData) {
+                if (surfaceLayerData.length <= 0) {
+                    continue;
+                }
+                const layerKeys = this.resolveLayerKeys(this.composeGeometryVariant(entry.variantSuffix, "surface"));
+                const surfaceLayer = new SolidPolygonLayer<DeckSurfaceLayerData, DeckPickLayerMetadata>({
+                    id: layerKeys.surfaceLayerKey,
+                    data: surfaceLayerData,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: surfaceLayerData.coordinateOrigin,
+                    filled: true,
+                    extruded: false,
+                    wireframe: false,
+                    // Our binary surface buffers carry per-vertex attributes already aligned to the raw vertices.
+                    // Deck's polygon normalization may add closing vertices, which desynchronizes those buffers.
+                    _normalize: false,
+                    _full3d: true,
+                    modelMatrix,
+                    parameters: surfaceParameters,
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey,
+                    featureAddresses: surfaceLayerData.featureAddresses
+                });
+                registry.upsert(layerKeys.surfaceLayerKey, surfaceLayer, 350 + entry.orderOffset);
+                desiredSurfaceLayerKeys.add(layerKeys.surfaceLayerKey);
+            }
+
+            for (const pointLayerData of entry.pointLayerData) {
+                if (pointLayerData.length <= 0) {
+                    continue;
+                }
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(entry.variantSuffix, "point", pointLayerData.billboard)
+                );
+                const pointLayer = new ScatterplotLayer<DeckPointLayerData, DeckPickLayerMetadata>({
+                    id: layerKeys.pointLayerKey,
+                    data: pointLayerData,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: pointLayerData.coordinateOrigin,
+                    filled: true,
+                    stroked: false,
+                    radiusUnits: "pixels",
+                    billboard: pointLayerData.billboard,
+                    modelMatrix,
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey,
+                    featureAddresses: pointLayerData.featureAddresses
+                });
+                registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset);
+                desiredPointLayerKeys.add(layerKeys.pointLayerKey);
+            }
+
+            for (const labelLayerData of entry.labelLayerData) {
+                if (labelLayerData.length <= 0) {
+                    continue;
+                }
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(entry.variantSuffix, "label", labelLayerData.billboard)
+                );
+                const labelLayer = new TextLayer({
+                    id: layerKeys.labelLayerKey,
+                    data: labelLayerData.data,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: labelLayerData.coordinateOrigin,
+                    getPosition: (d: DeckRenderableLabelDatum) => d.position,
+                    getText: (d: DeckRenderableLabelDatum) => d.text,
+                    getColor: (d: DeckRenderableLabelDatum) => d.fillColor,
+                    getOutlineColor: (d: DeckRenderableLabelDatum) => d.outlineColor,
+                    getOutlineWidth: (d: DeckRenderableLabelDatum) => d.outlineWidth,
+                    getSize: (d: DeckRenderableLabelDatum) => 14 * d.scale,
+                    sizeUnits: "pixels",
+                    getPixelOffset: (d: DeckRenderableLabelDatum) => d.pixelOffset ?? [0, 0],
+                    billboard: labelLayerData.billboard,
+                    modelMatrix,
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey
+                } as any) as any;
+                registry.upsert(layerKeys.labelLayerKey, labelLayer, 475 + entry.orderOffset);
+                desiredLabelLayerKeys.add(layerKeys.labelLayerKey);
+            }
+
+            for (const pathLayerData of entry.pathLayerData) {
+                if (pathLayerData.length <= 0) {
+                    continue;
+                }
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(entry.variantSuffix, "path", pathLayerData.billboard)
+                );
+                const pathLayer = new PathLayer<DeckPathLayerData, DeckPathLayerMetadata>({
+                    id: layerKeys.pathLayerKey,
+                    data: pathLayerData,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: pathLayerData.coordinateOrigin,
+                    _pathType: "open",
+                    widthUnits: "pixels",
+                    billboard: pathLayerData.billboard,
+                    modelMatrix,
+                    capRounded: true,
+                    jointRounded: true,
+                    pickable: true,
+                    dashJustified: true,
+                    extensions: [new PathStyleExtension({dash: true})],
+                    tileKey: this.tile.mapTileKey,
+                    featureAddressesByPath: pathLayerData.featureAddressesByPath
+                });
+                registry.upsert(layerKeys.pathLayerKey, pathLayer, 400 + entry.orderOffset);
+                desiredPathLayerKeys.add(layerKeys.pathLayerKey);
+            }
+
+            for (const arrowLayerData of entry.arrowLayerData) {
+                if (arrowLayerData.length <= 0) {
+                    continue;
+                }
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(entry.variantSuffix, "arrow", arrowLayerData.billboard)
+                );
+                const arrowMarkers = this.buildArrowMarkers(arrowLayerData);
+                const arrowLayer = new IconLayer<DeckArrowMarker, DeckPickLayerMetadata>({
+                    id: layerKeys.arrowLayerKey,
+                    data: arrowMarkers,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: arrowLayerData.coordinateOrigin,
+                    iconAtlas: DECK_ARROW_ICON_ATLAS,
+                    iconMapping: DECK_ARROW_ICON_MAPPING,
+                    getIcon: () => "arrowhead",
+                    getPosition: (marker: DeckArrowMarker) => marker.position,
+                    getSize: (marker: DeckArrowMarker) => marker.sizePx,
+                    sizeUnits: "pixels",
+                    getAngle: (marker: DeckArrowMarker) => marker.angleDeg,
+                    getColor: (marker: DeckArrowMarker) => marker.color,
+                    billboard: arrowLayerData.billboard,
+                    modelMatrix,
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey,
+                    alphaCutoff: 0.05,
+                });
+                registry.upsert(layerKeys.arrowLayerKey, arrowLayer, 450 + entry.orderOffset);
+                desiredArrowLayerKeys.add(layerKeys.arrowLayerKey);
+            }
+        }
+
+        this.reconcileLayerKeys(registry, this.surfaceLayerKeys, desiredSurfaceLayerKeys);
+        this.reconcileLayerKeys(registry, this.pointLayerKeys, desiredPointLayerKeys);
+        this.reconcileLayerKeys(registry, this.pathLayerKeys, desiredPathLayerKeys);
+        this.reconcileLayerKeys(registry, this.labelLayerKeys, desiredLabelLayerKeys);
+        this.reconcileLayerKeys(registry, this.arrowLayerKeys, desiredArrowLayerKeys);
+    }
+
+    private modelMatrixForScene(sceneHandle: IRenderSceneHandle): Matrix4 | null {
+        if (sceneHandle.renderer !== "deck") {
+            return null;
+        }
+        const deckScene = sceneHandle.scene as DeckSceneHandle | undefined;
+        return deckScene?.sceneMode === SceneMode.SCENE2D ? DECK_FLAT_2D_MODEL_MATRIX : null;
+    }
+
+    private composeGeometryVariant(baseVariantSuffix: string, geometryKind: string, billboard?: boolean): string {
+        const parts: string[] = [];
+        if (baseVariantSuffix.length > 0) {
+            parts.push(baseVariantSuffix);
+        }
+        parts.push(
+            billboard === undefined
+                ? geometryKind
+                : `${geometryKind}-${billboard ? "billboard" : "world"}`
+        );
+        return parts.join("::");
+    }
+
+    private reconcileLayerKeys(
+        registry: DeckLayerRegistry,
+        activeLayerKeys: Set<string>,
+        desiredLayerKeys: Set<string>
+    ): void {
+        for (const layerKey of activeLayerKeys) {
+            if (!desiredLayerKeys.has(layerKey)) {
+                registry.remove(layerKey);
+            }
+        }
+        activeLayerKeys.clear();
+        for (const layerKey of desiredLayerKeys) {
+            activeLayerKeys.add(layerKey);
+        }
+    }
+
+    private completeRender(
+        fidelity: "low" | "high" | "any" | null,
+        activeLowFiLods: number[]
+    ): void {
+        this.rendered = true;
+        this.renderQueued = false;
+        this.deleted = false;
+        this.lastSignature = this.renderSignature(fidelity);
+        this.hadTileDataAtLastRender = this.tileHasData();
+        this.tileFeatureCountAtLastRender = this.tileFeatureCount();
+        this.tileDataVersionAtLastRender = this.tile.dataVersion;
+        this.activeRenderedFidelity = fidelity;
+        this.activeRenderedLowFiLods = fidelity === "low" ? [...activeLowFiLods] : [];
+    }
+
+    private hasRenderableLayerData(
+        surfaceLayerData: DeckSurfaceLayerData[],
+        pathLayerData: DeckPathLayerData[],
+        pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
+        arrowLayerData: DeckPathLayerData[]
+    ): boolean {
+        return surfaceLayerData.some((data) => data.length > 0)
+            || pathLayerData.some((data) => data.length > 0)
+            || pointLayerData.some((data) => data.length > 0)
+            || labelLayerData.some((data) => data.length > 0)
+            || arrowLayerData.some((data) => data.length > 0);
+    }
+
+    private hasRenderableMergedPointFeatures(
+        mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
+    ): boolean {
+        if (!mergedPointFeatures) {
+            return false;
+        }
+        return Object.values(mergedPointFeatures).some(features => features.length > 0);
+    }
+
+    private shouldKeepActiveLowFiFallback(
+        fidelity: "low" | "high" | "any" | null,
+        surfaceLayerData: DeckSurfaceLayerData[],
+        pathLayerData: DeckPathLayerData[],
+        pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
+        arrowLayerData: DeckPathLayerData[],
+        mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
+    ): boolean {
+        if (fidelity !== "high"
+            || this.activeRenderedFidelity !== "low"
+            || this.activeRenderedLowFiLods.length === 0) {
+            return false;
+        }
+        return !this.hasRenderableLayerData(surfaceLayerData, pathLayerData, pointLayerData, labelLayerData, arrowLayerData)
+            && !this.hasRenderableMergedPointFeatures(mergedPointFeatures);
+    }
+
+    private updateLowFiBundleCache(lowFiBundles: DeckLowFiBundleData[]): void {
+        this.lowFiBundleByLod.clear();
+        for (const lowFiBundle of lowFiBundles) {
+            this.lowFiBundleByLod.set(lowFiBundle.lod, lowFiBundle);
+        }
+    }
+
+    private requestedLowFiLod(): number | null {
+        const requestedLod = this.resolveMaxLowFiLod("low");
+        if (requestedLod < 0) {
+            return null;
+        }
+        return Math.max(0, Math.min(7, Math.floor(requestedLod)));
+    }
+
+    private selectLowFiBundlesForCurrentRequest(): DeckLowFiBundleData[] {
+        const requestedLod = this.requestedLowFiLod();
+        if (requestedLod === null) {
+            return [];
+        }
+        return [...this.lowFiBundleByLod.values()]
+            .filter((bundle) => bundle.lod <= requestedLod)
+            .sort((lhs, rhs) => lhs.lod - rhs.lod);
+    }
+
+    private lowFiLodSelection(): number[] {
+        return this.selectLowFiBundlesForCurrentRequest().map((bundle) => bundle.lod);
+    }
+
+    private sameLowFiLodSelection(lhs: number[], rhs: number[]): boolean {
+        if (lhs.length !== rhs.length) {
+            return false;
+        }
+        for (let index = 0; index < lhs.length; index++) {
+            if (lhs[index] !== rhs[index]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private tryApplyCachedLowFiSwitch(
+        sceneHandle: IRenderSceneHandle,
+        registry: DeckLayerRegistry,
+        fidelity: "low" | "high" | "any" | null
+    ): boolean {
+        if (fidelity !== "low" || !this.rendered) {
+            return false;
+        }
+        const selectedLowFiBundles = this.selectLowFiBundlesForCurrentRequest();
+        if (selectedLowFiBundles.length === 0) {
+            // No cached low-fi output is available yet for this tile. Fall back to
+            // the normal render path so we do not clear the current high-fi layers
+            // and temporarily make the tile disappear during a high -> low switch.
+            return false;
+        }
+        const selectedLowFiLods = selectedLowFiBundles.map((bundle) => bundle.lod);
+        if (this.activeRenderedFidelity === "low" &&
+            this.sameLowFiLodSelection(this.activeRenderedLowFiLods, selectedLowFiLods)) {
+            return false;
+        }
+
+        this.clearMergedPointVisualizations(sceneHandle);
+        this.latestPointLayerData = [];
+        this.latestArrowLayerData = [];
+        this.latestMergedPointFeatures = null;
+        this.latestWorkerTimings = null;
+        this.applyLowFiBundleDataToRegistry(sceneHandle, registry, selectedLowFiBundles);
+        this.completeRender("low", selectedLowFiLods);
+        return true;
+    }
+
+    private hasPendingLowFiSwitch(): boolean {
+        if (!this.rendered
+            || this.currentFidelity() !== "low"
+            || this.activeRenderedFidelity !== "low") {
+            return false;
+        }
+        return !this.sameLowFiLodSelection(this.activeRenderedLowFiLods, this.lowFiLodSelection());
+    }
+
+    private hasPendingFidelitySwitch(): boolean {
+        if (!this.rendered) {
+            return false;
+        }
+        const currentFidelity = this.currentFidelity();
+        if (currentFidelity === null) {
+            return false;
+        }
+        return currentFidelity !== this.activeRenderedFidelity;
+    }
+
+    destroy(sceneHandle: IRenderSceneHandle): void {
+        this.deleted = true;
+        const registry = this.resolveRegistry(sceneHandle);
+        for (const affectedCornerTile of this.pointMergeService.remove(
+            this.tile.tileId,
+            this.tile.mapTileKey,
+            this.mapViewLayerStyleId()
+        )) {
+            affectedCornerTile.removeScene(sceneHandle);
+            if (affectedCornerTile.referencingTiles.length > 0) {
+                affectedCornerTile.renderScene(sceneHandle);
+            }
+        }
+        for (const surfaceLayerKey of this.surfaceLayerKeys) {
+            registry.remove(surfaceLayerKey);
+        }
+        for (const pointLayerKey of this.pointLayerKeys) {
+            registry.remove(pointLayerKey);
+        }
+        for (const pathLayerKey of this.pathLayerKeys) {
+            registry.remove(pathLayerKey);
+        }
+        for (const labelLayerKey of this.labelLayerKeys) {
+            registry.remove(labelLayerKey);
+        }
+        for (const arrowLayerKey of this.arrowLayerKeys) {
+            registry.remove(arrowLayerKey);
+        }
+        this.surfaceLayerKeys.clear();
+        this.pointLayerKeys.clear();
+        this.pathLayerKeys.clear();
+        this.labelLayerKeys.clear();
+        this.arrowLayerKeys.clear();
+        this.latestLabelLayerData = [];
+        this.latestLowFiBundleData = [];
+        this.lowFiBundleByLod.clear();
+        this.activeRenderedFidelity = null;
+        this.activeRenderedLowFiLods = [];
+        this.rendered = false;
+        this.hadTileDataAtLastRender = false;
+        this.tileFeatureCountAtLastRender = 0;
+        this.tileDataVersionAtLastRender = -1;
+    }
+
+    isDirty(): boolean {
+        return (
+            !this.rendered ||
+            this.lastSignature !== this.renderSignature() ||
+            this.hadTileDataAtLastRender !== this.tileHasData() ||
+            this.tileFeatureCountAtLastRender !== this.tileFeatureCount() ||
+            this.tileDataVersionAtLastRender !== this.tile.dataVersion
+        );
+    }
+
+    renderRank(): number {
+        const hasData = this.tileHasData();
+        const priorityBucket = (this.hasPendingLowFiSwitch() || this.hasPendingFidelitySwitch())
+            ? RENDER_RANK_PRIORITY_SWITCH_ONLY
+            : ((!this.rendered && hasData)
+                ? RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA
+                : RENDER_RANK_PRIORITY_DEFAULT);
+        const rawRenderOrder = this.tile.renderOrder();
+        const renderOrder = Number.isFinite(rawRenderOrder)
+            ? Math.max(0, Math.min(Math.floor(rawRenderOrder), RENDER_RANK_RENDER_ORDER_MAX))
+            : RENDER_RANK_RENDER_ORDER_MAX;
+        const hasDataRank = hasData ? RENDER_RANK_HAS_DATA : RENDER_RANK_MISSING_DATA;
+        return priorityBucket * RENDER_RANK_PRIORITY_STRIDE
+            + renderOrder * RENDER_RANK_ORDER_STRIDE
+            + hasDataRank;
+    }
+
+    updateStatus(renderQueued?: boolean): void {
+        if (renderQueued !== undefined) {
+            this.renderQueued = renderQueued;
+        }
+    }
+
+    setStyleOption(optionId: string, value: string | number | boolean): boolean {
+        this.options[optionId] = value;
+        return true;
+    }
+
+    private highlightModeLabel(): string {
+        switch (this.highlightMode.value) {
+            case coreLib.HighlightMode.HOVER_HIGHLIGHT.value:
+                return "hover";
+            case coreLib.HighlightMode.SELECTION_HIGHLIGHT.value:
+                return "selection";
+            default:
+                return "base";
+        }
+    }
+
+    private renderSignature(fidelity: "low" | "high" | "any" | null = this.currentFidelity()): string {
+        return JSON.stringify({
+            fidelity,
+            highFidelityStage: this.highFidelityStage,
+            maxLowFiLod: this.styleHasExplicitLowFidelityRules ? this.maxLowFiLod : null,
+            renderQueued: this.renderQueued,
+            highlightMode: this.highlightMode.value,
+            featureIdSubset: this.featureIdSubset,
+            styleOptions: this.options
+        });
+    }
+
+    private async renderWasm(fidelity: "low" | "high" | "any" | null): Promise<DeckPathLayerData[]> {
+        if (fidelity === null) {
+            return [];
+        }
+
+        // Keep non-base highlighting synchronous to minimize interaction latency
+        // and avoid ordering races while selection/hover state changes.
+        if (this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value) {
+            const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(fullMainThread.vertexCount);
+            this.latestWorkerTimings = fullMainThread.workerTimings;
+            this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
+            this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestLabelLayerData = fullMainThread.labelLayerData;
+            this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestLowFiBundleData = fullMainThread.lowFiBundles;
+            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
+            return fullMainThread.pathLayerData;
+        }
+
+        if (!isDeckRenderWorkerPipelineEnabled()) {
+            const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(fullMainThread.vertexCount);
+            this.latestWorkerTimings = fullMainThread.workerTimings;
+            this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
+            this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestLabelLayerData = fullMainThread.labelLayerData;
+            this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestLowFiBundleData = fullMainThread.lowFiBundles;
+            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
+            return fullMainThread.pathLayerData;
+        }
+
+        try {
+            const workerOutput = await this.renderWasmInWorker(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(workerOutput.vertexCount);
+            this.latestWorkerTimings = workerOutput.workerTimings;
+            this.latestSurfaceLayerData = workerOutput.surfaceLayerData;
+            this.latestPointLayerData = workerOutput.pointLayerData;
+            this.latestLabelLayerData = workerOutput.labelLayerData;
+            this.latestArrowLayerData = workerOutput.arrowLayerData;
+            this.latestLowFiBundleData = workerOutput.lowFiBundles;
+            this.latestMergedPointFeatures = workerOutput.mergedPointFeatures;
+            return workerOutput.pathLayerData;
+        } catch (error) {
+            console.error("Deck worker rendering failed; falling back to main thread rendering.", error);
+            const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(fullMainThread.vertexCount);
+            this.latestWorkerTimings = fullMainThread.workerTimings;
+            this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
+            this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestLabelLayerData = fullMainThread.labelLayerData;
+            this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestLowFiBundleData = fullMainThread.lowFiBundles;
+            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
+            return fullMainThread.pathLayerData;
+        }
+    }
+
+    private async renderWasmInWorker(
+        fidelity: "low" | "high" | "any",
+        outputMode: DeckGeometryOutputMode
+    ): Promise<DeckWasmRenderOutput> {
+        const fieldDictBlob = this.tile.getFieldDictBlob();
+        const dataSourceInfoBlob = this.tile.getDataSourceInfoBlob();
+        if (!fieldDictBlob || !dataSourceInfoBlob) {
+            throw new Error("Worker render requested without parser context blobs.");
+        }
+        const tileStageBlobs = this.tile.stageBlobs().map(entry => entry.blob);
+        if (!tileStageBlobs.length && this.tile.tileFeatureLayerBlob) {
+            tileStageBlobs.push(this.tile.tileFeatureLayerBlob);
+        }
+        if (!tileStageBlobs.length) {
+            throw new Error("Worker render requested without tile data blobs.");
+        }
+        const pool = deckRenderWorkerPool();
+        const result = await pool.renderTile({
+            viewIndex: this.viewIndex,
+            tileKey: this.tile.mapTileKey,
+            tileStageBlobs,
+            fieldDictBlob,
+            dataSourceInfoBlob,
+            nodeId: this.tile.nodeId,
+            mapName: this.tile.mapName,
+            styleSource: this.styleSource,
+            styleOptions: this.copyStyleOptions(),
+            highlightModeValue: this.highlightMode.value,
+            fidelityValue: this.fidelityEnumValue(fidelity).value,
+            highFidelityStage: this.resolvedHighFidelityStage(),
+            maxLowFiLod: this.resolveMaxLowFiLod(fidelity),
+            outputMode,
+            featureIdSubset: [...this.featureIdSubset],
+            mergeCountSnapshot: this.pointMergeService.makeMergeCountSnapshot(
+                this.tile.tileId,
+                this.mapViewLayerStyleId(),
+                this.tile.mapTileKey
+            )
+        });
+        const geometryLayerData = this.buildGeometryLayerData(result.coordinateOrigin, result);
+        return {
+            ...geometryLayerData,
+            lowFiBundles: this.buildLowFiBundleData(result.lowFiBundles, result.coordinateOrigin),
+            mergedPointFeatures:
+                (result.mergedPointFeatures ?? {}) as Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
+            vertexCount: result.vertexCount,
+            workerTimings: result.workerTimings ?? null
+        };
+    }
+
+    /**
+     * Cross-tile relation resolution stays on the synchronous selection path.
+     * Worker renders and regular viewport paints only resolve relations inside
+     * the primary tile.
+     */
+    private shouldAddRelationAuxiliaryTiles(): boolean {
+        return this.highlightMode.value === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value
+            && this.styleHasRelationRules;
+    }
+
+    private createMainThreadDeckVisualization(
+        fidelity: "low" | "high" | "any",
+        outputMode: DeckGeometryOutputMode
+    ): DeckFeatureLayerVisualization {
+        const deckCtor = deckFeatureLayerVisualizationCtor();
+        const mergeCountProvider: MergeCountProvider = {
+            count: (geoPos, hashPos, level, mapViewLayerStyleRuleId) => this.pointMergeService.count(
+                geoPos,
+                hashPos,
+                level,
+                mapViewLayerStyleRuleId,
+                this.tile.mapTileKey
+            )
+        };
+        return new deckCtor(
+            this.viewIndex,
+            this.tile.mapTileKey,
+            this.style,
+            this.options,
+            mergeCountProvider,
+            this.highlightMode,
+            this.fidelityEnumValue(fidelity),
+            this.resolvedHighFidelityStage(),
+            this.resolveMaxLowFiLod(fidelity),
+            this.mapGeometryOutputModeForWasm(outputMode),
+            this.featureIdSubset
+        );
+    }
+
+    private async addTilesAndRunMainThreadVisualization(
+        deckVisu: DeckFeatureLayerVisualization
+    ): Promise<number> {
+        let vertexCount = 0;
+        await this.tile.peekAsync(async (tileFeatureLayer) => {
+            vertexCount = Number(tileFeatureLayer.numVertices());
+            deckVisu.addTileFeatureLayer(tileFeatureLayer);
+            deckVisu.run();
+        });
+        return vertexCount;
+    }
+
+    private async resolveExternalRelations(deckVisu: DeckFeatureLayerVisualization): Promise<void> {
+        if (!this.shouldAddRelationAuxiliaryTiles()) {
+            return;
+        }
+        const requests = (deckVisu.externalRelationReferences() as RelationLocateRequest[]) ?? [];
+        if (requests.length === 0) {
+            return;
+        }
+        const locateResult = await this.relationExternalTileLoader(requests);
+        await FeatureTile.peekMany(locateResult.tiles, async (tileFeatureLayers: TileFeatureLayer[]) => {
+            for (const tileFeatureLayer of tileFeatureLayers) {
+                deckVisu.addTileFeatureLayer(tileFeatureLayer);
+            }
+            deckVisu.processResolvedExternalReferences(locateResult.responses);
+        });
+    }
+
+    private async renderWasmOnMainThread(
+        fidelity: "low" | "high" | "any",
+        outputMode: DeckGeometryOutputMode
+    ): Promise<DeckWasmRenderOutput> {
+        let deckVisu: DeckFeatureLayerVisualization | undefined;
+        try {
+            deckVisu = this.createMainThreadDeckVisualization(fidelity, outputMode);
+            const vertexCount = await this.addTilesAndRunMainThreadVisualization(deckVisu);
+            await this.resolveExternalRelations(deckVisu);
+            const renderResult = this.readRenderResultFromDeckVisualization(deckVisu);
+            const geometryLayerData = this.buildGeometryLayerData(
+                renderResult.coordinateOrigin,
+                renderResult
+            );
+            return {
+                ...geometryLayerData,
+                lowFiBundles: this.buildLowFiBundleData(renderResult.lowFiBundles, renderResult.coordinateOrigin),
+                mergedPointFeatures: renderResult.mergedPointFeatures as
+                    Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
+                vertexCount: Math.max(0, Math.floor(vertexCount)),
+                workerTimings: null
+            };
+        } finally {
+            if (deckVisu) {
+                deckVisu.delete();
+            }
+        }
+    }
+
+    private buildLowFiBundleData(
+        rawBundles: DeckLowFiBundleBuffers[],
+        coordinateOrigin: Float64Array
+    ): DeckLowFiBundleData[] {
+        if (!rawBundles.length) {
+            return [];
+        }
+        const bundlesByLod = new Map<number, DeckLowFiBundleData>();
+        for (const rawBundle of rawBundles) {
+            const lod = Number.isFinite(rawBundle.lod)
+                ? Math.max(0, Math.min(7, Math.floor(rawBundle.lod)))
+                : 0;
+            const geometryLayerData = this.buildGeometryLayerData(coordinateOrigin, rawBundle);
+            const {surfaceLayerData, pathLayerData, pointLayerData, labelLayerData, arrowLayerData} = geometryLayerData;
+            if (!surfaceLayerData.length && !pathLayerData.length && !pointLayerData.length
+                && !labelLayerData.length && !arrowLayerData.length) {
+                continue;
+            }
+            bundlesByLod.set(lod, {
+                lod,
+                surfaceLayerData,
+                pathLayerData,
+                pointLayerData,
+                labelLayerData,
+                arrowLayerData
+            });
+        }
+        return [...bundlesByLod.values()].sort((lhs, rhs) => lhs.lod - rhs.lod);
+    }
+
+    private buildGeometryLayerData(
+        coordinateOrigin: Float64Array,
+        geometry: DeckGeometryBucketBuffers
+    ): Pick<DeckWasmRenderOutput, "surfaceLayerData" | "pathLayerData" | "pointLayerData" | "labelLayerData" | "arrowLayerData"> {
+        return {
+            surfaceLayerData: this.buildSurfaceLayerData({
+                coordinateOrigin,
+                ...geometry.surface
+            }),
+            pathLayerData: this.buildCombinedPathLayerData(
+                coordinateOrigin,
+                geometry.pathWorld,
+                geometry.pathBillboard
+            ),
+            pointLayerData: this.buildCombinedPointLayerData(
+                coordinateOrigin,
+                geometry.pointWorld,
+                geometry.pointBillboard
+            ),
+            labelLayerData: this.buildCombinedLabelLayerData(
+                coordinateOrigin,
+                geometry.labelWorld,
+                geometry.labelBillboard
+            ),
+            arrowLayerData: this.buildCombinedPathLayerData(
+                coordinateOrigin,
+                geometry.arrowWorld,
+                geometry.arrowBillboard
+            )
+        };
+    }
+
+    private readRenderResultFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
+        return (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+    }
+
+    private buildCombinedPathLayerData(
+        coordinateOrigin: Float64Array,
+        worldRaw: Omit<DeckPathRawBuffers, "coordinateOrigin">,
+        billboardRaw: Omit<DeckPathRawBuffers, "coordinateOrigin">
+    ): DeckPathLayerData[] {
+        return [
+            ...this.buildPathLayerData({coordinateOrigin, ...worldRaw}, false),
+            ...this.buildPathLayerData({coordinateOrigin, ...billboardRaw}, true)
+        ];
+    }
+
+    private buildCombinedPointLayerData(
+        coordinateOrigin: Float64Array,
+        worldRaw: Omit<DeckPointRawBuffers, "coordinateOrigin">,
+        billboardRaw: Omit<DeckPointRawBuffers, "coordinateOrigin">
+    ): DeckPointLayerData[] {
+        return [
+            ...this.buildPointLayerData({coordinateOrigin, ...worldRaw}, false),
+            ...this.buildPointLayerData({coordinateOrigin, ...billboardRaw}, true)
+        ];
+    }
+
+    private buildCombinedLabelLayerData(
+        coordinateOrigin: Float64Array,
+        worldRaw: DeckLabelDatum[],
+        billboardRaw: DeckLabelDatum[]
+    ): DeckLabelLayerData[] {
+        return [
+            ...this.buildLabelLayerData(coordinateOrigin, worldRaw, false),
+            ...this.buildLabelLayerData(coordinateOrigin, billboardRaw, true)
+        ];
+    }
+
+    private coordinateOriginFromRaw(raw: Float64Array): [number, number, number] | null {
+        if (raw.length < 3) {
+            return null;
+        }
+        return [raw[0], raw[1], raw[2]];
+    }
+
+    private buildPathLayerData(raw: DeckPathRawBuffers, billboard: boolean): DeckPathLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
+        if (!coordinateOrigin) {
+            return [];
+        }
+        if (raw.startIndices.length < 2) {
+            return [];
+        }
+
+        const pathCount = raw.startIndices.length - 1;
+        if (!pathCount || pathCount > MAX_DECK_PATH_COUNT) {
+            return [];
+        }
+
+        const vertexCount = raw.startIndices[pathCount];
+        if (!Number.isFinite(vertexCount) || !Number.isInteger(vertexCount) ||
+            vertexCount <= 1 || vertexCount > MAX_DECK_VERTEX_COUNT) {
+            return [];
+        }
+
+        if (raw.positions.length < vertexCount * 3) {
+            return [];
+        }
+        if (raw.colors.length < vertexCount * 4 || raw.widths.length < vertexCount || raw.featureAddresses.length < pathCount) {
+            return [];
+        }
+        if (raw.dashArrays && raw.dashArrays.length < vertexCount * 2) {
+            return [];
+        }
+        if (raw.startIndices[0] !== 0) {
+            return [];
+        }
+        for (let pathIndex = 0; pathIndex < pathCount; pathIndex++) {
+            const start = raw.startIndices[pathIndex];
+            const end = raw.startIndices[pathIndex + 1];
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end > vertexCount) {
+                return [];
+            }
+        }
+
+        const attributes: DeckPathLayerData["attributes"] = {
+            getPath: {value: raw.positions, size: 3},
+            instanceColors: {value: raw.colors, size: 4},
+            instanceStrokeWidths: {value: raw.widths, size: 1}
+        };
+        if (raw.dashArrays && raw.dashArrays.length >= vertexCount * 2) {
+            attributes.instanceDashArrays = {value: raw.dashArrays, size: 2};
+        }
+
+        return [{
+            length: pathCount,
+            billboard,
+            coordinateOrigin,
+            startIndices: raw.startIndices,
+            featureAddressesByPath: raw.featureAddresses,
+            attributes
+        }];
+    }
+
+    private buildSurfaceLayerData(raw: DeckSurfaceRawBuffers): DeckSurfaceLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
+        if (!coordinateOrigin) {
+            return [];
+        }
+        if (raw.startIndices.length < 2) {
+            return [];
+        }
+
+        const surfaceCount = raw.startIndices.length - 1;
+        if (!surfaceCount || surfaceCount > MAX_DECK_SURFACE_COUNT) {
+            return [];
+        }
+
+        const vertexCount = raw.startIndices[surfaceCount];
+        if (!Number.isFinite(vertexCount) || !Number.isInteger(vertexCount)
+            || vertexCount < 3 || vertexCount > MAX_DECK_VERTEX_COUNT) {
+            return [];
+        }
+
+        if (raw.positions.length < vertexCount * 3
+            || raw.colors.length < vertexCount * 4
+            || raw.featureAddresses.length < surfaceCount) {
+            return [];
+        }
+        if (raw.startIndices[0] !== 0) {
+            return [];
+        }
+
+        for (let surfaceIndex = 0; surfaceIndex < surfaceCount; surfaceIndex++) {
+            const start = raw.startIndices[surfaceIndex];
+            const end = raw.startIndices[surfaceIndex + 1];
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 3 || end > vertexCount) {
+                return [];
+            }
+        }
+
+        return [{
+            length: surfaceCount,
+            coordinateOrigin,
+            startIndices: raw.startIndices,
+            featureAddresses: raw.featureAddresses,
+            attributes: {
+                getPolygon: {value: raw.positions, size: 3},
+                fillColors: {value: raw.colors, size: 4}
+            }
+        }];
+    }
+
+    private buildPointLayerData(raw: DeckPointRawBuffers, billboard: boolean): DeckPointLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
+        if (!coordinateOrigin) {
+            return [];
+        }
+        if (raw.positions.length < 3) {
+            return [];
+        }
+        if (raw.positions.length % 3 !== 0) {
+            return [];
+        }
+
+        const pointCount = raw.positions.length / 3;
+        if (!pointCount || pointCount > MAX_DECK_POINT_COUNT) {
+            return [];
+        }
+        if (raw.colors.length < pointCount * 4
+            || raw.radii.length < pointCount
+            || raw.featureAddresses.length < pointCount) {
+            return [];
+        }
+
+        return [{
+            length: pointCount,
+            billboard,
+            coordinateOrigin,
+            featureAddresses: raw.featureAddresses,
+            attributes: {
+                getPosition: {value: raw.positions, size: 3},
+                getFillColor: {value: raw.colors, size: 4},
+                getRadius: {value: raw.radii, size: 1}
+            }
+        }];
+    }
+
+    private buildLabelLayerData(
+        coordinateOriginRaw: Float64Array,
+        data: DeckLabelDatum[],
+        billboard: boolean
+    ): DeckLabelLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(coordinateOriginRaw);
+        if (!coordinateOrigin || data.length <= 0) {
+            return [];
+        }
+        const normalizedData: DeckRenderableLabelDatum[] = data.map((entry) => ({
+            ...entry,
+            position: [entry.position.x, entry.position.y, entry.position.z]
+        }));
+        return [{
+            length: normalizedData.length,
+            billboard,
+            coordinateOrigin,
+            data: normalizedData
+        }];
+    }
+
+    private buildArrowMarkers(pathData: DeckPathLayerData): DeckArrowMarker[] {
+        const markers: DeckArrowMarker[] = [];
+        const positions = pathData.attributes.getPath.value;
+        const colors = pathData.attributes.instanceColors.value;
+        const widths = pathData.attributes.instanceStrokeWidths.value;
+        for (let arrowIndex = 0; arrowIndex < pathData.length; arrowIndex++) {
+            const start = pathData.startIndices[arrowIndex];
+            const end = pathData.startIndices[arrowIndex + 1];
+            if (end - start < 3) continue;
+
+            const leftVertex = start;
+            const tipVertex = start + 1;
+            const rightVertex = end - 1;
+
+            const tipBase = tipVertex * 3;
+            const leftBase = leftVertex * 3;
+            const rightBase = rightVertex * 3;
+
+            const tipX = positions[tipBase];
+            const tipY = positions[tipBase + 1];
+            const tipZ = positions[tipBase + 2];
+
+            const baseCenterX = (positions[leftBase] + positions[rightBase]) * 0.5;
+            const baseCenterY = (positions[leftBase + 1] + positions[rightBase + 1]) * 0.5;
+
+            const dirX = tipX - baseCenterX;
+            const dirY = tipY - baseCenterY;
+            const dirLength = Math.hypot(dirX, dirY);
+            if (dirLength <= 1e-6) continue;
+
+            const colorBase = tipVertex * 4;
+            const widthPx = widths[tipVertex];
+            const rawFeatureAddress = pathData.featureAddressesByPath[arrowIndex];
+            const featureAddress =
+                Number.isInteger(rawFeatureAddress) && rawFeatureAddress !== DECK_UNSELECTABLE_FEATURE_INDEX
+                    ? rawFeatureAddress
+                    : null;
+            const angleDeg =
+                this.normalizeDegrees(
+                    DECK_ARROW_ANGLE_SIGN * ((Math.atan2(dirX, dirY) * 180) / Math.PI) +
+                    DECK_ARROW_ANGLE_OFFSET_DEG
+                );
+            const sizePx = Math.max(8, widthPx * 4);
+            markers.push({
+                featureAddress,
+                position: [tipX, tipY, tipZ],
+                color: [
+                    colors[colorBase],
+                    colors[colorBase + 1],
+                    colors[colorBase + 2],
+                    colors[colorBase + 3]
+                ],
+                sizePx,
+                angleDeg
+            });
+        }
+        return markers;
+    }
+
+    private tileHasData(): boolean {
+        return this.tile.hasData();
+    }
+
+    private tileFeatureCount(): number {
+        return this.tile.numFeatures;
+    }
+
+    private resolvedHighFidelityStage(): number {
+        return this.highFidelityStage;
+    }
+
+    private highestLoadedStageOrDefault(): number | null {
+        const highestLoadedStage = this.tile.highestLoadedStage();
+        if (highestLoadedStage === null || highestLoadedStage === undefined || !Number.isFinite(highestLoadedStage)) {
+            return null;
+        }
+        return Math.max(0, Math.floor(highestLoadedStage));
+    }
+
+    private currentFidelity(): "low" | "high" | "any" | null {
+        if (!this.tile.hasData() || this.tile.numFeatures <= 0) {
+            return null;
+        }
+        const highestLoadedStage = this.highestLoadedStageOrDefault();
+        if (highestLoadedStage !== null &&
+            this.prefersHighFidelity &&
+            highestLoadedStage >= this.resolvedHighFidelityStage()) {
+            return "high";
+        }
+        return "low";
+    }
+
+    private fidelityEnumValue(fidelity: "low" | "high" | "any"): RuleFidelity {
+        const fidelityEnum = deckRuleFidelityEnum();
+        if (fidelity === "high") {
+            return fidelityEnum.HIGH;
+        }
+        if (fidelity === "low") {
+            return fidelityEnum.LOW;
+        }
+        return fidelityEnum.ANY;
+    }
+
+    private resolveMaxLowFiLod(fidelity: "low" | "high" | "any"): number {
+        if (fidelity !== "low" || !this.styleHasExplicitLowFidelityRules) {
+            return -1;
+        }
+        if (this.maxLowFiLod === null || this.maxLowFiLod === undefined) {
+            return -1;
+        }
+        return this.maxLowFiLod;
+    }
+
+    private mapGeometryOutputModeForWasm(outputMode: DeckGeometryOutputMode): number {
+        const ctor = deckFeatureLayerVisualizationCtor();
+        if (outputMode === DECK_GEOMETRY_OUTPUT_POINTS_ONLY
+        ) {
+            return ctor.GEOMETRY_OUTPUT_POINTS_ONLY();
+        }
+        if (outputMode === DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY
+        ) {
+            return ctor.GEOMETRY_OUTPUT_NON_POINTS_ONLY();
+        }
+        return ctor.GEOMETRY_OUTPUT_ALL();
+    }
+
+    private setTileVertexCount(count: number): void {
+        this.tile.setVertexCount(Math.max(0, Math.floor(Number(count))));
+    }
+
+    private copyStyleOptions(): Record<string, boolean | number | string> {
+        return {...this.options};
+    }
+
+    private mapViewLayerStyleId(): MapViewLayerStyleRule {
+        return this.pointMergeService.makeMapViewLayerStyleId(
+            this.viewIndex,
+            this.tile.mapName,
+            this.tile.layerName,
+            this.styleId,
+            this.highlightMode
+        );
+    }
+
+    private recordRenderTimeSample(durationMs: number, measuredDurationMs?: number): void {
+        const sampleDuration = Number.isFinite(measuredDurationMs)
+            ? measuredDurationMs as number
+            : durationMs;
+        const timingListKey = `Rendering/${this.statsHighlightModeLabel()}/${this.styleId}#ms`;
+        const timingList = this.tile.stats.get(timingListKey);
+        if (timingList) {
+            timingList.push(sampleDuration);
+            return;
+        }
+        this.tile.stats.set(timingListKey, [sampleDuration]);
+    }
+
+    private recordWorkerParseTimeSample(durationMs?: number): void {
+        if (!Number.isFinite(durationMs)) {
+            return;
+        }
+        const parseTimes = this.tile.stats.get(FeatureTile.statParseTime);
+        if (parseTimes) {
+            parseTimes.push(durationMs as number);
+            return;
+        }
+        this.tile.stats.set(FeatureTile.statParseTime, [durationMs as number]);
+    }
+
+    private statsHighlightModeLabel(): string {
+        switch (this.highlightMode.value) {
+            case coreLib.HighlightMode.HOVER_HIGHLIGHT.value:
+                return "Hover";
+            case coreLib.HighlightMode.SELECTION_HIGHLIGHT.value:
+                return "Selection";
+            default:
+                return "Basic";
+        }
+    }
+
+    private resolveRegistry(sceneHandle: IRenderSceneHandle): DeckLayerRegistry {
+        const scene = sceneHandle.scene as DeckSceneHandle;
+        return scene.layerRegistry!;
+    }
+
+    private consumeLatestWorkerTimings(): DeckWorkerTimings | null {
+        const timings = this.latestWorkerTimings;
+        this.latestWorkerTimings = null;
+        return timings;
+    }
+
+    private normalizeDegrees(value: number): number {
+        const normalized = value % 360;
+        return normalized < 0 ? normalized + 360 : normalized;
+    }
+}

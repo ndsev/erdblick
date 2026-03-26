@@ -1,4 +1,10 @@
-import {AppStateService, InspectionPanelModel, LayerViewConfig, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
+import {
+    AppStateService,
+    InspectionPanelModel,
+    LayerViewConfig,
+    TileGridMode,
+    VIEW_SYNC_LAYERS
+} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
 import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
@@ -25,6 +31,9 @@ export interface LayerInfoItem extends Record<string, any> {
     coverage: Array<number | CoverageRectItem>;
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
+    stages?: number;
+    stageLabels?: string[];
+    highFidelityStage?: number;
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
@@ -88,6 +97,7 @@ export class MapTreeNode {
     type: string = "Map";
     info: MapInfoItem;
     key: string;
+    onlyFeatureLayers: LayerTreeNode[];
     layers: Map<string, LayerTreeNode> = new Map();
     expanded: boolean = true;
     visible: boolean[] = [];  // This is an array, because the values are stored per MapView.
@@ -99,10 +109,11 @@ export class MapTreeNode {
         this.layers =  new Map(Object.entries(mapInfo.layers).map(([_, layerInfo]) =>
             [layerInfo.layerId, new LayerTreeNode(layerInfo, mapInfo.mapId)])
         );
+        this.onlyFeatureLayers = Array.from(this.layers.values().filter(layer => layer.type !== "SourceData"));
     }
 
     get children() {
-        return Array.from(this.layers.values().filter(layer => layer.type !== "SourceData"));
+        return this.onlyFeatureLayers;
     }
 
     updateVisibilityFromChildren(numViews: number) {
@@ -356,17 +367,20 @@ export class MapLayerTree {
         this.configureTreeParameters();
     }
 
-    toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
-        const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
-            return;
-        }
-        const layer = mapItem.layers.get(layerId)!;
-        if (layer.viewConfig.length <= viewIndex) {
-            return;
-        }
-        layer.viewConfig[viewIndex].tileBorders = !layer.viewConfig[viewIndex].tileBorders;
-        this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
+    setViewTileBorderState(viewIndex: number, enabled: boolean) {
+        this.stateService.viewTileBordersState.next(viewIndex, enabled);
+    }
+
+    getViewTileBorderState(viewIndex: number) {
+        return this.stateService.viewTileBordersState.getValue(viewIndex);
+    }
+
+    setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
+        this.stateService.viewTileGridModeState.next(viewIndex, mode);
+    }
+
+    getViewTileGridMode(viewIndex: number): TileGridMode {
+        return this.stateService.viewTileGridModeState.getValue(viewIndex);
     }
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
@@ -379,6 +393,19 @@ export class MapLayerTree {
             return;
         }
         layer.viewConfig[viewIndex].level = level;
+        this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
+    }
+
+    setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
+        const mapItem = this.maps.get(mapId);
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
+            return;
+        }
+        const layer = mapItem.layers.get(layerId)!;
+        if (layer.viewConfig.length <= viewIndex) {
+            return;
+        }
+        layer.viewConfig[viewIndex].autoLevel = autoLevel;
         this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
     }
 
@@ -406,16 +433,16 @@ export class MapLayerTree {
         return layer.viewConfig[viewIndex].level;
     }
 
-    getMapLayerBorderState(viewIndex: number, mapId: string, layerId: string) {
+    getMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
-            return false;
+            return true;
         }
         const layer = mapItem.layers.get(layerId)!;
         if (layer.viewConfig.length <= viewIndex) {
-            return false;
+            return true;
         }
-        return layer.viewConfig[viewIndex].tileBorders;
+        return layer.viewConfig[viewIndex].autoLevel;
     }
 
     getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {
@@ -557,11 +584,11 @@ export class MapLayerTree {
 
                 if (targetConfig.visible !== sourceConfig.visible ||
                     targetConfig.level !== sourceConfig.level ||
-                    targetConfig.tileBorders !== sourceConfig.tileBorders) {
+                    targetConfig.autoLevel !== sourceConfig.autoLevel) {
                     layer.viewConfig[targetIndex] = {
+                        autoLevel: sourceConfig.autoLevel,
                         visible: sourceConfig.visible,
-                        level: sourceConfig.level,
-                        tileBorders: sourceConfig.tileBorders
+                        level: sourceConfig.level
                     };
                     layerConfigMutated = true;
                 }
@@ -597,6 +624,22 @@ export class MapLayerTree {
                         option.value
                     );
                 }
+            }
+        }
+
+        const sourceTileBorders = this.getViewTileBorderState(viewIndex);
+        const sourceTileGridMode = this.getViewTileGridMode(viewIndex);
+        for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
+            if (targetIndex === viewIndex) {
+                continue;
+            }
+            if (this.getViewTileBorderState(targetIndex) !== sourceTileBorders) {
+                this.setViewTileBorderState(targetIndex, sourceTileBorders);
+                viewConfigChanged = true;
+            }
+            if (this.getViewTileGridMode(targetIndex) !== sourceTileGridMode) {
+                this.setViewTileGridMode(targetIndex, sourceTileGridMode);
+                viewConfigChanged = true;
             }
         }
 

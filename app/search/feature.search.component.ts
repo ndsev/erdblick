@@ -1,23 +1,24 @@
-import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
-import {KeyboardService} from "../shared/keyboard.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
-import {SearchPanelComponent} from "./search.panel.component";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
+import {Dialog} from "primeng/dialog";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="feature-search-dialog" header="Search Loaded Features" [closeOnEscape]="false"
+        <p-dialog #featureSearchDialog class="feature-search-dialog" header="Search Loaded Features"
+                  [closeOnEscape]="false"
                   [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
-                  (onShow)="syncTreeScrollHeight($event)"
+                  (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
@@ -35,19 +36,24 @@ import {Scroller} from "primeng/scroller";
                 <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
+            <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">
+                <span>Awaited tiles to load: </span><span>{{ awaitedTilesToLoad }}</span>
+                <p-progress-spinner strokeWidth="10" fill="transparent" animationDuration=".5s"
+                                    [style]="{ width: '1em', height: '1em', margin: '0' }"/>
+            </div>
 
             <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
                 <p-tablist>
                     <p-tab value="results">
-                        <span>Results</span>
+                        <span>Results </span>
                         <p-badge [value]="results.length"/>
                     </p-tab>
                     <p-tab value="diagnostics">
-                        <span>Diagnostics</span>
+                        <span>Diagnostics </span>
                         <p-badge [value]="diagnostics.length"/>
                     </p-tab>
                     <p-tab value="traces" *ngIf="traces.length > 0">
-                        <span>Traces</span>
+                        <span>Traces </span>
                         <p-badge [value]="traces.length"/>
                     </p-tab>
                 </p-tablist>
@@ -58,7 +64,7 @@ import {Scroller} from "primeng/scroller";
                         <div style="display: flex; flex-direction: row; gap: 0.5em; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                             <span>Highlight colour:</span>
                             <p-colorPicker [(ngModel)]="searchService.pointColor"
-                                           (ngModelChange)="searchService.updatePointColor()" appendTo="body"/>
+                                           (ngModelChange)="searchService.updatePointColor()"></p-colorPicker>
                         </div>
                         <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
                             <span>Group:</span>
@@ -105,7 +111,7 @@ import {Scroller} from "primeng/scroller";
                                         <li>
                                             <div>
                                                 <span>{{ message.message }}</span>
-                                                <div>
+                                                <div *ngIf="message.query.length > 0">
                                                     <span>Here: </span>
                                                     <code style="width: 100%;"
                                                           [innerHTML]="message.query | highlightRegion: message.location?.offset:message.location?.size:25"></code>
@@ -154,6 +160,7 @@ export class FeatureSearchComponent {
     percentDone: number = 0;
     totalTiles: number = 0;
     doneTiles: number = 0;
+    awaitedTilesToLoad: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
@@ -173,18 +180,19 @@ export class FeatureSearchComponent {
     resultsStatus: string = "Loading...";
     scrollHeight: string = "28.5em";
 
-    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`?
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
+    @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapDataService,
                 public stateService: AppStateService,
-                public keyboardService: KeyboardService,
-                private infoMessageService: InfoMessageService) {
+                private infoMessageService: InfoMessageService,
+                private dialogStack: DialogStackService) {
         this.searchService.progress.subscribe(searchState => {
             if (!searchState) {
+                this.awaitedTilesToLoad = 0;
                 this.resultsTree = [];
                 return;
             }
@@ -192,6 +200,7 @@ export class FeatureSearchComponent {
             this.percentDone = searchState.percentDone();
             this.totalTiles = searchState.getTaskCount();
             this.doneTiles = searchState.getCompletedCount();
+            this.awaitedTilesToLoad = searchState.getPendingTileCount();
             if (searchState.isComplete()) {
                 this.searchResultReady();
                 this.canPauseStopSearch = false;
@@ -205,6 +214,11 @@ export class FeatureSearchComponent {
             if (this.diagnostics.length > 0 && this.results.length === 0)
                 this.resultPanelIndex = 'diagnostics';
         })
+    }
+
+    onDialogShow(event: any) {
+        this.syncTreeScrollHeight(event);
+        this.dialogStack.bringToFront(this.featureSearchDialog);
     }
 
     searchResultReady() {
@@ -278,6 +292,7 @@ export class FeatureSearchComponent {
         this.diagnostics = [];
         this.isSearchPaused = false;
         this.canPauseStopSearch = false;
+        this.awaitedTilesToLoad = 0;
         this.results = [];
         this.resultsTree = [];
         this.showFilter = false;
@@ -288,7 +303,7 @@ export class FeatureSearchComponent {
 
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
-            this.searchPanelComponent.setSearchValue(message.fix);
+            this.searchService.fixedDiagnosticsSearchQuery.next(message.fix);
         }
     }
 

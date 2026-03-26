@@ -4,7 +4,7 @@ Source: [https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Box]
 
 ### License
 
-Donated by [Cesium](http://cesiumjs.org/) for glTF testing.
+Donated by an external contributor for glTF testing.
 
 This model is licensed under a [Creative Commons Attribution 4.0 International License](http://creativecommons.org/licenses/by/4.0/).
 

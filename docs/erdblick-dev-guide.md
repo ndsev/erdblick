@@ -1,10 +1,10 @@
 # Erdblick Development Guide
 
-Erdblick is a Cesium-based Angular application backed by a WebAssembly core for tile decoding, styling, and feature search. This guide explains the internal architecture and the main data flows for contributors working on the UI or the C++ core. If you need usage instructions instead of implementation details, start with the [MapViewer User Guide](../../../docs/mv-user.md).
+Erdblick is a deck.gl-based Angular application backed by a WebAssembly core for tile decoding, styling, and feature search. This guide explains the internal architecture and the main data flows for contributors working on the UI or the C++ core. If you need usage instructions instead of implementation details, start with the [MapViewer User Guide](../../../docs/mv-user.md).
 
 Source code is available at [github.com/ndsev/erdblick](https://github.com/ndsev/erdblick).
 
-We begin with a component overview to show how the Angular app, the WASM core, Cesium, configuration files, and a mapget-compatible backend fit together. Afterwards, we zoom into the tile streaming and rendering pipelines, error handling, feature search, selection, and debugging strategies.
+We begin with a component overview to show how the Angular app, the WASM core, deck.gl, configuration files, and a mapget-compatible backend fit together. Afterwards, we zoom into the tile streaming and rendering pipelines, error handling, feature search, selection, and debugging strategies.
 
 ## Development Setup
 
@@ -44,7 +44,7 @@ Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari 
 
 ## Component Overview
 
-At a high level, erdblick consists of an Angular shell, a Cesium-based map view, a WebAssembly core that understands map tiles and evaluates styles and search queries, and a mapget-compatible backend plus static configuration assets:
+At a high level, erdblick consists of an Angular shell, a deck.gl-based map view, a WebAssembly core that understands map tiles and evaluates styles and search queries, and a mapget-compatible backend plus static configuration assets:
 
 ```mermaid
 classDiagram
@@ -52,7 +52,7 @@ classDiagram
     Angular shell and panels
   }
   class MapView {
-    Cesium-based views
+    deck.gl-based views
   }
   class MapDataService
   class StyleService
@@ -64,7 +64,7 @@ classDiagram
   }
   class Backend {
     <<interface>>
-    mapget-compatible HTTP API
+    mapget-compatible HTTP + WebSocket API
   }
   class ConfigFiles {
     config.json and extensions
@@ -99,12 +99,12 @@ classDiagram
 In code, the main responsibilities are:
 
 - `AppComponent` and the PrimeNG-based panels present the UI (maps and layers, styles, search, inspection, preferences, statistics, DataSource editor).
-- `MapViewComponent` and `MapView` encapsulate the Cesium viewer per pane (two or more views), read camera changes, and forward interaction events to services.
+- `MapViewComponent` and `MapView` encapsulate the deck.gl view per pane (two or more views), read camera changes, and forward interaction events to services.
 - `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding).
 - `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
 - `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
 - `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
-- A mapget-compatible backend provides tiles and metadata over HTTP. Erdblick assumes `/sources`, `/tiles`, `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
+- A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
 
 The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
 
@@ -115,6 +115,7 @@ flowchart LR
   subgraph mapdata_dir[mapdata/*]
     MapPanel[MapPanelComponent<br>maps and layers]
     MapSvc[MapDataService<br>tiles and visualizations]
+    TileStream[MapTileStreamClient<br>/tiles stream + TileLayerParser]
   end
   State[AppStateService<br>shared state]
   StyleSvc[StyleService<br>styles]
@@ -130,7 +131,9 @@ flowchart LR
 
   MapSvc --> StyleSvc
   MapSvc --> Core
-  MapSvc --> Backend
+  MapSvc --> TileStream
+  TileStream --> Core
+  TileStream --> Backend
   MapSvc --> View
 ```
 
@@ -139,7 +142,7 @@ This view focuses on the tile pipeline and the map tree:
 - `MapPanelComponent` provides the UI for map and layer configuration and notifies both `MapDataService` and `AppStateService`.
 - `MapDataService` keeps track of maps, tiles, and tile visualizations per view and per style.
 - `AppStateService` contributes viewport and selection information that influences which tiles are requested and kept.
-- `StyleService` provides style definitions when tiles are converted into Cesium primitives.
+- `StyleService` provides style definitions when tiles are converted into render primitives.
 - The WASM core (`TileLayerParser` and related types) turns tile streams into feature-layer objects.
 - The backend responds to `/sources`, `/tiles`, and `/config` calls initiated from this group.
 
@@ -149,8 +152,8 @@ This view focuses on the tile pipeline and the map tree:
 flowchart LR
   subgraph mapview_dir[mapview/*]
     MapViewComp[MapViewComponent<br>Angular wrapper]
-    MapViewModel[MapView<br>Cesium glue]
-    CesiumViewer[Cesium Viewer<br>scene]
+    MapViewModel[MapView<br>deck.gl glue]
+    deck.glViewer[deck.gl view<br>scene]
   end
   State[AppStateService<br>shared state]
   MapSvc[MapDataService<br>tiles]
@@ -160,7 +163,7 @@ flowchart LR
   MenuSvc[RightClickMenuService<br>context menus]
 
   MapViewComp --> MapViewModel
-  MapViewModel --> CesiumViewer
+  MapViewModel --> deck.glViewer
 
   MapViewModel --> State
   MapViewModel --> MapSvc
@@ -172,8 +175,8 @@ flowchart LR
 
 Here the emphasis is on user interaction and camera control:
 
-- `MapViewComponent` owns one Cesium canvas per view and passes the view index and configuration into `MapView`.
-- `MapView` configures the Cesium `Viewer`, translates mouse and keyboard events into navigation or selection actions, and listens to tile visualizations and search results.
+- `MapViewComponent` owns one map canvas per view and passes the view index and configuration into `MapView`.
+- `MapView` configures the deck.gl view controller, translates mouse and keyboard events into navigation or selection actions, and listens to tile visualizations and search results.
 - `AppStateService` persists and restores per-view camera state and split-view options.
 - `MapDataService` supplies tile visualizations and receives camera-related updates (for example focus or zoom-to-feature).
 - `FeatureSearchService` and `JumpTargetService` deliver search markers and jump targets that the view renders or focuses.
@@ -260,7 +263,8 @@ flowchart LR
   end
   State[AppStateService<br>selection state]
   MapSvc[MapDataService<br>tiles and SourceData]
-  Core[WASM core<br>inspection and SourceData]
+  TileStream[MapTileStreamClient<br>/tiles SourceData]
+  Core[WASM core<br>TileLayerParser + inspection]
   Backend[Backend<br>/tiles SourceData]
 
   InspectPanel --> InspectTree
@@ -270,8 +274,10 @@ flowchart LR
   State --> MapSvc
   MapSvc --> InspectPanel
   MapSvc --> SourcePanel
-  SourcePanel --> Core
-  MapSvc --> Backend
+  SourcePanel --> MapSvc
+  SourcePanel --> TileStream
+  TileStream --> Core
+  TileStream --> Backend
 ```
 
 Here the focus is on selection and inspection:
@@ -285,15 +291,14 @@ Here the focus is on selection and inspection:
 
 ## Tile Cache and Loading Sequence
 
-The tile pipeline starts with the camera position, computes which tiles should be visible, streams those tiles from the backend, and converts them into Cesium primitives once the data arrives:
+The tile pipeline starts with the camera position, computes which tiles should be visible, streams those tiles from the backend, and converts them into render primitives once the data arrives:
 
 ```mermaid
 sequenceDiagram
   participant View as MapView
   participant State as AppStateService
   participant MapSvc as MapDataService
-  participant FetchTiles as Fetch tiles
-  participant FetchAbort as Fetch abort
+  participant TilesWS as MapTileStreamClient
   participant Core as WASM tile helpers
   participant Backend as Backend tiles endpoints
 
@@ -304,46 +309,73 @@ sequenceDiagram
 
   Note right of MapSvc: MapDataService compares visible tiles<br>with loaded tiles per view and style<br>and decides which tiles to keep or drop
 
-  alt tile stream already running
-    MapSvc->>FetchAbort: create abort request<br>with client id and tile hints
-    FetchAbort->>Backend: POST /abort
-    Backend-->>FetchAbort: confirm abort of<br>previous tile stream
-    FetchAbort-->>MapSvc: done and clear currentFetchAbort
-  end
+  MapSvc->>TilesWS: open WebSocket /tiles (if needed)
+  MapSvc->>TilesWS: send request JSON<br>requestId + requests + stringPoolOffsets
+  TilesWS->>Backend: WebSocket /tiles (control plane)
+  TilesWS->>Backend: GET /tiles/next?clientId=...&maxBytes=... (2 long-poll requests)
+  Backend-->>TilesWS: VTLV control frames over WS
+  Backend-->>TilesWS: VTLV tile data frames over /tiles/next
 
-  MapSvc->>FetchTiles: create tile request body<br>with requested map tile keys
-  FetchTiles->>Backend: POST /tiles
-  Backend-->>FetchTiles: VTLV tile stream
-
-  loop for each received chunk
-    FetchTiles-->>MapSvc: buffer chunk with type<br>and payload bytes
-    alt fields chunk
-      MapSvc->>Core: readFieldDictUpdate for<br>field dictionary changes
+  loop for each received frame
+    alt request-context chunk
+      TilesWS->>TilesWS: update current backend request context id
+    else fields chunk
+      TilesWS->>Core: readFieldDictUpdate for<br>field dictionary changes
     else features chunk
+      TilesWS-->>MapSvc: feature payload bytes
       MapSvc->>Core: readTileFeatureLayer for<br>feature layer payload
       Core-->>MapSvc: TileFeatureLayer metadata<br>and feature data
       MapSvc->>MapSvc: update loadedTileLayers<br>and viewVisualizationState
+    else source-data chunk
+      TilesWS-->>MapSvc: source-data payload bytes
+      MapSvc->>Core: readTileSourceDataLayer<br>for inspection/source view
+    else status chunk
+      TilesWS-->>MapSvc: status payload<br>allDone + per-request info
     end
   end
 
-  Note over MapSvc: processTileStream and processVisualizationTasks<br>run in short time slices and reschedule via setTimeout<br>so parsing and rendering work does not block the UI thread
+  Note over TilesWS: Frames are enqueued and handled in short<br>time slices (~10ms budget). Tile payload ingress is pull-based<br>with two parallel long-poll requests.
+  Note over MapSvc: processVisualizationTasks slices rendering work<br>into small time budgets to keep the UI responsive.
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
 ```
 
 In `MapDataService` this flow is implemented roughly as follows:
 
-- `update()` computes the current viewport, calls `coreLib.getTileIds` to determine which tile IDs should be present, and compares this against `loadedTileLayers` to decide which tiles to request or drop per view.
-- For tile data, `MapDataService` uses `Fetch` with `withChunkProcessing()` to POST a list of requested tiles to `/tiles`. The backend replies with a tile-layer stream encoded as version–type–length–value frames, which `Fetch.handleChunkedResponse` decodes.
-- `CHUNK_TYPE_FIELDS` frames carry dictionary updates and are passed directly to `TileLayerParser.readFieldDictUpdate`.
-- `CHUNK_TYPE_FEATURES` frames hold compressed tile payloads. `MapDataService.addTileFeatureLayer` uses the parser to construct `FeatureTile` objects, updates `loadedTileLayers`, and marks affected `TileVisualization` instances as dirty.
+- `scheduleUpdate()` drives `runUpdate()`, which recalculates visible tiles plus the per-tile render policy (target fidelity and low-fi LOD cap) per view and then calls `updateMapDataRequest()`, `updateEvictLoadedLayers()`, and `updateVisualizations()`.
+- `updateMapDataRequest()` builds per-layer request batches, inserts placeholder `FeatureTile` instances for requested IDs, and sends the request through `MapTileStreamClient.updateRequest()`.
+- `MapTileStreamClient.updateRequest()` sends `{ requestId, requests, stringPoolOffsets }`, where:
+  - `requestId` is a monotonically increasing client-side id.
+  - `stringPoolOffsets` comes from the shared `TileLayerParser` field dictionary so the backend can skip already-known strings.
+  - Request deduplication compares the request body without `requestId`, so identical logical requests are not resent.
+- `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance and decodes VTLV frames from a local frame queue. Parsing runs in `processFrameQueue()` with a ~10ms time budget per slice.
+- `mapget.tiles.request-context` includes a stable integer `clientId` for the lifetime of the current WS connection.
+- After receiving `clientId`, erdblick runs two parallel long-poll pulls (`GET /tiles/next?clientId=...&maxBytes=...`) and feeds each returned binary VTLV frame batch into the same frame queue used by WS control frames.
+- `maxBytes` is an adaptive micro-batch limit derived from the measured `/tiles/next` downstream throughput using an EWMA estimate, capped at 5 MiB.
+- On each request update, mapget keeps the same WebSocket session/client id, drops queued tile frames that are no longer requested, and avoids re-requesting tiles that are already queued.
+- `Features` frames are forwarded to `MapDataService.addTileFeatureLayer()`, which hydrates `FeatureTile` instances, updates `loadedTileLayers`, and marks affected `TileVisualization` instances for rendering.
+- `Fields` frames are applied immediately through `TileLayerParser.readFieldDictUpdate(...)` so subsequent Feature/SourceData payloads can resolve string references.
+- `Status` frames (`mapget.tiles.status`) contain per-request results, `allDone`, and optional `requestId`. Erdblick ignores stale status messages whose `requestId` does not match the most recent request.
+- `Request-context` frames (`mapget.tiles.request-context`) announce the active server request id and the pull `clientId` used for `/tiles/next` long-poll requests.
 - For each view, `viewVisualizationState[viewIndex].visualizationQueue` is rebuilt so that tiles which changed detail level, border flags, or styles are processed first. `processVisualizationTasks()` then schedules work in small time slices to keep the UI responsive.
+- `MapDataService` no longer flushes the tile-stream frame queue on each request update. Already queued data frames still parse, while stale status updates are filtered by `requestId`.
+
+Current `/tiles` frame type ids used by erdblick:
+
+| Type id | Name | Payload |
+| --- | --- | --- |
+| `1` | `Fields` | Binary frame for parser dictionary updates |
+| `2` | `Features` | Binary tile-feature-layer payload |
+| `3` | `SourceData` | Binary tile-source-data payload |
+| `4` | `Status` | JSON (`mapget.tiles.status`) |
+| `6` | `Request-context` | JSON (`mapget.tiles.request-context`) |
+| `128` | `End-of-stream` | Marker frame (currently treated as no-op) |
 
 Tile metadata such as legal notices and scalar fields is also extracted through the parser and stored alongside `MapLayerTree` so it can be surfaced in the Maps & Layers panel and legal information dialogs.
 
 ## Rendering
 
-Once tiles and styles are available, erdblick turns them into Cesium primitives through a compact rendering pipeline. The diagram in `erdblick-rendering-sequence.svg` shows the full detail; the following mermaid sequence diagram mirrors the central part and highlights the role of the WASM renderer and the point merge service:
+Once tiles and styles are available, erdblick turns them into render primitives through a compact rendering pipeline. The diagram in `erdblick-rendering-sequence.svg` shows the full detail; the following mermaid sequence diagram mirrors the central part and highlights the role of the WASM renderer and the point merge service:
 
 ```mermaid
 sequenceDiagram
@@ -355,7 +387,7 @@ sequenceDiagram
   participant Backend as Backend locate endpoint
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances
-  View->>TileVis: render with Cesium viewer
+  View->>TileVis: render with deck.gl view
 
   Note right of TileVis: Decide low detail tile box<br>or high detail rendering based<br>on detail flags and tile contents
 
@@ -363,7 +395,7 @@ sequenceDiagram
   TileVis->>Core: addTileFeatureLayer for feature tile
   Core->>Core: run style rules and Simfil filters
 
-  Note right of Core: For each feature and relation<br>FeatureLayerVisualization evaluates filters<br>selects geometry and builds Cesium primitives<br>through cesium interface helper classes
+  Note right of Core: For each feature and relation<br>FeatureLayerVisualization evaluates filters<br>selects geometry and builds render primitives<br>through core interop helper classes
 
   Core-->>TileVis: externalReferences list
   alt external references present
@@ -378,18 +410,60 @@ sequenceDiagram
   TileVis->>PointMerge: insert mergedPointFeatures<br>for map layer style id
   PointMerge-->>View: render finished corner tiles<br>for merged points
 
-  TileVis->>View: add PrimitiveCollection to<br>Cesium viewer primitives
+  TileVis->>View: add PrimitiveCollection to<br>deck.gl view primitives
   TileVis->>View: update TileBoxVisualization<br>for low detail tile boxes
 ```
 
-In `visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
+In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
 
-- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed.
-- `coreLib.FeatureLayerVisualization` turns tile feature layers into Cesium primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.
-- For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into Cesium primitives held by `MergedPointsTile`.
+- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It always calls into the WASM core for feature rendering and passes the active rule fidelity (`low`/`high`) so style rules can branch by detail level.
+- Style rules can additionally pin an exact feature LOD via `lod: <0..7>` (commonly inside `first-of`) to differentiate coarse and fine geometry rendering.
+- `TileBoxVisualization` renders one low-detail rectangle per tile *per view* (shared across styles). Per-tile load-state overlays are disabled; only border and static empty/error fill overlays remain.
+- `coreLib.FeatureLayerVisualization` turns tile feature layers into render primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.
+- For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into render primitives held by `MergedPointsTile`.
 - When styles or view sync options change, `MapDataService.addTileFeatureLayer` clears and rebuilds `visualizationQueue` so that tiles are re-rendered with the new configuration.
 
-Cesium itself remains a pure rendering dependency: it receives `PrimitiveCollection` instances and billboards, plus camera instructions, but it is unaware of map-specific concepts such as features, tiles, or Simfil expressions.
+### Staged Loading and LOD Policy
+
+Erdblick must treat backend stage metadata as authoritative and avoid hard-coding “stage 0 means low-fi” assumptions. The important inputs are:
+
+- `LayerInfo.stages`
+- `LayerInfo.stageLabels`
+- `LayerInfo.highFidelityStage`
+- per-feature backend `lod` (`LOD_0..LOD_7`)
+
+Current common backend stage models are:
+
+| Stage model | Stage 0 | Stage 1 | Stage 2 | `highFidelityStage` | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `LOW_FI_HIGH_FI_ADAS` | low-fi geometry | full geometry + non-ADAS enrichment | ADAS-only enrichment | `1` | Current `Road` model |
+| `LOW_FI_FULL_GEOM_HIGH_FI_ADAS` | canonical base geometry | non-ADAS enrichment | ADAS-only enrichment | `0` | Current `Lane` model |
+
+Two important consequences:
+
+- `stageLabels` are informational; `highFidelityStage` is what decides whether erdblick runs `fidelity: low` or `fidelity: high` rules.
+- Stage and LOD are independent. Stage answers “which backend payload slices arrived?”, while `lod` answers “may this feature be culled in low-fi rendering?”.
+
+Frontend view policy is tile-count based **per zoom level**:
+
+- visible tiles `>= 128` -> `fidelity=low`, render `lod <= LOD_0`
+- visible tiles `>= 96` -> `fidelity=low`, render `lod <= LOD_1`
+- visible tiles `>= 80` -> `fidelity=low`, render `lod <= LOD_2`
+- visible tiles `>= 64` -> `fidelity=low`, render `lod <= LOD_3`
+- visible tiles `>= 56` -> `fidelity=low`, render `lod <= LOD_4`
+- visible tiles `>= 48` -> `fidelity=low`, render `lod <= LOD_5`
+- visible tiles `>= 40` -> `fidelity=low`, render `lod <= LOD_6`
+- visible tiles `>= 32` -> `fidelity=low`, render `lod <= LOD_7`
+- visible tiles `<= 31` -> `fidelity=high`, no low-fi LOD culling
+
+Stage retrieval is independent from this render policy: visible tiles are requested up to the layer max stage, and missing stages are streamed incrementally via `tileIdsByNextStage`.
+
+Runtime diagnostics for this selection are exposed via per-tile stats keys:
+
+- `Rendering/Policy/View-<n>/RequestedMaxStage#value`
+- `Rendering/Policy/View-<n>/MaxLowFiLod#value` (`-1` means no low-fi LOD cap)
+
+deck.gl itself remains a pure rendering dependency: it receives `PrimitiveCollection` instances and billboards, plus camera instructions, but it is unaware of map-specific concepts such as features, tiles, or Simfil expressions.
 
 ## Exceptions and Error Handling
 
@@ -415,10 +489,10 @@ The erdblick core is compiled to WASM without C++ exception support. Enabling na
 
 Aside from in-process exceptions, a few error classes originate from IO or backend behavior:
 
-- **TileLayerStream parsing errors** - malformed chunk headers or frames result in console errors from the `Fetch` helper or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
+- **TileLayerStream parsing errors** - malformed chunk headers or frames result in console errors from the `MapTileStreamClient` or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
 - **Style sheet parsing errors** - YAML or Simfil issues in style sheets are caught by `StyleService.parseWasmStyle`, which logs the problem and records an error marker for the affected style. Execution-time errors inside rules generally surface as WASM exceptions while rendering and appear in the browser console.
 - **Tile and style performance anomalies** - tiles collect statistics such as parse time, size, and render times per style. The statistics dialog aggregates these so you can spot cases where a particular map layer or style slows rendering or produces suspiciously empty tiles.
-- **Backend or connection loss** - network errors from `fetch` (for `/sources`, `/tiles`, `/locate`, or `/config`) are logged by `Fetch.handleError`. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
+- **Backend or connection loss** - network errors from the WebSocket tile stream or `HttpClient` calls (for `/sources`, `/locate`, or `/config`) are logged to the console. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
 
 In general, treat the browser console and the statistics dialog as complementary tools: the console tells you what failed, the stats dialog tells you which tiles and styles were affected or unusually slow.
 
@@ -453,8 +527,6 @@ sequenceDiagram
 
   Jobs-->>Search: group complete callback<br>when last search task finishes
 
-  Note over Search,Jobs: When the search group completes<br>FeatureSearchService creates a diagnostics group<br>and posts DiagnosticsWorkerTask messages per tile
-
   UI->>Search: request completions<br>for prefix at caret
   Search->>Jobs: create completion group<br>for prefix and position
   Search->>MapSvc: pick tiles for completion<br>from loaded tiles
@@ -476,8 +548,8 @@ A few implementation details matter for contributors:
 
 - `FeatureSearchService` owns the worker pool, work queue, and result aggregation logic. It creates up to `navigator.hardwareConcurrency` workers and keeps them hot across searches.
 - Tasks posted to workers carry the serialized tile blob, the current field dictionary blob, and `dataSourceInfo` so that each worker can build a local `TileLayerParser` and `TileFeatureLayer` instance.
-- The quad tree inside `FeatureSearchService` clusters search results into per-tile buckets and computes billboard positions, which are then rendered via Cesium in `MapView`.
-- Completion and diagnostics follow the same structure with `CompletionWorkerTask` and `DiagnosticsWorkerTask` messages; the worker invokes `FeatureLayerSearch.complete` and `FeatureLayerSearch.diagnostics` respectively.
+- The quad tree inside `FeatureSearchService` clusters search results into per-tile buckets and computes billboard positions, which are then rendered through the deck.gl-based `MapView`.
+- Completion and diagnostics follow the same structure with `CompletionWorkerTask` messages; the worker invokes `FeatureLayerSearch.complete` and `FeatureLayerSearch.diagnostics` respectively.
 
 When touching this area, keep web worker pitfalls in mind:
 
@@ -500,6 +572,7 @@ sequenceDiagram
   participant Tiles as FeatureTile cache
   participant Inspect as Inspection UI
   participant SourcePanel as SourceDataPanelComponent
+  participant TileStream as MapTileStreamClient
   participant Backend as Backend tiles SourceData
 
   View->>MapSvc: setHoveredFeatures<br>TileFeatureId list from pick
@@ -513,17 +586,19 @@ sequenceDiagram
 
   Inspect->>State: setSelection with<br>SelectedSourceData for address
   State-->>MapSvc: selectionState update<br>panel with SourceData selection
-  MapSvc->>Backend: request SourceData tile<br>from /tiles for layer
-  Backend-->>MapSvc: SourceData tile payload
-  MapSvc-->>SourcePanel: decoded SourceData layer<br>and updated panel contents
+  SourcePanel->>MapSvc: getDataSourceInfoJson<br>for TileLayerParser
+  SourcePanel->>TileStream: request SourceData tile<br>from /tiles for layer
+  TileStream->>Backend: WebSocket /tiles
+  Backend-->>TileStream: SourceData tile payload
+  TileStream-->>SourcePanel: decoded SourceData layer<br>and updated panel contents
 ```
 
 Key points to understand:
 
-- `MapView` translates Cesium pick events into `TileFeatureId` structures (map/layer/tile/feature identifiers) and forwards them to `MapDataService.setHoveredFeatures` or into the selection machinery via `AppStateService`. Jumps and search results use the same identifiers.
+- `MapView` translates view pick events into `TileFeatureId` structures (map/layer/tile/feature identifiers) and forwards them to `MapDataService.setHoveredFeatures` or into the selection machinery via `AppStateService`. Jumps and search results use the same identifiers.
 - `MapDataService.loadFeatures` ensures that the relevant tiles are present in `loadedTileLayers`, fetching them if necessary, and wraps them in `FeatureWrapper` objects that expose inspection helpers like `inspectionModel()`.
 - `selectionTopic` and `hoverTopic` hold the current panel models, including pinned state, color, and size. `InspectionContainerComponent` subscribes to them and re-renders the inspection tree and SourceData view accordingly.
-- SourceData is driven by the same tile streaming code but uses `CHUNK_TYPE_SOURCEDATA` and `TileLayerParser.readTileSourceDataLayer` instead of feature-layer parsing. SourceData selection reuses the same map and layer identifiers, so you can jump back and forth between features and their underlying blobs.
+- SourceData is driven by the same tile streaming code but uses `MAP_TILE_STREAM_TYPE_SOURCEDATA` and `TileLayerParser.readTileSourceDataLayer` instead of feature-layer parsing. SourceData selection reuses the same map and layer identifiers, so you can jump back and forth between features and their underlying blobs.
 
 If you change how selection is encoded or how tiles are keyed, make sure to keep `AppStateService`, `MapDataService`, and the inspection components in sync; otherwise, URL-based sharing and multi-panel inspection will drift out of alignment.
 

@@ -1,5 +1,5 @@
 import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
-import {Camera, Cartesian3, Rectangle, Scene} from "../integrations/cesium";
+import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -12,6 +12,7 @@ import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -35,30 +36,34 @@ interface ExtendedSearchTarget extends SearchTarget {
                           placeholder="Search">
                 </textarea>
 
-                <div class="completion-popup"
-                    *ngIf="completion.visible || completion.pending"
-                    (mousedown)="onCompletionPopupDown($event)"
-                    [style.top.px]="completion.top"
-                    [style.left.px]="completion.left">
-                    <div *ngFor="let item of completionItems; index as idx"
-                        [ngClass]="{'selected': idx === completion.selectionIndex}"
-                        (click)="applyCompletion(item.query)">
-                        <div class="row">
-                            <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
-                        </div>
-                        <div class="row hint" *ngIf="item.hint">
-                           {{ item.hint }}
-                        </div>
+                @if (completion.visible || completion.pending) {
+                    <div class="completion-popup" (mousedown)="onCompletionPopupDown($event)"
+                         [style.top.px]="completion.top"
+                         [style.left.px]="completion.left" [style.z-index]="9000">
+                        @for (item of completionItems; track $index) {
+                            <div [ngClass]="{'selected': $index === completion.selectionIndex}"
+                                 (click)="applyCompletion(item.query)">
+                                <div class="row">
+                                    <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
+                                </div>
+                                @if (item.hint) {
+                                    <div class="row hint">
+                                        {{ item.hint }}
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (completion.pending) {
+                            <p-progress-spinner aria-label="Loading completion candidates" 
+                                                [style]="{ height: '1em', width: '1em' }" />
+                        }
                     </div>
-                    <p-progress-spinner *ngIf="completion.pending"
-                        aria-label="Loading completion candidates"
-                        [style]="{ height: '1em', width: '1em' }" />
-                </div>
+                }
             </div>
 
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
-                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false">
+                          [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
@@ -114,7 +119,6 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </p-dialog>
-        <feature-search [searchPanelComponent]="this"></feature-search>
     `,
     styles: [`
         .item-disabled {
@@ -256,7 +260,8 @@ export class SearchPanelComponent implements AfterViewInit {
                 private messageService: InfoMessageService,
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
-                public searchService: FeatureSearchService) {
+                public searchService: FeatureSearchService,
+                private dialogStack: DialogStackService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
 
         this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -292,7 +297,7 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.stateService.lastSearchHistoryEntryState.pipe(skip(2)).subscribe(entry => {
-            if (!this.stateService.ready) {
+            if (!this.stateService.ready.getValue()) {
                 return;
             }
             // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
@@ -365,6 +370,8 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     ngAfterViewInit() {
+        this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery));
+
         this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();
@@ -525,7 +532,15 @@ export class SearchPanelComponent implements AfterViewInit {
             });
             this.jumpService.markedPosition.next(coordinates);
         } else {
-            this.mapService.moveToRectangleTopic.next({targetView: targetViewIndex, rectangle: coordinates});
+            this.mapService.moveToRectangleTopic.next({
+                targetView: targetViewIndex,
+                rectangle: {
+                    west: GeoMath.toDegrees(coordinates.west),
+                    south: GeoMath.toDegrees(coordinates.south),
+                    east: GeoMath.toDegrees(coordinates.east),
+                    north: GeoMath.toDegrees(coordinates.north),
+                }
+            });
         }
     }
 

@@ -2,14 +2,21 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "../mapdata/map.service";
-import {LocateResponse} from "../mapview/visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
-import {Cartographic, Rectangle} from "../integrations/cesium";
+import {Cartographic, Rectangle} from "../integrations/geo";
+
+interface LocateResponse {
+    responses: Array<Array<{
+        tileId: string;
+        typeId: string;
+        featureId: Array<string>;
+    }>>;
+}
 
 export interface SearchTarget {
     icon: string;
@@ -59,14 +66,14 @@ export class JumpTargetService {
                         if (jumpTargetsConfig !== undefined) {
                             const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
                             // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
-                            import(/* @vite-ignore */ jumpTargetsPath).then(function (plugin) {
-                                return plugin.default() as Array<SearchTarget>;
-                            }).then((jumpTargets: Array<SearchTarget>) => {
-                                this.extJumpTargets = jumpTargets;
-                                this.update();
-                            }).catch((error) => {
-                                console.error(error);
-                            });
+                            this.loadJumpTargetsModule(jumpTargetsPath)
+                                .then((plugin) => plugin.default() as Array<SearchTarget>)
+                                .then((jumpTargets: Array<SearchTarget>) => {
+                                    this.extJumpTargets = jumpTargets;
+                                    this.update();
+                                }).catch((error) => {
+                                    console.error(error);
+                                });
                             return;
                         }
                     }
@@ -132,7 +139,7 @@ export class JumpTargetService {
         const matchSourceDataElements = (value: string): [bigint, string, string]|null => {
             const regex = /^\s*(\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
-            let tileId: bigint = -1n;
+            let tileId: bigint;
             let mapId = "";
             let sourceLayerId = "";
 
@@ -166,31 +173,22 @@ export class JumpTargetService {
                 return null;
             }
 
-            if (tileId === -1n) {
-                return null;
-            }
-
             return [tileId, mapId, sourceLayerId]
         }
 
         const matches = matchSourceDataElements(searchString);
         if (matches) {
             const [tileId, mapId, sourceLayerId] = matches;
-            if (tileId !== -1n) {
-                label = `tileId = ${tileId}`;
-                if (mapId) {
-                    label = `${label} | mapId = ${mapId}`;
-                    if (sourceLayerId) {
-                        label = `${label} | sourceLayerId = ${sourceLayerId}`;
-                    } else {
-                        label = `${label} | (sourceLayerId = ?)`;
-                    }
+            label = `tileId = ${tileId}`;
+            if (mapId) {
+                label = `${label} | mapId = ${mapId}`;
+                if (sourceLayerId) {
+                    label = `${label} | sourceLayerId = ${sourceLayerId}`;
                 } else {
-                    label = `${label} | (mapId = ?) | (sourceLayerId = ?)`;
+                    label = `${label} | (sourceLayerId = ?)`;
                 }
             } else {
-                label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-                valid = false;
+                label = `${label} | (mapId = ?) | (sourceLayerId = ?)`;
             }
 
             if (matches.length > 1 && matches[1]) {
@@ -253,8 +251,12 @@ export class JumpTargetService {
         }
     }
 
+    private loadJumpTargetsModule(jumpTargetsPath: string) {
+        return import(/* @vite-ignore */ jumpTargetsPath);
+    }
+
     update() {
-        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
         if (featureJumpTargets) {
             featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
@@ -286,7 +288,7 @@ export class JumpTargetService {
     }
 
     async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number) {
-        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
