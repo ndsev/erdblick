@@ -77,6 +77,7 @@ public:
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] glm::dvec3 const& offset() const;
+    [[nodiscard]] glm::dvec3 const& offsetIncrement() const;
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
     [[nodiscard]] bool hasIconUrl() const;
@@ -144,6 +145,7 @@ private:
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
     glm::dvec3 offset_{.0, .0, .0};
+    glm::dvec3 offsetIncrement_{.0, .0, .0};
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
     // Labels' rules

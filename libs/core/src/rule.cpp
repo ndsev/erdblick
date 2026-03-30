@@ -201,6 +201,11 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         offset_.y = yaml["offset"][1].as<double>();
         offset_.z = yaml["offset"][2].as<double>();
     }
+    if (yaml["offset-increment"].IsDefined() && yaml["offset-increment"].size() >= 3) {
+        offsetIncrement_.x = yaml["offset-increment"][0].as<double>();
+        offsetIncrement_.y = yaml["offset-increment"][1].as<double>();
+        offsetIncrement_.z = yaml["offset-increment"][2].as<double>();
+    }
     if (yaml["point-merge-grid-cell"].IsDefined() && yaml["point-merge-grid-cell"].size() >= 3) {
         pointMergeGridCellSize_ = glm::dvec3();
         pointMergeGridCellSize_->x = yaml["point-merge-grid-cell"][0].as<double>();
@@ -714,6 +719,11 @@ std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEye
 glm::dvec3 const& FeatureStyleRule::offset() const
 {
     return offset_;
+}
+
+glm::dvec3 const& FeatureStyleRule::offsetIncrement() const
+{
+    return offsetIncrement_;
 }
 
 std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() const

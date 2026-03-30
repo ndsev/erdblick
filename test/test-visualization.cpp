@@ -150,6 +150,19 @@ lod: 42
     REQUIRE_FALSE(ruleWithInvalidLod.lod().has_value());
 }
 
+TEST_CASE("FeatureStyleRuleOffsetIncrementParsing", "[erdblick.style]")
+{
+    auto yaml = YAML::Load(R"(
+type: Road
+geometry: [line]
+offset: [1.0, 2.0, 3.0]
+offset-increment: [4.0, 5.0, 6.0]
+)");
+    FeatureStyleRule rule(yaml, 0);
+    REQUIRE(rule.offset() == glm::dvec3(1.0, 2.0, 3.0));
+    REQUIRE(rule.offsetIncrement() == glm::dvec3(4.0, 5.0, 6.0));
+}
+
 TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdblick.renderer]")
 {
     auto style = relationTestStyle();
