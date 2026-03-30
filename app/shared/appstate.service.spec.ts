@@ -518,6 +518,23 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('reopens the dock for default feature selections', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.isDockOpen = false;
+        service.selection = [
+            { id: 1, features: [feature('old-feature')], locked: false, size: [30, 20], color: '#111111', undocked: false }
+        ];
+
+        service.setSelection([feature('old-feature')]);
+        expect(service.isDockOpen).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('does not replace unlocked SourceData with a feature inspection', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;

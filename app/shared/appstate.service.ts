@@ -1157,6 +1157,9 @@ export class AppStateService implements OnDestroy {
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
+        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0) {
+            this.isDockOpen = true;
+        }
         const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
         const isSourceDataPanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData !== undefined;
         const isClearSourceDataRequest =
