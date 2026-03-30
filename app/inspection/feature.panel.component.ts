@@ -174,6 +174,7 @@ export class FeaturePanelComponent implements OnDestroy {
     getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
         interface HoverAnnotationContext {
             mapTileKey: string;
+            mapId?: string;
             softHoverGroupId?: string;
             strongHoverGroupId?: string;
             nodePath: string;
@@ -254,7 +255,8 @@ export class FeaturePanelComponent implements OnDestroy {
                     value: value ?? "",
                     type: valueType,
                     mapTileKey: context.mapTileKey,
-                    nodeId: makeNodeId(context, data?.key ?? "", nodeIndex)
+                    nodeId: makeNodeId(context, data?.key ?? "", nodeIndex),
+                    mapId: context.mapId ?? ""
                 };
                 if (data?.hasOwnProperty("info")) {
                     node.data["info"] = data.info;
@@ -294,6 +296,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     Array.isArray(data?.children) ? data.children : [],
                     {
                         mapTileKey: context.mapTileKey,
+                        mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
                         softHoverGroupId: nextSoftHoverGroupId,
                         strongHoverGroupId: nextStrongHoverGroupId,
                         nodePath: node.data["nodeId"]
@@ -321,12 +324,14 @@ export class FeaturePanelComponent implements OnDestroy {
                 continue;
             }
             const mapTileKey = this.selectedFeatures?.[featureIndex]?.mapTileKey ?? "";
+            const mapId = this.selectedFeatures?.[featureIndex]?.featureTile.mapName ?? "";
             for (const section of inspectionModels) {
                 const node: TreeTableNode = {};
                 node.data = {
                     key: section?.key ?? "",
                     value: section?.value ?? "",
-                    type: section?.type ?? coreLib.ValueType.NULL.value
+                    type: section?.type ?? coreLib.ValueType.NULL.value,
+                    mapId
                 };
                 if (section?.hasOwnProperty("info")) {
                     node.data["info"] = section.info;
@@ -338,6 +343,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     Array.isArray(section?.children) ? section.children : [],
                     {
                         mapTileKey,
+                        mapId,
                         nodePath: `feature-${featureIndex}:${section?.key ?? ""}`
                     }
                 );

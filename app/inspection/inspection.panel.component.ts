@@ -69,7 +69,39 @@ interface InspectionPanelContentAdapter {
                         </span>
                         <span>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
-                                <p-button icon="" (click)="openExtraMenu($event)"
+                                <span class="inspection-feature-tools-inline">
+                                    <p-button icon="" (click)="focusOnFeatureAction($event)"
+                                              (mousedown)="$event.stopPropagation()"
+                                              pTooltip="Focus on feature" tooltipPosition="bottom">
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">my_location</span>
+                                    </p-button>
+                                    <p-button icon="" (click)="openGeoJsonInNewTabAction($event)"
+                                              (mousedown)="$event.stopPropagation()"
+                                              pTooltip="Open GeoJSON in new tab" tooltipPosition="bottom">
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">open_in_new</span>
+                                    </p-button>
+                                    <p-button icon="" (click)="downloadGeoJsonAction($event)"
+                                              (mousedown)="$event.stopPropagation()"
+                                              pTooltip="Download GeoJSON" tooltipPosition="bottom">
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">download</span>
+                                    </p-button>
+                                    <p-button icon="" (click)="copyGeoJsonAction($event)"
+                                              (mousedown)="$event.stopPropagation()"
+                                              pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">content_copy</span>
+                                    </p-button>
+                                    <p-button icon="" (click)="openComparePopover($event)"
+                                              (mousedown)="$event.stopPropagation()"
+                                              pTooltip="Compare" tooltipPosition="bottom">
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                    </p-button>
+                                </span>
+                                <p-button class="inspection-feature-tools-menu" icon="" (click)="openExtraMenu($event)"
                                           (mousedown)="$event.stopPropagation()"
                                           pTooltip="More actions" tooltipPosition="bottom">
                                     <span class="material-symbols-outlined"
@@ -334,6 +366,31 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
             return;
         }
         this.mapService.zoomToFeature(undefined, panel.features[0]);
+    }
+
+    protected focusOnFeatureAction(event: MouseEvent) {
+        this.focusOnFeature(event);
+    }
+
+    protected openGeoJsonInNewTabAction(event: MouseEvent) {
+        event.stopPropagation();
+        this.featurePanel?.openGeoJsonInNewTab();
+    }
+
+    protected downloadGeoJsonAction(event: MouseEvent) {
+        event.stopPropagation();
+        this.featurePanel?.downloadGeoJson();
+    }
+
+    protected copyGeoJsonAction(event: MouseEvent) {
+        event.stopPropagation();
+        this.featurePanel?.copyGeoJson();
+    }
+
+    protected openComparePopover(event: MouseEvent) {
+        event.stopPropagation();
+        this.refreshCompareOptions();
+        this.comparePopover.toggle(event);
     }
 
     protected onHeaderPointerDown(event: PointerEvent) {
