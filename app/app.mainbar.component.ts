@@ -110,6 +110,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private viewerLayoutResizeObserver?: ResizeObserver;
     private viewerLayoutElement?: HTMLElement;
+    private mobileMenubarStateFrame?: number;
     private viewportMobileMenubar = false;
     private viewerLayoutMobileMenubar = false;
 
@@ -157,6 +158,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy() {
         this.teardownMobileMenuTracking();
         this.teardownViewerLayoutTracking();
+        if (typeof window !== 'undefined' && this.mobileMenubarStateFrame !== undefined) {
+            window.cancelAnimationFrame(this.mobileMenubarStateFrame);
+        }
+        this.mobileMenubarStateFrame = undefined;
         this.subscriptions.unsubscribe();
     }
 
@@ -169,7 +174,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
         this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
             this.viewportMobileMenubar = event.matches;
-            this.updateMobileMenubarState();
+            this.scheduleMobileMenubarStateUpdate();
         };
         if (typeof this.mediaQueryList.addEventListener === 'function') {
             this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
@@ -289,7 +294,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     private updateViewerLayoutMobileState(width: number) {
         this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
-        this.updateMobileMenubarState();
+        this.scheduleMobileMenubarStateUpdate();
     }
 
     private updateMobileMenubarState() {
@@ -299,6 +304,24 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
         this.isMobileMenubar = isMobileMenubar;
         this.rebuildMenuItems();
+    }
+
+    private scheduleMobileMenubarStateUpdate() {
+        if (this.mobileMenubarStateFrame !== undefined) {
+            return;
+        }
+        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+            this.updateMobileMenubarState();
+            return;
+        }
+        this.ngZone.runOutsideAngular(() => {
+            this.mobileMenubarStateFrame = window.requestAnimationFrame(() => {
+                this.mobileMenubarStateFrame = undefined;
+                this.ngZone.run(() => {
+                    this.updateMobileMenubarState();
+                });
+            });
+        });
     }
 
     private findViewerLayoutElement(): HTMLElement | undefined {
