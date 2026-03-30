@@ -10,7 +10,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        submodules: recursive
+        with:
+          submodules: recursive
 
       - name: Use Node.js
         uses: actions/setup-node@v4
@@ -32,7 +33,7 @@ jobs:
         run: git lfs install
 
       - name: Install npm dependencies
-        run: npm -g install --force --include=dev
+        run: npm ci
 
       - name: Build with Emscripten
         run: |
