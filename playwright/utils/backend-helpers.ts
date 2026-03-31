@@ -1,6 +1,6 @@
 import type {APIRequestContext} from '@playwright/test';
 import {expect} from '../fixtures/test';
-import { TEST_LAYER_NAME, TEST_MAP_NAME } from './test-params';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from './test-params';
 
 /**
  * Helper utilities for talking to the `mapget` backend directly via the
@@ -64,5 +64,5 @@ export async function requireMapSource(request: APIRequestContext, mapId: string
  * environments before interacting with the UI.
  */
 export async function requireTestMapSource(request: APIRequestContext): Promise<any | null> {
-    return requireMapSource(request, TEST_MAP_NAME, TEST_LAYER_NAME);
+    return requireMapSource(request, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
 }

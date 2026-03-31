@@ -1,0 +1,26 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "userDataDir": "playwright/.cache/cli-profile",
+    "launchOptions": {
+      "channel": "chrome",
+      "headless": false
+    },
+    "contextOptions": {
+      "viewport": {
+        "width": 1600,
+        "height": 900
+      },
+      "locale": "en-US",
+      "timezoneId": "UTC"
+    }
+  },
+  "outputDir": "playwright/.cache/cli-output",
+  "outputMode": "file",
+  "testIdAttribute": "data-testid",
+  "baseURL": "http://localhost:4200",
+  "timeouts": {
+    "action": 10000,
+    "navigation": 80000
+  }
+}

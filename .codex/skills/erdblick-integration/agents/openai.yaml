@@ -1,0 +1,4 @@
+interface:
+  display_name: "Erdblick Integration"
+  short_description: "Compose erdblick Playwright integration and snapshot tests"
+  default_prompt: "Compose or update erdblick Playwright integration tests and snapshot tests using data-testid-first locators, URL-based map positioning, full-screen screenshots, and repo-native helpers."
