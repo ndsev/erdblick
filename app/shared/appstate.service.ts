@@ -141,6 +141,23 @@ function clampOsmOpacity(value: number): number {
     return Math.max(0, Math.min(100, rounded));
 }
 
+function cloneStateValue<T>(value: T): T {
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    if (value instanceof Date) {
+        return new Date(value.getTime()) as unknown as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map(entry => cloneStateValue(entry)) as unknown as T;
+    }
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        result[key] = cloneStateValue(entry);
+    }
+    return result as T;
+}
+
 @Injectable({providedIn: 'root'})
 /**
  * Central application state coordinator.
@@ -152,6 +169,7 @@ function clampOsmOpacity(value: number): number {
 export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
+    private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -731,7 +749,41 @@ export class AppStateService implements OnDestroy {
     }
 
     private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
-        return new MapViewState<T>(this.statePool, options);
+        const state = new MapViewState<T>(this.statePool, options);
+        this.mapViewStates.push(state as MapViewState<unknown>);
+        return state;
+    }
+
+    private seedAdditionalViews(previousViewCount: number, nextViewCount: number): void {
+        if (nextViewCount <= previousViewCount) {
+            return;
+        }
+
+        for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
+            const sourceViewIndex = Math.max(0, targetViewIndex - 1);
+            for (const state of this.mapViewStates) {
+                state.next(targetViewIndex, cloneStateValue(state.getValue(sourceViewIndex)));
+            }
+        }
+
+        if (this.styles.size === 0) {
+            return;
+        }
+
+        const nextStyles = new Map<string, (string|number|boolean)[]>();
+        for (const [key, values] of this.styles.entries()) {
+            const nextValues = [...values];
+            for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
+                const sourceViewIndex = Math.max(0, targetViewIndex - 1);
+                const sourceValue = nextValues[sourceViewIndex];
+                if (sourceValue === undefined) {
+                    continue;
+                }
+                nextValues[targetViewIndex] = cloneStateValue(sourceValue);
+            }
+            nextStyles.set(key, nextValues);
+        }
+        this.stylesState.next(nextStyles);
     }
 
     private setupStateSubscriptions() {
@@ -911,7 +963,14 @@ export class AppStateService implements OnDestroy {
     // -----------------
 
     get numViews() {return this.numViewsState.getValue();}
-    set numViews(val: number) {this.numViewsState.next(val);};
+    set numViews(val: number) {
+        const previousViewCount = this.numViewsState.getValue();
+        if (val === previousViewCount) {
+            return;
+        }
+        this.seedAdditionalViews(previousViewCount, val);
+        this.numViewsState.next(val);
+    };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}

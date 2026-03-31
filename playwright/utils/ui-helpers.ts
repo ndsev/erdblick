@@ -2,7 +2,30 @@ import type {APIRequestContext, Locator, Page} from '@playwright/test';
 import { expect } from '@playwright/test';
 import {test} from '../fixtures/test';
 import {requireMapSource} from './backend-helpers';
-import { TEST_LAYER_NAME, TEST_MAP_NAME } from './test-params';
+import {TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS} from './test-params';
+
+function escapeRegExp(input: string): string {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function menuItemNamePattern(label: string): RegExp {
+    return new RegExp(`${escapeRegExp(label)}$`);
+}
+
+async function openMainMenu(page: Page, rootLabel: string): Promise<Locator> {
+    const rootItem = page.locator('.main-bar').first().getByRole('menuitem', {
+        name: menuItemNamePattern(rootLabel)
+    }).first();
+    await expect(rootItem).toBeVisible();
+    await rootItem.hover();
+
+    const submenu = page.locator('.p-menubar-submenu:visible').last();
+    if (!(await submenu.isVisible().catch(() => false))) {
+        await rootItem.click();
+    }
+    await expect(submenu).toBeVisible();
+    return submenu;
+}
 
 /**
  * High-level UI helpers for driving the Angular app in Playwright tests.
@@ -12,9 +35,19 @@ import { TEST_LAYER_NAME, TEST_MAP_NAME } from './test-params';
  * on asserting behaviour rather than low-level DOM wiring.
  */
 
-export async function navigateToRoot(page: Page): Promise<void> {
+export async function navigateToRoot(page: Page, locationIndex: number = 0): Promise<void> {
     // Disable OSM by default to make visual assertions more stable.
-    await page.goto('/?osm=0');
+    const [lon, lat] = TEST_VIEW_POSITIONS[locationIndex];
+    const params = new URLSearchParams({
+        osm: '0~6,0~6',
+        lon: String(lon),
+        lat: String(lat),
+        alt: String(500),
+        h: String(0.02),
+        p: String(-0.75),
+        r: String(0)
+    });
+    await page.goto(`/?${params.toString()}`);
     await waitForAppReady(page);
     await disableUiAnimations(page);
     await dismissSurveyIfPresent(page);
@@ -60,18 +93,20 @@ export async function dismissSurveyIfPresent(page: Page): Promise<void> {
     }
 }
 
-export async function revealPrefButtons(page: Page): Promise<void> {
-    const layersButton = page.locator('.layers-button').first().locator('button').first();
-    await expect(layersButton).toBeVisible();
-    await layersButton.hover();
-
-    const prefButtons = page.locator('.pref-buttons-container').first();
-    await expect(prefButtons).toBeVisible();
+export async function revealPrefButtons(page: Page): Promise<Locator> {
+    return openMainMenu(page, 'Edit');
 }
 
 export async function clickPrefButton(page: Page, label: string): Promise<void> {
-    await revealPrefButtons(page);
-    const button = page.locator('.pref-buttons-container .pref-button-subcontainer', { hasText: label }).first();
+    const submenu = await revealPrefButtons(page);
+    const currentLabel = label === 'Preferences'
+        ? 'Settings'
+        : label === 'Styles'
+            ? 'Styles Configurator'
+            : label;
+    const button = submenu.getByRole('menuitem', {
+        name: menuItemNamePattern(currentLabel)
+    }).first();
     await expect(button).toBeVisible();
     await button.click();
 }
@@ -126,6 +161,7 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
     const layerCheckboxInput = layerNode.locator('input.p-checkbox-input[type="checkbox"]').first();
     await expect(layerCheckboxInput).toBeVisible();
     await layerCheckboxInput.check();
+    await closeLayerDialog(page);
 }
 
 /**
@@ -142,8 +178,9 @@ export async function navigateToArea(page: Page, lon: number, lat: number, level
         hasText: 'WGS84 Lon-Lat Coordinates'
     }).first();
     await expect(jumpToWGS84).toBeVisible();
-    // Trigger "Jump to WGS84" using the typed lon/lat/level.
-    await jumpToWGS84.click();
+    // Force the exact coordinate target even when the map panel overlaps the
+    // search overlay on narrow layouts.
+    await jumpToWGS84.click({ force: true });
 }
 
 export async function openLayerDialog(page: Page): Promise<void> {
@@ -156,6 +193,17 @@ export async function openLayerDialog(page: Page): Promise<void> {
     const mapsButton = page.getByTestId('maps-toggle');
     await mapsButton.click({ force: true });
     await expect(dialog).toBeVisible();
+}
+
+export async function closeLayerDialog(page: Page): Promise<void> {
+    const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
+    if (!(await dialog.isVisible().catch(() => false))) {
+        return;
+    }
+
+    const mapsButton = page.getByTestId('maps-toggle');
+    await mapsButton.click({ force: true });
+    await expect(dialog).toBeHidden();
 }
 
 export async function addComparisonView(page: Page): Promise<void> {
@@ -235,13 +283,13 @@ export async function clickSearchResultLeaf(page: Page, index: number): Promise<
 export async function setupTwoViewsWithPositionSync(
     page: Page,
     request: APIRequestContext,
-    mapLabel: string = TEST_MAP_NAME,
-    layerLabel: string = TEST_LAYER_NAME
+    mapIndex: number = 0,
+    layerIndex: number = 0
 ): Promise<void> {
-    await requireMapSource(request, mapLabel, layerLabel);
+    await requireMapSource(request, TEST_MAP_NAMES[mapIndex], TEST_LAYER_NAMES[layerIndex]);
 
     await navigateToRoot(page);
-    await enableMapLayer(page, mapLabel, layerLabel);
+    await enableMapLayer(page, TEST_MAP_NAMES[mapIndex], TEST_LAYER_NAMES[layerIndex]);
 
     await addComparisonView(page);
 

@@ -227,6 +227,106 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('seeds the second view from the primary view when split view is opened', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const destination = Cartographic.fromDegrees(11.25, 48.5, 987654);
+        const orientation = { heading: 1.25, pitch: -0.75, roll: 0.125 };
+
+        service.setView(0, destination, orientation);
+        service.setProjectionMode(0, true);
+        service.setLayerSyncOption(0, true);
+        service.setOsmState(0, false, 42);
+        service.viewTileBordersState.next(0, false);
+        service.viewTileGridModeState.next(0, 'xyz');
+        service.mapLayerConfig('m1', 'layerA', false, 9);
+        service.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
+
+        service.numViews = 2;
+
+        expect(service.numViews).toBe(2);
+        expect(service.cameraViewDataState.getValue(1)).toEqual(service.cameraViewDataState.getValue(0));
+        expect(service.cameraViewDataState.getValue(1)).not.toBe(service.cameraViewDataState.getValue(0));
+        expect(service.mode2dState.getValue(1)).toBe(true);
+        expect(service.getLayerSyncOption(1)).toBe(true);
+        expect(service.getOsmState(1)).toEqual({ enabled: false, opacity: 42 });
+        expect(service.viewTileBordersState.getValue(1)).toBe(false);
+        expect(service.viewTileGridModeState.getValue(1)).toBe('xyz');
+        expect(service.layerVisibilityState.getValue(1)).toEqual([true]);
+        expect(service.layerVisibilityState.getValue(1)).not.toBe(service.layerVisibilityState.getValue(0));
+        expect(service.layerZoomLevelState.getValue(1)).toEqual([7]);
+        expect(service.layerAutoZoomLevelState.getValue(1)).toEqual([false]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('copies style option values into the second view when split view is opened', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.layerNamesState.next(['m1/layerA']);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [true]);
+
+        service.numViews = 2;
+
+        const stylesMap = service.stylesState.getValue();
+        expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.5]);
+        expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([true, true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('seeds each newly added view from the previous view when the view count keeps increasing', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.layerNamesState.next(['m1/layerA']);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+
+        service.numViews = 2;
+
+        const destination = Cartographic.fromDegrees(7.75, 50.2, 123456);
+        const orientation = { heading: 0.5, pitch: -0.4, roll: 0.3 };
+
+        service.setView(1, destination, orientation);
+        service.setProjectionMode(1, true);
+        service.setLayerSyncOption(1, true);
+        service.setOsmState(1, false, 17);
+        service.viewTileBordersState.next(1, false);
+        service.viewTileGridModeState.next(1, 'xyz');
+        service.setMapLayerConfig('m1', 'layerA', [
+            { autoLevel: true, visible: true, level: 13 },
+            { autoLevel: false, visible: false, level: 5 }
+        ]);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5, 0.25]);
+
+        service.numViews = 3;
+
+        expect(service.numViews).toBe(3);
+        expect(service.cameraViewDataState.getValue(2)).toEqual(service.cameraViewDataState.getValue(1));
+        expect(service.cameraViewDataState.getValue(2)).not.toBe(service.cameraViewDataState.getValue(1));
+        expect(service.mode2dState.getValue(2)).toBe(true);
+        expect(service.getLayerSyncOption(2)).toBe(true);
+        expect(service.getOsmState(2)).toEqual({ enabled: false, opacity: 17 });
+        expect(service.viewTileBordersState.getValue(2)).toBe(false);
+        expect(service.viewTileGridModeState.getValue(2)).toBe('xyz');
+        expect(service.layerVisibilityState.getValue(2)).toEqual([false]);
+        expect(service.layerVisibilityState.getValue(2)).not.toBe(service.layerVisibilityState.getValue(1));
+        expect(service.layerZoomLevelState.getValue(2)).toEqual([5]);
+        expect(service.layerAutoZoomLevelState.getValue(2)).toEqual([false]);
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.25, 0.25]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('hydrates selection colors from storage with a leading hash', async () => {
         localStorage.setItem('selected', JSON.stringify(['1~1~Features:map:layer:tile~feature-1~30:20~abc123~0']));
         const routerStub = createRouterStub();

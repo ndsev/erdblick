@@ -1,12 +1,16 @@
 import { test as base } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { TEST_LAYER_NAME, TEST_MAP_NAME } from '../utils/test-params';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
+
+const DARK_MODE_KEY = 'ui.darkMode';
+const FORCED_DARK_MODE_SETTING = 'on';
 
 /**
  * Shared Playwright fixtures used across end-to-end tests.
  *
  * This module:
+ * - Forces dark mode through localStorage before the app bootstraps.
  * - Defines the `Window.ebDebug` surface that the Angular app exposes for
  *   debug interactions in tests.
  * - Hooks into Chromium's V8 coverage APIs to collect JS / CSS coverage and
@@ -67,12 +71,20 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
 
 /**
  * Extended Playwright test object that:
+ * - Forces the UI into dark mode for deterministic visual coverage.
  * - Mocks `/locate` requests to return deterministic synthetic locations that
  *   point into the `TestMap/WayLayer` tiles served by the Python datasource.
  * - Starts JS / CSS coverage collection on Chromium-based browsers and writes
  *   the results into NDJSON files once each test completes.
  */
 export const test = base.extend({
+    context: async ({ context }, use) => {
+        await context.addInitScript(([key, value]) => {
+            window.localStorage.setItem(key, value);
+        }, [DARK_MODE_KEY, FORCED_DARK_MODE_SETTING]);
+
+        await use(context);
+    },
     page: async ({ page }, use) => {
         const backendBinary = process.env["MAPGET_BIN"];
         const usingMapviewerBinary = !!backendBinary && ['mapviewer', 'mapviewer.exe'].includes(path.basename(backendBinary).toLowerCase());
@@ -117,7 +129,7 @@ export const test = base.extend({
                 }
 
                 const responses = requests.map((req: any) => {
-                    const mapId = typeof req.mapId === 'string' ? req.mapId : TEST_MAP_NAME;
+                    const mapId = typeof req.mapId === 'string' ? req.mapId : TEST_MAP_NAMES[0];
                     const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
                     const featureId = Array.isArray(req.featureId) ? req.featureId : [];
 
@@ -127,7 +139,7 @@ export const test = base.extend({
                     // key matches coreLib.getTileFeatureLayerKey(mapId, layerId, tileId).
                     const numericTileId = 1;
                     const hexTileId = numericTileId.toString(16);
-                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAME}:${hexTileId}`;
+                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAMES[0]}:${hexTileId}`;
 
                     // Each locate request yields a single synthetic location result.
                     return [{

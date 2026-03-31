@@ -1,0 +1,12 @@
+# Repo-local Codex configuration for optional Chrome inspection.
+# Workflow policy lives in AGENTS.md and the erdblick skill.
+
+[features]
+skill_mcp_dependency_install = true
+
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+required = false
+startup_timeout_sec = 20.0
+tool_timeout_sec = 120.0

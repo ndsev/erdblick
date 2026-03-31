@@ -1,5 +1,9 @@
 import { expect, test } from '../fixtures/test';
-import { TEST_MAP_LAYER_DATA_ID, TEST_MAP_NAME, TEST_VIEW_POSITION } from '../utils/test-params';
+import {
+    TEST_LAYER_NAMES,
+    TEST_MAP_NAMES,
+    TEST_VIEW_POSITIONS
+} from '../utils/test-params';
 import {
     navigateToArea,
     setupTwoViewsWithPositionSync
@@ -20,20 +24,23 @@ test.describe('Multi-view synchronisation', () => {
         const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
         const leftTab = dialog.getByTestId('map-tab-0');
         const rightTab = dialog.getByTestId('map-tab-1');
-        const leftLayerNode = leftTab.locator(`[data-id="${TEST_MAP_LAYER_DATA_ID}"]`).first();
-        const rightLayerNode = rightTab.locator(`[data-id="${TEST_MAP_LAYER_DATA_ID}"]`).first();
+        const testMapLayerId = `${TEST_MAP_NAMES[0]}/${TEST_LAYER_NAMES[0]}`;
+        const leftLayerNode = leftTab.locator(`[data-id="${testMapLayerId}"]`).first();
+        const rightLayerNode = rightTab.locator(`[data-id="${testMapLayerId}"]`).first();
         await expect(leftLayerNode).toBeVisible();
         await expect(rightLayerNode).toBeVisible();
 
-        // Disable OSM background on the right view to differentiate them.
+        const leftOsmButton = leftTab.getByTestId('osm-toggle-0');
         const rightOsmButton = rightTab.getByTestId('osm-toggle-1');
+        await expect(leftOsmButton).toBeVisible();
         await expect(rightOsmButton).toBeVisible();
-        await rightOsmButton.click();
+        await expect(leftOsmButton.locator('.pi-eye-slash').first()).toBeVisible();
+        await expect(rightOsmButton.locator('.pi-eye-slash').first()).toBeVisible();
 
         const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
         await expect(secondViewCanvas).toBeVisible();
 
-        await navigateToArea(page, ...TEST_VIEW_POSITION);
+        await navigateToArea(page, ...TEST_VIEW_POSITIONS[0]);
 
         const rightUiControls = page.getByTestId('view-ui-container-1');
         await expect(rightUiControls).toBeVisible();
@@ -71,16 +78,14 @@ test.describe('Multi-view synchronisation', () => {
         // Turning off the left map layer should also disable it on the right.
         await leftLayerCheckbox.click();
 
-        const leftMapNode = leftTab.locator(`[data-id="${TEST_MAP_NAME}"]`).first();
-        const rightMapNode = rightTab.locator(`[data-id="${TEST_MAP_NAME}"]`).first();
+        const leftMapNode = leftTab.locator(`[data-id="${TEST_MAP_NAMES[0]}"]`).first();
+        const rightMapNode = rightTab.locator(`[data-id="${TEST_MAP_NAMES[0]}"]`).first();
         await expect.poll(async () => {
             const left = await leftMapNode.isChecked();
             const right = await rightMapNode.isChecked();
             return !left && !right;
         }, { timeout: 3000 }).toBe(true);
 
-        const leftOsmButton = leftTab.getByTestId('osm-toggle-0');
-        await expect(leftOsmButton).toBeVisible();
         await leftOsmButton.click();
 
         // Both OSM buttons should use the same "eye" icon state.
