@@ -15,8 +15,10 @@ Use this skill for committed Playwright integration work in this repository.
 - Shared UI helpers: `../../../playwright/utils/ui-helpers.ts`
 - Backend helpers: `../../../playwright/utils/backend-helpers.ts`
 - Env-backed test parameters: `../../../playwright/utils/test-params.ts`
+- State snapshot helpers: `../../../playwright/utils/state-snapshots.ts`
 - Playwright config and harness: `../../../playwright.config.ts`, `../../../playwright/global-setup.ts`, `../../../playwright/global-teardown.ts`
 - Test parameter source of truth: `../../../test/.env`
+- Optional fixture state snapshots: `../../../test/states/*.json`
 - URL contract: `../../../docs/erdblick-url.md`
 - PrimeNG-heavy UI that often needs new test ids: `../../../app/mapdata/`, `../../../app/search/`, `../../../app/mapview/`, `../../../app/inspection/`
 
@@ -29,7 +31,7 @@ Use this skill for committed Playwright integration work in this repository.
 - Use `playwright-cli` first for page driving, hover checks, and quick reproduction.
 - Use Chrome MCP only when you need deeper console, network, accessibility, or screenshot diagnostics.
 
-### 2. Read `test/.env` and ask the user which test data to use
+### 2. Read `test/.env`, inspect `test/states`, and ask the user which test data to use
 
 Always read `../../../test/.env` and present the current values to the user before finalising the new spec.
 
@@ -46,6 +48,14 @@ Always ask the user all of these questions even if there is only one entry per a
 1. Which `EB_TEST_VIEW_POSITION` entry should the test use or should a new entry be added and used? 
 2. Which `EB_TEST_MAP_NAME` entry should the test use or should a new entry be added and used?
 3. Which `EB_TEST_LAYER_NAME` entry should the test use or should a new entry be added and used?
+4. Which `test/states/*.json` snapshot should the test use for fixture hydration, or should hydration be skipped?
+
+State snapshot selection rules:
+
+- Check `../../../test/states` for `*.json` files.
+- If files exist, ask which one to use and set the Playwright fixture option `stateSnapshot` accordingly.
+- If no files exist, document that hydration is skipped and defaults are used.
+- State hydration happens before app startup through the shared fixture. Do not add page-level localStorage writes for this.
 
 If the needed location, map, or layer is missing:
 
@@ -91,7 +101,7 @@ Always add `data-testid` when either of these is true:
 
 Apply this especially to:
 
-- `<p-dialog ... data-testid="...">` for any tested dialog
+- `<app-dialog ... data-testid="...">` for any tested dialog
 - buttons, toggles, selects, checkboxes, tree containers, or wrappers that the spec must interact with
 - elements that need hover coverage before the visual assertion
 

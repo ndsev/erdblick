@@ -9,15 +9,16 @@ import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
-import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
+        <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
                   [closeOnEscape]="false"
                   [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
+                  [persistLayout]="true" [layoutId]="featureSearchLayoutId"
                   (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
@@ -147,13 +148,14 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
-        </p-dialog>
+        </app-dialog>
         <div #alert></div>
     `,
     styles: [``],
     standalone: false
 })
 export class FeatureSearchComponent {
+    readonly featureSearchLayoutId = 'feature-search';
     isPanelVisible: boolean = false;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
@@ -182,7 +184,7 @@ export class FeatureSearchComponent {
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
-    @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
+    @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,

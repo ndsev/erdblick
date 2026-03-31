@@ -5,8 +5,9 @@ import { AppStateService } from "../shared/appstate.service";
 @Component({
     selector: 'legal-dialog',
     template: `
-        <p-dialog header="Copyright and Legal Information" [(visible)]="stateService.legalInfoDialogVisible" [modal]="false"
-                  [style]="{'min-height': '10em', 'min-width': '40em'}">
+        <app-dialog header="Copyright and Legal Information" [(visible)]="stateService.legalInfoDialogVisible" [modal]="false"
+                  [style]="{'min-height': '10em', 'min-width': '40em'}"
+                  [persistLayout]="true" [layoutId]="'legal-info-dialog'">
             <div class="dialog-content">
                 <table class="stats-table">
                     <thead>
@@ -24,7 +25,7 @@ import { AppStateService } from "../shared/appstate.service";
                 </table>
                 <button pButton type="button" label="Close" icon="pi pi-cross" (click)="close()"></button>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [
         `
@@ -72,4 +73,3 @@ export class LegalInfoDialogComponent {
         this.stateService.legalInfoDialogVisible = false;
     }
 }
-

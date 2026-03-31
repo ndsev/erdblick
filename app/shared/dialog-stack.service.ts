@@ -1,9 +1,13 @@
 import {Injectable} from '@angular/core';
-import {Dialog} from 'primeng/dialog';
 
 interface StackEntry {
     container: HTMLElement;
     wrapper?: HTMLElement;
+}
+
+interface DialogLike {
+    container: () => HTMLElement | undefined;
+    wrapper?: HTMLElement | null;
 }
 
 @Injectable({providedIn: 'root'})
@@ -13,7 +17,7 @@ export class DialogStackService {
     private static readonly MAX_TRACKED_ELEMENTS = 100;
     private readonly stack: StackEntry[] = [];
 
-    bringToFront(target: Dialog | HTMLElement | undefined | null) {
+    bringToFront(target: DialogLike | HTMLElement | undefined | null) {
         const entry = this.resolveEntry(target);
         if (!entry) {
             return;
@@ -33,7 +37,7 @@ export class DialogStackService {
         this.applyStackZIndex();
     }
 
-    private resolveEntry(target: Dialog | HTMLElement | undefined | null): StackEntry | undefined {
+    private resolveEntry(target: DialogLike | HTMLElement | undefined | null): StackEntry | undefined {
         if (!target) {
             return undefined;
         }

@@ -105,6 +105,8 @@ import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.p
 import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
+import {AppDialogComponent} from "./shared/app-dialog.component";
+import {SnapshotManagerComponent} from "./shared/snapshot-manager.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -194,7 +196,8 @@ export const initializeServices = () => {
         DiagnosticsProgressComponent,
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
-        DiagnosticsExportDialogComponent
+        DiagnosticsExportDialogComponent,
+        SnapshotManagerComponent
     ],
     bootstrap: [
         AppComponent
@@ -204,6 +207,7 @@ export const initializeServices = () => {
         BrowserAnimationsModule,
         AnimateOnScroll,
         AppRoutingModule,
+        AppDialogComponent,
         SpeedDialModule,
         DialogModule,
         DynamicDialogModule,

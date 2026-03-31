@@ -1,5 +1,4 @@
 import {Directive, ElementRef, HostListener, Injectable, Renderer2, RendererFactory2} from "@angular/core";
-import {Dialog} from "primeng/dialog";
 
 @Directive({
     selector: '[onEnterClick]',
@@ -19,7 +18,6 @@ export class OnEnterClickDirective {
 @Injectable({providedIn: 'root'})
 export class KeyboardService {
     private renderer: Renderer2;
-    private dialogStack: Array<Dialog> = [];
     private shortcuts = new Map<string, (event: KeyboardEvent) => void>();
     private preventOnInputShortcuts: Set<string> = new Set<string>();
 

@@ -1,7 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapDataService} from "./map.service";
 import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
-import {Dialog} from "primeng/dialog";
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
@@ -11,12 +10,13 @@ import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.m
 import {Subscription} from "rxjs";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 
 @Component({
     selector: 'map-panel',
     template: `
-        <p-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
+        <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
                   [position]="'left'" [draggable]="false" [resizable]="false" 
                   (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
@@ -249,7 +249,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-button>
                 }
             </ng-container>
-        </p-dialog>
+        </app-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
     `,
@@ -280,7 +280,7 @@ export class MapPanelComponent {
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
-    @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
+    @ViewChild('mapLayerDialog') mapLayerDialog: AppDialogComponent | undefined;
 
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
 

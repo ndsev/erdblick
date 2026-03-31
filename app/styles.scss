@@ -4078,3 +4078,13 @@ inspection-tree {
 .safari {
   padding-bottom: 0.5em;
 }
+
+app-dialog .p-dialog {
+  display: flex;
+  flex-direction: column;
+}
+
+app-dialog .p-dialog-content {
+  display: flex;
+  flex-direction: column;
+}

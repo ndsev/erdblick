@@ -813,7 +813,7 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('stores inspection dialog layout directly on selection panels', () => {
+    it('stores inspection dialog layout in dialogLayouts state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
@@ -826,17 +826,17 @@ describe('AppStateService', () => {
         service.setInspectionDialogPosition(11, { left: 10, top: 20 }, 0);
         service.setInspectionDialogPosition(22, { left: 30, top: 40 }, 0);
 
-        const first = service.getInspectionDialogLayoutEntry(11);
-        const second = service.getInspectionDialogLayoutEntry(22);
+        const first = service.getInspectionDialogLayout(11);
+        const second = service.getInspectionDialogLayout(22);
         expect(first?.slot).toBe(0);
         expect(second?.slot).toBe(0);
 
         service.setInspectionDialogPosition(11, { left: 12, top: 24 }, 9);
-        expect(service.getInspectionDialogLayoutEntry(11)?.slot).toBe(0);
+        expect(service.getInspectionDialogLayout(11)?.slot).toBe(0);
 
         service.pruneInspectionDialogLayout([22]);
-        expect(service.getInspectionDialogLayoutEntry(11)?.position).toEqual({ left: 12, top: 24 });
-        expect(service.getInspectionDialogLayoutEntry(22)?.position).toEqual({ left: 30, top: 40 });
+        expect(service.getInspectionDialogLayout(11)).toBeUndefined();
+        expect(service.getInspectionDialogLayout(22)?.position).toEqual({ left: 30, top: 40 });
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -868,8 +868,9 @@ describe('AppStateService', () => {
         const persistedSelection = localStorage.getItem('selected') ?? '';
         expect(persistedSelection).toContain('~555555~');
         expect(persistedSelection).not.toContain('#555555');
-        expect(localStorage.getItem('selected')).toContain('3:100:200');
-        expect(localStorage.getItem('inspectionDialogLayoutState')).toBeNull();
+        expect(localStorage.getItem('selected')).not.toContain('3:100:200');
+        expect(localStorage.getItem('dialogLayouts')).toContain('"inspection:5"');
+        expect(localStorage.getItem('dialogLayouts')).toContain('"slot":3');
         expect(localStorage.getItem('inspectionComparisonState')).toContain('"panelId":5');
 
         service.closeInspectionComparison();
@@ -1011,6 +1012,149 @@ describe('AppStateService', () => {
             },
             others: []
         });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('exports app state entries as a single snapshot object', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.markerState.next(true);
+        const snapshot = service.exportSnapshot();
+
+        expect(snapshot).toHaveProperty('marker');
+        expect(snapshot).toHaveProperty('numberOfViews');
+        expect(snapshot).toHaveProperty('styleOptions');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects snapshot imports with unknown top-level keys and applies nothing', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.markerState.next(false);
+        const errors = service.importSnapshot({
+            marker: true,
+            unknownState: 1
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('imports valid partial snapshots and keeps missing states unchanged', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.markerState.next(false);
+        service.preferencesDialogVisibleState.next(false);
+
+        const errors = service.importSnapshot({
+            marker: true
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.markerState.getValue()).toBe(true);
+        expect(service.preferencesDialogVisibleState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects prototype-pollution keys in snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const payload = JSON.parse('{"marker": true, "__proto__": {"polluted": true}}');
+        const errors = service.importSnapshot(payload);
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(({} as any).polluted).toBeUndefined();
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects nested __proto__ keys in snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const payload = JSON.parse('{"styleOptions": {"valid/key": [true], "__proto__": {"polluted": true}}}');
+        const errors = service.importSnapshot(payload);
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(({} as any).polluted).toBeUndefined();
+        expect(service.stylesState.getValue().size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects constructor.prototype payloads in snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const payload = JSON.parse('{"styleOptions": {"constructor": {"prototype": {"polluted": true}}}}');
+        const errors = service.importSnapshot(payload);
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(({} as any).polluted).toBeUndefined();
+        expect(service.stylesState.getValue().size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects oversized snapshot strings before state mutation', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const limits = service.getSnapshotImportLimits();
+
+        const errors = service.importSnapshot({
+            erdblickVersion: 'x'.repeat(limits.maxStringLength + 1)
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.erdblickVersion.getValue()).toBe('');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects snapshots that exceed the max nesting depth', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const limits = service.getSnapshotImportLimits();
+
+        const deepValue: Record<string, unknown> = {};
+        let cursor: Record<string, unknown> = deepValue;
+        for (let index = 0; index < limits.maxNestingDepth + 1; index++) {
+            cursor['next'] = {};
+            cursor = cursor['next'] as Record<string, unknown>;
+        }
+
+        const errors = service.importSnapshot({
+            styleOptions: deepValue
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.stylesState.getValue().size).toBe(0);
 
         service.ngOnDestroy();
         routerStub.events.complete();

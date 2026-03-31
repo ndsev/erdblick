@@ -1,5 +1,4 @@
 import {Component, OnDestroy, Renderer2, ViewChild, effect, input} from "@angular/core";
-import {Dialog} from "primeng/dialog";
 import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
 import {MapDataService} from "../mapdata/map.service";
@@ -10,12 +9,13 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {MenuItem, MenuItemCommandEvent} from "primeng/api";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 @Component({
     selector: 'inspection-panel-dialog',
     template: `
-        <p-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
-                  [style]="dialogStyle"
+        <app-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
+                  [style]="dialogStyle" [persistLayout]="true" [layoutId]="layoutId"
                   (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()">
             @if (panel()) {
                 <ng-template #header>
@@ -122,7 +122,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                     </div>
                 </ng-template>
             }
-        </p-dialog>
+        </app-dialog>
         <p-popover #comparePopover [baseZIndex]="30000">
             <div style="display: flex; flex-direction: row; align-content: center; gap: 0.25em">
                 <div class="comparison-popover">
@@ -154,6 +154,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     dialogIndex = input.required<number>();
     title = "";
     errorMessage: string = "";
+    layoutId = '';
     dialogStyle: { [key: string]: string } = {};
     layerMenuItems: { label: string, disabled: boolean, command: () => void }[] = [];
     selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
@@ -163,7 +164,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     private lastExtraMenuTarget?: HTMLElement;
     isMetadata: boolean = false;
 
-    @ViewChild('dialog') dialog?: Dialog;
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
     @ViewChild('extraMenu') extraMenu!: ContextMenu;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
@@ -183,6 +184,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
             const panel = this.panel();
             this.errorMessage = "";
             this.updateHeaderFor(panel);
+            this.layoutId = `inspection:${panel.id}`;
             this.dialogStyle = this.buildDialogStyle(panel);
         });
     }
@@ -379,7 +381,38 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
         this.bindDockDragCue();
-        this.applyInitialPosition();
+        const panel = this.panel();
+        const layout = this.stateService.ensureInspectionDialogLayout(
+            panel.id,
+            this.dialogIndex(),
+            () => {
+                const container = this.getDialogContainer();
+                if (!container) {
+                    const baseFontSize = this.stateService.baseFontSize;
+                    return {
+                        position: {left: 0, top: 0},
+                        size: {
+                            width: Math.round(panel.size[0] * baseFontSize),
+                            height: Math.round(panel.size[1] * baseFontSize)
+                        }
+                    };
+                }
+                const rect = container.getBoundingClientRect();
+                return {
+                    position: {left: Math.round(rect.left), top: Math.round(rect.top)},
+                    size: {width: Math.round(rect.width), height: Math.round(rect.height)}
+                };
+            }
+        );
+        const baseFontSize = this.stateService.baseFontSize;
+        if (baseFontSize) {
+            const widthEm = layout.size.width / baseFontSize;
+            const heightEm = layout.size.height / baseFontSize;
+            panel.size[0] = widthEm;
+            panel.size[1] = heightEm;
+            this.dialogStyle = this.buildDialogStyle(panel);
+            this.stateService.setInspectionPanelSize(panel.id, [widthEm, heightEm]);
+        }
         setTimeout(() => this.featurePanel?.refresh(), 0);
     }
 
@@ -388,7 +421,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (this.shouldDock()) {
             this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
         }
-        this.storeDialogPosition();
         this.clearDockCue();
         this.dialogStack.bringToFront(this.dialog);
     }
@@ -412,42 +444,10 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     }
 
     private buildDialogStyle(panel: InspectionPanelModel<FeatureWrapper>): { [key: string]: string } {
-        const nextStyle: { [key: string]: string } = {
+        return {
             width: `${panel.size[0]}em`,
             height: `${panel.size[1]}em`
         };
-        const containerStyle = this.getDialogContainer()?.style;
-        const currentLeft = containerStyle?.left || this.dialogStyle['left'];
-        const currentTop = containerStyle?.top || this.dialogStyle['top'];
-        const currentPosition = containerStyle?.position || this.dialogStyle['position'];
-        const currentMargin = containerStyle?.margin || this.dialogStyle['margin'];
-        if (currentLeft) {
-            nextStyle['left'] = currentLeft;
-        }
-        if (currentTop) {
-            nextStyle['top'] = currentTop;
-        }
-        if (currentPosition) {
-            nextStyle['position'] = currentPosition;
-        }
-        if (currentMargin) {
-            nextStyle['margin'] = currentMargin;
-        }
-        if (!nextStyle['left'] || !nextStyle['top']) {
-            const stored = panel.inspectionDialogLayoutEntry?.position
-                ?? this.stateService.getInspectionDialogLayoutEntry(panel.id)?.position;
-            if (stored) {
-                if (!nextStyle['left']) {
-                    nextStyle['left'] = `${Math.round(stored.left)}px`;
-                }
-                if (!nextStyle['top']) {
-                    nextStyle['top'] = `${Math.round(stored.top)}px`;
-                }
-                nextStyle['position'] = nextStyle['position'] ?? 'fixed';
-                nextStyle['margin'] = nextStyle['margin'] ?? '0';
-            }
-        }
-        return nextStyle;
     }
 
     ngOnDestroy() {
@@ -498,51 +498,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 this.detachDragUpListener = undefined;
             });
         });
-    }
-
-    private applyInitialPosition() {
-        const container = this.getDialogContainer();
-        if (!container) {
-            return;
-        }
-        const index = this.dialogIndex();
-        const panelId = this.panel().id;
-        const stored = this.panel().inspectionDialogLayoutEntry?.position
-            ?? this.stateService.getInspectionDialogLayoutEntry(panelId)?.position;
-        if (stored) {
-            if (!container.style.left || !container.style.top) {
-                this.setDialogPosition(stored.left, stored.top);
-            }
-            return;
-        }
-        const slotIndex = this.stateService.ensureInspectionDialogSlot(panelId, index);
-        const rect = container.getBoundingClientRect();
-        const offsetPx = this.stateService.baseFontSize;
-        const offsetMultiplier = slotIndex + 1;
-        const left = rect.left + offsetPx * offsetMultiplier;
-        const top = rect.top + offsetPx * offsetMultiplier;
-        this.setDialogPosition(left, top);
-        this.stateService.setInspectionDialogPosition(panelId, {left, top}, index);
-    }
-
-    private storeDialogPosition() {
-        const container = this.getDialogContainer();
-        if (!container) {
-            return;
-        }
-        const rect = container.getBoundingClientRect();
-        this.stateService.setInspectionDialogPosition(this.panel().id, {left: rect.left, top: rect.top}, this.dialogIndex());
-    }
-
-    private setDialogPosition(left: number, top: number) {
-        const container = this.getDialogContainer();
-        if (!container) {
-            return;
-        }
-        container.style.position = 'fixed';
-        container.style.left = `${Math.round(left)}px`;
-        container.style.top = `${Math.round(top)}px`;
-        container.style.margin = '0';
     }
 
     private shouldDock(): boolean {

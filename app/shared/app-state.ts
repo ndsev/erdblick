@@ -305,6 +305,26 @@ export class AppState<T> extends BehaviorSubject<T> {
         this.next(this.defaultValue);
     }
 
+    toSnapshotValue(): unknown {
+        const value = this.getValue();
+        const payload = this.preprocess ? this.preprocess(value) : value;
+        return deepCopy(payload);
+    }
+
+    validateSnapshotValue(value: unknown): T {
+        const verified = this.schema.parse(value);
+        const currentValue = this.getValue();
+        return (this.postprocess ? this.postprocess(verified as any, currentValue) : verified) as T;
+    }
+
+    applySnapshotValue(value: unknown): void {
+        const currentValue = this.getValue();
+        const nextValue = this.validateSnapshotValue(value);
+        if (!deepEquals(currentValue, nextValue as T)) {
+            this.next(nextValue as T);
+        }
+    }
+
     private isArray(): this is AppState<unknown[]> {
         return this.schema instanceof z.ZodArray;
     }
@@ -643,6 +663,31 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         return true;
     }
 
+    override toSnapshotValue(): unknown {
+        const snapshot: Record<string, (string|number|boolean)[]> = {};
+        for (const [key, values] of this.value.entries()) {
+            snapshot[key] = [...values];
+        }
+        return snapshot;
+    }
+
+    override applySnapshotValue(value: unknown): void {
+        const nextMap = this.validateSnapshotValue(value);
+        if (this.styleMapEquals(this.value, nextMap)) {
+            return;
+        }
+        this.next(nextMap);
+    }
+
+    override validateSnapshotValue(value: unknown): Map<string, (string|number|boolean)[]> {
+        const parsed = z.record(z.string(), z.array(z.union([z.string(), z.number(), z.boolean()]))).parse(value);
+        const nextMap = new Map<string, (string|number|boolean)[]>();
+        for (const [key, values] of Object.entries(parsed)) {
+            nextMap.set(key, [...values]);
+        }
+        return nextMap;
+    }
+
     override serialize(_: boolean): Record<string, string> | undefined {
         const result: Record<string, string> = {};
         if (this.value.size === 0) {
@@ -817,6 +862,19 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         // Use a slash-delimited compound key; mapId may contain '/'.
         const mapLayerId = `${mapId}/${layerId}`;
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
+    }
+
+    private styleMapEquals(a: Map<string, (string|number|boolean)[]>, b: Map<string, (string|number|boolean)[]>): boolean {
+        if (a.size !== b.size) {
+            return false;
+        }
+        for (const [key, value] of a.entries()) {
+            const other = b.get(key);
+            if (!other || !deepEquals(value, other)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private styleOptionKeyFromMapLayer(mapLayerId: string, shortStyleId: string, optionId: string): string {

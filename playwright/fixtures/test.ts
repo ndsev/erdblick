@@ -1,7 +1,8 @@
 import { test as base } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_STATE_SNAPSHOT } from '../utils/test-params';
+import { loadStateSnapshotLocalStorageEntries } from '../utils/state-snapshots';
 
 const DARK_MODE_KEY = 'ui.darkMode';
 const FORCED_DARK_MODE_SETTING = 'on';
@@ -77,11 +78,24 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
  * - Starts JS / CSS coverage collection on Chromium-based browsers and writes
  *   the results into NDJSON files once each test completes.
  */
-export const test = base.extend({
-    context: async ({ context }, use) => {
+type SnapshotFixtures = {
+    stateSnapshot: string | null;
+};
+
+export const test = base.extend<SnapshotFixtures>({
+    stateSnapshot: [TEST_STATE_SNAPSHOT, { option: true }],
+    context: async ({ context, stateSnapshot }, use) => {
+        const snapshotEntries = loadStateSnapshotLocalStorageEntries(stateSnapshot);
         await context.addInitScript(([key, value]) => {
             window.localStorage.setItem(key, value);
         }, [DARK_MODE_KEY, FORCED_DARK_MODE_SETTING]);
+        if (snapshotEntries) {
+            await context.addInitScript((entries) => {
+                for (const [key, value] of Object.entries(entries)) {
+                    window.localStorage.setItem(key, value);
+                }
+            }, snapshotEntries);
+        }
 
         await use(context);
     },

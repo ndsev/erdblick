@@ -4,8 +4,9 @@ import {AppStateService} from '../shared/appstate.service';
 @Component({
     selector: 'about-dialog',
     template: `
-        <p-dialog header="About" [(visible)]="stateService.aboutDialogVisible" [modal]="false"
-                  [resizable]="false" class="pref-dialog" [style]="{'min-width': '24em', 'max-width': '42em'}">
+        <app-dialog header="About" [(visible)]="stateService.aboutDialogVisible" [modal]="false"
+                  [resizable]="false" class="pref-dialog" [style]="{'min-width': '24em', 'max-width': '42em'}"
+                  [persistLayout]="true" [layoutId]="'about-dialog'">
             <div class="about-dialog-content">
                 @if (stateService.distributionVersions.getValue().length) {
                     <div class="about-section-title">Distribution</div>
@@ -44,7 +45,7 @@ import {AppStateService} from '../shared/appstate.service';
                     <p-button type="button" label="Close" icon="pi pi-times" (click)="close()"></p-button>
                 </div>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [
         `
