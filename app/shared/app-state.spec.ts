@@ -97,6 +97,19 @@ describe('AppState', () => {
         expect(state.getValue()).toBe(5);
     });
 
+    it('exports and imports snapshot values using schema validation', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState(pool, {
+            name: 'count',
+            defaultValue: 0,
+            schema: z.number(),
+        });
+
+        state.applySnapshotValue(7);
+        expect(state.getValue()).toBe(7);
+        expect(state.toSnapshotValue()).toBe(7);
+    });
+
     it('deserializes Boolish URL params', () => {
         const pool = new Map<string, AppState<unknown>>();
         const state = new AppState(pool, {
@@ -332,6 +345,20 @@ describe('StyleState', () => {
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
         const styles = new StyleState(pool);
         expect(styles.serialize(true)).toEqual({});
+    });
+
+    it('exports and applies snapshot values with a stable object shape', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
+        const styles = new StyleState(pool);
+        const key = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
+        styles.applySnapshotValue({
+            [key]: [true]
+        });
+        expect(styles.getValue().get(key)).toEqual([true]);
+        expect(styles.toSnapshotValue()).toEqual({
+            [key]: [true]
+        });
     });
 
     it('serialize excludes layers not present in layerNames', () => {

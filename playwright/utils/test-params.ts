@@ -101,4 +101,7 @@ export const TEST_LAYER_NAMES = parseStringArray(
 export const TEST_VIEW_POSITIONS = parsePositionArray(
     readEnv('EB_TEST_VIEW_POSITION', '[[42.5,11.615,13]]')
 );
-
+export const TEST_STATE_SNAPSHOT = (() => {
+    const value = readEnv('EB_TEST_STATE_SNAPSHOT', '').trim();
+    return value.length ? value : null;
+})();

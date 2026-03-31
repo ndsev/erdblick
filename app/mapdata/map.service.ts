@@ -324,8 +324,7 @@ export class MapDataService {
                     features: features,
                     sourceData: selection.sourceData,
                     color: selection.color,
-                    undocked: selection.undocked ?? false,
-                    inspectionDialogLayoutEntry: selection.inspectionDialogLayoutEntry
+                    undocked: selection.undocked ?? false
                 });
             }
             if (revision !== this.selectionConversionRevision) {
@@ -336,7 +335,6 @@ export class MapDataService {
                 update.panel.color = update.selection.color;
                 update.panel.size = update.selection.size;
                 update.panel.undocked = update.selection.undocked ?? false;
-                update.panel.inspectionDialogLayoutEntry = update.selection.inspectionDialogLayoutEntry;
             });
             this.selectionTopic.next(convertedSelections);
         });

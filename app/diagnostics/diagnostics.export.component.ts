@@ -2,15 +2,15 @@ import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import type {DiagnosticsExportOptions} from './diagnostics.model';
-import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {AppStateService} from '../shared/appstate.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'diagnostics-export-dialog',
     template: `
-        <p-dialog #dialog header="Export Diagnostics Data" class="diagnostics-export-dialog" [(visible)]="stateService.diagnosticsExportDialogVisible"
-                  [modal]="false" (onShow)="onDialogShow()">
+        <app-dialog #dialog header="Export Diagnostics Data" class="diagnostics-export-dialog" [(visible)]="stateService.diagnosticsExportDialogVisible"
+                  [modal]="false" [persistLayout]="true" [layoutId]="layoutId" (onShow)="onDialogShow()">
             <div class="diagnostics-export-content">
                 <div class="diagnostics-export-section">
                     <div class="diagnostics-label">Include</div>
@@ -40,13 +40,14 @@ import {AppStateService} from '../shared/appstate.service';
                     <p-button label="Export JSON" [disabled]="!canExport || exporting" (click)="export()" />
                 </div>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [``],
     standalone: false
 })
 export class DiagnosticsExportDialogComponent implements OnDestroy {
-    @ViewChild('dialog') dialog?: Dialog;
+    readonly layoutId = 'diagnostics-export';
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     exporting = false;
     exportOptions: DiagnosticsExportOptions = {
         includeProgress: true,

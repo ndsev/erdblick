@@ -10,15 +10,16 @@ import {
     AppStateService,
     DEFAULT_DECK_STYLE_WORKER_COUNT
 } from "../shared/appstate.service";
-import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.pool";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 @Component({
     selector: 'preferences',
     template: `
-        <p-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
+        <app-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
+                  [persistLayout]="true" [layoutId]="'preferences-dialog'"
                   (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
@@ -149,7 +150,7 @@ import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.p
                 <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [
         `
@@ -180,7 +181,7 @@ import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.p
 })
 export class PreferencesComponent implements OnInit, OnDestroy {
 
-    @ViewChild('pref') preferencesDialog?: Dialog;
+    @ViewChild('pref') preferencesDialog?: AppDialogComponent;
 
     tilesToLoadInput: number | string = 0;
     limitSimultaneousInspectionsInput: number | string = 0;

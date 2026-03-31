@@ -1,13 +1,14 @@
 import {Component, ViewChild} from '@angular/core';
 import {AppStateService} from '../shared/appstate.service';
-import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'keyboard-dialog',
     template: `
-        <p-dialog header="Keyboard Controls" [(visible)]="stateService.controlsDialogVisible" [position]="'center'"
+        <app-dialog header="Keyboard Controls" [(visible)]="stateService.controlsDialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="false" [draggable]="true" class="pref-dialog"
+                  [persistLayout]="true" [layoutId]="'keyboard-dialog'"
                   #keyboardDialog (onShow)="onDialogShow()">
             <div class="keyboard-dialog">
                 <ul class="keyboard-list">
@@ -88,7 +89,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
                 </ul>
             </div>
             <p-button (click)="close()" label="Close" icon="pi pi-times"></p-button>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [
         `
@@ -153,7 +154,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
     standalone: false
 })
 export class KeyboardComponent {
-    @ViewChild('keyboardDialog') keyboardDialog?: Dialog;
+    @ViewChild('keyboardDialog') keyboardDialog?: AppDialogComponent;
 
     constructor(public stateService: AppStateService,
                 private dialogStack: DialogStackService) {}

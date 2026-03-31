@@ -6,7 +6,8 @@ import {Color} from "../integrations/geo";
 @Component({
     selector: 'sourcedatadialog',
     template: `
-        <p-dialog header="Inspect Tile Source Data" class="tilesource-select-dialog" [(visible)]="menuService.tileSourceDataDialogVisible" [modal]="false"
+        <app-dialog header="Inspect Tile Source Data" class="tilesource-select-dialog" [(visible)]="menuService.tileSourceDataDialogVisible" [modal]="false"
+                  [persistLayout]="true" [layoutId]="'source-data-selection-dialog'"
                   (onHide)="reset()">
             @if (loading) {
                 <div style="display:flex; justify-content: center">
@@ -71,7 +72,7 @@ import {Color} from "../integrations/geo";
                     </div>
                 </div>
             }
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [``],
     standalone: false

@@ -9,7 +9,6 @@ import {
     VIEW_SYNC_POSITION,
     VIEW_SYNC_PROJECTION
 } from './shared/appstate.service';
-import {EditorService} from './shared/editor.service';
 import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 import {MenuItem} from "primeng/api";
@@ -124,7 +123,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     constructor(public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService,
                 private diagnostics: DiagnosticsFacadeService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
@@ -216,12 +214,15 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     private openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
+        this.stateService.datasourcesEditorDialogVisible = true;
     }
 
     private openStylesDialog() {
         this.styleService.stylesDialogVisible = true;
+    }
+
+    private openStateSnapshots() {
+        this.stateService.snapshotManagerDialogVisible = true;
     }
 
     protected showMapsPanel() {
@@ -358,6 +359,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: 'Datasources',
                         icon: 'data_table',
                         command: () => { this.openDatasources(); }
+                    },
+                    {
+                        name: 'State Snapshots',
+                        icon: 'save',
+                        command: () => { this.openStateSnapshots(); }
                     },
                     {
                         name: 'Settings',
