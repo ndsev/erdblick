@@ -39,7 +39,7 @@ interface ExtendedSearchTarget extends SearchTarget {
                 @if (completion.visible || completion.pending) {
                     <div class="completion-popup" (mousedown)="onCompletionPopupDown($event)"
                          [style.top.px]="completion.top"
-                         [style.left.px]="completion.left" [style.z-index]="9000">
+                         [style.left.px]="completion.left" [style.z-index]="50000">
                         @for (item of completionItems; track $index) {
                             <div [ngClass]="{'selected': $index === completion.selectionIndex}"
                                  (click)="applyCompletion(item.query)">
@@ -63,6 +63,7 @@ interface ExtendedSearchTarget extends SearchTarget {
 
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
+                          [baseZIndex]="30040"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">

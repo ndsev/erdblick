@@ -3,6 +3,7 @@
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <iostream>
 
@@ -11,6 +12,53 @@ using namespace mapget;
 
 namespace
 {
+
+bool isBareGeoJsonPathField(std::string_view field)
+{
+    if (field.empty()) {
+        return false;
+    }
+    const auto isIdentifierStart = [](unsigned char c) {
+        return std::isalpha(c) || c == '_';
+    };
+    const auto isIdentifierPart = [](unsigned char c) {
+        return std::isalnum(c) || c == '_';
+    };
+    if (!isIdentifierStart(static_cast<unsigned char>(field.front()))) {
+        return false;
+    }
+    return std::all_of(field.begin() + 1, field.end(), [&](char c) {
+        return isIdentifierPart(static_cast<unsigned char>(c));
+    });
+}
+
+std::string escapedGeoJsonPathField(std::string_view field)
+{
+    std::string escaped;
+    escaped.reserve(field.size());
+    for (char c : field) {
+        if (c == '\\' || c == '"') {
+            escaped.push_back('\\');
+        }
+        escaped.push_back(c);
+    }
+    return escaped;
+}
+
+std::string appendGeoJsonPathField(std::string_view base, std::string_view field)
+{
+    if (isBareGeoJsonPathField(field)) {
+        if (base.empty()) {
+            return std::string(field);
+        }
+        return fmt::format("{}.{}", base, field);
+    }
+    const auto escaped = escapedGeoJsonPathField(field);
+    if (base.empty()) {
+        return fmt::format("[\"{}\"]", escaped);
+    }
+    return fmt::format("{}.[\"{}\"]", base, escaped);
+}
 
 /**
  * Converts a collection of qualified source-data references to the internal
@@ -99,7 +147,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 
     // Basic attributes section.
     if (auto mergedBasicAttrs = featurePtr->mergedAttributesOrNull()) {
-        auto scope = push(convertString("Basic Attributes"), "properties", ValueType::Section);
+        auto scope = push(convertString("Basic Attributes"), RawPath{"properties"}, ValueType::Section);
         for (auto i = 0U; i < mergedBasicAttrs->size(); ++i) {
             convertField(
                 mergedBasicAttrs->keyAt(static_cast<int64_t>(i)),
@@ -110,7 +158,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     // Flexible attributes section.
     if (auto layers = featurePtr->attributeLayersOrNull())
     {
-        auto scope = push(convertString("Attribute Layers"), "properties.layer", ValueType::Section);
+        auto scope = push(convertString("Attribute Layers"), RawPath{"properties.layer"}, ValueType::Section);
         layers->forEachLayer([this](auto&& layerName, auto&& layer) -> bool {
             convertAttributeLayer(layerName, layer);
             return true;
@@ -121,7 +169,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     using namespace mapget;
     if (featurePtr->numRelations())
     {
-        auto scope = push(convertString("Relations"), "relations", ValueType::Section);
+        auto scope = push(convertString("Relations"), RawPath{"relations"}, ValueType::Section);
         std::unordered_map<std::string_view, std::vector<model_ptr<Relation>>> relsByName;
         featurePtr->forEachRelation([this](model_ptr<Relation> const& relation) -> bool {
             convertRelation(relation);
@@ -132,7 +180,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     // Geometry section.
     if (auto geomCollection = featurePtr->geomOrNull())
     {
-        auto scope = push(convertString("Geometry"), "geometry", ValueType::Section);
+        auto scope = push(convertString("Geometry"), RawPath{"geometry"}, ValueType::Section);
         const auto highFiStage = highFidelityStage(featurePtr->model());
         uint32_t geomIndex = 0;
         geomCollection->forEachGeometry([this, &geomIndex, highFiStage](model_ptr<Geometry> const& geom) -> bool {
@@ -159,12 +207,21 @@ InspectionConverter::InspectionNodeScope InspectionConverter::push(
     if (std::holds_alternative<uint32_t>(path)) {
         current_->geoJsonPath_ = fmt::format("{}[{}]", prevTop->geoJsonPath_, std::get<uint32_t>(path));
     }
+    else if (std::holds_alternative<RawPath>(path)) {
+        std::string_view rawPath = std::get<RawPath>(path).value_;
+        if (prevTop->geoJsonPath_.empty()) {
+            current_->geoJsonPath_ = std::string(rawPath);
+        }
+        else if (rawPath.empty()) {
+            current_->geoJsonPath_ = prevTop->geoJsonPath_;
+        }
+        else {
+            current_->geoJsonPath_ = fmt::format("{}.{}", prevTop->geoJsonPath_, rawPath);
+        }
+    }
     else {
         std::string_view field = std::get<std::string_view>(path);
-        if (prevTop->geoJsonPath_.empty())
-            current_->geoJsonPath_ = field;
-        else
-            current_->geoJsonPath_ = fmt::format("{}.{}", prevTop->geoJsonPath_, field);
+        current_->geoJsonPath_ = appendGeoJsonPathField(prevTop->geoJsonPath_, field);
     }
 
     return result;
@@ -201,9 +258,25 @@ void InspectionConverter::convertAttributeLayer(
     const model_ptr<AttributeLayer>& l)
 {
     auto layerScope = push(convertString(name), name);
-    l->forEachAttribute([this](model_ptr<Attribute> const& attr)
+    std::vector<simfil::StringId> attributeFieldIds;
+    attributeFieldIds.reserve(l->size());
+    for (auto const& [fieldId, value] : l->fields()) {
+        if (value->addr().column() != TileFeatureLayer::ColumnId::Attributes) {
+            continue;
+        }
+        attributeFieldIds.push_back(fieldId);
+    }
+
+    size_t attributeIndex = 0;
+    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex](model_ptr<Attribute> const& attr)
     {
-        auto attrScope = push(convertString(attr->name()), attr->name(), ValueType::Null);
+        auto fieldId = attributeIndex < attributeFieldIds.size()
+            ? attributeFieldIds[attributeIndex]
+            : simfil::StringId{};
+        ++attributeIndex;
+
+        auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
+        auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
         convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
         auto numValues = 0;

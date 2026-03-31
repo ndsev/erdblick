@@ -23,6 +23,10 @@ export type SearchResultClusterLayerPickingInfo = PickingInfo<
 
 type SearchClusterFeature = PointFeature<SearchResultClusterPoint> | ClusterFeature<ClusterProperties>;
 
+const DECK_NO_DEPTH_TEST_PARAMETERS = {
+    depthTest: false
+} as any;
+
 function iconSizeScale(size: number): number {
     return Math.min(100, size) / 100 + 1;
 }
@@ -110,6 +114,13 @@ export class SearchResultClusterLayer extends CompositeLayer<SearchResultCluster
 
     override renderLayers(): IconLayer<SearchClusterFeature> {
         const data = this.state.data ?? [];
+        const subLayerProps = this.getSubLayerProps({
+            id: "icon",
+            parameters: {
+                ...(this.props.parameters ?? {}),
+                ...DECK_NO_DEPTH_TEST_PARAMETERS
+            }
+        });
         return new IconLayer<SearchClusterFeature>(
             {
                 data,
@@ -133,9 +144,7 @@ export class SearchResultClusterLayer extends CompositeLayer<SearchResultCluster
                 sizeUnits: "pixels",
                 alphaCutoff: 0.05
             },
-            this.getSubLayerProps({
-                id: "icon"
-            })
+            subLayerProps
         );
     }
 }

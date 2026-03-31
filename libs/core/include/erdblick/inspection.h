@@ -64,7 +64,10 @@ public:
     };
 
     using OptionalValueAndType = std::optional<std::pair<JsValue, ValueType>>;
-    using FieldOrIndex = std::variant<uint32_t, std::string_view>;
+    struct RawPath {
+        std::string_view value_;
+    };
+    using FieldOrIndex = std::variant<uint32_t, std::string_view, RawPath>;
 
     JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
 

@@ -1189,11 +1189,20 @@ export class MapDataService {
     }
 
     private tileSatisfiesStyleStage(tile: FeatureTile, style: FeatureLayerStyle): boolean {
+        const requiredStage = this.styleMinimumStage(style);
         const highestLoadedStage = tile.highestLoadedStage();
         if (highestLoadedStage === null) {
             return false;
         }
-        return highestLoadedStage >= this.styleMinimumStage(style);
+        if (highestLoadedStage >= requiredStage) {
+            return true;
+        }
+
+        // Some datasets expose fewer stages than a style was authored for.
+        // In that case, once the tile is complete for the layer's advertised
+        // stage count, treat the style as ready instead of blocking forever on
+        // a stage that will never arrive.
+        return tile.isComplete(this.getLayerStageCount(tile.mapName, tile.layerName));
     }
 
     public isTileInspectionDataComplete(tile: FeatureTile): boolean {

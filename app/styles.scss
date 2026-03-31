@@ -2605,7 +2605,6 @@ inspection-tree {
   min-width: 15em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
-  z-index: 120;
 
   &.shifted {
     left: 0.5em !important;
@@ -2662,7 +2661,7 @@ inspection-tree {
       padding: var(--p-contextmenu-list-padding);
 
       position: fixed;
-      z-index: 520;
+      z-index: 50000;
       margin-top: -0.5em;
 
       min-width: 150px;

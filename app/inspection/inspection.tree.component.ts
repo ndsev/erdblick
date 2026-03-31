@@ -500,9 +500,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (rowData.hasOwnProperty("geoJsonPath")) {
             const path = rowData["geoJsonPath"];
             this.inspectionMenuItems.push({
-                label: 'Copy GeoJson Path',
+                label: 'Copy Search Path',
                 command: () => {
-                    this.copyToClipboard(path);
+                    if (path) {
+                        this.copyToClipboard(path);
+                    }
                 }
             });
         }
