@@ -120,7 +120,7 @@ export async function openPreferencesDialog(page: Page): Promise<Locator> {
 
 export async function openStylesDialog(page: Page): Promise<Locator> {
     await clickPrefButton(page, 'Styles');
-    const dialog = page.locator('.styles-dialog').first().locator('.p-dialog').first();
+    const dialog = page.getByTestId('styles-dialog').locator('.p-dialog').first();
     await expect(dialog).toBeVisible();
     return dialog;
 }
@@ -321,4 +321,81 @@ export async function getCameraPosition(page: Page, viewIndex: number): Promise<
     } catch {
         return null;
     }
+}
+
+export type DocsScreenshotLabel = {
+    locator: Locator;
+    label: string;
+};
+
+export async function captureDocsScreenshotWithLabels(
+    page: Page,
+    screenshotPath: string,
+    labels: DocsScreenshotLabel[]
+): Promise<void> {
+    const labelBoxes: Array<{ label: string; x: number; y: number; width: number; height: number }> = [];
+
+    for (const entry of labels) {
+        await expect(entry.locator).toBeVisible();
+        const box = await entry.locator.boundingBox();
+        if (!box) {
+            throw new Error(`Could not read bounds for docs label "${entry.label}"`);
+        }
+        labelBoxes.push({
+            label: entry.label,
+            x: box.x,
+            y: box.y,
+            width: box.width,
+            height: box.height
+        });
+    }
+
+    await page.evaluate((entries) => {
+        document.getElementById('__erdblick-doc-labels__')?.remove();
+
+        const root = document.createElement('div');
+        root.id = '__erdblick-doc-labels__';
+        root.style.position = 'fixed';
+        root.style.inset = '0';
+        root.style.pointerEvents = 'none';
+        root.style.zIndex = '2147483647';
+        document.body.appendChild(root);
+
+        const gap = 8;
+        const padding = 8;
+        const viewportWidth = window.innerWidth;
+
+        for (const entry of entries) {
+            const label = document.createElement('div');
+            label.textContent = entry.label;
+            label.style.position = 'fixed';
+            label.style.pointerEvents = 'none';
+            label.style.zIndex = '2147483647';
+            label.style.padding = '4px 8px';
+            label.style.borderRadius = '999px';
+            label.style.background = 'rgba(16, 24, 40, 0.92)';
+            label.style.color = '#f8fafc';
+            label.style.border = '1px solid rgba(148, 163, 184, 0.75)';
+            label.style.font = '600 12px/1.2 sans-serif';
+            label.style.whiteSpace = 'nowrap';
+            label.style.boxShadow = '0 6px 18px rgba(15, 23, 42, 0.28)';
+            label.style.left = '-9999px';
+            label.style.top = '-9999px';
+
+            root.appendChild(label);
+
+            const rect = label.getBoundingClientRect();
+            const maxLeft = Math.max(padding, viewportWidth - padding - rect.width);
+            const centeredLeft = entry.x + (entry.width / 2) - (rect.width / 2);
+            const left = Math.min(Math.max(centeredLeft, padding), maxLeft);
+            const top = Math.max(padding, entry.y - gap - rect.height);
+
+            label.style.left = `${left}px`;
+            label.style.top = `${top}px`;
+        }
+    }, labelBoxes);
+
+    await page.screenshot({
+        path: screenshotPath
+    });
 }

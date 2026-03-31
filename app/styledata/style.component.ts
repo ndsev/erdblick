@@ -26,7 +26,7 @@ import {oneDark} from "@codemirror/theme-one-dark";
 @Component({
     selector: 'style-panel',
     template: `
-        <p-dialog class="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
+        <p-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
                   [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
                   (onShow)="onStylesDialogShow()">
             @if (styleService.styleGroups | async; as styleGroups) {
@@ -35,7 +35,7 @@ import {oneDark} from "@codemirror/theme-one-dark";
                         <div>No styles loaded.</div>
                     }
                     <div class="styles-container">
-                        <p-tree [value]="styleGroups">
+                        <p-tree [value]="styleGroups" data-testid="style-tree">
                             <!-- Group Node Template -->
                             <ng-template let-node pTemplate="Group">
                             <span>
@@ -50,14 +50,16 @@ import {oneDark} from "@codemirror/theme-one-dark";
                             </ng-template>
                             <!-- Style Node Template -->
                             <ng-template let-node pTemplate="Style">
-                                <div class="flex-container">
+                                <div class="flex-container" [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)">
                                     <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
                                     <span onEnterClick class="material-symbols-outlined menu-toggler"
+                                          [attr.data-testid]="'style-menu-button-' + styleTestIdSuffix(node.id)"
                                           (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                         more_vert
                                     </span>
                                         <span>
                                         <p-checkbox [(ngModel)]="node.visible"
+                                                    [attr.data-testid]="'style-visibility-' + styleTestIdSuffix(node.id)"
                                                     (click)="$event.stopPropagation()"
                                                     (ngModelChange)="applyStyleConfig(node.id)"
                                                     [binary]="true"
@@ -75,18 +77,21 @@ import {oneDark} from "@codemirror/theme-one-dark";
                                     <div class="tree-node-controls">
                                         @if (node.imported) {
                                             <p-button onEnterClick (click)="removeStyle(node.id)"
+                                                      [attr.data-testid]="'style-remove-button-' + styleTestIdSuffix(node.id)"
                                                       icon="pi pi-trash"
                                                       label="" pTooltip="Remove style"
                                                       tooltipPosition="bottom" tabindex="0">
                                             </p-button>
                                         } @else {
                                             <p-button onEnterClick (click)="resetStyle(node.id)"
+                                                      [attr.data-testid]="'style-reset-button-' + styleTestIdSuffix(node.id)"
                                                       icon="pi pi-refresh"
                                                       label="" pTooltip="Reset style to server version"
                                                       tooltipPosition="bottom" tabindex="0">
                                             </p-button>
                                         }
                                         <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                  [attr.data-testid]="'style-edit-button-' + styleTestIdSuffix(node.id)"
                                                   icon="pi pi-file-edit"
                                                   label="" pTooltip="Edit style"
                                                   tooltipPosition="bottom" tabindex="0">
@@ -120,10 +125,11 @@ import {oneDark} from "@codemirror/theme-one-dark";
                 </div>
             }
             <div class="dialog-controls">
-                <p-button (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
+                <p-button data-testid="styles-close-button" (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
                 <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
                               accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
                               customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
+                              data-testid="style-import-button"
                               class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
                               chooseLabel="Import Style" tabindex="0"/>
             </div>
@@ -131,13 +137,13 @@ import {oneDark} from "@codemirror/theme-one-dark";
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog" (onShow)="onEditorDialogShow()">
+                  data-testid="style-editor-dialog" class="editor-dialog" (onShow)="onEditorDialogShow()">
             <editor></editor>
             <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
+                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)"
+                    <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
@@ -146,10 +152,10 @@ import {oneDark} from "@codemirror/theme-one-dark";
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
+                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleService.selectedStyleIdForEditing)"
                               [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export">
                     </p-button>
-                    <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
+                    <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
             </div>
         </p-dialog>
@@ -607,6 +613,15 @@ export class StyleComponent implements OnDestroy {
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
+
+    styleTestIdSuffix(styleId: string): string {
+        return styleId
+            .trim()
+            .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'unknown';
+    }
 
     protected onWarningShow() {
         this.dialogStack.bringToFront(this.warningDialog);
