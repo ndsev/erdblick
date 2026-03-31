@@ -3822,36 +3822,63 @@ inspection-tree {
   }
 }
 
-.tilesource-options {
-  display:flex;
-  flex-direction: column;
-  gap: 0.5em;
+.tilesource-select-dialog {
+  margin: 0;
 
-  .main-dropdown {
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-    gap: 0.5em;
-
-    p-dropdown {
-      width: 100%;
-    }
-
-    .p-inputtext {
-      width: 100%;
-    }
-
-    button {
-      padding-left: 0;
-      padding-right: 0;
-      width: 2.85em;
-      height: 2.85em;
-      box-shadow: none;
-    }
+  .p-dialog {
+    min-width: 36em;
+    height: 15em;
   }
 
-  .p-dropdown {
-    width: 100%;
+  .p-dialog-header {
+    padding: 0.75em !important;
+    height: 2.5em !important;
+  }
+
+  .p-dialog-content {
+    padding: 0.5em !important;
+  }
+
+  .tilesource-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+
+    .main-dropdown {
+      width: 100%;
+      display: flex;
+      flex-direction: row;
+      gap: 0.5em;
+
+      div:first-child {
+        width: 100%;
+      }
+
+      .p-inputtext {
+        width: 100%;
+        height: 2.35em;
+      }
+
+      button {
+        padding-left: 0;
+        padding-right: 0;
+        width: 2.4em;
+        height: 2.4em;
+        box-shadow: none;
+      }
+    }
+
+    .p-dropdown {
+      width: 100%;
+    }
+
+    .p-select {
+      width: 100%;
+
+      .p-select-label {
+        height: 2.3em;
+      }
+    }
   }
 }
 
