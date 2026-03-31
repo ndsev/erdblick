@@ -30,7 +30,6 @@ import {MapDataService} from '../mapdata/map.service';
                             <div class="diagnostics-popover-row">
                                 <span class="diagnostics-label">Tiles</span>
                                 <span>{{ snapshot.tiles.loaded }} / {{ snapshot.tiles.expected }}</span>
-                                <span class="diagnostics-muted">cached n/a</span>
                                 @if (snapshot.tiles.errors > 0) {
                                     <span class="diagnostics-error">errors {{ snapshot.tiles.errors }}</span>
                                 }
