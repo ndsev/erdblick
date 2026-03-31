@@ -119,6 +119,7 @@ export class MapDataService {
     private observedLayerStageCountByKey: Map<string, number> = new Map();
     private dataSourceInfoJson: string | null = null;
     private selectionConversionRevision = 0;
+    private hoverConversionRevision = 0;
     private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
     private viewportLoadStartedAtMs: number | null = null;
     private viewportRenderCompletedAtMs: number | null = null;
@@ -1597,7 +1598,9 @@ export class MapDataService {
         });
         if (anyRenderPolicyChanged
             || this.selectionVisualizations.length > 0
-            || this.hoverVisualizations.length > 0) {
+            || this.hoverVisualizations.length > 0
+            || this.selectionTopic.getValue().length > 0
+            || this.hoverTopic.getValue().length > 0) {
             this.refreshHighlightVisualizationsForCurrentPolicies();
         }
     }
@@ -1609,6 +1612,12 @@ export class MapDataService {
         this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
             features: hoveredFeatureWrappers
         }]);
+    }
+
+    public refreshHighlightVisualizations(): void {
+        this.selectionHighlightSignature = "";
+        this.hoverHighlightSignature = "";
+        this.refreshHighlightVisualizationsForCurrentPolicies();
     }
 
     private refreshHighlightVisualizationIfNeeded(
@@ -1954,6 +1963,10 @@ export class MapDataService {
         this.statsDialogNeedsUpdate.next();
         if (this.selectedTileKeys.has(tileLayer.mapTileKey)) {
             this.selectionTileUpdated.next(tileLayer.mapTileKey);
+        }
+        if (this.selectedTileKeys.has(tileLayer.mapTileKey)
+            || this.hoverTopic.getValue().some(feature => feature.mapTileKey === tileLayer.mapTileKey)) {
+            this.refreshHighlightVisualizationsForCurrentPolicies();
         }
 
         // Update legal information if any.
@@ -2453,7 +2466,11 @@ export class MapDataService {
     }
 
     async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
+        const revision = ++this.hoverConversionRevision;
         const features = await this.loadFeatures(tileFeatureIds);
+        if (revision !== this.hoverConversionRevision) {
+            return;
+        }
         if (!features.length) {
             this.hoverTopic.next(features);
             return;
