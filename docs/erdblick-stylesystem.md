@@ -76,6 +76,7 @@ options:
 | `billboard` | Optional `true`/`false` override for camera-facing rendering. When omitted, erdblick keeps the primitive-specific default (for example paths stay world-oriented, while labels/icons stay billboarded). |
 | `flat` | Clamp geometry to ground, ignoring heights. |
 | `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
+| `depth-test` | Whether the rendered geometry participates in depth testing. Set `false` for overlay-style highlights that should render on top. |
 | `offset` / `vertical-offset` | Base local `[x, y, z]` offset in meters (or a single vertical offset for `z`). |
 | `offset-increment` | Additional local `[x, y, z]` offset step used for stacked rendering. Effective offset is `offset + offset-increment * slot`, where the slot increments per emitted feature for `aspect: feature` rules and per rendered attribute/transition slot for `aspect: attribute` rules. |
 | `icon-url` / `icon-url-expression` | Static path or Simfil expression for billboard icons. |

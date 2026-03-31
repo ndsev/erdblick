@@ -76,6 +76,7 @@ interface DeckBinaryAttribute<T extends ArrayLike<number>> {
 interface DeckPathLayerData {
     length: number;
     billboard: boolean;
+    depthTest: boolean;
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
     featureAddressesByPath: DeckFeatureAddressBuffer;
@@ -90,6 +91,7 @@ interface DeckPathLayerData {
 interface DeckPointLayerData {
     length: number;
     billboard: boolean;
+    depthTest: boolean;
     coordinateOrigin: [number, number, number];
     featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
@@ -101,6 +103,7 @@ interface DeckPointLayerData {
 
 interface DeckSurfaceLayerData {
     length: number;
+    depthTest: boolean;
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
     featureAddresses: DeckFeatureAddressBuffer;
@@ -113,6 +116,7 @@ interface DeckSurfaceLayerData {
 interface DeckLabelLayerData {
     length: number;
     billboard: boolean;
+    depthTest: boolean;
     coordinateOrigin: [number, number, number];
     data: DeckRenderableLabelDatum[];
 }
@@ -127,6 +131,7 @@ interface DeckPathRawBuffers {
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
+    depthTests?: Uint8Array;
     featureAddresses: Uint32Array;
     dashArrays?: Float32Array;
 }
@@ -136,6 +141,7 @@ interface DeckPointRawBuffers {
     positions: Float32Array;
     colors: Uint8Array;
     radii: Float32Array;
+    depthTests?: Uint8Array;
     featureAddresses: Uint32Array;
 }
 
@@ -144,6 +150,7 @@ interface DeckSurfaceRawBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
+    depthTests?: Uint8Array;
     featureAddresses: Uint32Array;
 }
 
@@ -185,11 +192,9 @@ const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
 const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
-const DECK_HIGHLIGHT_SURFACE_PARAMETERS = {
-    depthWriteEnabled: false,
-    depthCompare: "always",
-    cullMode: "none"
-} as const;
+const DECK_NO_DEPTH_TEST_PARAMETERS = {
+    depthTest: false
+} as any;
 const DECK_ARROW_ICON_ATLAS =
     "data:image/svg+xml;charset=utf-8," +
     encodeURIComponent(
@@ -541,16 +546,15 @@ export class DeckTileVisualization implements ITileVisualization {
         const desiredLabelLayerKeys = new Set<string>();
         const desiredArrowLayerKeys = new Set<string>();
         const modelMatrix = this.modelMatrixForScene(sceneHandle);
-        const surfaceParameters = this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value
-            ? DECK_HIGHLIGHT_SURFACE_PARAMETERS
-            : undefined;
 
         for (const entry of entries) {
             for (const surfaceLayerData of entry.surfaceLayerData) {
                 if (surfaceLayerData.length <= 0) {
                     continue;
                 }
-                const layerKeys = this.resolveLayerKeys(this.composeGeometryVariant(entry.variantSuffix, "surface"));
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(entry.variantSuffix, "surface", undefined, surfaceLayerData.depthTest)
+                );
                 const surfaceLayer = new SolidPolygonLayer<DeckSurfaceLayerData, DeckPickLayerMetadata>({
                     id: layerKeys.surfaceLayerKey,
                     data: surfaceLayerData,
@@ -564,7 +568,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     _normalize: false,
                     _full3d: true,
                     modelMatrix,
-                    parameters: surfaceParameters,
+                    parameters: this.layerParametersForDepthTest(surfaceLayerData.depthTest),
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     featureAddresses: surfaceLayerData.featureAddresses
@@ -578,7 +582,12 @@ export class DeckTileVisualization implements ITileVisualization {
                     continue;
                 }
                 const layerKeys = this.resolveLayerKeys(
-                    this.composeGeometryVariant(entry.variantSuffix, "point", pointLayerData.billboard)
+                    this.composeGeometryVariant(
+                        entry.variantSuffix,
+                        "point",
+                        pointLayerData.billboard,
+                        pointLayerData.depthTest
+                    )
                 );
                 const pointLayer = new ScatterplotLayer<DeckPointLayerData, DeckPickLayerMetadata>({
                     id: layerKeys.pointLayerKey,
@@ -590,6 +599,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     radiusUnits: "pixels",
                     billboard: pointLayerData.billboard,
                     modelMatrix,
+                    parameters: this.layerParametersForDepthTest(pointLayerData.depthTest),
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     featureAddresses: pointLayerData.featureAddresses
@@ -603,7 +613,12 @@ export class DeckTileVisualization implements ITileVisualization {
                     continue;
                 }
                 const layerKeys = this.resolveLayerKeys(
-                    this.composeGeometryVariant(entry.variantSuffix, "label", labelLayerData.billboard)
+                    this.composeGeometryVariant(
+                        entry.variantSuffix,
+                        "label",
+                        labelLayerData.billboard,
+                        labelLayerData.depthTest
+                    )
                 );
                 const labelLayer = new TextLayer({
                     id: layerKeys.labelLayerKey,
@@ -620,6 +635,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     getPixelOffset: (d: DeckRenderableLabelDatum) => d.pixelOffset ?? [0, 0],
                     billboard: labelLayerData.billboard,
                     modelMatrix,
+                    parameters: this.layerParametersForDepthTest(labelLayerData.depthTest),
                     pickable: true,
                     tileKey: this.tile.mapTileKey
                 } as any) as any;
@@ -632,7 +648,12 @@ export class DeckTileVisualization implements ITileVisualization {
                     continue;
                 }
                 const layerKeys = this.resolveLayerKeys(
-                    this.composeGeometryVariant(entry.variantSuffix, "path", pathLayerData.billboard)
+                    this.composeGeometryVariant(
+                        entry.variantSuffix,
+                        "path",
+                        pathLayerData.billboard,
+                        pathLayerData.depthTest
+                    )
                 );
                 const pathLayer = new PathLayer<DeckPathLayerData, DeckPathLayerMetadata>({
                     id: layerKeys.pathLayerKey,
@@ -643,6 +664,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     widthUnits: "pixels",
                     billboard: pathLayerData.billboard,
                     modelMatrix,
+                    parameters: this.layerParametersForDepthTest(pathLayerData.depthTest),
                     capRounded: true,
                     jointRounded: true,
                     pickable: true,
@@ -660,7 +682,12 @@ export class DeckTileVisualization implements ITileVisualization {
                     continue;
                 }
                 const layerKeys = this.resolveLayerKeys(
-                    this.composeGeometryVariant(entry.variantSuffix, "arrow", arrowLayerData.billboard)
+                    this.composeGeometryVariant(
+                        entry.variantSuffix,
+                        "arrow",
+                        arrowLayerData.billboard,
+                        arrowLayerData.depthTest
+                    )
                 );
                 const arrowMarkers = this.buildArrowMarkers(arrowLayerData);
                 const arrowLayer = new IconLayer<DeckArrowMarker, DeckPickLayerMetadata>({
@@ -678,6 +705,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     getColor: (marker: DeckArrowMarker) => marker.color,
                     billboard: arrowLayerData.billboard,
                     modelMatrix,
+                    parameters: this.layerParametersForDepthTest(arrowLayerData.depthTest),
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     alphaCutoff: 0.05,
@@ -702,7 +730,12 @@ export class DeckTileVisualization implements ITileVisualization {
         return deckScene?.sceneMode === SceneMode.SCENE2D ? DECK_FLAT_2D_MODEL_MATRIX : null;
     }
 
-    private composeGeometryVariant(baseVariantSuffix: string, geometryKind: string, billboard?: boolean): string {
+    private composeGeometryVariant(
+        baseVariantSuffix: string,
+        geometryKind: string,
+        billboard?: boolean,
+        depthTest: boolean = true
+    ): string {
         const parts: string[] = [];
         if (baseVariantSuffix.length > 0) {
             parts.push(baseVariantSuffix);
@@ -712,7 +745,14 @@ export class DeckTileVisualization implements ITileVisualization {
                 ? geometryKind
                 : `${geometryKind}-${billboard ? "billboard" : "world"}`
         );
+        if (!depthTest) {
+            parts.push("overlay");
+        }
         return parts.join("::");
+    }
+
+    private layerParametersForDepthTest(depthTest: boolean) {
+        return depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS;
     }
 
     private reconcileLayerKeys(
@@ -1322,6 +1362,9 @@ export class DeckTileVisualization implements ITileVisualization {
         if (raw.colors.length < vertexCount * 4 || raw.widths.length < vertexCount || raw.featureAddresses.length < pathCount) {
             return [];
         }
+        if (raw.depthTests && raw.depthTests.length < pathCount) {
+            return [];
+        }
         if (raw.dashArrays && raw.dashArrays.length < vertexCount * 2) {
             return [];
         }
@@ -1336,23 +1379,83 @@ export class DeckTileVisualization implements ITileVisualization {
             }
         }
 
-        const attributes: DeckPathLayerData["attributes"] = {
-            getPath: {value: raw.positions, size: 3},
-            instanceColors: {value: raw.colors, size: 4},
-            instanceStrokeWidths: {value: raw.widths, size: 1}
-        };
-        if (raw.dashArrays && raw.dashArrays.length >= vertexCount * 2) {
-            attributes.instanceDashArrays = {value: raw.dashArrays, size: 2};
+        const groups = new Map<boolean, {
+            positions: number[];
+            startIndices: number[];
+            colors: number[];
+            widths: number[];
+            depthTests: number[];
+            featureAddresses: number[];
+            dashArrays?: number[];
+        }>();
+        const dashArraysPresent = !!raw.dashArrays && raw.dashArrays.length >= vertexCount * 2;
+
+        for (let pathIndex = 0; pathIndex < pathCount; pathIndex++) {
+            const depthTest = !raw.depthTests || raw.depthTests[pathIndex] !== 0;
+            let group = groups.get(depthTest);
+            if (!group) {
+                group = {
+                    positions: [],
+                    startIndices: [0],
+                    colors: [],
+                    widths: [],
+                    depthTests: [],
+                    featureAddresses: [],
+                    dashArrays: dashArraysPresent ? [] : undefined
+                };
+                groups.set(depthTest, group);
+            }
+
+            const startVertex = raw.startIndices[pathIndex];
+            const endVertex = raw.startIndices[pathIndex + 1];
+            for (let vertexIndex = startVertex; vertexIndex < endVertex; vertexIndex++) {
+                const pathOffset = vertexIndex * 3;
+                group.positions.push(
+                    raw.positions[pathOffset],
+                    raw.positions[pathOffset + 1],
+                    raw.positions[pathOffset + 2]
+                );
+                const colorOffset = vertexIndex * 4;
+                group.colors.push(
+                    raw.colors[colorOffset],
+                    raw.colors[colorOffset + 1],
+                    raw.colors[colorOffset + 2],
+                    raw.colors[colorOffset + 3]
+                );
+                group.widths.push(raw.widths[vertexIndex]);
+                if (group.dashArrays && raw.dashArrays) {
+                    const dashOffset = vertexIndex * 2;
+                    group.dashArrays.push(raw.dashArrays[dashOffset], raw.dashArrays[dashOffset + 1]);
+                }
+            }
+            group.depthTests.push(depthTest ? 1 : 0);
+            group.featureAddresses.push(raw.featureAddresses[pathIndex]);
+            group.startIndices.push(group.positions.length / 3);
         }
 
-        return [{
-            length: pathCount,
-            billboard,
-            coordinateOrigin,
-            startIndices: raw.startIndices,
-            featureAddressesByPath: raw.featureAddresses,
-            attributes
-        }];
+        return [true, false].flatMap((depthTest) => {
+            const group = groups.get(depthTest);
+            if (!group || group.featureAddresses.length <= 0) {
+                return [];
+            }
+            const attributes: DeckPathLayerData["attributes"] = {
+                getPath: {value: new Float32Array(group.positions), size: 3},
+                instanceColors: {value: new Uint8Array(group.colors), size: 4},
+                instanceStrokeWidths: {value: new Float32Array(group.widths), size: 1}
+            };
+            if (group.dashArrays && group.dashArrays.length > 0) {
+                attributes.instanceDashArrays = {value: new Float32Array(group.dashArrays), size: 2};
+            }
+            return [{
+                length: group.featureAddresses.length,
+                billboard,
+                depthTest,
+                coordinateOrigin,
+                startIndices: new Uint32Array(group.startIndices),
+                featureAddressesByPath: new Uint32Array(group.featureAddresses),
+                attributes
+            }];
+        });
     }
 
     private buildSurfaceLayerData(raw: DeckSurfaceRawBuffers): DeckSurfaceLayerData[] {
@@ -1380,6 +1483,9 @@ export class DeckTileVisualization implements ITileVisualization {
             || raw.featureAddresses.length < surfaceCount) {
             return [];
         }
+        if (raw.depthTests && raw.depthTests.length < surfaceCount) {
+            return [];
+        }
         if (raw.startIndices[0] !== 0) {
             return [];
         }
@@ -1392,16 +1498,67 @@ export class DeckTileVisualization implements ITileVisualization {
             }
         }
 
-        return [{
-            length: surfaceCount,
-            coordinateOrigin,
-            startIndices: raw.startIndices,
-            featureAddresses: raw.featureAddresses,
-            attributes: {
-                getPolygon: {value: raw.positions, size: 3},
-                fillColors: {value: raw.colors, size: 4}
+        const groups = new Map<boolean, {
+            positions: number[];
+            startIndices: number[];
+            colors: number[];
+            depthTests: number[];
+            featureAddresses: number[];
+        }>();
+
+        for (let surfaceIndex = 0; surfaceIndex < surfaceCount; surfaceIndex++) {
+            const depthTest = !raw.depthTests || raw.depthTests[surfaceIndex] !== 0;
+            let group = groups.get(depthTest);
+            if (!group) {
+                group = {
+                    positions: [],
+                    startIndices: [0],
+                    colors: [],
+                    depthTests: [],
+                    featureAddresses: []
+                };
+                groups.set(depthTest, group);
             }
-        }];
+
+            const startVertex = raw.startIndices[surfaceIndex];
+            const endVertex = raw.startIndices[surfaceIndex + 1];
+            for (let vertexIndex = startVertex; vertexIndex < endVertex; vertexIndex++) {
+                const positionOffset = vertexIndex * 3;
+                group.positions.push(
+                    raw.positions[positionOffset],
+                    raw.positions[positionOffset + 1],
+                    raw.positions[positionOffset + 2]
+                );
+                const colorOffset = vertexIndex * 4;
+                group.colors.push(
+                    raw.colors[colorOffset],
+                    raw.colors[colorOffset + 1],
+                    raw.colors[colorOffset + 2],
+                    raw.colors[colorOffset + 3]
+                );
+            }
+            group.depthTests.push(depthTest ? 1 : 0);
+            group.featureAddresses.push(raw.featureAddresses[surfaceIndex]);
+            group.startIndices.push(group.positions.length / 3);
+        }
+
+        return [true, false].flatMap((depthTest) => {
+            const group = groups.get(depthTest);
+            if (!group || group.featureAddresses.length <= 0) {
+                return [];
+            }
+            return [{
+                length: group.featureAddresses.length,
+                depthTest,
+                coordinateOrigin,
+                startIndices: new Uint32Array(group.startIndices),
+                featureAddresses: new Uint32Array(group.featureAddresses),
+                attributes: {
+                    getPolygon: {value: new Float32Array(group.positions), size: 3},
+                    fillColors: {value: new Uint8Array(group.colors), size: 4}
+                }
+            }];
+        });
     }
 
     private buildPointLayerData(raw: DeckPointRawBuffers, billboard: boolean): DeckPointLayerData[] {
@@ -1425,18 +1582,58 @@ export class DeckTileVisualization implements ITileVisualization {
             || raw.featureAddresses.length < pointCount) {
             return [];
         }
+        if (raw.depthTests && raw.depthTests.length < pointCount) {
+            return [];
+        }
 
-        return [{
-            length: pointCount,
-            billboard,
-            coordinateOrigin,
-            featureAddresses: raw.featureAddresses,
-            attributes: {
-                getPosition: {value: raw.positions, size: 3},
-                getFillColor: {value: raw.colors, size: 4},
-                getRadius: {value: raw.radii, size: 1}
+        const groups = new Map<boolean, {
+            positions: number[];
+            colors: number[];
+            radii: number[];
+            featureAddresses: number[];
+        }>();
+        for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+            const depthTest = !raw.depthTests || raw.depthTests[pointIndex] !== 0;
+            let group = groups.get(depthTest);
+            if (!group) {
+                group = {positions: [], colors: [], radii: [], featureAddresses: []};
+                groups.set(depthTest, group);
             }
-        }];
+            const positionOffset = pointIndex * 3;
+            group.positions.push(
+                raw.positions[positionOffset],
+                raw.positions[positionOffset + 1],
+                raw.positions[positionOffset + 2]
+            );
+            const colorOffset = pointIndex * 4;
+            group.colors.push(
+                raw.colors[colorOffset],
+                raw.colors[colorOffset + 1],
+                raw.colors[colorOffset + 2],
+                raw.colors[colorOffset + 3]
+            );
+            group.radii.push(raw.radii[pointIndex]);
+            group.featureAddresses.push(raw.featureAddresses[pointIndex]);
+        }
+
+        return [true, false].flatMap((depthTest) => {
+            const group = groups.get(depthTest);
+            if (!group || group.featureAddresses.length <= 0) {
+                return [];
+            }
+            return [{
+                length: group.featureAddresses.length,
+                billboard,
+                depthTest,
+                coordinateOrigin,
+                featureAddresses: new Uint32Array(group.featureAddresses),
+                attributes: {
+                    getPosition: {value: new Float32Array(group.positions), size: 3},
+                    getFillColor: {value: new Uint8Array(group.colors), size: 4},
+                    getRadius: {value: new Float32Array(group.radii), size: 1}
+                }
+            }];
+        });
     }
 
     private buildLabelLayerData(
@@ -1448,16 +1645,30 @@ export class DeckTileVisualization implements ITileVisualization {
         if (!coordinateOrigin || data.length <= 0) {
             return [];
         }
-        const normalizedData: DeckRenderableLabelDatum[] = data.map((entry) => ({
-            ...entry,
-            position: [entry.position.x, entry.position.y, entry.position.z]
-        }));
-        return [{
-            length: normalizedData.length,
-            billboard,
-            coordinateOrigin,
-            data: normalizedData
-        }];
+        const groups = new Map<boolean, DeckRenderableLabelDatum[]>();
+        for (const entry of data) {
+            const depthTest = entry.depthTest !== false;
+            const group = groups.get(depthTest) ?? [];
+            group.push({
+                ...entry,
+                depthTest,
+                position: [entry.position.x, entry.position.y, entry.position.z]
+            });
+            groups.set(depthTest, group);
+        }
+        return [true, false].flatMap((depthTest) => {
+            const normalizedData = groups.get(depthTest);
+            if (!normalizedData || normalizedData.length <= 0) {
+                return [];
+            }
+            return [{
+                length: normalizedData.length,
+                billboard,
+                depthTest,
+                coordinateOrigin,
+                data: normalizedData
+            }];
+        });
     }
 
     private buildArrowMarkers(pathData: DeckPathLayerData): DeckArrowMarker[] {

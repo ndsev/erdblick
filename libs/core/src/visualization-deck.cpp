@@ -166,6 +166,7 @@ JsValue DeckFeatureLayerVisualization::pointBuffersToJs(PointBuffers const& buff
         {"positions", JsValue::Float32Array(buffers.positions)},
         {"colors", JsValue::Uint8Array(buffers.colors)},
         {"radii", JsValue::Float32Array(buffers.radii)},
+        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
     });
 }
@@ -176,6 +177,7 @@ JsValue DeckFeatureLayerVisualization::surfaceBuffersToJs(SurfaceBuffers const& 
         {"positions", JsValue::Float32Array(buffers.surfacePositions)},
         {"startIndices", JsValue::Uint32Array(buffers.surfaceStartIndices)},
         {"colors", JsValue::Uint8Array(buffers.surfaceColors)},
+        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.surfaceFeatureAddresses)},
     });
 }
@@ -187,6 +189,7 @@ JsValue DeckFeatureLayerVisualization::pathBuffersToJs(PathBuffers const& buffer
         {"startIndices", JsValue::Uint32Array(buffers.startIndices)},
         {"colors", JsValue::Uint8Array(buffers.colors)},
         {"widths", JsValue::Float32Array(buffers.widths)},
+        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
     });
     if (withDashArrays) {
@@ -499,7 +502,8 @@ void DeckFeatureLayerVisualization::emitLabel(
         {"outlineColor", rgbaBytesFromColor(rule.labelOutlineColor())},
         {"outlineWidth", JsValue(rule.labelOutlineWidth())},
         {"scale", JsValue(rule.labelScale())},
-        {"billboard", JsValue(resolveLabelBillboard(rule))}
+        {"billboard", JsValue(resolveLabelBillboard(rule))},
+        {"depthTest", JsValue(rule.depthTest())}
     });
     if (auto const& pixelOffset = rule.labelPixelOffset()) {
         params.set("pixelOffset", JsValue::List({
@@ -537,6 +541,7 @@ JsValue DeckFeatureLayerVisualization::makeMergedPointPointParams(
         {"outlineColor", rgbaBytesFromColor(rule.outlineColor())},
         {"outlineWidth", JsValue(rule.outlineWidth())},
         {"billboard", JsValue(resolvePointBillboard(rule))},
+        {"depthTest", JsValue(rule.depthTest())},
     });
 }
 
@@ -574,6 +579,7 @@ JsValue DeckFeatureLayerVisualization::makeMergedPointLabelParams(
         {"outlineWidth", JsValue(rule.labelOutlineWidth())},
         {"scale", JsValue(rule.labelScale())},
         {"billboard", JsValue(resolveLabelBillboard(rule))},
+        {"depthTest", JsValue(rule.depthTest())},
     });
     if (auto const& pixelOffset = rule.labelPixelOffset()) {
         result.set("pixelOffset", JsValue::List({
@@ -606,6 +612,7 @@ void DeckFeatureLayerVisualization::appendPointGeometry(
         buffers.colors.push_back(toColorByte(color.a));
 
         buffers.radii.push_back(radius);
+        buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
         buffers.featureAddresses.push_back(selectableFeatureId);
     };
 
@@ -644,6 +651,7 @@ void DeckFeatureLayerVisualization::appendSurfaceGeometry(
             buffers.surfaceColors.push_back(toColorByte(color.b));
             buffers.surfaceColors.push_back(toColorByte(color.a));
         }
+        buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
         buffers.surfaceStartIndices.push_back(static_cast<uint32_t>(buffers.surfacePositions.size() / 3));
         buffers.surfaceFeatureAddresses.push_back(selectableFeatureId);
     };
@@ -739,6 +747,7 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
                 buffers.dashArray.push_back(0.0f);
             }
         }
+        buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
         buffers.featureAddresses.push_back(selectableFeatureId);
         buffers.startIndices.push_back(static_cast<uint32_t>(buffers.positions.size() / 3));
     };
@@ -782,6 +791,7 @@ void DeckFeatureLayerVisualization::appendArrowGeometry(
             buffers.colors.push_back(toColorByte(color.a));
             buffers.widths.push_back(normalizedWidth);
         }
+        buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
         buffers.featureAddresses.push_back(selectableFeatureId);
         buffers.startIndices.push_back(static_cast<uint32_t>(buffers.positions.size() / 3));
     };

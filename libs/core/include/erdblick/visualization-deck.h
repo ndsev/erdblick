@@ -139,12 +139,14 @@ public:
         std::vector<float> positions;
         std::vector<uint8_t> colors;
         std::vector<float> radii;
+        std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
     };
     struct SurfaceBuffers {
         std::vector<float> surfacePositions;
         std::vector<uint32_t> surfaceStartIndices;
         std::vector<uint8_t> surfaceColors;
+        std::vector<uint8_t> depthTests;
         std::vector<uint32_t> surfaceFeatureAddresses;
     };
     struct PathBuffers {
@@ -152,6 +154,7 @@ public:
         std::vector<uint32_t> startIndices;
         std::vector<uint8_t> colors;
         std::vector<float> widths;
+        std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
         std::vector<float> dashArray;
     };

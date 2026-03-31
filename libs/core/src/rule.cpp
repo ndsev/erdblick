@@ -176,6 +176,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse a line width, defaults to pixels
         width_ = yaml["width"].as<float>();
     }
+    if (yaml["depth-test"].IsDefined()) {
+        depthTest_ = yaml["depth-test"].as<bool>();
+    }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
         billboard_ = yaml["billboard"].as<bool>();
@@ -501,6 +504,11 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 float FeatureStyleRule::width() const
 {
     return width_;
+}
+
+bool FeatureStyleRule::depthTest() const
+{
+    return depthTest_;
 }
 
 std::optional<bool> const& FeatureStyleRule::billboard() const

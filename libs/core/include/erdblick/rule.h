@@ -67,6 +67,7 @@ public:
 
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
     [[nodiscard]] float width() const;
+    [[nodiscard]] bool depthTest() const;
     [[nodiscard]] std::optional<bool> const& billboard() const;
     [[nodiscard]] bool flat() const;
     [[nodiscard]] bool isDashed() const;
@@ -134,6 +135,7 @@ private:
     glm::fvec4 color_{.0, .0, .0, 1.};
     std::string colorExpression_;
     float width_ = 1.;
+    bool depthTest_ = true;
     std::optional<bool> billboard_;
     bool flat_ = false;
     bool dashed_ = false;
