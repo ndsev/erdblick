@@ -9,15 +9,16 @@ import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
-import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog #featureSearchDialog class="feature-search-dialog" header="Search Loaded Features"
+        <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
                   [closeOnEscape]="false"
                   [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
+                  [persistLayout]="true" [layoutId]="featureSearchLayoutId"
                   (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
@@ -42,7 +43,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                     [style]="{ width: '1em', height: '1em', margin: '0' }"/>
             </div>
 
-            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
+            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" data-testid="feature-search-panel" scrollable>
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results </span>
@@ -77,7 +78,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 
                         <!-- Results Tree -->
                         <div style="height: 100%">
-                            <p-tree #tree [value]="resultsTree"
+                            <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
                                     selectionMode="single"
                                     [metaKeySelection]="false"
                                     [lazy]="true"
@@ -147,13 +148,14 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
-        </p-dialog>
+        </app-dialog>
         <div #alert></div>
     `,
     styles: [``],
     standalone: false
 })
 export class FeatureSearchComponent {
+    readonly featureSearchLayoutId = 'feature-search';
     isPanelVisible: boolean = false;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
@@ -182,7 +184,7 @@ export class FeatureSearchComponent {
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
-    @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
+    @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,

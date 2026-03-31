@@ -10,7 +10,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        submodules: recursive
+        with:
+          submodules: recursive
 
       - name: Configure Git authentication for GitHub
         run: |
@@ -26,11 +27,8 @@ jobs:
 
       - name: Compile
         run: |
-          mkdir build-test && cd build-test
-          cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
-          cmake --build .
+          cmake -S . -B build-test -GNinja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-test
 
       - name: Run Tests
-        run: |
-          cd build-test/test
-          ctest --verbose --no-tests=error
+        run: ctest --test-dir build-test --verbose --no-tests=error

@@ -112,16 +112,30 @@ export class FeatureFilterOptions {
                                             <p-treeTableToggler [rowNode]="rowNode"/>
                                         </span>
                                     }
-                                    <span (click)="onNodeClick($event, rowData, col.key)"
-                                          (mouseenter)="onNodeValueHover(rowData, col.key)"
-                                          (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
-                                          style="cursor: pointer"
-                                          [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
-                                          [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
-                                          [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
-                                          [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
-                                          [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
-                                    </span>
+                                    @if (col.key === "value" && isFeatureIdValueRow(rowData)) {
+                                        <a href=""
+                                           (click)="onFeatureIdLinkClick($event, rowData)"
+                                           (mouseenter)="onNodeValueHover(rowData, col.key)"
+                                           (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
+                                           style="cursor: pointer"
+                                           [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
+                                           [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
+                                           [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
+                                           [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
+                                           [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
+                                        </a>
+                                    } @else {
+                                        <span (click)="onNodeClick($event, rowData, col.key)"
+                                              (mouseenter)="onNodeValueHover(rowData, col.key)"
+                                              (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
+                                              style="cursor: pointer"
+                                              [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
+                                              [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
+                                              [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
+                                              [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
+                                              [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
+                                        </span>
+                                    }
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
                                         <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
                                     }
@@ -444,7 +458,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     onRowClick(event: MouseEvent, rowNode: any) {
         const target = event.target as HTMLElement | null;
-        if (target?.closest(".inspection-row-actions") || target?.closest(".p-treetable-toggler")) {
+        if (target?.closest(".inspection-row-actions") || target?.closest(".p-treetable-toggler") || target?.closest("a")) {
             return;
         }
         const node: TreeNode = rowNode.node;
@@ -499,6 +513,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.jumpService.highlightByJumpTargetFilter(
             rowData["mapId"],
             rowData["value"]).then();
+    }
+
+    onFeatureIdLinkClick(event: MouseEvent, rowData: any) {
+        event.preventDefault();
+        this.onValueClick(event, rowData);
     }
 
     onRowHover(rowData: any) {
@@ -570,7 +589,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }]).then();
     }
 
-    private isFeatureIdValueRow(rowData: any): boolean {
+    protected isFeatureIdValueRow(rowData: any): boolean {
         return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;
     }
 

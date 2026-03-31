@@ -6,7 +6,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
 @Component({
     selector: 'inspection-container',
     template: `
-        <div #dockContainer class="inspection-container"
+        <div #dockContainer class="inspection-container" data-testid="inspection-container"
              [ngClass]="{'reordering': isReordering, 'single-panel': dockedPanels.length === 1, 'multi-panel': dockedPanels.length > 1}">
             @if (dockedPanels.length > 0) {
                 <div class="dock-filter">
@@ -86,7 +86,6 @@ export class InspectionContainerComponent implements OnDestroy {
                 private renderer: Renderer2) {
         this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();
-            this.stateService.pruneInspectionDialogLayout(allPanels.map(panel => panel.id));
             this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
             const hasDockedPanels = this.dockedPanels.length > 0;

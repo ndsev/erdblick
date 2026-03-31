@@ -18,6 +18,7 @@ declare let window: DebugWindow;
         <dockable-layout></dockable-layout>
         @if (!environment.visualizationOnly) {
             <datasources></datasources>
+            <snapshot-manager></snapshot-manager>
             <map-panel></map-panel>
             @if (stateService.diagnosticsPerformanceDialogVisible) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>

@@ -4,7 +4,6 @@ import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
-import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "../shared/keyboard.service";
 import {debounceTime, distinctUntilChanged, map, of, skip, startWith, Subject, switchMap, timer} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
@@ -13,6 +12,7 @@ import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -25,6 +25,7 @@ interface ExtendedSearchTarget extends SearchTarget {
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
+                          data-testid="search-input"
                           [(ngModel)]="searchInputValue"
                           (click)="showSearchOverlay()"
                           (ngModelChange)="setSearchValue(searchInputValue)"
@@ -62,9 +63,9 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
 
             <div class="resizable-container" #searchcontrols>
-                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
+                <app-dialog #actionsdialog class="search-menu-dialog" data-testid="search-menu-dialog" [showHeader]="false" [(visible)]="searchService.showFeatureSearchDialog"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
-                    <div>
+                    <div data-testid="search-menu-panel">
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
@@ -108,17 +109,17 @@ interface ExtendedSearchTarget extends SearchTarget {
                             </div>
                         </div>
                     </div>
-                </p-dialog>
+                </app-dialog>
             </div>
         </div>
         
-        <p-dialog header="Which map is the feature located in?" [(visible)]="mapSelectionVisible" [position]="'center'"
+        <app-dialog header="Which map is the feature located in?" [(visible)]="mapSelectionVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" class="map-selection-dialog">
             <div *ngFor="let map of mapSelection; let i = index" style="width: 100%">
                 <p-button [label]="map" type="button" (click)="setSelectedMap(map)"/>
             </div>
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [`
         .item-disabled {
@@ -160,7 +161,7 @@ export class SearchPanelComponent implements AfterViewInit {
     mapSelection: Array<string> = [];
 
     @ViewChild('textarea') textarea!: ElementRef<HTMLTextAreaElement>;
-    @ViewChild('actionsdialog') dialog!: Dialog;
+    @ViewChild('actionsdialog') dialog!: AppDialogComponent;
 
     cursorPosition: number = 0;
 

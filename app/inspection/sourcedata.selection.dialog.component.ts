@@ -6,55 +6,73 @@ import {Color} from "../integrations/geo";
 @Component({
     selector: 'sourcedatadialog',
     template: `
-        <p-dialog header="Inspect Tile Source Data" [(visible)]="menuService.tileSourceDataDialogVisible" [modal]="false"
-                  (onHide)="reset()" [style]="{'min-height': '14em', 'min-width': '36em'}">
-            <div *ngIf="loading" style="display:flex; justify-content: center">
-                <p-progressSpinner ariaLabel="loading"/>
-            </div>
-            <div *ngIf="!loading" class="tilesource-options">
-                <p *ngIf="errorString">{{ errorString }}</p>
-                <div class="main-dropdown">
-                    <p-select *ngIf="!errorString && !showCustomTileIdInput"
-                                [options]="tileIds"
-                                [(ngModel)]="selectedTileId"
-                                optionLabel="name"
-                                scrollHeight="20em"
-                                placeholder="Select a TileId"
-                                (ngModelChange)="onTileIdChange($event)"
-                                appendTo="body"/>
-                    <input *ngIf="!errorString && showCustomTileIdInput" placeholder="Enter custom Tile ID" type="text" 
-                           pInputText [(ngModel)]="customTileId" (ngModelChange)="onCustomTileIdChange($event)"/>
-                    <p-button *ngIf="!errorString" (click)="toggleCustomTileIdInput()" class="osm-button"
-                              icon="{{showCustomTileIdInput ? 'pi pi-times' : 'pi pi-plus'}}"
-                              label="" [pTooltip]="showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'" tooltipPosition="bottom" tabindex="0">
-                    </p-button>
+        <app-dialog header="Inspect Tile Source Data" class="tilesource-select-dialog" [(visible)]="menuService.tileSourceDataDialogVisible" [modal]="false"
+                  [persistLayout]="true" [layoutId]="'source-data-selection-dialog'"
+                  (onHide)="reset()">
+            @if (loading) {
+                <div style="display:flex; justify-content: center">
+                    <p-progressSpinner ariaLabel="loading"/>
                 </div>
-                
-                <p-select *ngIf="!errorString"
-                            [options]="mapIds"
-                            [(ngModel)]="selectedMapId"
-                            [disabled]="!mapIds.length"
-                            optionLabel="name"
-                            scrollHeight="20em"
-                            [placeholder]="mapIds.length ? 'Select a MapId' : 'No associated maps found'"
-                            (ngModelChange)="onMapIdChange($event)"
-                            appendTo="body" />
-                <p-select *ngIf="!errorString"
-                            [options]="sourceDataLayers" 
-                            [(ngModel)]="selectedSourceDataLayer" 
-                            [disabled]="!sourceDataLayers.length" 
-                            optionLabel="name" 
-                            scrollHeight="20em"
-                            placeholder="Select a SourceDataLayer"
-                            [placeholder]="mapIds.length ? 'Select a SourceDataLayer' : 'No associated source data layers found'"
-                            (ngModelChange)="onLayerIdChange($event)"
-                            appendTo="body" />
-                <div style="display: flex; flex-direction: row; gap: 0.5em">
-                    <p-button *ngIf="!errorString" (click)="requestSourceData()" label="Ok" icon="pi pi-check"></p-button>
-                    <p-button (click)="close()" label="Close" icon="pi pi-times"></p-button>
+            } @else {
+                <div class="tilesource-options" data-testid="source-data-selection-panel">
+                    @if (errorString) {
+                        <p>{{ errorString }}</p>
+                    } @else {
+                        <div class="main-dropdown">
+                            @if (showCustomTileIdInput) {
+                                <input data-testid="source-data-selection-custom-tile-id" placeholder="Enter custom Tile ID" type="text"
+                                       pInputText [(ngModel)]="customTileId" (ngModelChange)="onCustomTileIdChange($event)"/>
+                            } @else {
+                                <div data-testid="source-data-selection-tile-select">
+                                    <p-select [options]="tileIds"
+                                              [(ngModel)]="selectedTileId"
+                                              optionLabel="name"
+                                              scrollHeight="20em"
+                                              placeholder="Select a TileId"
+                                              (ngModelChange)="onTileIdChange($event)"
+                                              appendTo="body"/>
+                                </div>
+                            }
+                            <p-button (click)="toggleCustomTileIdInput()" class="osm-button" data-testid="source-data-selection-toggle-custom-tile-id"
+                                      icon="{{showCustomTileIdInput ? 'pi pi-times' : 'pi pi-plus'}}"
+                                      label="" [pTooltip]="showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'" tooltipPosition="bottom" tabindex="0">
+                            </p-button>
+                        </div>
+                        <div data-testid="source-data-selection-map-select">
+                            <p-select [options]="mapIds"
+                                      [(ngModel)]="selectedMapId"
+                                      [disabled]="!mapIds.length"
+                                      optionLabel="name"
+                                      scrollHeight="20em"
+                                      [placeholder]="mapIds.length ? 'Select a MapId' : 'No associated maps found'"
+                                      (ngModelChange)="onMapIdChange($event)"
+                                      appendTo="body" />
+                        </div>
+                        <div data-testid="source-data-selection-layer-select">
+                            <p-select [options]="sourceDataLayers"
+                                      [(ngModel)]="selectedSourceDataLayer"
+                                      [disabled]="!sourceDataLayers.length"
+                                      optionLabel="name"
+                                      scrollHeight="20em"
+                                      placeholder="Select a SourceDataLayer"
+                                      [placeholder]="mapIds.length ? 'Select a SourceDataLayer' : 'No associated source data layers found'"
+                                      (ngModelChange)="onLayerIdChange($event)"
+                                      appendTo="body" />
+                        </div>
+                    }
+                    <div style="display: flex; flex-direction: row; gap: 0.5em">
+                        @if (!errorString) {
+                            <span data-testid="source-data-selection-confirm-button">
+                                <p-button (click)="requestSourceData()" label="Ok" icon="pi pi-check"></p-button>
+                            </span>
+                        }
+                        <span data-testid="source-data-selection-close-button">
+                            <p-button (click)="close()" label="Close" icon="pi pi-times"></p-button>
+                        </span>
+                    </div>
                 </div>
-            </div>
-        </p-dialog>
+            }
+        </app-dialog>
     `,
     styles: [``],
     standalone: false

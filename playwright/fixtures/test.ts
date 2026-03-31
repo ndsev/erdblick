@@ -1,11 +1,17 @@
 import { test as base } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_STATE_SNAPSHOT } from '../utils/test-params';
+import { loadStateSnapshotLocalStorageEntries } from '../utils/state-snapshots';
+
+const DARK_MODE_KEY = 'ui.darkMode';
+const FORCED_DARK_MODE_SETTING = 'on';
 
 /**
  * Shared Playwright fixtures used across end-to-end tests.
  *
  * This module:
+ * - Forces dark mode through localStorage before the app bootstraps.
  * - Defines the `Window.ebDebug` surface that the Angular app exposes for
  *   debug interactions in tests.
  * - Hooks into Chromium's V8 coverage APIs to collect JS / CSS coverage and
@@ -66,77 +72,104 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
 
 /**
  * Extended Playwright test object that:
+ * - Forces the UI into dark mode for deterministic visual coverage.
  * - Mocks `/locate` requests to return deterministic synthetic locations that
  *   point into the `TestMap/WayLayer` tiles served by the Python datasource.
  * - Starts JS / CSS coverage collection on Chromium-based browsers and writes
  *   the results into NDJSON files once each test completes.
  */
-export const test = base.extend({
-    page: async ({ page }, use, testInfo) => {
-        // Mock /locate responses for deterministic integration tests.
-        // The backend Python datasource does not currently implement
-        // a locate() handler, so mapget would otherwise return an
-        // empty response. For UI flows that depend on /locate
-        // (inspection panels, jump targets), we synthesize responses
-        // that point to a stable TestMap/WayLayer tile key.
-        await page.route('**/locate', async (route) => {
-            const request = route.request();
-            if (request.method() !== 'POST') {
-                // Non-POST requests are passed through unchanged.
-                await route.continue();
-                return;
-            }
+type SnapshotFixtures = {
+    stateSnapshot: string | null;
+};
 
-            let body: any;
-            try {
-                body = request.postDataJSON();
-            } catch {
-                // If the body is not JSON, leave the request untouched.
-                await route.continue();
-                return;
-            }
+export const test = base.extend<SnapshotFixtures>({
+    stateSnapshot: [TEST_STATE_SNAPSHOT, { option: true }],
+    context: async ({ context, stateSnapshot }, use) => {
+        const snapshotEntries = loadStateSnapshotLocalStorageEntries(stateSnapshot);
+        await context.addInitScript(([key, value]) => {
+            window.localStorage.setItem(key, value);
+        }, [DARK_MODE_KEY, FORCED_DARK_MODE_SETTING]);
+        if (snapshotEntries) {
+            await context.addInitScript((entries) => {
+                for (const [key, value] of Object.entries(entries)) {
+                    window.localStorage.setItem(key, value);
+                }
+            }, snapshotEntries);
+        }
 
-            // Expect shape { requests: [{ mapId, typeId, featureId: [...] }, ...] }.
-            const requests = Array.isArray(body?.requests) ? body.requests : null;
-            if (!requests || requests.length === 0) {
-                // No locate requests to satisfy; fall back to default handling.
-                await route.continue();
-                return;
-            }
+        await use(context);
+    },
+    page: async ({ page }, use) => {
+        const backendBinary = process.env["MAPGET_BIN"];
+        const usingMapviewerBinary = !!backendBinary && ['mapviewer', 'mapviewer.exe'].includes(path.basename(backendBinary).toLowerCase());
+        const shouldMockLocate = !usingMapviewerBinary;
 
-            // Only handle "feature locate" requests that carry a flat featureId array.
-            if (!Array.isArray(requests[0]?.featureId)) {
-                await route.continue();
-                return;
-            }
+        if (shouldMockLocate) {
+            // Mock /locate responses for deterministic integration tests.
+            // The backend Python datasource does not currently implement
+            // a locate() handler, so mapget would otherwise return an
+            // empty response. For UI flows that depend on /locate
+            // (inspection panels, jump targets), we synthesize responses
+            // that point to a stable TestMap/WayLayer tile key.
+            await page.route('**/locate', async (route) => {
+                const request = route.request();
+                if (request.method() !== 'POST') {
+                    // Non-POST requests are passed through unchanged.
+                    await route.continue();
+                    return;
+                }
 
-            const responses = requests.map((req: any) => {
-                const mapId = typeof req.mapId === 'string' ? req.mapId : 'TestMap';
-                const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
-                const featureId = Array.isArray(req.featureId) ? req.featureId : [];
+                let body: any;
+                try {
+                    body = request.postDataJSON();
+                } catch {
+                    // If the body is not JSON, leave the request untouched.
+                    await route.continue();
+                    return;
+                }
 
-                // Use a fixed tile id for all located features. The Python
-                // datasource generates the same synthetic grid of roads in
-                // every tile, so any tile id is acceptable as long as the
-                // key matches coreLib.getTileFeatureLayerKey(mapId, layerId, tileId).
-                const numericTileId = 1;
-                const hexTileId = numericTileId.toString(16);
-                const tileKey = `Features:${mapId}:WayLayer:${hexTileId}`;
+                // Expect shape { requests: [{ mapId, typeId, featureId: [...] }, ...] }.
+                const requests = Array.isArray(body?.requests) ? body.requests : null;
+                if (!requests || requests.length === 0) {
+                    // No locate requests to satisfy; fall back to default handling.
+                    await route.continue();
+                    return;
+                }
 
-                // Each locate request yields a single synthetic location result.
-                return [{
-                    tileId: tileKey,
-                    typeId,
-                    featureId
-                }];
+                // Only handle "feature locate" requests that carry a flat featureId array.
+                if (!Array.isArray(requests[0]?.featureId)) {
+                    await route.continue();
+                    return;
+                }
+
+                const responses = requests.map((req: any) => {
+                    const mapId = typeof req.mapId === 'string' ? req.mapId : TEST_MAP_NAMES[0];
+                    const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
+                    const featureId = Array.isArray(req.featureId) ? req.featureId : [];
+
+                    // Use a fixed tile id for all located features. The Python
+                    // datasource generates the same synthetic grid of roads in
+                    // every tile, so any tile id is acceptable as long as the
+                    // key matches coreLib.getTileFeatureLayerKey(mapId, layerId, tileId).
+                    const numericTileId = 1;
+                    const hexTileId = numericTileId.toString(16);
+                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAMES[0]}:${hexTileId}`;
+
+                    // Each locate request yields a single synthetic location result.
+                    return [{
+                        tileId: tileKey,
+                        typeId,
+                        featureId
+                    }];
+                });
+
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ responses })
+                });
             });
-
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({ responses })
-            });
-        });
+        }
 
         const browser = page.context().browser();
         const browserName = browser?.browserType().name();

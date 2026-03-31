@@ -190,9 +190,9 @@ protected:
         uint32_t tileFeatureId,
         const FeatureStyleRule& rule,
         std::string const& mapLayerStyleRuleId,
-        uint32_t& offsetFactor,
+        uint32_t& offsetSlot,
         std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr);
-    void addGeometry(
+    bool addGeometry(
         mapget::SelfContainedGeometry const& geom,
         std::optional<uint32_t> geometryStage,
         uint32_t tileFeatureId,
@@ -200,7 +200,7 @@ protected:
         std::string const& mapLayerStyleRuleId,
         BoundEvalFun& evalFun,
         glm::dvec3 const& offset = {.0, .0, .0});
-    void addGeometry(
+    bool addGeometry(
         mapget::model_ptr<mapget::Geometry> const& geom,
         uint32_t tileFeatureId,
         FeatureStyleRule const& rule,
@@ -260,6 +260,13 @@ protected:
     static JsValue encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& points);
     [[nodiscard]] std::optional<uint32_t> preferredGeometryStageForCurrentFidelity(
         std::optional<uint32_t> stageOverride = std::nullopt) const;
+    [[nodiscard]] bool geometryPassesRenderFilters(
+        mapget::GeomType geomType,
+        std::optional<uint32_t> geometryStage,
+        FeatureStyleRule const& rule) const;
+    [[nodiscard]] static glm::dvec3 effectiveOffsetForSlot(
+        FeatureStyleRule const& rule,
+        uint32_t offsetSlot);
 
     bool featuresAdded_ = false;
     int viewIndex_;
@@ -282,6 +289,7 @@ protected:
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::unique_ptr<simfil::Environment> evalEnvironment_;
     std::map<std::string, CachedExpression, std::less<>> expressionCache_;
+    std::unordered_map<uint32_t, uint32_t> featureOffsetSlotsByRuleIndex_;
     std::deque<RelationStyleState> relationStyleStates_;
     JsValue externalRelationReferences_;
     std::vector<PendingExternalRelation> externalRelationVisualizations_;

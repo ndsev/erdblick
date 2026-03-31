@@ -61,6 +61,7 @@ rules:
     width: 4.0
     mode: hover
     offset: [0, 0, -0.01]
+    offset-increment: [0, 0, -0.01]
   - geometry: ["point"]
     color: green
     opacity: 0.8

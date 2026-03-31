@@ -318,7 +318,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
         return;
     }
 
-    let state: GlobalState | null = null;
+    let state: GlobalState | null;
     try {
         const content = fs.readFileSync(statePath, 'utf-8');
         state = JSON.parse(content) as GlobalState;

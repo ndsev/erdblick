@@ -64,18 +64,26 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
-    inspectionDialogLayoutEntry?: InspectionDialogLayoutEntry;
 }
 
-export interface InspectionDialogPosition {
+export interface AppDialogPosition {
     left: number;
     top: number;
 }
 
-export interface InspectionDialogLayoutEntry {
+export interface AppDialogSize {
+    width: number;
+    height: number;
+}
+
+export interface AppDialogLayout {
+    position: AppDialogPosition;
+    size: AppDialogSize;
+}
+
+export interface InspectionDialogLayout extends AppDialogLayout {
     panelId: number;
     slot: number;
-    position: InspectionDialogPosition;
 }
 
 export interface InspectionComparisonEntry {
@@ -121,6 +129,19 @@ export interface ViewSyncOption {
 
 export type TileGridMode = "xyz" | "nds";
 
+interface SnapshotImportLimits {
+    maxFileSizeBytes: number;
+    maxTopLevelEntries: number;
+    maxNestingDepth: number;
+    maxCollectionEntries: number;
+    maxStringLength: number;
+}
+
+interface SnapshotNormalizationResult {
+    normalized?: Record<string, unknown>;
+    errors: string[];
+}
+
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
@@ -141,6 +162,23 @@ function clampOsmOpacity(value: number): number {
     return Math.max(0, Math.min(100, rounded));
 }
 
+function cloneStateValue<T>(value: T): T {
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    if (value instanceof Date) {
+        return new Date(value.getTime()) as unknown as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map(entry => cloneStateValue(entry)) as unknown as T;
+    }
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        result[key] = cloneStateValue(entry);
+    }
+    return result as T;
+}
+
 @Injectable({providedIn: 'root'})
 /**
  * Central application state coordinator.
@@ -152,6 +190,7 @@ function clampOsmOpacity(value: number): number {
 export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
+    private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -170,6 +209,7 @@ export class AppStateService implements OnDestroy {
     // One-shot guard used to keep inbound v1 links stable during passive startup.
     private skipNextUrlSync = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
+    private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
 
     // Base UI metrics
@@ -232,13 +272,7 @@ export class AppStateService implements OnDestroy {
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
                 // Remove # character from hex color
                 const color = state.color.startsWith('#') ? state.color.slice(1) : state.color;
-                // size ~ [optional layout slot:left:top] ~ color ~ undockedFlag
-                if (state.inspectionDialogLayoutEntry) {
-                    const entry = state.inspectionDialogLayoutEntry;
-                    s += `${state.size[0]}:${state.size[1]}~${entry.slot}:${entry.position.left}:${entry.position.top}~${color}~${state.undocked ? 1 : 0}`;
-                } else {
-                    s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
-                }
+                s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
                 return s;
             });
         },
@@ -257,17 +291,7 @@ export class AppStateService implements OnDestroy {
                 const undocked = parts.pop()! === "1";
                 const colorToken = parts.pop()!;
                 const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
-                let sizeToken = parts.pop()!;
-                let inspectionDialogLayoutEntry: InspectionDialogLayoutEntry | undefined;
-                if (sizeToken.split(':').length === 3) {
-                    const [slot, left, top] = sizeToken.split(':').map(Number);
-                    inspectionDialogLayoutEntry = {
-                        panelId: id,
-                        slot,
-                        position: {left, top}
-                    };
-                    sizeToken = parts.pop() ?? '';
-                }
+                const sizeToken = parts.pop()!;
                 const sizeParts = sizeToken.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
 
@@ -277,8 +301,7 @@ export class AppStateService implements OnDestroy {
                     locked: lockState || !undocked,
                     size: size as [number, number],
                     color: color,
-                    undocked: undocked,
-                    inspectionDialogLayoutEntry
+                    undocked: undocked
                 };
 
                 // Check if the first MapTileKey is for SourceData.
@@ -515,6 +538,18 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly datasourcesEditorDialogVisibleState = this.createState<boolean>({
+        name: 'datasourcesEditorDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly snapshotManagerDialogVisibleState = this.createState<boolean>({
+        name: 'snapshotManagerDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly diagnosticsPerformanceDialogVisibleState = this.createState<boolean>({
         name: 'diagnosticsPerformanceDialogVisible',
         defaultValue: false,
@@ -644,6 +679,23 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
+    readonly dialogLayoutsState = this.createState<Record<string, AppDialogLayout | InspectionDialogLayout>>({
+        name: 'dialogLayouts',
+        defaultValue: {},
+        schema: z.record(z.string(), z.object({
+            position: z.object({
+                left: z.coerce.number(),
+                top: z.coerce.number()
+            }),
+            size: z.object({
+                width: z.coerce.number().positive(),
+                height: z.coerce.number().positive()
+            }),
+            panelId: z.coerce.number().optional(),
+            slot: z.coerce.number().optional()
+        }))
+    });
+
     // TODO: merge this functionality with the state?
     readonly syncOptions: ViewSyncOption[] = [
         {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
@@ -692,6 +744,10 @@ export class AppStateService implements OnDestroy {
                 });
             }
         });
+
+        this.selectionState.subscribe(panels => {
+            this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+        });
     }
 
     private syncAllStates() {
@@ -731,7 +787,41 @@ export class AppStateService implements OnDestroy {
     }
 
     private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
-        return new MapViewState<T>(this.statePool, options);
+        const state = new MapViewState<T>(this.statePool, options);
+        this.mapViewStates.push(state as MapViewState<unknown>);
+        return state;
+    }
+
+    private seedAdditionalViews(previousViewCount: number, nextViewCount: number): void {
+        if (nextViewCount <= previousViewCount) {
+            return;
+        }
+
+        for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
+            const sourceViewIndex = Math.max(0, targetViewIndex - 1);
+            for (const state of this.mapViewStates) {
+                state.next(targetViewIndex, cloneStateValue(state.getValue(sourceViewIndex)));
+            }
+        }
+
+        if (this.styles.size === 0) {
+            return;
+        }
+
+        const nextStyles = new Map<string, (string|number|boolean)[]>();
+        for (const [key, values] of this.styles.entries()) {
+            const nextValues = [...values];
+            for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
+                const sourceViewIndex = Math.max(0, targetViewIndex - 1);
+                const sourceValue = nextValues[sourceViewIndex];
+                if (sourceValue === undefined) {
+                    continue;
+                }
+                nextValues[targetViewIndex] = cloneStateValue(sourceValue);
+            }
+            nextStyles.set(key, nextValues);
+        }
+        this.stylesState.next(nextStyles);
     }
 
     private setupStateSubscriptions() {
@@ -906,12 +996,176 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    getSnapshotImportLimits(): SnapshotImportLimits {
+        const stateCount = this.statePool.size;
+        return {
+            // Keep an upper bound aligned with practical browser localStorage budgets.
+            maxFileSizeBytes: 5 * 1024 * 1024,
+            // Snapshot top-level keys are strictly AppState names.
+            maxTopLevelEntries: stateCount,
+            // AppState payloads are shallow-to-moderately nested; reject pathological depth.
+            maxNestingDepth: 16,
+            // Derive broad collection limits from the number of registered states.
+            maxCollectionEntries: Math.max(1024, stateCount * 512),
+            maxStringLength: 1024 * 1024
+        };
+    }
+
+    exportSnapshot(): Record<string, unknown> {
+        const snapshot: Record<string, unknown> = Object.create(null);
+        for (const [name, state] of this.statePool.entries()) {
+            snapshot[name] = state.toSnapshotValue();
+        }
+        return snapshot;
+    }
+
+    validateSnapshot(snapshot: unknown): string[] {
+        return this.normalizeSnapshot(snapshot).errors;
+    }
+
+    importSnapshot(snapshot: unknown): string[] {
+        const normalizedResult = this.normalizeSnapshot(snapshot);
+        if (normalizedResult.errors.length) {
+            return normalizedResult.errors;
+        }
+        const normalized = normalizedResult.normalized!;
+        const keys = Object.keys(normalized);
+        const errors: string[] = [];
+
+        for (const key of keys) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                errors.push(`Unknown snapshot state '${key}'.`);
+                continue;
+            }
+            try {
+                state.validateSnapshotValue(normalized[key]);
+            } catch (error: any) {
+                errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
+            }
+        }
+        if (errors.length) {
+            return errors;
+        }
+
+        for (const key of keys) {
+            const state = this.statePool.get(key)!;
+            state.applySnapshotValue(normalized[key]);
+        }
+        return [];
+    }
+
+    private normalizeSnapshot(snapshot: unknown): SnapshotNormalizationResult {
+        const limits = this.getSnapshotImportLimits();
+        const errors: string[] = [];
+        let serialized: string;
+        try {
+            serialized = JSON.stringify(snapshot);
+        } catch {
+            return { errors: ['Snapshot payload is not serializable JSON.'] };
+        }
+        if (serialized.length > limits.maxFileSizeBytes) {
+            return { errors: [`Snapshot payload exceeds ${limits.maxFileSizeBytes} bytes.`] };
+        }
+
+        const normalizedRoot = this.normalizeSnapshotNode(snapshot, '$', 0, limits, errors);
+        if (errors.length) {
+            return {errors};
+        }
+        if (!normalizedRoot || Array.isArray(normalizedRoot) || typeof normalizedRoot !== 'object') {
+            return {errors: ['Snapshot payload must be a JSON object.']};
+        }
+        const normalized = normalizedRoot as Record<string, unknown>;
+        const keys = Object.keys(normalized);
+        if (keys.length > limits.maxTopLevelEntries) {
+            return {errors: ['Snapshot payload contains too many top-level entries.']};
+        }
+
+        for (const key of keys) {
+            if (!this.statePool.has(key)) {
+                errors.push(`Unknown snapshot state '${key}'.`);
+            }
+        }
+        if (errors.length) {
+            return {errors};
+        }
+
+        // Validate all present entries before import to keep mutation transactional.
+        for (const key of keys) {
+            const state = this.statePool.get(key)!;
+            try {
+                state.validateSnapshotValue(normalized[key]);
+            } catch (error: any) {
+                errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
+            }
+        }
+        return errors.length ? {errors} : {normalized, errors: []};
+    }
+
+    private normalizeSnapshotNode(
+        value: unknown,
+        path: string,
+        depth: number,
+        limits: SnapshotImportLimits,
+        errors: string[]
+    ): unknown {
+        if (depth > limits.maxNestingDepth) {
+            errors.push(`Snapshot payload exceeds max depth at '${path}'.`);
+            return undefined;
+        }
+
+        if (Array.isArray(value)) {
+            if (value.length > limits.maxCollectionEntries) {
+                errors.push(`Snapshot array '${path}' exceeds max length.`);
+                return undefined;
+            }
+            return value.map((entry, index) =>
+                this.normalizeSnapshotNode(entry, `${path}[${index}]`, depth + 1, limits, errors)
+            );
+        }
+
+        if (value && typeof value === 'object') {
+            const proto = Object.getPrototypeOf(value);
+            if (proto !== Object.prototype && proto !== null) {
+                errors.push(`Snapshot object '${path}' has an unsupported prototype.`);
+                return undefined;
+            }
+            const entries = Object.entries(value as Record<string, unknown>);
+            if (entries.length > limits.maxCollectionEntries) {
+                errors.push(`Snapshot object '${path}' exceeds max key count.`);
+                return undefined;
+            }
+            const normalized: Record<string, unknown> = Object.create(null);
+            for (const [key, entry] of entries) {
+                if (this.SNAPSHOT_UNSAFE_KEYS.has(key)) {
+                    errors.push(`Snapshot payload contains unsafe key '${key}' at '${path}'.`);
+                    return undefined;
+                }
+                normalized[key] = this.normalizeSnapshotNode(entry, `${path}.${key}`, depth + 1, limits, errors);
+            }
+            return normalized;
+        }
+
+        if (typeof value === 'string' && value.length > limits.maxStringLength) {
+            errors.push(`Snapshot string at '${path}' exceeds max length.`);
+            return undefined;
+        }
+        return value;
+    }
+
     // -----------------
     // Public API below
     // -----------------
 
     get numViews() {return this.numViewsState.getValue();}
-    set numViews(val: number) {this.numViewsState.next(val);};
+    set numViews(val: number) {
+        const previousViewCount = this.numViewsState.getValue();
+        if (val === previousViewCount) {
+            return;
+        }
+        this.seedAdditionalViews(previousViewCount, val);
+        this.numViewsState.next(val);
+    };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
@@ -966,6 +1220,10 @@ export class AppStateService implements OnDestroy {
     set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
     get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
     set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
+    get datasourcesEditorDialogVisible() {return this.datasourcesEditorDialogVisibleState.getValue();}
+    set datasourcesEditorDialogVisible(val: boolean) {this.datasourcesEditorDialogVisibleState.next(val);};
+    get snapshotManagerDialogVisible() {return this.snapshotManagerDialogVisibleState.getValue();}
+    set snapshotManagerDialogVisible(val: boolean) {this.snapshotManagerDialogVisibleState.next(val);};
     get diagnosticsPerformanceDialogVisible() {return this.diagnosticsPerformanceDialogVisibleState.getValue();}
     set diagnosticsPerformanceDialogVisible(val: boolean) {this.diagnosticsPerformanceDialogVisibleState.next(val);};
     get diagnosticsLogDialogVisible() {return this.diagnosticsLogDialogVisibleState.getValue();}
@@ -1157,6 +1415,9 @@ export class AppStateService implements OnDestroy {
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
+        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0) {
+            this.isDockOpen = true;
+        }
         const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
         const isSourceDataPanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData !== undefined;
         const isClearSourceDataRequest =
@@ -1326,34 +1587,124 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
-    getInspectionDialogLayoutEntry(panelId: number): InspectionDialogLayoutEntry | undefined {
-        return this.selectionState.getValue().find(panel => panel.id === panelId)?.inspectionDialogLayoutEntry;
+    getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
+        return this.dialogLayoutsState.getValue()[id];
     }
 
-    ensureInspectionDialogSlot(panelId: number, preferredIndex: number): number {
-        return this.getInspectionDialogLayoutEntry(panelId)?.slot ?? preferredIndex;
+    ensureDialogLayout(id: string, fallbackFactory: () => AppDialogLayout): AppDialogLayout | InspectionDialogLayout {
+        const existing = this.getDialogLayout(id);
+        if (existing) {
+            return existing;
+        }
+        const layout = fallbackFactory();
+        this.upsertDialogLayout(id, layout);
+        return layout;
     }
 
-    setInspectionDialogPosition(panelId: number, position: InspectionDialogPosition, preferredIndex?: number): void {
-        const allPanels = this.selectionState.getValue();
-        const panelIndex = allPanels.findIndex(panel => panel.id === panelId);
-        if (panelIndex === -1) {
+    upsertDialogLayout(id: string, layout: AppDialogLayout | InspectionDialogLayout): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const existing = currentLayouts[id];
+        const nextLayout: AppDialogLayout | InspectionDialogLayout = existing ? {
+            ...existing,
+            ...layout,
+            position: {
+                ...existing.position,
+                ...layout.position
+            },
+            size: {
+                ...existing.size,
+                ...layout.size
+            }
+        } : {
+            ...layout,
+            position: {...layout.position},
+            size: {...layout.size}
+        };
+        this.dialogLayoutsState.next({
+            ...currentLayouts,
+            [id]: nextLayout
+        });
+    }
+
+    removeDialogLayout(id: string): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        if (!(id in currentLayouts)) {
             return;
         }
-        const existing = allPanels[panelIndex].inspectionDialogLayoutEntry;
-        const slot = existing === undefined
-            ? this.ensureInspectionDialogSlot(panelId, preferredIndex ?? panelId)
-            : existing.slot;
-        allPanels[panelIndex].inspectionDialogLayoutEntry = {
-            panelId,
-            slot,
-            position: {left: position.left, top: position.top}
-        };
-        this.onStateChanged(this.selectionState, true);
+        const nextLayouts = {...currentLayouts};
+        delete nextLayouts[id];
+        this.dialogLayoutsState.next(nextLayouts);
     }
 
-    pruneInspectionDialogLayout(_activePanelIds: number[]) {
-        // Layout is stored directly on the corresponding selection panel.
+    getInspectionDialogLayout(panelId: number): InspectionDialogLayout | undefined {
+        const layout = this.getDialogLayout(this.inspectionLayoutId(panelId));
+        if (layout && 'panelId' in layout && 'slot' in layout) {
+            return layout as InspectionDialogLayout;
+        }
+        return undefined;
+    }
+
+    ensureInspectionDialogLayout(
+        panelId: number,
+        preferredSlot: number,
+        fallbackFactory: () => AppDialogLayout
+    ): InspectionDialogLayout {
+        const layoutId = this.inspectionLayoutId(panelId);
+        const existing = this.getInspectionDialogLayout(panelId);
+        if (existing) {
+            return existing;
+        }
+        const fallback = fallbackFactory();
+        const created: InspectionDialogLayout = {
+            panelId,
+            slot: preferredSlot,
+            position: {...fallback.position},
+            size: {...fallback.size}
+        };
+        this.upsertDialogLayout(layoutId, created);
+        return created;
+    }
+
+    setInspectionDialogPosition(panelId: number, position: AppDialogPosition, preferredIndex?: number): void {
+        if (!this.selectionState.getValue().some(panel => panel.id === panelId)) {
+            return;
+        }
+        const current = this.getInspectionDialogLayout(panelId);
+        if (current) {
+            this.upsertDialogLayout(this.inspectionLayoutId(panelId), {
+                ...current,
+                position: {left: position.left, top: position.top}
+            });
+            return;
+        }
+        const slot = preferredIndex ?? panelId;
+        const existing = this.getDialogLayout(this.inspectionLayoutId(panelId));
+        this.upsertDialogLayout(this.inspectionLayoutId(panelId), {
+            panelId,
+            slot,
+            position: {left: position.left, top: position.top},
+            size: existing?.size ?? {
+                width: Math.round(this.defaultInspectionPanelSize[0] * this.baseFontSize),
+                height: Math.round(this.defaultInspectionPanelSize[1] * this.baseFontSize)
+            }
+        });
+    }
+
+    pruneInspectionDialogLayout(activePanelIds: number[]) {
+        const activeIds = new Set(activePanelIds.map(panelId => this.inspectionLayoutId(panelId)));
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const nextLayouts: Record<string, AppDialogLayout | InspectionDialogLayout> = {};
+        let changed = false;
+        for (const [id, layout] of Object.entries(currentLayouts)) {
+            if (id.startsWith('inspection:') && !activeIds.has(id)) {
+                changed = true;
+                continue;
+            }
+            nextLayouts[id] = layout;
+        }
+        if (changed) {
+            this.dialogLayoutsState.next(nextLayouts);
+        }
     }
 
     openInspectionComparison(model: InspectionComparisonModel): void {
@@ -1432,6 +1783,10 @@ export class AppStateService implements OnDestroy {
             }
         }
         return true;
+    }
+
+    private inspectionLayoutId(panelId: number): string {
+        return `inspection:${panelId}`;
     }
 
     setMarkerState(enabled: boolean) {
@@ -1769,17 +2124,7 @@ export class AppStateService implements OnDestroy {
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
                 color: panel.color,
-                undocked: panel.undocked,
-                inspectionDialogLayoutEntry: panel.inspectionDialogLayoutEntry
-                    ? {
-                        panelId: panel.id,
-                        slot: panel.inspectionDialogLayoutEntry.slot,
-                        position: {
-                            left: panel.inspectionDialogLayoutEntry.position.left,
-                            top: panel.inspectionDialogLayoutEntry.position.top
-                        }
-                    }
-                    : undefined
+                undocked: panel.undocked
             };
 
             // Filter features

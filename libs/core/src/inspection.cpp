@@ -445,9 +445,12 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     bool isArray = false;
     OptionalValueAndType singleValue;
 
-    if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds) {
-        singleValue = {convertString(tile_->resolve<FeatureId>(*value)->toString()), ValueType::FeatureId};
-        fieldScope->mapId_ = JsValue(tile_->mapId());
+    if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
+        value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
+    {
+        auto featureId = tile_->resolve<FeatureId>(*value);
+        singleValue = {convertString(featureId->toString()), ValueType::FeatureId};
+        fieldScope->mapId_ = JsValue(featureId->model().mapId());
     }
     else {
         switch (value->type()) {
@@ -496,6 +499,15 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
 
     if (numValues == 1) {
         std::tie(fieldScope->value_, fieldScope->type_) = *singleValue;
+        // Preserve semantic metadata from the flattened child, e.g. FEATUREID mapId/hoverId.
+        if (fieldScope->children_.size() == 1) {
+            auto const& child = fieldScope->children_.front();
+            fieldScope->mapId_ = child.mapId_;
+            fieldScope->hoverId_ = child.hoverId_;
+            fieldScope->info_ = child.info_;
+            fieldScope->geoJsonPath_ = child.geoJsonPath_;
+            fieldScope->sourceDataRefs_ = child.sourceDataRefs_;
+        }
         return singleValue;
     }
     return {};

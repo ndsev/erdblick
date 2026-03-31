@@ -1,7 +1,6 @@
 import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {TreeTableNode} from 'primeng/api';
 import {MapDataService} from '../mapdata/map.service';
@@ -19,6 +18,7 @@ import {
     UNIT_SUFFIXES
 } from './diagnostics.constants';
 import {KeyboardService} from "../shared/keyboard.service";
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 interface LayerOption {
     label: string;
@@ -70,8 +70,9 @@ interface PerfTileScopeCounts {
 @Component({
     selector: 'diagnostics-performance-dialog',
     template: `
-        <p-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="stateService.diagnosticsPerformanceDialogVisible"
+        <app-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="stateService.diagnosticsPerformanceDialogVisible"
                   [modal]="false"
+                  [persistLayout]="true" [layoutId]="layoutId"
                   [style]="dialogStyle"
                   (onShow)="onDialogShow()">
             @if (diagnostics.snapshot$ | async; as snapshot) {
@@ -188,13 +189,14 @@ interface PerfTileScopeCounts {
             <div class="diagnostics-dialog-actions">
                 <p-button label="Export" (click)="openExport()" />
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [``],
     standalone: false
 })
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
-    @ViewChild('dialog') dialog?: Dialog;
+    readonly layoutId = 'diagnostics-performance';
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
         height: '75vh'
     };

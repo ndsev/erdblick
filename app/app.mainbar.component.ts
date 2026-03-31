@@ -9,7 +9,6 @@ import {
     VIEW_SYNC_POSITION,
     VIEW_SYNC_PROJECTION
 } from './shared/appstate.service';
-import {EditorService} from './shared/editor.service';
 import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 import {MenuItem} from "primeng/api";
@@ -26,11 +25,11 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
     },
     template: `
         @if (stateService.mapsDialogVisible) {
-            <p-button class="maps-button" (click)="closeMapsPanel()" label="" tooltipPosition="right" pTooltip="Close maps configuration panel">
+            <p-button class="maps-button" data-testid="maps-toggle" (click)="closeMapsPanel()" label="" tooltipPosition="right" pTooltip="Close maps configuration panel">
                 <span class="material-symbols-outlined">close</span>
             </p-button>
         } @else {
-            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label="" tooltipPosition="right" pTooltip="Open maps configuration panel">
+            <p-button class="maps-button" data-testid="maps-toggle" (click)="showMapsPanel()" icon="" label="" tooltipPosition="right" pTooltip="Open maps configuration panel">
                 <span class="material-symbols-outlined">stacks</span>
             </p-button>
         }
@@ -110,6 +109,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private viewerLayoutResizeObserver?: ResizeObserver;
     private viewerLayoutElement?: HTMLElement;
+    private mobileMenubarStateFrame?: number;
     private viewportMobileMenubar = false;
     private viewerLayoutMobileMenubar = false;
 
@@ -123,7 +123,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     constructor(public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService,
                 private diagnostics: DiagnosticsFacadeService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
@@ -157,6 +156,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy() {
         this.teardownMobileMenuTracking();
         this.teardownViewerLayoutTracking();
+        if (typeof window !== 'undefined' && this.mobileMenubarStateFrame !== undefined) {
+            window.cancelAnimationFrame(this.mobileMenubarStateFrame);
+        }
+        this.mobileMenubarStateFrame = undefined;
         this.subscriptions.unsubscribe();
     }
 
@@ -169,7 +172,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
         this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
             this.viewportMobileMenubar = event.matches;
-            this.updateMobileMenubarState();
+            this.scheduleMobileMenubarStateUpdate();
         };
         if (typeof this.mediaQueryList.addEventListener === 'function') {
             this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
@@ -211,12 +214,15 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     private openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
+        this.stateService.datasourcesEditorDialogVisible = true;
     }
 
     private openStylesDialog() {
         this.styleService.stylesDialogVisible = true;
+    }
+
+    private openStateSnapshots() {
+        this.stateService.snapshotManagerDialogVisible = true;
     }
 
     protected showMapsPanel() {
@@ -289,7 +295,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     private updateViewerLayoutMobileState(width: number) {
         this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
-        this.updateMobileMenubarState();
+        this.scheduleMobileMenubarStateUpdate();
     }
 
     private updateMobileMenubarState() {
@@ -299,6 +305,24 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
         this.isMobileMenubar = isMobileMenubar;
         this.rebuildMenuItems();
+    }
+
+    private scheduleMobileMenubarStateUpdate() {
+        if (this.mobileMenubarStateFrame !== undefined) {
+            return;
+        }
+        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+            this.updateMobileMenubarState();
+            return;
+        }
+        this.ngZone.runOutsideAngular(() => {
+            this.mobileMenubarStateFrame = window.requestAnimationFrame(() => {
+                this.mobileMenubarStateFrame = undefined;
+                this.ngZone.run(() => {
+                    this.updateMobileMenubarState();
+                });
+            });
+        });
     }
 
     private findViewerLayoutElement(): HTMLElement | undefined {
@@ -335,6 +359,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: 'Datasources',
                         icon: 'data_table',
                         command: () => { this.openDatasources(); }
+                    },
+                    {
+                        name: 'State Snapshots',
+                        icon: 'save',
+                        command: () => { this.openStateSnapshots(); }
                     },
                     {
                         name: 'Settings',

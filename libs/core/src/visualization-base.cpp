@@ -265,6 +265,46 @@ std::optional<uint32_t> FeatureLayerVisualizationBase::preferredGeometryStageFor
     return std::nullopt;
 }
 
+bool FeatureLayerVisualizationBase::geometryPassesRenderFilters(
+    mapget::GeomType geomType,
+    std::optional<uint32_t> geometryStage,
+    FeatureStyleRule const& rule) const
+{
+    auto const resolvedGeometryStage = geometryStage.value_or(0U);
+    if (fidelity_ == FeatureStyleRule::LowFidelity) {
+        auto const lowFidelityStageMax = highFidelityStage_ > 0U ? highFidelityStage_ - 1U : 0U;
+        if (resolvedGeometryStage > lowFidelityStageMax) {
+            return false;
+        }
+    } else if (fidelity_ == FeatureStyleRule::HighFidelity) {
+        if (resolvedGeometryStage < highFidelityStage_) {
+            return false;
+        }
+    }
+
+    if (!rule.supports(geomType, geometryStage)) {
+        return false;
+    }
+
+    switch (geomType) {
+    case GeomType::Polygon:
+    case GeomType::Mesh:
+    case GeomType::Line:
+        return includesNonPointGeometry() || (rule.hasLabel() && includesPointLikeGeometry());
+    case GeomType::Points:
+        return includesPointLikeGeometry();
+    }
+
+    return false;
+}
+
+glm::dvec3 FeatureLayerVisualizationBase::effectiveOffsetForSlot(
+    FeatureStyleRule const& rule,
+    uint32_t offsetSlot)
+{
+    return rule.offset() + rule.offsetIncrement() * static_cast<double>(offsetSlot);
+}
+
 void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisualize& relationToRender)
 {
     auto const& relation = static_cast<mapget::Relation const&>(*relationToRender.relation_);
@@ -826,11 +866,20 @@ void FeatureLayerVisualizationBase::addFeature(
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
         if (auto geomCollection = feature->geomOrNull()) {
+            auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.index()];
+            auto const effectiveOffset = effectiveOffsetForSlot(rule, currentOffsetSlot);
+            bool emittedFeatureGeometry = false;
             auto addFeatureGeometry =
                 [this, featureAddress = static_cast<uint32_t>(feature->addr().index()),
-                 &rule, &mapLayerStyleRuleId, &evalFun](auto&& geom)
+                 &rule, &mapLayerStyleRuleId, &evalFun, &effectiveOffset, &emittedFeatureGeometry](auto&& geom)
                 {
-                    addGeometry(geom, featureAddress, rule, mapLayerStyleRuleId, evalFun, rule.offset());
+                    emittedFeatureGeometry = addGeometry(
+                        geom,
+                        featureAddress,
+                        rule,
+                        mapLayerStyleRuleId,
+                        evalFun,
+                        effectiveOffset) || emittedFeatureGeometry;
                     return true;
                 };
             if (highlightMode_ != FeatureStyleRule::NoHighlight
@@ -838,6 +887,9 @@ void FeatureLayerVisualizationBase::addFeature(
                 geomCollection->forEachGeometryAtPreferredStage(std::nullopt, addFeatureGeometry);
             } else {
                 geomCollection->forEachGeometry(addFeatureGeometry);
+            }
+            if (emittedFeatureGeometry) {
+                ++featureOffsetSlotsByRuleIndex_[rule.index()];
             }
         }
         break;
@@ -860,7 +912,7 @@ void FeatureLayerVisualizationBase::addFeature(
             featureIdForAttributes = resolveFeatureId();
         }
 
-        uint32_t offsetFactor = 0;
+        uint32_t offsetSlot = 0;
         attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
             if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
                 if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
@@ -895,7 +947,7 @@ void FeatureLayerVisualizationBase::addFeature(
                     static_cast<uint32_t>(feature->addr().index()),
                     rule,
                     mapLayerStyleRuleId,
-                    offsetFactor,
+                    offsetSlot,
                     hoveredValidityIndices);
                 return true;
             });
@@ -906,7 +958,7 @@ void FeatureLayerVisualizationBase::addFeature(
     }
 }
 
-void FeatureLayerVisualizationBase::addGeometry(
+bool FeatureLayerVisualizationBase::addGeometry(
     model_ptr<Geometry> const& geom,
     uint32_t tileFeatureId,
     FeatureStyleRule const& rule,
@@ -915,9 +967,9 @@ void FeatureLayerVisualizationBase::addGeometry(
     glm::dvec3 const& offset)
 {
     if (!geom) {
-        return;
+        return false;
     }
-    addGeometry(
+    return addGeometry(
         geom->toSelfContained(),
         geom->model().stage(),
         tileFeatureId,
@@ -927,7 +979,7 @@ void FeatureLayerVisualizationBase::addGeometry(
         offset);
 }
 
-void FeatureLayerVisualizationBase::addGeometry(
+bool FeatureLayerVisualizationBase::addGeometry(
     SelfContainedGeometry const& geom,
     std::optional<uint32_t> geometryStage,
     uint32_t tileFeatureId,
@@ -936,20 +988,8 @@ void FeatureLayerVisualizationBase::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
-    auto const resolvedGeometryStage = geometryStage.value_or(0U);
-    if (fidelity_ == FeatureStyleRule::LowFidelity) {
-        auto const lowFidelityStageMax = highFidelityStage_ > 0U ? highFidelityStage_ - 1U : 0U;
-        if (resolvedGeometryStage > lowFidelityStageMax) {
-            return;
-        }
-    } else if (fidelity_ == FeatureStyleRule::HighFidelity) {
-        if (resolvedGeometryStage < highFidelityStage_) {
-            return;
-        }
-    }
-
-    if (!rule.supports(geom.geomType_, geometryStage)) {
-        return;
+    if (!geometryPassesRenderFilters(geom.geomType_, geometryStage, rule)) {
+        return false;
     }
 
     auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
@@ -962,20 +1002,24 @@ void FeatureLayerVisualizationBase::addGeometry(
         vertsProjected.emplace_back(projectWgsPoint(vertCarto));
     }
 
+    bool emittedAnyGeometry = false;
     switch (geometryForRendering.geomType_) {
     case GeomType::Polygon:
         if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
             emitPolygon(vertsProjected, rule, renderFeatureId, evalFun);
+            emittedAnyGeometry = true;
         }
         break;
     case GeomType::Line:
         if (includesNonPointGeometry()) {
             addPolyLine(vertsProjected, rule, renderFeatureId, evalFun);
+            emittedAnyGeometry = true;
         }
         break;
     case GeomType::Mesh:
         if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
             emitMesh(vertsProjected, rule, renderFeatureId, evalFun);
+            emittedAnyGeometry = true;
         }
         break;
     case GeomType::Points:
@@ -1014,16 +1058,17 @@ void FeatureLayerVisualizationBase::addGeometry(
             else {
                 emitPoint(xyzPos, rule, renderFeatureId, evalFun);
             }
+            emittedAnyGeometry = true;
         }
         break;
     }
 
     if (rule.hasLabel() && includesPointLikeGeometry()) {
-                auto text = rule.labelText(evalFun);
-            if (!text.empty()) {
-                auto const labelWgsPos = geometryCenter(geometryForRendering);
-                auto const hashWgsPos = geometryCenter(geom);
-                auto xyzPos = JsValue(projectWgsPoint(labelWgsPos));
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            auto const labelWgsPos = geometryCenter(geometryForRendering);
+            auto const hashWgsPos = geometryCenter(geom);
+            auto xyzPos = JsValue(projectWgsPoint(labelWgsPos));
 
             if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
                 addMergedPointGeometry(
@@ -1046,8 +1091,10 @@ void FeatureLayerVisualizationBase::addGeometry(
             else {
                 emitLabel(xyzPos, text, rule, renderFeatureId, evalFun);
             }
+            emittedAnyGeometry = true;
         }
     }
+    return emittedAnyGeometry;
 }
 
 void FeatureLayerVisualizationBase::addMergedPointGeometry(
@@ -1334,7 +1381,7 @@ void FeatureLayerVisualizationBase::addAttribute(
     uint32_t tileFeatureId,
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId,
-    uint32_t& offsetFactor,
+    uint32_t& offsetSlot,
     std::unordered_set<uint32_t> const* hoveredValidityIndices)
 {
     // Check if the attribute type name is accepted for the rule.
@@ -1415,9 +1462,7 @@ void FeatureLayerVisualizationBase::addAttribute(
             return;
         }
 
-        auto const& ruleOffset = rule.offset();
-        auto const hasRuleOffset = ruleOffset.x != .0 || ruleOffset.y != .0 || ruleOffset.z != .0;
-        uint32_t currentOffsetFactor = offsetFactor;
+        uint32_t currentOffsetSlot = offsetSlot;
         validityIndex = 0;
         multiValidity->forEach([&, this](auto&& validity)
         {
@@ -1442,25 +1487,22 @@ void FeatureLayerVisualizationBase::addAttribute(
                 validity.geometryStage().has_value()
                     ? validity.geometryStage()
                     : preferredGeometryStage;
-            if (hasRuleOffset) {
-                validityGeometry = offsetGeometryLocally(
-                    validityGeometry,
-                    ruleOffset * static_cast<double>(currentOffsetFactor + 1U));
-            }
+            auto const effectiveOffset = effectiveOffsetForSlot(rule, currentOffsetSlot);
             addGeometry(
                 validityGeometry,
                 validityGeometryStage,
                 tileFeatureId,
                 rule,
                 mapLayerStyleRuleId,
-                boundEvalFun);
+                boundEvalFun,
+                effectiveOffset);
             if (validity.geometryDescriptionType() == mapget::Validity::FeatureTransition) {
-                ++currentOffsetFactor;
+                ++currentOffsetSlot;
             }
             ++validityIndex;
             return true;
         });
-        offsetFactor = currentOffsetFactor + 1U;
+        offsetSlot = currentOffsetSlot + 1U;
     }
     else {
         if (hoveredValidityIndices && !hoveredValidityIndices->contains(0U)) {
@@ -1470,8 +1512,8 @@ void FeatureLayerVisualizationBase::addAttribute(
         boundEvalFun.context_ = attrEvaluationContext;
         attrEvaluationContext->set(validityIndexId.value(), simfil::Value(static_cast<int64_t>(0)));
         attrEvaluationContext->set(validityCountId.value(), simfil::Value(static_cast<int64_t>(1)));
-        ++offsetFactor;
         if (auto geomCollection = feature->geomOrNull()) {
+            auto const effectiveOffset = effectiveOffsetForSlot(rule, offsetSlot);
             auto addAttributeGeometry =
                 [&, this](auto&& geom) {
                     addGeometry(
@@ -1480,7 +1522,7 @@ void FeatureLayerVisualizationBase::addAttribute(
                         rule,
                         mapLayerStyleRuleId,
                         boundEvalFun,
-                        rule.offset() * static_cast<double>(offsetFactor));
+                        effectiveOffset);
                     return true;
                 };
             if (preferredGeometryStage) {
@@ -1491,6 +1533,7 @@ void FeatureLayerVisualizationBase::addAttribute(
                 geomCollection->forEachGeometry(addAttributeGeometry);
             }
         }
+        ++offsetSlot;
     }
 }
 
