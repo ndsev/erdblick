@@ -1601,6 +1601,7 @@ inspection-tree {
       justify-content: space-between;
       align-items: center;
       width: 100%;
+      container-type: inline-size;
 
       & > * {
         display: flex;
@@ -1610,9 +1611,13 @@ inspection-tree {
       }
 
       .title-container {
-        max-width: calc(100% - 8.5em);
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 100%;
 
         .title {
+          flex: 1 1 auto;
+          min-width: 0;
           max-width: 100%;
           white-space: nowrap;
           font-weight: bold;
@@ -1621,7 +1626,7 @@ inspection-tree {
           align-items: center;
           cursor: pointer;
           padding: 0.15em 0.15em 0.15em 0;
-          overflow: auto;
+          overflow: hidden;
 
           &:hover {
             color: var(--p-primary-contrast-color);
@@ -1638,17 +1643,43 @@ inspection-tree {
           }
 
           .title-span {
-            min-width: 50%;
+            flex: 1 1 auto;
+            min-width: 0;
             text-overflow: ellipsis;
             overflow: hidden;
           }
         }
       }
 
+      & > :last-child {
+        flex: 0 0 auto;
+        margin-left: auto;
+      }
+
       .p-button {
         width: 1.75em !important;
         height: 1.75em !important;
         margin: 0;
+      }
+
+      .inspection-feature-tools-inline {
+        display: none;
+        gap: 0.25em;
+        align-items: center;
+      }
+
+      .inspection-feature-tools-menu {
+        display: inline-flex;
+      }
+
+      @container (min-width: 36rem) {
+        .inspection-feature-tools-inline {
+          display: inline-flex;
+        }
+
+        .inspection-feature-tools-menu {
+          display: none;
+        }
       }
     }
   }
@@ -2260,6 +2291,7 @@ inspection-tree {
       align-items: center;
       width: calc(100% - 1.5em);
       cursor: grab;
+      container-type: inline-size;
 
       & > * {
         display: flex;
@@ -2269,9 +2301,13 @@ inspection-tree {
       }
 
       .title-container {
-        max-width: calc(100% - 6.5em);
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 100%;
 
         .title {
+          flex: 1 1 auto;
+          min-width: 0;
           max-width: 100%;
           white-space: nowrap;
           display: flex;
@@ -2279,7 +2315,7 @@ inspection-tree {
           align-items: center;
           cursor: pointer;
           padding: 0.15em 0.15em 0.15em 0;
-          overflow: auto;
+          overflow: hidden;
 
           &:hover {
             color: var(--p-primary-contrast-color);
@@ -2296,11 +2332,17 @@ inspection-tree {
           }
 
           .title-span {
-            min-width: 50%;
+            flex: 1 1 auto;
+            min-width: 0;
             text-overflow: ellipsis;
             overflow: hidden;
           }
         }
+      }
+
+      & > :last-child {
+        flex: 0 0 auto;
+        margin-left: auto;
       }
 
 
@@ -2308,6 +2350,26 @@ inspection-tree {
         width: 1.75em !important;
         height: 1.75em !important;
         margin: 0;
+      }
+
+      .inspection-feature-tools-inline {
+        display: none;
+        gap: 0.25em;
+        align-items: center;
+      }
+
+      .inspection-feature-tools-menu {
+        display: inline-flex;
+      }
+
+      @container (min-width: 36rem) {
+        .inspection-feature-tools-inline {
+          display: inline-flex;
+        }
+
+        .inspection-feature-tools-menu {
+          display: none;
+        }
       }
     }
 
@@ -2543,7 +2605,6 @@ inspection-tree {
   min-width: 15em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
-  z-index: 120;
 
   &.shifted {
     left: 0.5em !important;
@@ -2600,7 +2661,7 @@ inspection-tree {
       padding: var(--p-contextmenu-list-padding);
 
       position: fixed;
-      z-index: 520;
+      z-index: 50000;
       margin-top: -0.5em;
 
       min-width: 150px;

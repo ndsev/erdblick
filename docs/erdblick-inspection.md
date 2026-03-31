@@ -39,7 +39,7 @@ The tree view mirrors the internal inspection model rather than a flattened tabl
 - **Hover relations** to highlight related features on the map.
 - **Click feature IDs** to follow references.
 - **Open SourceData** from nodes that carry source references.
-- **Copy GeoJSON path** from the context menu when you want to reuse the same field in Simfil search.
+- **Copy Search Path** from the context menu when you want to reuse the same field in Simfil search.
 
 Erdblick also applies a few presentation rules that matter in practice:
 
@@ -82,7 +82,7 @@ If you jump from a feature node into SourceData, erdblick keeps the map/tile/lay
 Inspection is also a useful handoff tool:
 
 - **URL state** – open panels, lock state, sizes, colors, and SourceData selections are encoded in the URL and mirrored into local state.
-- **Clipboard actions** – copy key/value pairs, GeoJSON paths, or full GeoJSON snippets from the context menu.
+- **Clipboard actions** – copy key/value pairs, search paths, or full GeoJSON snippets from the context menu.
 - **GeoJSON export** – export the current inspected selection as a GeoJSON FeatureCollection.
 - **Browser history** – the browser’s Back and Forward buttons walk through previous inspection layouts.
 

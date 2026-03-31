@@ -79,7 +79,7 @@ Because the search iterates over loaded tiles, it will not “page in” additio
 <!-- --8<-- [start:crafting] -->
 When you compose Simfil expressions, it helps to start from the data that erdblick actually sees:
 
-- Use the inspection column to explore a feature and right-click an attribute to choose **Copy GeoJSON path**. The copied path matches the structure Simfil operates on in feature search.
+- Use the inspection column to explore a feature and right-click an attribute to choose **Copy Search Path**. The copied path matches the structure Simfil operates on in feature search.
 - Keep early queries simple, for example `**.speedLimitKmh > 80` to highlight fast segments or `**.functionalRoadClass == 4` to focus on a particular road class.
 - Combine multiple conditions with logical operators (`and`, `or`, `not`) and build up complexity gradually. If you run into syntax issues, the diagnostics tab will usually point at the problematic clause.
 - Use the GeoJSON actions in the inspector to download sample features as `.geojson` if you want to experiment with queries outside erdblick.
@@ -89,7 +89,7 @@ For the full set of operators and syntax rules, refer to the Simfil language gui
 
 #### Understanding Feature Paths
 
-To effectively use auto-complete, it's helpful to understand how features are structured. Use the inspection panel's "Copy GeoJSON Path" functionality to explore the exact paths to specific elements in the inspection tree. This gives you insight into the data structure and helps you understand the path syntax.
+To effectively use auto-complete, it's helpful to understand how features are structured. Use the inspection panel's **Copy Search Path** action to explore the exact paths to specific elements in the inspection tree. This gives you insight into the data structure and helps you understand the path syntax.
 
 ## Autocompletion and Inline Diagnostics
 

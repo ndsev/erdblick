@@ -1,4 +1,4 @@
-import {Component, ElementRef, HostListener, NgZone, ViewChild} from "@angular/core";
+import {Component, ElementRef, HostListener, NgZone, OnDestroy, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
@@ -15,10 +15,12 @@ import {filter} from "rxjs/operators";
 import {removeGroupPrefix} from "../mapdata/map.tree.model"
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {basicSetup} from "codemirror";
-import {EditorState} from "@codemirror/state";
+import {Compartment, EditorState} from "@codemirror/state";
 import {yaml} from "@codemirror/lang-yaml";
 import {EditorView} from "@codemirror/view";
 import {MergeView} from "@codemirror/merge";
+import {defaultHighlightStyle, syntaxHighlighting} from "@codemirror/language";
+import {oneDark} from "@codemirror/theme-one-dark";
 
 
 @Component({
@@ -227,7 +229,7 @@ import {MergeView} from "@codemirror/merge";
     `],
     standalone: false
 })
-export class StyleComponent {
+export class StyleComponent implements OnDestroy {
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     editedStyleSourceSubscription: Subscription = new Subscription();
@@ -241,6 +243,10 @@ export class StyleComponent {
     private styleCompareLeftSource: string = "";
     private styleCompareRightSource: string = "";
     private styleCompareView?: MergeView;
+    private readonly compareThemeCompartmentA = new Compartment();
+    private readonly compareThemeCompartmentB = new Compartment();
+    private compareModeObserver?: MutationObserver;
+    private readonly DARK_MODE_CLASS = 'erdblick-dark';
 
     @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -269,6 +275,11 @@ export class StyleComponent {
         });
     }
 
+    ngOnDestroy() {
+        this.compareModeObserver?.disconnect();
+        this.styleCompareView?.destroy();
+    }
+
     onStylesDialogShow() {
         this.dialogStack.bringToFront(this.stylesDialog);
     }
@@ -283,6 +294,8 @@ export class StyleComponent {
     }
 
     onStyleCompareDialogHide() {
+        this.compareModeObserver?.disconnect();
+        this.compareModeObserver = undefined;
         this.styleCompareView?.destroy();
         this.styleCompareView = undefined;
         this.styleCompareLeftModified = false;
@@ -626,6 +639,7 @@ export class StyleComponent {
         if (!host || !this.styleCompareStyleId || !this.styleCompareDialogVisible) {
             return;
         }
+        const compareTheme = this.currentCodeMirrorTheme();
         this.styleCompareView?.destroy();
         this.styleCompareView = undefined;
         host.innerHTML = "";
@@ -639,6 +653,7 @@ export class StyleComponent {
                 extensions: [
                     basicSetup,
                     yaml(),
+                    this.compareThemeCompartmentA.of(compareTheme),
                     EditorView.updateListener.of(update => {
                         if (!update.docChanged) {
                             return;
@@ -654,10 +669,12 @@ export class StyleComponent {
                 extensions: [
                     basicSetup,
                     yaml(),
+                    this.compareThemeCompartmentB.of(compareTheme),
                     EditorState.readOnly.of(true)
                 ]
             }
         });
+        this.observeCompareTheme();
     }
 
     private discardComparedStyleEdits() {
@@ -683,5 +700,31 @@ export class StyleComponent {
 
     private refreshUpdatedStylesDialogVisibility() {
         this.styleUpdateDialogVisible = this.styleService.getUpdatedModifiedStyles().length > 0;
+    }
+
+    private observeCompareTheme() {
+        const root = document.documentElement;
+        this.compareModeObserver?.disconnect();
+        this.compareModeObserver = new MutationObserver((records) => {
+            for (const record of records) {
+                if (record.type !== 'attributes' || record.attributeName !== 'class') {
+                    continue;
+                }
+                const theme = this.currentCodeMirrorTheme();
+                this.styleCompareView?.a.dispatch({
+                    effects: this.compareThemeCompartmentA.reconfigure(theme)
+                });
+                this.styleCompareView?.b.dispatch({
+                    effects: this.compareThemeCompartmentB.reconfigure(theme)
+                });
+            }
+        });
+        this.compareModeObserver.observe(root, {attributes: true, attributeFilter: ['class']});
+    }
+
+    private currentCodeMirrorTheme() {
+        const isDark = document.documentElement.classList.contains(this.DARK_MODE_CLASS);
+        const lightTheme = EditorView.theme({}, {dark: false});
+        return isDark ? oneDark : [lightTheme, syntaxHighlighting(defaultHighlightStyle)];
     }
 }

@@ -67,6 +67,7 @@ public:
 
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
     [[nodiscard]] float width() const;
+    [[nodiscard]] bool depthTest() const;
     [[nodiscard]] std::optional<bool> const& billboard() const;
     [[nodiscard]] bool flat() const;
     [[nodiscard]] bool isDashed() const;
@@ -77,6 +78,7 @@ public:
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] glm::dvec3 const& offset() const;
+    [[nodiscard]] glm::dvec3 const& offsetIncrement() const;
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
     [[nodiscard]] bool hasIconUrl() const;
@@ -133,6 +135,7 @@ private:
     glm::fvec4 color_{.0, .0, .0, 1.};
     std::string colorExpression_;
     float width_ = 1.;
+    bool depthTest_ = true;
     std::optional<bool> billboard_;
     bool flat_ = false;
     bool dashed_ = false;
@@ -144,6 +147,7 @@ private:
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
     glm::dvec3 offset_{.0, .0, .0};
+    glm::dvec3 offsetIncrement_{.0, .0, .0};
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
     // Labels' rules

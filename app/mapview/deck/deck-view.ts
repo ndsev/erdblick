@@ -179,6 +179,9 @@ export abstract class DeckMapView implements IRenderView {
     private lastSearchResultsIconMappingUrl = "";
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
+    private isHoveringFeature = false;
+    private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
+        this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
 
     get viewIndex() {
         return this._viewIndex;
@@ -240,6 +243,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.scheduleSearchResultsOverlayUpdate();
                 this.scheduleCanvasResize(width, height);
             },
+            getCursor: this.deckCursor,
             onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
             onHover: (info) => this.onHover(info),
             onClick: (info, event) => this.onClick(info, event)
@@ -249,6 +253,7 @@ export abstract class DeckMapView implements IRenderView {
 
         this.setupSubscriptions();
         this.updateViewport();
+        this.mapService.refreshHighlightVisualizations();
         this.requestRender();
     }
 
@@ -260,6 +265,7 @@ export abstract class DeckMapView implements IRenderView {
         this.cancelSearchResultsOverlayScheduling();
         this.cancelCanvasResizeScheduling();
         this.tickCallbacks.clear();
+        this.setFeatureHoverState(false);
         this.hoveredFeatureIds.next(undefined);
         this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
         this.removeTileGridLayers();
@@ -811,6 +817,8 @@ export abstract class DeckMapView implements IRenderView {
 
     private onHover(info: PickingInfo): void {
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
+            this.setFeatureHoverState(false);
+            void this.mapService.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
@@ -824,15 +832,28 @@ export abstract class DeckMapView implements IRenderView {
         }
         const featureIds = this.pickFeature({x: info.x, y: info.y});
         if (!featureIds.length) {
+            this.setFeatureHoverState(false);
+            void this.mapService.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
+        this.setFeatureHoverState(true);
         this.mapService.setHoveredFeatures(featureIds).then(() => {
             this.hoveredFeatureIds.next({
                 featureIds,
                 position: {x: info.x, y: info.y}
             });
         });
+    }
+
+    private setFeatureHoverState(isHoveringFeature: boolean): void {
+        if (this.isHoveringFeature === isHoveringFeature) {
+            return;
+        }
+        this.isHoveringFeature = isHoveringFeature;
+        if (this.deck) {
+            this.deck.setProps({getCursor: this.deckCursor});
+        }
     }
 
     private onClick(info: PickingInfo, event: DeckGestureEventLike): void {
@@ -866,7 +887,6 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        this.stateService.isDockOpen = true;
         const shouldPinPanel = !!srcEvent?.ctrlKey;
         this.selectFeatureIds(featureIds, shouldPinPanel);
     }

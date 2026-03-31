@@ -47,6 +47,7 @@ export interface DeckPointBucketBuffers {
     positions: Float32Array;
     colors: Uint8Array;
     radii: Float32Array;
+    depthTests: Uint8Array;
     featureAddresses: Uint32Array;
 }
 
@@ -54,6 +55,7 @@ export interface DeckSurfaceBucketBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
+    depthTests: Uint8Array;
     featureAddresses: Uint32Array;
 }
 
@@ -62,6 +64,7 @@ export interface DeckPathBucketBuffers {
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
+    depthTests: Uint8Array;
     featureAddresses: Uint32Array;
     dashArrays?: Float32Array;
 }
@@ -76,6 +79,7 @@ export interface DeckLabelDatum {
     scale: number;
     pixelOffset?: [number, number];
     billboard: boolean;
+    depthTest?: boolean;
 }
 
 export interface DeckGeometryBucketBuffers {

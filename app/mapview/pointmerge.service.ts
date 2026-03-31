@@ -13,6 +13,9 @@ type Cartographic = {x: number, y: number, z: number};
 type DeckColor = [number, number, number, number];
 type DeckPosition = [number, number, number];
 type DeckScene = {layerRegistry?: DeckLayerRegistry};
+const DECK_NO_DEPTH_TEST_PARAMETERS = {
+    depthTest: false
+} as any;
 
 interface DeckMergedPoint {
     featureAddresses: number[];
@@ -23,6 +26,7 @@ interface DeckMergedPoint {
     outlineWidth: number;
     pixelSize: number;
     billboard: boolean;
+    depthTest: boolean;
 }
 
 interface DeckMergedIcon {
@@ -34,6 +38,7 @@ interface DeckMergedIcon {
     height: number;
     color: DeckColor;
     billboard: boolean;
+    depthTest: boolean;
 }
 
 interface DeckMergedLabel {
@@ -47,6 +52,7 @@ interface DeckMergedLabel {
     scale: number;
     pixelOffset: [number, number];
     billboard: boolean;
+    depthTest: boolean;
 }
 
 /**
@@ -201,9 +207,10 @@ export class MergedPointsTile {
 
         this.removeDeck(scene);
 
-        const pointsByBillboard = new Map<boolean, DeckMergedPoint[]>();
-        const iconsByBillboard = new Map<boolean, DeckMergedIcon[]>();
-        const labelsByBillboard = new Map<boolean, DeckMergedLabel[]>();
+        const pointsByBucket = new Map<string, {billboard: boolean, depthTest: boolean, data: DeckMergedPoint[]}>();
+        const iconsByBucket = new Map<string, {billboard: boolean, depthTest: boolean, data: DeckMergedIcon[]}>();
+        const labelsByBucket = new Map<string, {billboard: boolean, depthTest: boolean, data: DeckMergedLabel[]}>();
+        const bucketKey = (billboard: boolean, depthTest: boolean) => `${billboard ? 1 : 0}:${depthTest ? 1 : 0}`;
 
         for (const feature of this.features.values()) {
             const featureAddresses = feature.featureAddresses;
@@ -223,8 +230,10 @@ export class MergedPointsTile {
                     const width = Number(params.width ?? params.pixelSize ?? 12);
                     const height = Number(params.height ?? params.pixelSize ?? 12);
                     const billboard = params.billboard !== false;
-                    const bucket = iconsByBillboard.get(billboard) ?? [];
-                    bucket.push({
+                    const depthTest = params.depthTest !== false;
+                    const key = bucketKey(billboard, depthTest);
+                    const bucket = iconsByBucket.get(key) ?? {billboard, depthTest, data: []};
+                    bucket.data.push({
                         featureAddresses,
                         featureTileKeys,
                         position,
@@ -232,15 +241,18 @@ export class MergedPointsTile {
                         width: Number.isFinite(width) && width > 0 ? width : 12,
                         height: Number.isFinite(height) && height > 0 ? height : 12,
                         color,
-                        billboard
+                        billboard,
+                        depthTest
                     });
-                    iconsByBillboard.set(billboard, bucket);
+                    iconsByBucket.set(key, bucket);
                 } else {
                     const pixelSize = Number(params.pixelSize ?? 6);
                     const outlineWidth = Number(params.outlineWidth ?? 0);
                     const billboard = params.billboard === true;
-                    const bucket = pointsByBillboard.get(billboard) ?? [];
-                    bucket.push({
+                    const depthTest = params.depthTest !== false;
+                    const key = bucketKey(billboard, depthTest);
+                    const bucket = pointsByBucket.get(key) ?? {billboard, depthTest, data: []};
+                    bucket.data.push({
                         featureAddresses,
                         featureTileKeys,
                         position,
@@ -248,9 +260,10 @@ export class MergedPointsTile {
                         outlineColor: this.toDeckColor(params.outlineColor, [0, 0, 0, 0]),
                         outlineWidth: Number.isFinite(outlineWidth) && outlineWidth > 0 ? outlineWidth : 0,
                         pixelSize: Number.isFinite(pixelSize) && pixelSize > 0 ? pixelSize : 6,
-                        billboard
+                        billboard,
+                        depthTest
                     });
-                    pointsByBillboard.set(billboard, bucket);
+                    pointsByBucket.set(key, bucket);
                 }
             }
 
@@ -265,8 +278,10 @@ export class MergedPointsTile {
                 const scale = Number(params.scale ?? 1);
                 const outlineWidth = Number(params.outlineWidth ?? 0);
                 const billboard = params.billboard !== false;
-                const bucket = labelsByBillboard.get(billboard) ?? [];
-                bucket.push({
+                const depthTest = params.depthTest !== false;
+                const key = bucketKey(billboard, depthTest);
+                const bucket = labelsByBucket.get(key) ?? {billboard, depthTest, data: []};
+                bucket.data.push({
                     featureAddresses,
                     featureTileKeys,
                     position,
@@ -279,17 +294,20 @@ export class MergedPointsTile {
                         Number(offset[0] ?? 0),
                         Number(offset[1] ?? 0)
                     ],
-                    billboard
+                    billboard,
+                    depthTest
                 });
-                labelsByBillboard.set(billboard, bucket);
+                labelsByBucket.set(key, bucket);
             }
         }
 
-        for (const [billboard, points] of pointsByBillboard.entries()) {
+        for (const {billboard, depthTest, data: points} of pointsByBucket.values()) {
             if (!points.length) {
                 continue;
             }
-            const layerKey = this.makeDeckLayerKey(`merged-point-${billboard ? "billboard" : "world"}`);
+            const layerKey = this.makeDeckLayerKey(
+                `merged-point-${billboard ? "billboard" : "world"}-${depthTest ? "depth" : "overlay"}`
+            );
             this.deckPointLayerKeys.add(layerKey);
             registry.upsert(layerKey, new ScatterplotLayer({
                 id: layerKey,
@@ -303,6 +321,7 @@ export class MergedPointsTile {
                 getLineWidth: (d: DeckMergedPoint) => d.outlineWidth,
                 lineWidthUnits: "pixels",
                 billboard,
+                parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 stroked: true,
                 filled: true,
                 pickable: true,
@@ -310,11 +329,13 @@ export class MergedPointsTile {
             } as any) as any, 500);
         }
 
-        for (const [billboard, icons] of iconsByBillboard.entries()) {
+        for (const {billboard, depthTest, data: icons} of iconsByBucket.values()) {
             if (!icons.length) {
                 continue;
             }
-            const layerKey = this.makeDeckLayerKey(`merged-icon-${billboard ? "billboard" : "world"}`);
+            const layerKey = this.makeDeckLayerKey(
+                `merged-icon-${billboard ? "billboard" : "world"}-${depthTest ? "depth" : "overlay"}`
+            );
             this.deckIconLayerKeys.add(layerKey);
             registry.upsert(layerKey, new IconLayer({
                 id: layerKey,
@@ -332,16 +353,19 @@ export class MergedPointsTile {
                     anchorY: d.height / 2
                 }),
                 billboard,
+                parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 pickable: true,
                 getId: (d: DeckMergedIcon) => d.featureAddresses
             } as any) as any, 510);
         }
 
-        for (const [billboard, labels] of labelsByBillboard.entries()) {
+        for (const {billboard, depthTest, data: labels} of labelsByBucket.values()) {
             if (!labels.length) {
                 continue;
             }
-            const layerKey = this.makeDeckLayerKey(`merged-label-${billboard ? "billboard" : "world"}`);
+            const layerKey = this.makeDeckLayerKey(
+                `merged-label-${billboard ? "billboard" : "world"}-${depthTest ? "depth" : "overlay"}`
+            );
             this.deckLabelLayerKeys.add(layerKey);
             registry.upsert(layerKey, new TextLayer({
                 id: layerKey,
@@ -356,6 +380,7 @@ export class MergedPointsTile {
                 sizeUnits: "pixels",
                 getPixelOffset: (d: DeckMergedLabel) => d.pixelOffset,
                 billboard,
+                parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 pickable: true,
                 getId: (d: DeckMergedLabel) => d.featureAddresses
             } as any) as any, 520);
