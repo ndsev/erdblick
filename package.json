@@ -69,6 +69,7 @@
   },
   "overrides": {
     "undici": "^7.24.4",
-    "fast-xml-parser": "^5.5.8"
+    "fast-xml-parser": "^5.5.8",
+    "picomatch": "^4.0.4"
   }
 }
