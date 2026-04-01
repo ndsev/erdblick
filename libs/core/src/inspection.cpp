@@ -521,9 +521,15 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
         value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
     {
-        auto featureId = tile_->resolve<FeatureId>(*value);
-        singleValue = {convertString(featureId->toString()), ValueType::FeatureId};
-        fieldScope->mapId_ = JsValue(featureId->model().mapId());
+        auto vv = value->value();
+        if (std::holds_alternative<std::string_view>(vv)) {
+            singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::FeatureId};
+        } else if (std::holds_alternative<std::string>(vv)) {
+            singleValue = {convertString(std::get<std::string>(vv)), ValueType::FeatureId};
+        } else {
+            singleValue = {convertString(""), ValueType::FeatureId};
+        }
+        fieldScope->mapId_ = JsValue(tile_->mapId());
     }
     else {
         switch (value->type()) {
