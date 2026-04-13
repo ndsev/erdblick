@@ -64,16 +64,19 @@ test.describe('Snapshot – map panel and source data selection dialog', () => {
         const mapPanel = page.getByTestId('map-layer-dialog').locator('.p-dialog').first();
         await expect(mapPanel).toBeVisible();
 
+        await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('map-panel.png', {
             maxDiffPixelRatio: 0.01
         });
 
         const sourceDataDialog = await openSourceDataSelectionDialog(page);
 
+        await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('map-panel-source-data-selection-dialog.png', {
             maxDiffPixelRatio: 0.01
         });
 
+        await page.mouse.move(0, 0);
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/map-panel-source-data-selection-controls.png', [
             {
                 locator: page.getByTestId('maps-toggle'),

@@ -35,6 +35,23 @@ async function openMainMenu(page: Page, rootLabel: string): Promise<Locator> {
  * on asserting behaviour rather than low-level DOM wiring.
  */
 
+async function finishInitialNavigation(page: Page): Promise<void> {
+    await waitForAppReady(page);
+    await disableUiAnimations(page);
+    await dismissSurveyIfPresent(page);
+}
+
+/**
+ * Opens the app root without encoding camera or OSM state into the URL.
+ *
+ * Use this when the test intentionally relies on hydrated application state
+ * from a Playwright `stateSnapshot` fixture.
+ */
+export async function navigateToStateSnapshotRoot(page: Page): Promise<void> {
+    await page.goto('/');
+    await finishInitialNavigation(page);
+}
+
 export async function navigateToRoot(page: Page, locationIndex: number = 0): Promise<void> {
     // Disable OSM by default to make visual assertions more stable.
     const [lon, lat] = TEST_VIEW_POSITIONS[locationIndex];
@@ -48,9 +65,7 @@ export async function navigateToRoot(page: Page, locationIndex: number = 0): Pro
         r: String(0)
     });
     await page.goto(`/?${params.toString()}`);
-    await waitForAppReady(page);
-    await disableUiAnimations(page);
-    await dismissSurveyIfPresent(page);
+    await finishInitialNavigation(page);
 }
 
 export async function waitForAppReady(page: Page): Promise<void> {
@@ -364,8 +379,9 @@ export async function captureDocsScreenshotWithLabels(
         const gap = 8;
         const padding = 8;
         const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
 
-        for (const entry of entries) {
+        const measuredEntries = entries.map((entry) => {
             const label = document.createElement('div');
             label.textContent = entry.label;
             label.style.position = 'fixed';
@@ -388,14 +404,67 @@ export async function captureDocsScreenshotWithLabels(
             const maxLeft = Math.max(padding, viewportWidth - padding - rect.width);
             const centeredLeft = entry.x + (entry.width / 2) - (rect.width / 2);
             const left = Math.min(Math.max(centeredLeft, padding), maxLeft);
-            const top = Math.max(padding, entry.y - gap - rect.height);
 
-            label.style.left = `${left}px`;
-            label.style.top = `${top}px`;
+            return {
+                entry,
+                label,
+                left,
+                right: left + rect.width,
+                labelHeight: rect.height,
+                placeBelow: true
+            };
+        });
+
+        measuredEntries.sort((a, b) => {
+            if (a.entry.y !== b.entry.y) {
+                return a.entry.y - b.entry.y;
+            }
+            return a.entry.x - b.entry.x;
+        });
+
+        for (let i = 0; i < measuredEntries.length; i++) {
+            const current = measuredEntries[i];
+            const previous = i > 0 ? measuredEntries[i - 1] : null;
+
+            if (previous) {
+                const verticalDistance = Math.abs(current.entry.y - previous.entry.y);
+                const maxElementHeight = Math.max(current.entry.height, previous.entry.height);
+                const verticalThreshold = maxElementHeight + gap;
+                const labelsOverlapOrClose =
+                    current.left <= previous.right + gap &&
+                    current.right >= previous.left - gap;
+                const currentCenterX = current.entry.x + (current.entry.width / 2);
+                const previousCenterX = previous.entry.x + (previous.entry.width / 2);
+                const xDistance = Math.abs(currentCenterX - previousCenterX);
+                const xNear = xDistance <= maxElementHeight;
+                const sameCollisionBand =
+                    verticalDistance <= verticalThreshold &&
+                    (labelsOverlapOrClose || xNear);
+
+                current.placeBelow = sameCollisionBand ? !previous.placeBelow : true;
+            }
+
+            const preferredTop = current.placeBelow
+                ? current.entry.y + current.entry.height + gap
+                : current.entry.y - gap - current.labelHeight;
+            const maxTop = Math.max(padding, viewportHeight - padding - current.labelHeight);
+            const top = Math.min(Math.max(preferredTop, padding), maxTop);
+
+            current.label.style.left = `${current.left}px`;
+            current.label.style.top = `${top}px`;
         }
     }, labelBoxes);
 
-    await page.screenshot({
-        path: screenshotPath
-    });
+    const browserName = page.context().browser()?.browserType().name();
+    try {
+        if (browserName === 'chromium') {
+            await page.screenshot({
+                path: screenshotPath
+            });
+        }
+    } finally {
+        await page.evaluate(() => {
+            document.getElementById('__erdblick-doc-labels__')?.remove();
+        });
+    }
 }

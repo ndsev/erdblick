@@ -440,7 +440,7 @@ export class MapPanelComponent {
                 label: 'Toggle All On',
                 command: () => {
                     for (const layer of this.mapService.maps.allFeatureLayers()) {
-                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, true);
                     }
                 }
             }

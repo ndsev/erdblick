@@ -544,8 +544,8 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
-    readonly snapshotManagerDialogVisibleState = this.createState<boolean>({
-        name: 'snapshotManagerDialogVisible',
+    readonly advancedPreferencesDialogVisibleState = this.createState<boolean>({
+        name: 'advancedPreferencesDialogVisible',
         defaultValue: false,
         schema: Boolish
     });
@@ -1222,8 +1222,8 @@ export class AppStateService implements OnDestroy {
     set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
     get datasourcesEditorDialogVisible() {return this.datasourcesEditorDialogVisibleState.getValue();}
     set datasourcesEditorDialogVisible(val: boolean) {this.datasourcesEditorDialogVisibleState.next(val);};
-    get snapshotManagerDialogVisible() {return this.snapshotManagerDialogVisibleState.getValue();}
-    set snapshotManagerDialogVisible(val: boolean) {this.snapshotManagerDialogVisibleState.next(val);};
+    get advancedPreferencesDialogVisible() {return this.advancedPreferencesDialogVisibleState.getValue();}
+    set advancedPreferencesDialogVisible(val: boolean) {this.advancedPreferencesDialogVisibleState.next(val);};
     get diagnosticsPerformanceDialogVisible() {return this.diagnosticsPerformanceDialogVisibleState.getValue();}
     set diagnosticsPerformanceDialogVisible(val: boolean) {this.diagnosticsPerformanceDialogVisibleState.next(val);};
     get diagnosticsLogDialogVisible() {return this.diagnosticsLogDialogVisibleState.getValue();}

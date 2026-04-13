@@ -2,7 +2,7 @@ import {AfterViewInit, Component, ElementRef, Input, OnChanges, OnDestroy, Rende
 import {basicSetup} from 'codemirror';
 import {Compartment, EditorState, Extension} from '@codemirror/state';
 import {autocompletion, CompletionContext, CompletionSource} from '@codemirror/autocomplete';
-import {json} from '@codemirror/lang-json';
+import {json, jsonParseLinter} from '@codemirror/lang-json';
 import {yaml} from '@codemirror/lang-yaml';
 import {EditorView, keymap, ViewUpdate} from '@codemirror/view';
 import {linter, Diagnostic, lintGutter} from '@codemirror/lint';
@@ -229,7 +229,11 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     private languageExtensions(language: 'yaml' | 'json'): Extension[] {
         if (language === 'json') {
-            return [json()];
+            return [
+                json(),
+                lintGutter(),
+                this.jsonLinter
+            ];
         }
         return [
             yaml(),
@@ -238,6 +242,8 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
             this.yamlLinter
         ];
     }
+
+    private jsonLinter: Extension = linter(jsonParseLinter());
 
     private yamlLinter: Extension = linter((view) => {
         return new Promise((resolve) => {

@@ -1,4 +1,5 @@
-import {Component, EventEmitter, Input, Output, ViewChild} from '@angular/core';
+import {NgTemplateOutlet} from '@angular/common';
+import {Component, ContentChild, EventEmitter, Input, Output, TemplateRef, ViewChild} from '@angular/core';
 import {Dialog, DialogModule} from 'primeng/dialog';
 import {AppDialogLayout, AppStateService} from './appstate.service';
 
@@ -34,13 +35,32 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
                   (onResizeInit)="onResizeInit.emit($event)"
                   (onDragEnd)="handleOnDragEnd($event)"
                   (onResizeEnd)="handleOnResizeEnd($event)">
+            @if (projectedHeaderTemplate) {
+                <ng-template #header>
+                    <ng-container *ngTemplateOutlet="projectedHeaderTemplate"></ng-container>
+                </ng-template>
+            }
+            @if (projectedContentTemplate) {
+                <ng-template #content>
+                    <ng-container *ngTemplateOutlet="projectedContentTemplate"></ng-container>
+                </ng-template>
+            }
+            @if (projectedFooterTemplate) {
+                <ng-template #footer>
+                    <ng-container *ngTemplateOutlet="projectedFooterTemplate"></ng-container>
+                </ng-template>
+            }
             <ng-content></ng-content>
         </p-dialog>
     `,
     standalone: true,
-    imports: [DialogModule]
+    imports: [DialogModule, NgTemplateOutlet]
 })
 export class AppDialogComponent {
+    @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
+    @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
+    @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
+
     @Input() visible = false;
     @Output() visibleChange = new EventEmitter<boolean>();
 
@@ -132,8 +152,17 @@ export class AppDialogComponent {
             const existing = this.stateService.getDialogLayout(this.layoutId!);
             if (existing) {
                 const normalized = this.normalizeLayout(existing);
-                this.applyLayout(updatedContainer, normalized);
-                this.stateService.upsertDialogLayout(this.layoutId!, normalized);
+                if (this.resizable) {
+                    this.applyLayout(updatedContainer, normalized);
+                    this.stateService.upsertDialogLayout(this.layoutId!, normalized);
+                } else {
+                    this.applyPosition(updatedContainer, normalized.position);
+                    const current = this.readLayoutFromContainer(updatedContainer);
+                    this.stateService.upsertDialogLayout(this.layoutId!, {
+                        position: {...normalized.position},
+                        size: {...current.size}
+                    });
+                }
                 return;
             }
             const initialLayout = this.readLayoutFromContainer(updatedContainer);
@@ -183,11 +212,15 @@ export class AppDialogComponent {
     }
 
     private applyLayout(container: HTMLElement, layout: AppDialogLayout): void {
-        container.style.position = 'fixed';
-        container.style.left = `${layout.position.left}px`;
-        container.style.top = `${layout.position.top}px`;
+        this.applyPosition(container, layout.position);
         container.style.width = `${layout.size.width}px`;
         container.style.height = `${layout.size.height}px`;
+    }
+
+    private applyPosition(container: HTMLElement, position: {left: number; top: number}): void {
+        container.style.position = 'fixed';
+        container.style.left = `${position.left}px`;
+        container.style.top = `${position.top}px`;
         container.style.margin = '0';
     }
 }

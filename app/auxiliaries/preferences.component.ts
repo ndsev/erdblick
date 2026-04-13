@@ -149,6 +149,10 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                 <label>Storage for modified built-in styles</label>
                 <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
+            <div class="button-container">
+                <label>Advanced Preferences</label>
+                <p-button (click)="openAdvancedPreferences()" label="Advanced" icon="pi pi-sliders-h"></p-button>
+            </div>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </app-dialog>
     `,
@@ -301,6 +305,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
+    }
+
+    openAdvancedPreferences() {
+        this.stateService.advancedPreferencesDialogVisible = true;
     }
 
     setTilePullCompressionEnabled(enabled: boolean) {

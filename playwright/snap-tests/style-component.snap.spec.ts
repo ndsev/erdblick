@@ -4,14 +4,14 @@ import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
 import {
     captureDocsScreenshotWithLabels,
     enableMapLayer,
-    navigateToRoot,
+    navigateToStateSnapshotRoot,
     openStylesDialog
 } from '../utils/ui-helpers';
 
 const STYLE_ID = 'DefaultStyle';
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
-const LOCATION_INDEX = 0;
+test.use({ stateSnapshot: 'style_editor_state' });
 
 function styleIdToTestIdSuffix(styleId: string): string {
     return styleId
@@ -27,13 +27,14 @@ test.describe('Snapshot – style component', () => {
         const styleTestIdSuffix = styleIdToTestIdSuffix(STYLE_ID);
 
         await requireMapSource(request, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
-        await navigateToRoot(page, LOCATION_INDEX);
+        await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
         const stylesDialog = await openStylesDialog(page);
         const editButton = stylesDialog.getByTestId(`style-edit-button-${styleTestIdSuffix}`);
         await expect(editButton).toBeVisible();
 
+        await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-dialog.png', {
             maxDiffPixelRatio: 0.01
         });
@@ -42,11 +43,33 @@ test.describe('Snapshot – style component', () => {
         const editorDialog = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
         await expect(editorDialog).toBeVisible();
 
+        await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
             maxDiffPixelRatio: 0.01
         });
 
+        await page.mouse.move(0, 0);
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/style-component-editor-controls.png', [
+            {
+                locator: stylesDialog.getByTestId(`style-visibility-${styleTestIdSuffix}`),
+                label: 'Toggle style visibility'
+            },
+            {
+                locator: stylesDialog.getByTestId(`style-reset-button-${styleTestIdSuffix}`),
+                label: 'Reset style'
+            },
+            {
+                locator: editButton,
+                label: 'Open style editor'
+            },
+            {
+                locator: stylesDialog.getByTestId('style-import-button'),
+                label: 'Import style'
+            },
+            {
+                locator: stylesDialog.getByTestId('styles-close-button'),
+                label: 'Close dialog'
+            },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),
                 label: 'Apply changes'

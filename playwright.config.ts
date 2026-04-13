@@ -46,6 +46,22 @@ loadEnvFile(path.resolve(__dirname, 'test', '.env'));
 
 const port = process.env["EB_APP_PORT"] || '9000';
 const baseURL = process.env["EB_APP_URL"] || `http://localhost:${port}`;
+const sharedUse = {
+    baseURL,
+    headless: true,
+    testIdAttribute: 'data-testid',
+    viewport: {
+        width: 1600,
+        height: 900
+    },
+    actionTimeout: 80000,
+    navigationTimeout: 80000,
+    screenshot: 'only-on-failure' as const,
+    trace: 'retain-on-failure' as const,
+    video: 'retain-on-failure' as const,
+    timezoneId: 'UTC',
+    locale: 'en-US',
+};
 
 export default defineConfig({
     testDir: './playwright',
@@ -57,33 +73,39 @@ export default defineConfig({
         timeout: 80000
     },
     reporter: process.env["CI"] ? 'dot' : 'list',
-    use: {
-        baseURL,
-        headless: true,
-        testIdAttribute: 'data-testid',
-        viewport: {
-            width: 1600,
-            height: 900
-        },
-        actionTimeout: 80000,
-        navigationTimeout: 80000,
-        screenshot: 'only-on-failure',
-        trace: 'retain-on-failure',
-        video: 'retain-on-failure',
-        launchOptions: {
-            args: [
-                '--use-gl=swiftshader',
-                '--disable-gpu',
-                '--ignore-gpu-blocklist'
-            ],
-            env: {
-                LIBGL_ALWAYS_SOFTWARE: '1',
-                ...(process.env as Record<string, string | undefined>)
+    use: sharedUse,
+    projects: [
+        {
+            use: {
+                ...sharedUse,
+                launchOptions: {
+                    args: [
+                        '--use-gl=swiftshader',
+                        '--disable-gpu',
+                        '--ignore-gpu-blocklist'
+                    ],
+                    env: {
+                        LIBGL_ALWAYS_SOFTWARE: '1',
+                        ...(process.env as Record<string, string | undefined>)
+                    }
+                }
             }
         },
-        timezoneId: 'UTC',
-        locale: 'en-US',
-    },
+        {
+            name: 'firefox',
+            use: {
+                ...sharedUse,
+                browserName: 'firefox'
+            }
+        },
+        {
+            name: 'webkit',
+            use: {
+                ...sharedUse,
+                browserName: 'webkit'
+            }
+        }
+    ],
     globalSetup: './playwright/global-setup.ts',
     globalTeardown: './playwright/global-teardown.ts',
     workers: process.env["CI"] ? 1 : 4

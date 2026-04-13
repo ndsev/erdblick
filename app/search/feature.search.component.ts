@@ -30,11 +30,12 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                     </p-progressBar>
                 </div>
                 <p-button (click)="toggleSearchPaused()"
+                          data-testid="feature-search-pause-button"
                           [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
                           label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
                           [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
-                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
+                <p-button (click)="stopSearch()" data-testid="feature-search-stop-button" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
             <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">

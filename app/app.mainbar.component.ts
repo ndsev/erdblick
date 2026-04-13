@@ -221,10 +221,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.styleService.stylesDialogVisible = true;
     }
 
-    private openStateSnapshots() {
-        this.stateService.snapshotManagerDialogVisible = true;
-    }
-
     protected showMapsPanel() {
         this.stateService.mapsDialogVisible = true;
     }
@@ -359,11 +355,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: 'Datasources',
                         icon: 'data_table',
                         command: () => { this.openDatasources(); }
-                    },
-                    {
-                        name: 'State Snapshots',
-                        icon: 'save',
-                        command: () => { this.openStateSnapshots(); }
                     },
                     {
                         name: 'Settings',

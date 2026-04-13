@@ -106,7 +106,7 @@ import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.compo
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
-import {SnapshotManagerComponent} from "./shared/snapshot-manager.component";
+import {AdvancedPreferencesComponent} from "./shared/advanced-preferences.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -197,7 +197,7 @@ export const initializeServices = () => {
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
         DiagnosticsExportDialogComponent,
-        SnapshotManagerComponent
+        AdvancedPreferencesComponent
     ],
     bootstrap: [
         AppComponent

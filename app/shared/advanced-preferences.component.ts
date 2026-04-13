@@ -6,25 +6,25 @@ import {AppDialogComponent} from './app-dialog.component';
 import {DialogStackService} from './dialog-stack.service';
 
 @Component({
-    selector: 'snapshot-manager',
+    selector: 'advanced-preferences',
     template: `
-        <app-dialog header="State Snapshots"
-                    class="editor-dialog snapshot-manager-dialog"
-                    [(visible)]="stateService.snapshotManagerDialogVisible"
+        <app-dialog header="Advanced Preferences"
+                    class="editor-dialog advanced-preferences-dialog"
+                    [(visible)]="stateService.advancedPreferencesDialogVisible"
                     [modal]="false"
                     [closable]="false"
                     [closeOnEscape]="false"
                     [persistLayout]="true"
-                    [layoutId]="'snapshot-manager-dialog'"
-                    #snapshotDialog
+                    [layoutId]="'advanced-preferences-dialog'"
+                    #advancedPreferencesDialog
                     (onShow)="onDialogShow()"
                     (onHide)="onDialogHide()">
             @if (validationError.length > 0) {
-                <div class="snapshot-validation-error">{{ validationError }}</div>
+                <div class="advanced-preferences-validation-error">{{ validationError }}</div>
             }
-            <editor [sessionId]="snapshotEditorSessionId"></editor>
-            <div class="snapshot-manager-actions">
-                <div class="snapshot-manager-actions-left">
+            <editor [sessionId]="advancedPreferencesEditorSessionId"></editor>
+            <div class="advanced-preferences-actions">
+                <div class="advanced-preferences-actions-left">
                     <p-button (click)="saveSnapshot()"
                               label="Save"
                               icon="pi pi-check"
@@ -52,7 +52,7 @@ import {DialogStackService} from './dialog-stack.service';
                     [closeOnEscape]="false"
                     #discardWarningDialog
                     (onShow)="onDiscardWarningShow()">
-            <p>You have unsaved snapshot changes. Do you want to save before closing?</p>
+            <p>You have unsaved advanced preference changes. Do you want to save before closing?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="saveSnapshot(true)" label="Save"></p-button>
                 <p-button (click)="discardWarningVisible = false" label="Cancel"></p-button>
@@ -61,12 +61,12 @@ import {DialogStackService} from './dialog-stack.service';
         </app-dialog>
     `,
     styles: [`
-        .snapshot-validation-error {
+        .advanced-preferences-validation-error {
             color: #d32f2f;
             margin-bottom: 0.5em;
         }
 
-        .snapshot-manager-actions {
+        .advanced-preferences-actions {
             margin-top: 0.5em;
             display: flex;
             flex-direction: row;
@@ -74,7 +74,7 @@ import {DialogStackService} from './dialog-stack.service';
             gap: 0.5em;
         }
 
-        .snapshot-manager-actions-left {
+        .advanced-preferences-actions-left {
             display: flex;
             flex-direction: row;
             gap: 0.5em;
@@ -82,13 +82,13 @@ import {DialogStackService} from './dialog-stack.service';
     `],
     standalone: false
 })
-export class SnapshotManagerComponent {
-    readonly snapshotEditorSessionId = 'snapshot-manager-editor';
+export class AdvancedPreferencesComponent {
+    readonly advancedPreferencesEditorSessionId = 'advanced-preferences-editor';
     dirty = false;
     discardWarningVisible = false;
     validationError = '';
 
-    @ViewChild('snapshotDialog') snapshotDialog?: AppDialogComponent;
+    @ViewChild('advancedPreferencesDialog') advancedPreferencesDialog?: AppDialogComponent;
     @ViewChild('discardWarningDialog') discardWarningDialog?: AppDialogComponent;
     @ViewChild('snapshotFileInput') snapshotFileInput?: ElementRef<HTMLInputElement>;
 
@@ -106,23 +106,23 @@ export class SnapshotManagerComponent {
         this.validationError = '';
         this.dirty = false;
         this.editorService.createSession({
-            id: this.snapshotEditorSessionId,
+            id: this.advancedPreferencesEditorSessionId,
             source: snapshotText,
             language: 'json',
             readOnly: false
         });
-        const session = this.editorService.getSession(this.snapshotEditorSessionId);
+        const session = this.editorService.getSession(this.advancedPreferencesEditorSessionId);
         if (session) {
             this.sourceSubscription.unsubscribe();
             this.sourceSubscription = session.source$.subscribe(source => {
                 this.dirty = source.trimEnd() !== this.baselineSnapshotText.trimEnd();
             });
             this.saveSubscription.unsubscribe();
-            this.saveSubscription = this.editorService.onSaveRequested(this.snapshotEditorSessionId)?.subscribe(() => {
+            this.saveSubscription = this.editorService.onSaveRequested(this.advancedPreferencesEditorSessionId)?.subscribe(() => {
                 this.saveSnapshot();
             }) ?? new Subscription();
         }
-        this.dialogStack.bringToFront(this.snapshotDialog);
+        this.dialogStack.bringToFront(this.advancedPreferencesDialog);
     }
 
     onDialogHide() {
@@ -130,7 +130,7 @@ export class SnapshotManagerComponent {
         this.saveSubscription.unsubscribe();
         this.sourceSubscription = new Subscription();
         this.saveSubscription = new Subscription();
-        this.editorService.closeSession(this.snapshotEditorSessionId);
+        this.editorService.closeSession(this.advancedPreferencesEditorSessionId);
         this.validationError = '';
         this.dirty = false;
         this.discardWarningVisible = false;
@@ -142,16 +142,16 @@ export class SnapshotManagerComponent {
             this.discardWarningVisible = true;
             return;
         }
-        this.stateService.snapshotManagerDialogVisible = false;
+        this.stateService.advancedPreferencesDialogVisible = false;
     }
 
     saveSnapshot(closeAfterSave: boolean = false) {
-        const editorText = this.editorService.getSessionSource(this.snapshotEditorSessionId);
+        const editorText = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
         let parsed: unknown;
         try {
             parsed = JSON.parse(editorText);
         } catch {
-            this.validationError = 'Snapshot JSON syntax is invalid.';
+            this.validationError = 'Advanced preferences JSON syntax is invalid.';
             return;
         }
 
@@ -163,12 +163,12 @@ export class SnapshotManagerComponent {
 
         const nextText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
         this.baselineSnapshotText = nextText;
-        this.editorService.updateSessionSource(this.snapshotEditorSessionId, nextText);
+        this.editorService.updateSessionSource(this.advancedPreferencesEditorSessionId, nextText);
         this.validationError = '';
         this.dirty = false;
         this.discardWarningVisible = false;
         if (closeAfterSave) {
-            this.stateService.snapshotManagerDialogVisible = false;
+            this.stateService.advancedPreferencesDialogVisible = false;
         }
     }
 
@@ -184,18 +184,18 @@ export class SnapshotManagerComponent {
         }
         const limits = this.stateService.getSnapshotImportLimits();
         if (file.size > limits.maxFileSizeBytes) {
-            this.validationError = `Snapshot file exceeds ${limits.maxFileSizeBytes} bytes.`;
+            this.validationError = `Advanced preferences file exceeds ${limits.maxFileSizeBytes} bytes.`;
             input.value = '';
             return;
         }
         const text = await file.text();
-        this.editorService.updateSessionSource(this.snapshotEditorSessionId, text);
+        this.editorService.updateSessionSource(this.advancedPreferencesEditorSessionId, text);
         this.validateSnapshotText(text);
         input.value = '';
     }
 
     exportSnapshot() {
-        const source = this.editorService.getSessionSource(this.snapshotEditorSessionId);
+        const source = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
         const blob = new Blob([source], {type: 'application/json;charset=utf-8'});
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
@@ -207,12 +207,12 @@ export class SnapshotManagerComponent {
     discardAndClose() {
         this.discardWarningVisible = false;
         this.validationError = '';
-        this.stateService.snapshotManagerDialogVisible = false;
+        this.stateService.advancedPreferencesDialogVisible = false;
     }
 
     @HostListener('window:keydown', ['$event'])
     onWindowKeyDown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.stateService.snapshotManagerDialogVisible) {
+        if (event.key !== 'Escape' || !this.stateService.advancedPreferencesDialogVisible) {
             return;
         }
         event.preventDefault();
@@ -233,7 +233,7 @@ export class SnapshotManagerComponent {
         try {
             parsed = JSON.parse(source);
         } catch {
-            this.validationError = 'Snapshot JSON syntax is invalid.';
+            this.validationError = 'Advanced preferences JSON syntax is invalid.';
             return;
         }
         const errors = this.stateService.validateSnapshot(parsed);

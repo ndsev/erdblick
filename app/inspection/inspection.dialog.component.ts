@@ -17,8 +17,8 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
         <app-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
                   [style]="dialogStyle" [persistLayout]="true" [layoutId]="layoutId"
                   (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()">
-            @if (panel()) {
-                <ng-template #header>
+            <ng-template #header>
+                @if (panel()) {
                     <div class="inspector-title" (pointerdown)="beginDrag()">
                         <span class="title-container" [class.feature]="panel().sourceData === undefined">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
@@ -103,9 +103,11 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                                       (mousedown)="$event.stopPropagation()"/>
                         </span>
                     </div>
-                </ng-template>
+                }
+            </ng-template>
 
-                <ng-template #content>
+            <ng-template #content>
+                @if (panel()) {
                     <div class="resizable-container">
                         <div style="width: 100%; height: 100%">
                             @if (errorMessage) {
@@ -120,8 +122,8 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                             }
                         </div>
                     </div>
-                </ng-template>
-            }
+                }
+            </ng-template>
         </app-dialog>
         <p-popover #comparePopover [baseZIndex]="30000">
             <div style="display: flex; flex-direction: row; align-content: center; gap: 0.25em">
