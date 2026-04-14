@@ -23,6 +23,7 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
                   [appendTo]="appendTo"
                   [baseZIndex]="baseZIndex"
                   [autoZIndex]="autoZIndex"
+                  [focusOnShow]="focusOnShow"
                   [closeOnEscape]="closeOnEscape"
                   [dismissableMask]="dismissableMask"
                   [keepInViewport]="keepInViewport"
@@ -75,6 +76,7 @@ export class AppDialogComponent {
     @Input() appendTo: any = null;
     @Input() baseZIndex = 0;
     @Input() autoZIndex = true;
+    @Input() focusOnShow = true;
     @Input() closeOnEscape = true;
     @Input() dismissableMask = false;
     @Input() keepInViewport = true;

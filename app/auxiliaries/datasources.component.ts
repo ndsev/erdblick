@@ -20,7 +20,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
                     (onHide)="onEditorDialogHide()"
                     class="editor-dialog datasource-dialog"
                     [persistLayout]="true" [layoutId]="'datasources-editor-dialog'"
-                    [contentStyle]="loading ? {'overflow-y': 'hidden'} : undefined"
+                    [contentStyle]="loading ? {'overflow-y': 'hidden'} : {}"
                     [closeOnEscape]="false">
             @if (loading) {
                 <div class="spinner datasource-loading-spinner">
@@ -38,7 +38,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
                     </div>
                 </div>
             } @else {
-                <editor></editor>
+                <editor [sessionId]="datasourcesEditorSessionId"></editor>
                 <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                     <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                         <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
