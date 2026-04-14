@@ -1626,16 +1626,6 @@ export class AppStateService implements OnDestroy {
         });
     }
 
-    removeDialogLayout(id: string): void {
-        const currentLayouts = this.dialogLayoutsState.getValue();
-        if (!(id in currentLayouts)) {
-            return;
-        }
-        const nextLayouts = {...currentLayouts};
-        delete nextLayouts[id];
-        this.dialogLayoutsState.next(nextLayouts);
-    }
-
     getInspectionDialogLayout(panelId: number): InspectionDialogLayout | undefined {
         const layout = this.getDialogLayout(this.inspectionLayoutId(panelId));
         if (layout && 'panelId' in layout && 'slot' in layout) {

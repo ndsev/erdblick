@@ -42,6 +42,63 @@ These scripts compile `erdblick-core` to a single-file WASM/JS bundle consumed b
 
 Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari are all supported. For serious profiling or debugging, it is worth checking problematic scenarios in Chrome once to rule out renderer-specific issues.
 
+## Playwright Integration Tests
+
+Committed browser tests live under `playwright/` and are split into two groups:
+
+- `playwright/tests/` contains behavioural end-to-end tests that assert UI and backend behaviour.
+- `playwright/snap-tests/` contains visual regression tests that store their baselines under `playwright/reference/`.
+
+The current harness does **not** drive the Angular dev server. Instead, `playwright/global-setup.ts` starts `mapget serve` with `test/mapget-integration.yaml`, serves the built UI bundle from `static/browser`, waits for `/sources`, and then runs the suite against `http://localhost:9000` by default. In practice that means:
+
+- rebuild the UI bundle with `npm run build` or `./build-ui.bash .` before running integration tests after frontend changes
+- make sure `mapget` is available in `PATH`, or override it with `MAPGET_BIN=/path/to/mapget`
+- make sure Python is available and the `mapget` Python package is installed in the interpreter used by `test/datasource.sh` (`./venv/bin/python` if present, otherwise `python3` or `python`)
+- keep `test/mapget-integration.yaml` and `test/datasource.sh` working, because many tests expect the synthetic `TestMap/WayLayer` source to appear in `/sources`
+
+The most useful commands are:
+
+```bash
+npm run test:integration:list
+npm run test:integration
+npm run test:integration -- playwright/tests/inspection-panel.spec.ts
+npm run test:integration -- --project=firefox playwright/tests/inspection-panel.spec.ts
+npm run test:integration:headed
+npm run test:integration:visual
+npm run test:integration:update-snapshots
+```
+
+If you need different startup parameters, `playwright.config.ts` and the shared helpers currently read these environment variables:
+
+- `EB_APP_PORT` or `EB_APP_URL` to change the target base URL
+- `EB_MAPGET_CONFIG` to use a different `mapget` config file
+- `EB_TEST_MAP_NAME`, `EB_TEST_LAYER_NAME`, and `EB_TEST_VIEW_POSITION` from `test/.env` to define the default map, layer, and camera tuples used by shared helpers
+- `EB_TEST_STATE_SNAPSHOT` or `test.use({ stateSnapshot: 'name' })` to preload local storage state from `test/states/*.json`
+
+When you introduce a new test, start from the shared fixture instead of `@playwright/test` directly:
+
+```ts
+import { expect, test } from '../fixtures/test';
+```
+
+`playwright/fixtures/test.ts` already applies the repo defaults used by the existing suite: deterministic viewport settings, forced dark mode, optional state snapshot hydration, a mocked `/locate` response for the Python datasource setup, and V8 coverage collection on Chromium.
+
+For new behavioural tests, follow the existing pattern in `playwright/tests/`:
+
+1. Assert that the expected backend source exists with `requireMapSource(...)` or `requireTestMapSource(...)`.
+2. Navigate with `navigateToRoot(...)` or `navigateToStateSnapshotRoot(...)` from `playwright/utils/ui-helpers.ts`.
+3. Reuse helpers such as `enableMapLayer(...)`, `openSearchPalette(...)`, or `runFeatureSearch(...)` before adding new one-off page-driving code.
+4. Prefer `getByTestId(...)` locators. If a dialog or control does not expose a stable `data-testid`, add one in the Angular template before writing a brittle selector.
+
+For new snapshot tests, mirror the files under `playwright/snap-tests/`:
+
+1. Keep the assertion at page level with `await expect(page).toHaveScreenshot(...)`.
+2. Move the mouse to `(0, 0)` immediately before the screenshot so hover state does not leak into the baseline.
+3. Reuse the same fixture and setup helpers as behavioural tests so the captured state is deterministic.
+4. Update baselines intentionally with `npm run test:integration:update-snapshots`, or narrow that command to the specific spec while iterating.
+
+Some snapshot specs also produce labelled documentation screenshots via `captureDocsScreenshotWithLabels(...)` in `playwright/utils/ui-helpers.ts`. Follow that pattern only when the visual state is meant to be reused in the docs; otherwise keep the test focused on the assertion itself.
+
 ## Component Overview
 
 At a high level, erdblick consists of an Angular shell, a deck.gl-based map view, a WebAssembly core that understands map tiles and evaluates styles and search queries, and a mapget-compatible backend plus static configuration assets:

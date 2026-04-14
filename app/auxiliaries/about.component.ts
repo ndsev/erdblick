@@ -52,7 +52,7 @@ import {AppStateService} from '../shared/appstate.service';
             .about-dialog-content {
                 display: flex;
                 flex-direction: column;
-                gap: 1em;
+                gap: 0.25em;
             }
 
             .about-summary {
