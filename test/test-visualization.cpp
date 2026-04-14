@@ -99,6 +99,16 @@ std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapge
     source->addRelation("hasPoi", "SecondaryPointOfInterest", {{"poiRef", 77}});
     return layer;
 }
+
+bool hasRenderedPathGeometry(nlohmann::json const& renderResult)
+{
+    auto const& pathWorld = renderResult["pathWorld"]["positions"];
+    if (pathWorld.is_array() && !pathWorld.empty()) {
+        return true;
+    }
+    auto const& pathBillboard = renderResult["pathBillboard"]["positions"];
+    return pathBillboard.is_array() && !pathBillboard.empty();
+}
 }
 
 TEST_CASE("DeckFeatureLayerVisualization", "[erdblick.renderer]")
@@ -172,10 +182,7 @@ TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdbli
     visualization.addTileFeatureLayer(TileFeatureLayer(tile));
     visualization.run();
 
-    SharedUint8Array pathPositions;
-    visualization.pathPositionsRaw(pathPositions);
-
-    REQUIRE_FALSE(pathPositions.bytes().empty());
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }
 
 TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added auxiliary tiles", "[erdblick.renderer]")
@@ -190,10 +197,7 @@ TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added au
     visualization.addTileFeatureLayer(TileFeatureLayer(auxiliaryTile));
     visualization.run();
 
-    SharedUint8Array pathPositions;
-    visualization.pathPositionsRaw(pathPositions);
-
-    REQUIRE_FALSE(pathPositions.bytes().empty());
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }
 
 TEST_CASE("DeckFeatureLayerVisualization exposes unresolved external relation references", "[erdblick.renderer]")
@@ -234,8 +238,5 @@ TEST_CASE("DeckFeatureLayerVisualization resolves external relations with canoni
         })
     }));
 
-    SharedUint8Array pathPositions;
-    visualization.pathPositionsRaw(pathPositions);
-
-    REQUIRE_FALSE(pathPositions.bytes().empty());
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }

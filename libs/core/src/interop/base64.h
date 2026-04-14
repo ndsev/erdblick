@@ -15,7 +15,7 @@ namespace erdblick::base64
  *
  * @param data  Vector to encode
  */
-inline std::string encode(const std::span<std::uint8_t>& data)
+inline std::string encode(std::span<const std::uint8_t> data)
 {
     return YAML::EncodeBase64(data.data(), data.size());
 }
