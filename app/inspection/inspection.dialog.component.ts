@@ -20,7 +20,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
             @if (panel()) {
                 <ng-template #header>
                     <div class="inspector-title" (pointerdown)="beginDrag()">
-                        <span class="title-container">
+                        <span class="title-container" [class.feature]="panel().sourceData === undefined">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
                                                (mousedown)="$event.stopPropagation()"
