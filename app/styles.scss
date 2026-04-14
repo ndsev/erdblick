@@ -1157,17 +1157,13 @@ map-view {
 
 .datasource-dialog {
   .p-dialog {
-    min-height: 6em;
-    min-width: 36em;
+    min-width: 50em;
+    min-height: 7em;
+  }
 
-    .p-dialog-header {
-      padding: 0.75em !important;
-      height: 2.5em !important;
-    }
-
-    .p-dialog-content {
-      padding: 0.5em !important;
-    }
+  .datasource-loading-spinner {
+    height: auto;
+    min-height: 4em;
   }
 }
 
@@ -1611,9 +1607,12 @@ inspection-tree {
       }
 
       .title-container {
-        flex: 1 1 auto;
         min-width: 0;
         max-width: 100%;
+        margin-right: 0.25em;
+        &.feature {
+          flex: 1 1 auto;
+        }
 
         .title {
           flex: 1 1 auto;
@@ -2301,9 +2300,12 @@ inspection-tree {
       }
 
       .title-container {
-        flex: 1 1 auto;
         min-width: 0;
         max-width: 100%;
+        margin-right: 0.25em;
+        &.feature {
+          flex: 1 1 auto;
+        }
 
         .title {
           flex: 1 1 auto;
@@ -2661,7 +2663,6 @@ inspection-tree {
       padding: var(--p-contextmenu-list-padding);
 
       position: fixed;
-      z-index: 50000;
       margin-top: -0.5em;
 
       min-width: 150px;

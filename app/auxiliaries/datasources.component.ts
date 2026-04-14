@@ -13,40 +13,35 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     selector: 'datasources',
     template: `
         <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
-                  #editorDialog (onShow)="onEditorDialogShow()" class="editor-dialog datasource-dialog" [closeOnEscape]="false">
-            @if (errorMessage) {
-                <p>{{ errorMessage }}</p>
-            }
-            <div [ngClass]="{'loading': loading || errorMessage }">
-                <editor></editor>
-                @if (!errorMessage && !readOnly) {
-                    <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                        <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                            <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
-                                      [disabled]="!wasModified"></p-button>
-                            <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Close"'
-                                      icon="pi pi-times"></p-button>
-                            <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
-                                <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
-                                <div>Press <span style="color: grey">Esc</span> to quit</div>
-                            </div>
-                        </div>
-                    </div>
-                }
-            </div>
+                  #editorDialog (onShow)="onEditorDialogShow()" class="editor-dialog datasource-dialog"
+                  [contentStyle]="loading ? {'overflow-y': 'hidden'} : undefined"
+                  [closeOnEscape]="false">
             @if (loading) {
-                <div class="spinner">
+                <div class="spinner datasource-loading-spinner">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
-            }
-            @if (errorMessage || readOnly) {
+            } @else if (errorMessage || readOnly) {
                 <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                     <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                         <p-button (click)="closeEditorDialog($event)" label="Close" icon="pi pi-times"></p-button>
-                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
+                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
                             <div style="color: orange">
                                 {{ errorMessage ? errorMessage : "Data Source configuration is set to read-only!" }}
                             </div>
+                        </div>
+                    </div>
+                </div>
+            } @else {
+                <editor></editor>
+                <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
+                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                        <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
+                                  [disabled]="!wasModified"></p-button>
+                        <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Close"'
+                                  icon="pi pi-times"></p-button>
+                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
+                            <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                            <div>Press <span style="color: grey">Esc</span> to quit</div>
                         </div>
                     </div>
                 </div>
@@ -62,11 +57,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             </div>
         </p-dialog>
     `,
-    styles: [`
-        .loading {
-            visibility: collapse;
-        }
-    `],
     standalone: false
 })
 export class DatasourcesComponent {
