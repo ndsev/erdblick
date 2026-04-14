@@ -7,7 +7,8 @@ source "$ci_dir/emsdk/emsdk_env.sh"
 cd "$ci_dir/.."
 
 export EMSCRIPTEN="$ci_dir/emsdk/upstream/emscripten"
-export PATH="$PATH:$(pwd)/node_modules/.bin/"
+# Prefer repo-local TypeScript over any preinstalled runner toolchain.
+export PATH="$(pwd)/node_modules/.bin:$PATH"
 
 rm -rf build
 mkdir -p build
