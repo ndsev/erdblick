@@ -481,9 +481,7 @@ describe("DeckTileVisualization", () => {
 
         expect(rendered).toBe(true);
         expect((deck.commits[0][0] as any).props.parameters).toEqual({
-            depthWriteEnabled: false,
-            depthCompare: "always",
-            cullMode: "none"
+            depthTest: false
         });
     });
 
