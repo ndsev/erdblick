@@ -4,6 +4,7 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {
+    clampTilesLoadLimit,
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
     MAX_DECK_STYLE_WORKERS,
@@ -273,8 +274,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        this.tilesToLoadInput = limit;
-        this.stateService.tilesLoadLimit = limit;
+        const cappedLimit = clampTilesLoadLimit(limit);
+        this.tilesToLoadInput = cappedLimit;
+        this.stateService.tilesLoadLimit = cappedLimit;
         this.tilesToLoadChanged = false;
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");

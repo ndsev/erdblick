@@ -74,6 +74,8 @@ export class ViewVisualizationState {
     tileRenderPolicy = new Map<bigint, TileRenderPolicy>();
     tileOrder = new Map<bigint, number>();
     visualizationQueue: ITileVisualization[] = [];
+    visualizationQueueSet = new Set<ITileVisualization>();
+    visualizationQueueOrderDirty = false;
     private visualizedTileLayers: Map<string, Map<string, ITileVisualization>> = new Map();
 
     getVisualization(styleId: string, tileKey: string): ITileVisualization | undefined {

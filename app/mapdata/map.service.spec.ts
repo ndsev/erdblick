@@ -542,7 +542,7 @@ describe('MapDataService', () => {
         const viewStates = (service as any).viewVisualizationState as any[];
         viewStates[0].visibleTileIds = new Set<bigint>([1n]);
         viewStates[0].putVisualization('enabled-style', tile.mapTileKey, visu);
-        viewStates[0].visualizationQueue = [visu];
+        (service as any).queueVisualization(viewStates[0], visu);
 
         let dispatchedTask: any = null;
         const subscription = service.tileVisualizationTopic.subscribe(task => {
@@ -562,6 +562,56 @@ describe('MapDataService', () => {
 
         subscription.unsubscribe();
         scheduleOutsideAngularSpy.mockRestore();
+    });
+
+    it('sorts visualization queues lazily before dequeueing work', () => {
+        const {service} = createMapDataService();
+        const viewStates = (service as any).viewVisualizationState as any[];
+        const viewState = viewStates[0];
+        const makeVisualization = (rank: number, tileKey: string) => ({
+            tile: {
+                tileId: BigInt(rank),
+                mapTileKey: tileKey,
+            },
+            styleId: 'style',
+            renderRank: vi.fn().mockReturnValue(rank),
+        });
+        const later = makeVisualization(2, 'tile-b');
+        const earlier = makeVisualization(1, 'tile-a');
+        (service as any).queueVisualization(viewState, later);
+        (service as any).queueVisualization(viewState, earlier);
+
+        const sortSpy = vi.spyOn(service as any, 'sortVisualizationQueue');
+
+        expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(earlier);
+        expect(sortSpy).toHaveBeenCalledOnce();
+        expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(later);
+        expect(sortSpy).toHaveBeenCalledOnce();
+
+        sortSpy.mockRestore();
+    });
+
+    it('tracks visualization queue membership without scanning the full queue', () => {
+        const {service} = createMapDataService();
+        const viewState = ((service as any).viewVisualizationState as any[])[0];
+        const visualization = {
+            tile: {
+                tileId: 1n,
+                mapTileKey: 'tile-a',
+            },
+            styleId: 'style',
+            renderRank: vi.fn().mockReturnValue(0),
+        };
+
+        (service as any).queueVisualization(viewState, visualization);
+        (service as any).queueVisualization(viewState, visualization);
+
+        expect(viewState.visualizationQueue).toHaveLength(1);
+        expect(viewState.visualizationQueueSet.has(visualization)).toBe(true);
+
+        expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(visualization);
+        expect(viewState.visualizationQueue).toHaveLength(0);
+        expect(viewState.visualizationQueueSet.has(visualization)).toBe(false);
     });
 
     it('builds a tiles WebSocket request body based on selection tile requests', async () => {

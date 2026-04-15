@@ -2,6 +2,7 @@ import {Injectable, OnDestroy} from '@angular/core';
 import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
 import {FeatureTile} from '../mapdata/features.model';
+import {AppStateService} from '../shared/appstate.service';
 import {
     DiagnosticsSnapshot,
     LogEntry,
@@ -35,9 +36,12 @@ export class DiagnosticsDatasource implements OnDestroy {
     private lastBackendConnected = this.mapService.isTileStreamConnected();
     private readonly errorTileKeys = new Set<string>();
 
-    constructor(private readonly mapService: MapDataService) {
+    constructor(
+        private readonly mapService: MapDataService,
+        private readonly appStateService: AppStateService
+    ) {
         this.patchConsoleLogging();
-        this.refreshPerfStats();
+        this.refreshPerfStatsIfVisible();
         this.refreshLogs();
         let wasPaused = this.mapService.tilePipelinePaused;
 
@@ -48,12 +52,12 @@ export class DiagnosticsDatasource implements OnDestroy {
                 }
                 this.snapshot$.next(this.buildSnapshot());
             }),
-            interval(PERF_INTERVAL_MS).subscribe(() => this.refreshPerfStats()),
+            interval(PERF_INTERVAL_MS).subscribe(() => this.refreshPerfStatsIfVisible()),
             interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
             this.mapService.tilePipelinePaused$.subscribe(paused => {
                 if (wasPaused && !paused) {
                     this.snapshot$.next(this.buildSnapshot());
-                    this.refreshPerfStats();
+                    this.refreshPerfStatsIfVisible();
                 }
                 wasPaused = paused;
             }),
@@ -73,6 +77,13 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
         const stats = buildAggregatedPerfStats(this.mapService.loadedTileLayers.values(), PEAK_TILE_LIMIT);
         this.perfStats$.next(stats);
+    }
+
+    refreshPerfStatsIfVisible() {
+        if (!this.appStateService.diagnosticsPerformanceDialogVisible) {
+            return;
+        }
+        this.refreshPerfStats();
     }
 
     refreshLogs() {
@@ -113,7 +124,7 @@ export class DiagnosticsDatasource implements OnDestroy {
     }
 
     private refreshOnDemand() {
-        this.refreshPerfStats();
+        this.refreshPerfStatsIfVisible();
         this.refreshLogs();
     }
 

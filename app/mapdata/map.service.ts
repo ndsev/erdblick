@@ -240,6 +240,8 @@ export class MapDataService {
         this.styleService.styleRemovedForId.subscribe(styleId => {
             this.viewVisualizationState.forEach(state => {
                 state.visualizationQueue = [];
+                state.visualizationQueueSet.clear();
+                state.visualizationQueueOrderDirty = false;
                 for (const tileVisu of state.removeVisualizations(styleId)) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                 }
@@ -433,7 +435,6 @@ export class MapDataService {
                     if (this.shouldRequeueVisualizationAfterRender(viewIndex, entry)) {
                         entry.updateStatus(true);
                         this.queueVisualization(viewState, entry);
-                        this.sortVisualizationQueue(viewState);
                     }
                     this.unmarkTileInFlightForView(viewIndex, entry.tile.tileId);
                     const inFlightCount = this.inFlightVisualizationRendersByView[viewIndex] ?? 0;
@@ -651,9 +652,14 @@ export class MapDataService {
         if (!queue.length) {
             return undefined;
         }
+        this.ensureVisualizationQueueSorted(viewState);
         const blockedTileIds = this.inFlightBlockedTileIdsByView[viewIndex];
         if (!blockedTileIds || !blockedTileIds.size) {
-            return queue.shift();
+            const entry = queue.shift();
+            if (entry) {
+                viewState.visualizationQueueSet.delete(entry);
+            }
+            return entry;
         }
         for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
             const candidate = queue[queueIndex];
@@ -661,16 +667,29 @@ export class MapDataService {
                 continue;
             }
             if (queueIndex === 0) {
-                return queue.shift();
+                const entry = queue.shift();
+                if (entry) {
+                    viewState.visualizationQueueSet.delete(entry);
+                }
+                return entry;
             }
             const [entry] = queue.splice(queueIndex, 1);
+            viewState.visualizationQueueSet.delete(entry);
             return entry;
         }
         return undefined;
     }
 
+    private ensureVisualizationQueueSorted(viewState: ViewVisualizationState): void {
+        if (!viewState.visualizationQueueOrderDirty) {
+            return;
+        }
+        this.sortVisualizationQueue(viewState);
+    }
+
     private sortVisualizationQueue(viewState: ViewVisualizationState): void {
         const queue = viewState.visualizationQueue;
+        viewState.visualizationQueueOrderDirty = false;
         if (queue.length < 2) {
             return;
         }
@@ -701,10 +720,12 @@ export class MapDataService {
     }
 
     private queueVisualization(viewState: ViewVisualizationState, visualization: ITileVisualization): void {
-        if (viewState.visualizationQueue.includes(visualization)) {
+        viewState.visualizationQueueOrderDirty = true;
+        if (viewState.visualizationQueueSet.has(visualization)) {
             return;
         }
         viewState.visualizationQueue.push(visualization);
+        viewState.visualizationQueueSet.add(visualization);
     }
 
     private shouldRequeueVisualizationAfterRender(
@@ -1345,6 +1366,7 @@ export class MapDataService {
             visu.tile.mapName !== optionNode.mapId ||
             visu.tile.layerName !== optionNode.layerId
         );
+        viewState.visualizationQueueSet = new Set(viewState.visualizationQueue);
 
         const optionValue = optionNode.value[viewIndex];
         for (const visu of viewState.getVisualizations(optionNode.styleId)) {
@@ -1360,7 +1382,6 @@ export class MapDataService {
                 }
             }
         }
-        this.sortVisualizationQueue(viewState);
     }
 
     public setSyncOptionsForView(viewIndex: number, enabled: boolean) {
@@ -1586,6 +1607,8 @@ export class MapDataService {
 
             // Update tile visualization queue.
             state.visualizationQueue = [];
+            state.visualizationQueueSet.clear();
+            state.visualizationQueueOrderDirty = false;
             // Schedule new or dirty visualizations.
             for (const [layerName, tilesForLayer] of visibleTilesByLayer.entries()) {
                 const applicableStyles: ErdblickStyle[] = [];
@@ -1603,7 +1626,6 @@ export class MapDataService {
                     }
                 }
             }
-            this.sortVisualizationQueue(state);
         });
         if (anyRenderPolicyChanged
             || this.selectionVisualizations.length > 0
@@ -1757,7 +1779,8 @@ export class MapDataService {
         const expectedByLayer = new Map<string, ExpectedLayerEntry>();
         let placeholdersAdded = false;
         const queueTile = (mapId: string, layerId: string, tileId: number, nextMissingStage: number) => {
-            const key = `${mapId}/${layerId}`;
+            const tileLevel = Math.trunc(tileId % 0x10000);
+            const key = `${mapId}/${layerId}/${tileLevel}`;
             let entry = requestByLayer.get(key);
             if (!entry) {
                 entry = {
@@ -2015,7 +2038,6 @@ export class MapDataService {
 
             const viewState = this.viewVisualizationState[viewIndex];
             tileLayer.setRenderOrder(viewState.getTileOrder(tileLayer.tileId));
-            const queuedVisualizations = new Set(viewState.visualizationQueue);
             for (const visu of viewState.getVisualizations(undefined, tileKey)) {
                 foundExistingVisualization = true;
                 const style = this.styleService.styles.get(visu.styleId);
@@ -2023,7 +2045,7 @@ export class MapDataService {
                     visu.updateStatus(false);
                     continue;
                 }
-                const isQueued = queuedVisualizations.has(visu);
+                const isQueued = viewState.visualizationQueueSet.has(visu);
 
                 visu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
                 this.applyTileRenderPolicyToVisualization(viewIndex, visu);
@@ -2034,12 +2056,11 @@ export class MapDataService {
                 }
 
                 visu.updateStatus(true);
+                viewState.visualizationQueueOrderDirty = true;
                 if (!isQueued) {
                     this.queueVisualization(viewState, visu);
-                    queuedVisualizations.add(visu);
                 }
             }
-            this.sortVisualizationQueue(viewState);
         }
 
         return {
@@ -2057,7 +2078,6 @@ export class MapDataService {
             for (const [_, style] of this.styleService.styles) {
                 this.renderTileLayerOnDemand(viewIndex, tileLayer, style);
             }
-            this.sortVisualizationQueue(viewState);
         }
     }
 
@@ -2688,6 +2708,8 @@ export class MapDataService {
             }
         }
         this.viewVisualizationState[viewIndex].visualizationQueue = [];
+        this.viewVisualizationState[viewIndex].visualizationQueueSet.clear();
+        this.viewVisualizationState[viewIndex].visualizationQueueOrderDirty = false;
         if (viewIndex >= 0 && viewIndex < this.inFlightVisualizationRendersByView.length) {
             this.inFlightVisualizationRendersByView[viewIndex] = 0;
         }

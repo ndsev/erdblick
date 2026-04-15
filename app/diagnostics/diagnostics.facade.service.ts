@@ -26,7 +26,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
 
     constructor(mapService: MapDataService,
                 private readonly stateService: AppStateService) {
-        super(mapService);
+        super(mapService, stateService);
     }
 
     openPerformanceDialog() {
