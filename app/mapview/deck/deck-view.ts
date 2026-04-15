@@ -711,7 +711,7 @@ export abstract class DeckMapView implements IRenderView {
             this.mapService.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
+            this.mapService.tileDataChanged.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
         );
         this.subscriptions.push(
             this.featureSearchService.progress.subscribe(() => this.scheduleSearchResultsOverlayDataRefresh())

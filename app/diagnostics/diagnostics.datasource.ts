@@ -61,7 +61,7 @@ export class DiagnosticsDatasource implements OnDestroy {
                 }
                 wasPaused = paused;
             }),
-            this.mapService.statsDialogNeedsUpdate
+            this.mapService.tileDataChanged
                 .pipe(auditTime(UPDATE_EVENT_DEBOUNCE_MS))
                 .subscribe(() => this.refreshOnDemand())
         );

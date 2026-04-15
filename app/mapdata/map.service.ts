@@ -70,6 +70,14 @@ export interface TileVisualizationRenderTask {
     onDone?: () => void;
 }
 
+export type TileDataChangeReason = "placeholder" | "loaded" | "evicted";
+
+export interface TileDataChange {
+    tileKey: string;
+    tile: FeatureTile;
+    reason: TileDataChangeReason;
+}
+
 interface RequestedLayerProgressState {
     mapId: string;
     layerId: string;
@@ -156,7 +164,7 @@ export class MapDataService {
     }
 
     selectionTileRequests: SelectionTileRequest[] = [];
-    statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
+    tileDataChanged: Subject<TileDataChange> = new Subject<TileDataChange>();
     selectionTileUpdated: Subject<string> = new Subject<string>();
     private selectedTileKeys: Set<string> = new Set<string>();
 
@@ -1334,6 +1342,7 @@ export class MapDataService {
             tileId: tileId,
         });
         this.loadedTileLayers.set(tileKey, placeholder);
+        this.tileDataChanged.next({tileKey, tile: placeholder, reason: "placeholder"});
 
         return true;
     }
@@ -1495,6 +1504,11 @@ export class MapDataService {
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (evictTileLayer(tileLayer)) {
                 tileLayer.dispose();
+                this.tileDataChanged.next({
+                    tileKey: tileLayer.mapTileKey,
+                    tile: tileLayer,
+                    reason: "evicted"
+                });
             } else {
                 newTileLayers.set(tileLayer.mapTileKey, tileLayer);
             }
@@ -1777,7 +1791,6 @@ export class MapDataService {
         };
         const requestByLayer = new Map<string, LayerRequestEntry>();
         const expectedByLayer = new Map<string, ExpectedLayerEntry>();
-        let placeholdersAdded = false;
         const queueTile = (mapId: string, layerId: string, tileId: number, nextMissingStage: number) => {
             const tileLevel = Math.trunc(tileId % 0x10000);
             const key = `${mapId}/${layerId}/${tileLevel}`;
@@ -1819,11 +1832,11 @@ export class MapDataService {
                 .get(selectionTileRequest.remoteRequest.layerId);
             if (mapLayerItem) {
                 for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
-                    placeholdersAdded = this.ensureTilePlaceholder(
+                    this.ensureTilePlaceholder(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId,
                         BigInt(tileId),
-                        true) || placeholdersAdded;
+                        true);
                     const selectionStageCount = this.getLayerStageCount(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId
@@ -1868,7 +1881,7 @@ export class MapDataService {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
                         const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
                         if (!existingTile) {
-                            placeholdersAdded = this.ensureTilePlaceholder(mapName, layer.id, tileId, false) || placeholdersAdded;
+                            this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
                         }
                         const stageCount = this.getLayerStageCount(mapName, layer.id);
                         const layerMaxStage = Math.max(0, stageCount - 1);
@@ -1912,10 +1925,6 @@ export class MapDataService {
                 tileIdsByNextStage,
             };
         });
-
-        if (placeholdersAdded) {
-            this.statsDialogNeedsUpdate.next();
-        }
 
         this.resetRequestedStageProgressFromExpected(expectedByLayer);
 
@@ -1992,7 +2001,11 @@ export class MapDataService {
             return true;
         });
 
-        this.statsDialogNeedsUpdate.next();
+        this.tileDataChanged.next({
+            tileKey: tileLayer.mapTileKey,
+            tile: tileLayer,
+            reason: "loaded"
+        });
         if (this.selectedTileKeys.has(tileLayer.mapTileKey)) {
             this.selectionTileUpdated.next(tileLayer.mapTileKey);
         }

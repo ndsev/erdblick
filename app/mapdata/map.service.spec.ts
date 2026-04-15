@@ -786,7 +786,7 @@ describe('MapDataService', () => {
     it('records tile layers and legal info on arrival', () => {
         const {service, tileParser} = createMapDataService();
 
-        const statsSpy = vi.spyOn(service.statsDialogNeedsUpdate, 'next');
+        const tileDataSpy = vi.spyOn(service.tileDataChanged, 'next');
         const legalSpy = vi.spyOn(service.legalInformationUpdated, 'next');
 
         const tileMetadata = {
@@ -802,7 +802,10 @@ describe('MapDataService', () => {
         service.addTileFeatureLayer(tileBlob as any, null, false);
 
         expect(service.loadedTileLayers.size).toBe(1);
-        expect(statsSpy).toHaveBeenCalled();
+        expect(tileDataSpy).toHaveBeenCalledWith(expect.objectContaining({
+            tileKey: tileMetadata.mapTileKey,
+            reason: 'loaded'
+        }));
         expect(legalSpy).toHaveBeenCalledWith(true);
         const legalSet = service.legalInformationPerMap.get('m1')!;
         expect(legalSet.has('LICENSE A')).toBe(true);
