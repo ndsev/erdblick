@@ -37,6 +37,7 @@ interface SelectionTileRequest {
         tileIds: Array<number>
     };
     tileKey: string;
+    resolveWhenInspectionComplete?: boolean;
     resolve: null | ((tile: FeatureTile) => void);
     reject: null | ((why: any) => void);
 }
@@ -1783,6 +1784,7 @@ export class MapDataService {
             mapId: string;
             layerId: string;
             tileIdToNextMissingStage: Map<number, number>;
+            priorityTileIds: Set<number>;
         };
         type ExpectedLayerEntry = {
             mapId: string;
@@ -1791,7 +1793,13 @@ export class MapDataService {
         };
         const requestByLayer = new Map<string, LayerRequestEntry>();
         const expectedByLayer = new Map<string, ExpectedLayerEntry>();
-        const queueTile = (mapId: string, layerId: string, tileId: number, nextMissingStage: number) => {
+        const queueTile = (
+            mapId: string,
+            layerId: string,
+            tileId: number,
+            nextMissingStage: number,
+            priority = false
+        ) => {
             const tileLevel = Math.trunc(tileId % 0x10000);
             const key = `${mapId}/${layerId}/${tileLevel}`;
             let entry = requestByLayer.get(key);
@@ -1800,8 +1808,12 @@ export class MapDataService {
                     mapId,
                     layerId,
                     tileIdToNextMissingStage: new Map<number, number>(),
+                    priorityTileIds: new Set<number>(),
                 };
                 requestByLayer.set(key, entry);
+            }
+            if (priority) {
+                entry.priorityTileIds.add(tileId);
             }
             const previousStage = entry.tileIdToNextMissingStage.get(tileId);
             if (previousStage === undefined || nextMissingStage < previousStage) {
@@ -1858,7 +1870,8 @@ export class MapDataService {
                             selectionTileRequest.remoteRequest.mapId,
                             selectionTileRequest.remoteRequest.layerId,
                             tileId,
-                            nextMissingStage);
+                            nextMissingStage,
+                            true);
                     }
                 }
             } else {
@@ -1879,6 +1892,7 @@ export class MapDataService {
                     }
                     for (let tileId of tileIds!) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
+                        const isSelectedTile = this.selectedTileKeys.has(tileMapLayerKey);
                         const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
                         if (!existingTile) {
                             this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
@@ -1899,7 +1913,7 @@ export class MapDataService {
                             tileId,
                             requestedMaxStage);
                         if (nextMissingStage !== undefined) {
-                            queueTile(mapName, layer.id, Number(tileId), nextMissingStage);
+                            queueTile(mapName, layer.id, Number(tileId), nextMissingStage, isSelectedTile);
                         }
                     }
                 }
@@ -1919,11 +1933,20 @@ export class MapDataService {
             for (const [tileId, nextMissingStage] of entry.tileIdToNextMissingStage.entries()) {
                 tileIdsByNextStage[nextMissingStage].push(tileId);
             }
-            return {
+            const request: {
+                mapId: string;
+                layerId: string;
+                tileIdsByNextStage: number[][];
+                priorityTileIds?: number[];
+            } = {
                 mapId: entry.mapId,
                 layerId: entry.layerId,
                 tileIdsByNextStage,
             };
+            if (entry.priorityTileIds.size) {
+                request.priorityTileIds = Array.from(entry.priorityTileIds);
+            }
+            return request;
         });
 
         this.resetRequestedStageProgressFromExpected(expectedByLayer);
@@ -1995,6 +2018,10 @@ export class MapDataService {
         // Consider, if this tile is needed by a selection tile request.
         this.selectionTileRequests = this.selectionTileRequests.filter(request => {
             if (tileLayer.mapTileKey === request.tileKey) {
+                if (request.resolveWhenInspectionComplete
+                    && !this.isTileInspectionDataComplete(tileLayer)) {
+                    return true;
+                }
                 request.resolve!(tileLayer);
                 return false;
             }
@@ -2380,6 +2407,7 @@ export class MapDataService {
                     tileIds: [Number(tileId)],
                 },
                 tileKey: canonicalTileKey,
+                resolveWhenInspectionComplete: false,
                 resolve: null,
                 reject: null
             };
@@ -2416,6 +2444,7 @@ export class MapDataService {
                 tileIds: [Number(tileId)],
             },
             tileKey: canonicalTileKey,
+            resolveWhenInspectionComplete: true,
             resolve: () => {},
             reject: () => {}
         });

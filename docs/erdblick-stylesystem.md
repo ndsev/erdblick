@@ -26,7 +26,7 @@ That means you can enable a debug overlay for one layer while keeping the same s
 At the top level, a style sheet is usually split into two sections: a list of rendering `rules` and an optional set of `options` that expose toggles in the UI for each layer the style sheet applies to:
 
 ```yaml
-name: Subgroup/DefaultStyle 
+name: Subgroup/DefaultStyle
 layer: Road|Lane
 rules:
   - type: LaneGroup
@@ -42,12 +42,48 @@ options:
 
 - `name` – Mandatory. Free to set. May contain slash-separated grouping.
 - `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
-- `stage` – Optional minimum tile stage required before any rule in the style can render.
-- High-vs-low fidelity stage cutover now comes from layer metadata (`LayerInfo.highFidelityStage`), not from style-sheet YAML.
-- Low-fidelity rendering uses stages below that metadata threshold; high-fidelity rendering uses stages at/above it. The frontend may additionally apply a per-view `lod` cap (`LOD_0..LOD_7`) before rules run.
-- Do not infer fidelity from the stage label alone. Some staged layers intentionally use labels like `Low-Fi` / `High-Fi` for UI continuity while still publishing `highFidelityStage: 0`, meaning all stages are treated as high-fidelity for rule selection and later stages are enrichment-only.
+- `stage` – Optional minimum loaded tile stage required before the style sheet can render.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
+
+## Stages, Fidelity, and LOD
+
+Tile stages, render fidelity, and feature LOD are related, but they answer different questions:
+
+- **Tile stage** describes which payload slice of a tile has arrived from the backend. A layer can publish one or more numbered stages (`0`, `1`, `2`, ...). Stage labels are display text; rendering decisions use the numeric stage and the layer metadata.
+- **Render fidelity** is erdblick's current rendering mode for a tile in a view. The frontend chooses `low` or `high` from the visible tile count at the current camera distance. Style sheets can react to that choice with rule-level `fidelity`.
+- **Feature LOD** is a per-feature value supplied by the backend (`0..7`). In low-fidelity rendering erdblick can cull features above the active LOD cap. Rules can also match an exact feature LOD with `lod`.
+
+Layer metadata defines the high-fidelity threshold:
+
+- `LayerInfo.stages` gives the number of staged payloads the layer can provide.
+- `LayerInfo.stageLabels` provides UI labels for those stages.
+- `LayerInfo.highFidelityStage` defines the first stage that belongs to high-fidelity rendering.
+
+For geometry selection, erdblick uses this threshold as follows:
+
+- `fidelity: high` rules can render geometry from `highFidelityStage` and later stages.
+- `fidelity: low` rules can render geometry before `highFidelityStage`; if `highFidelityStage` is `0`, stage `0` is also available as the low-fidelity fallback stage.
+- `fidelity: any` rules are eligible in both render modes.
+
+The two YAML fields named `stage` have different scopes:
+
+- Top-level `stage` is a style-sheet readiness gate. A style with `stage: 1` waits until the tile has loaded at least stage `1` before rendering any of its rules. If a dataset exposes fewer stages than the style requests, erdblick treats the style as ready once the tile is complete for that layer.
+- Rule-level `stage` is an exact geometry-stage filter. A rule with `stage: 1` only applies to geometry whose own stage is `1`.
+
+`stage` and `lod` are independent. Stage controls which backend payload slice provides the geometry. LOD controls which features are kept or matched inside that payload. A common pattern is to use `first-of` with exact `lod` matches to draw coarse features differently from fine ones:
+
+```yaml
+rules:
+  - type: Road
+    geometry: [line]
+    first-of:
+      - lod: 0
+        width: 2
+      - lod: 4
+        width: 5
+      - width: 8
+```
 
 ## Rule Field Reference
 
@@ -60,8 +96,8 @@ options:
 | `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. |
 | `aspect` | `feature` (default), `relation`, or `attribute`. Controls how the rule interprets the current entity. |
 | `mode` | `none`, `hover`, or `selection`. Use separate rules for hover/selection-specific rendering. |
-| `fidelity` | `low`, `high`, or `any` (default). Lets one style sheet define separate rules for zoomed-out low-fi rendering and high-fi rendering. In low-fi mode, erdblick may additionally cull features by backend-provided `lod`. |
-| `stage` | Optional exact tile stage match for geometry rules (for example `stage: 0` for low-fi geometry, `stage: 1` for full geometry). |
+| `fidelity` | `low`, `high`, or `any` (default). Controls whether the rule participates in low-fidelity rendering, high-fidelity rendering, or both. |
+| `stage` | Optional exact geometry-stage match. This is separate from the top-level style-sheet `stage` readiness gate. |
 | `lod` | Optional exact feature LOD match (`0..7`). Useful inside `first-of` chains to style coarse and fine features differently. |
 | `selectable` | `true`/`false` flag that decides whether the feature can be selected or will be skipped when the user clicks it. |
 | `first-of` | Array of child rules; erdblick evaluates them top-to-bottom and applies only the first match. Remaining child rules are skipped. |
@@ -171,17 +207,16 @@ When you move beyond basic coloring and start visualizing relations or labels, a
 
 ## Performance Considerations
 
-Style filters can significantly impact performance. While wildcards (`*` and `**`) are convenient for accessing nested properties, they require checking multiple paths for each feature. Since filters are applied to thousands of features with complex attribute structures, inefficient filters can slow down the mapviewer considerably. This is particularly important for `first-of` filters, which evaluate sub-rules sequentially until finding a match.
+Style filters can significantly affect rendering cost. Wildcards (`*` and `**`) are convenient while exploring data, but they require erdblick to check multiple paths for each feature. On large tiles, broad wildcard filters and long `first-of` chains can become expensive.
 
-Consider this example of a road speed heatmap, which demonstrates two common performance pitfalls:
+The road speed heatmap below shows two common pitfalls:
 
-1. It uses `first-of` filters, which means each feature must be checked against multiple filter conditions until a match is found. As explained in the erdblick documentation, `first-of` evaluates each sub-rule in order until one matches, making it important to optimize these filter checks. The order of rules matters - place the most frequently matching rules first to avoid unnecessary evaluations of subsequent rules.
-
-2. It uses wildcards (`**`) which require expanding and checking multiple possible paths in the data structure. This is particularly inefficient when combined with `first-of` since each wildcard expansion needs to happen for every filter check until a match occurs.
+1. `first-of` evaluates sub-rules in order until one matches, so rule order matters.
+2. `**` expands through multiple paths in the feature structure, and that expansion happens for every filter that uses it.
 
 ![Average speed heatmap visualization](average_speed_heatmap.png)
 
-Here's how an inefficient style config may look like:
+An inefficient style config might look like this:
 
 ```yaml
   - type: Road
@@ -202,10 +237,10 @@ Here's how an inefficient style config may look like:
 
 This can be optimized in two ways:
 
-1. Using full paths instead of wildcards eliminates the need to search through multiple possible paths
-2. Ordering the rules by likelihood - in this example, we assume speeds > 40 are most common in our map data, so we check that condition first to avoid unnecessary evaluations of the other rules
+1. Use full paths instead of wildcards where the schema is known.
+2. Put the most likely `first-of` matches first. In this example, speeds above 40 are assumed to be the common case.
 
-Here's how an optimized style config may look like:
+The optimized style config is more explicit:
 
 ```yaml
   - type: Road
@@ -225,15 +260,7 @@ Here's how an optimized style config may look like:
         color: "#8cf6f4"
 ```
 
-Key performance considerations:
-
-* Using full paths instead of wildcards (`**`) reduces the number of evaluations needed
-* Each wildcard expansion requires checking multiple paths, which can significantly impact performance
-* The impact becomes more noticeable with complex filters or when many features are visible
-* The feature inspector provides a convenient "Copy Path" functionality - simply inspect a feature that has the property you're interested in, navigate to and click on the relevant text, then select "Copy Path" to get the exact path to use in your styles
-* This copied path can be directly used in style configurations instead of wildcards for better performance
-
-While wildcards are convenient for exploration and quick prototyping, using explicit paths is recommended for production configurations, especially when dealing with large datasets or complex styling rules.
+Use the feature inspector's **Copy Path** action to obtain explicit paths for attributes you want to style. Wildcards are still useful for exploration and quick prototypes, but production styles should prefer explicit paths when the data structure is known.
 
 ## Configuring Styles on Disk
 
