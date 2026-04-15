@@ -15,7 +15,13 @@ import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.ser
 import {FeatureSearchService} from "../../search/feature.search.service";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
-import {AppStateService, CameraViewState, TileFeatureId, TileGridMode} from "../../shared/appstate.service";
+import {
+    AppStateService,
+    CameraViewState,
+    DEFAULT_MAP_ZOOM_STEP,
+    TileFeatureId,
+    TileGridMode
+} from "../../shared/appstate.service";
 import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
@@ -182,6 +188,7 @@ export abstract class DeckMapView implements IRenderView {
     private isHoveringFeature = false;
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
+    private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
 
     get viewIndex() {
         return this._viewIndex;
@@ -229,11 +236,7 @@ export abstract class DeckMapView implements IRenderView {
             initialViewState: this.viewState,
             viewState: this.viewState,
             layers: [],
-            controller: this.allowPitchAndBearing ? true : {
-                dragRotate: false,
-                touchRotate: false,
-                keyboard: false
-            },
+            controller: this.createDeckControllerOptions(),
             onDeviceInitialized: (device) => {
                 this.deckDevice = device;
             },
@@ -621,7 +624,7 @@ export abstract class DeckMapView implements IRenderView {
         this.stateService.focusedView = this._viewIndex;
         this.updateViewState({
             ...this.viewState,
-            zoom: this.viewState.zoom + 0.5
+            zoom: this.viewState.zoom + this.stateService.mapZoomStep
         }, true, true);
         this.pushViewStateToAppState();
     }
@@ -630,7 +633,7 @@ export abstract class DeckMapView implements IRenderView {
         this.stateService.focusedView = this._viewIndex;
         this.updateViewState({
             ...this.viewState,
-            zoom: this.viewState.zoom - 0.5
+            zoom: this.viewState.zoom - this.stateService.mapZoomStep
         }, true, true);
         this.pushViewStateToAppState();
     }
@@ -669,6 +672,12 @@ export abstract class DeckMapView implements IRenderView {
         this.subscriptions.push(
             this.stateService.osmState.pipe(this._viewIndex).subscribe((osmState) => {
                 this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.mapZoomStepState.pipe(distinctUntilChanged()).subscribe(() => {
+                this.deck?.setProps({controller: this.createDeckControllerOptions()});
             })
         );
 
@@ -957,6 +966,24 @@ export abstract class DeckMapView implements IRenderView {
                 roll: 0
             }
         );
+    }
+
+    private createDeckControllerOptions(): DeckProps<DeckMercatorView>["controller"] {
+        const zoomStep = this.stateService.mapZoomStep;
+        const scrollZoomSpeed = DeckMapView.DEFAULT_DECK_SCROLL_ZOOM_SPEED * zoomStep / DEFAULT_MAP_ZOOM_STEP;
+        const keyboardZoomSpeed = Math.pow(2, zoomStep);
+        if (!this.allowPitchAndBearing) {
+            return {
+                dragRotate: false,
+                touchRotate: false,
+                keyboard: false,
+                scrollZoom: {speed: scrollZoomSpeed}
+            };
+        }
+        return {
+            keyboard: {zoomSpeed: keyboardZoomSpeed},
+            scrollZoom: {speed: scrollZoomSpeed}
+        };
     }
 
     private sanitizeViewState(next: DeckCameraState): DeckCameraState {
