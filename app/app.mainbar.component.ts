@@ -26,11 +26,17 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
     },
     template: `
         @if (stateService.mapsDialogVisible) {
-            <p-button class="maps-button" (click)="closeMapsPanel()" label="" tooltipPosition="right" pTooltip="Close maps configuration panel">
+            <p-button class="maps-button" (click)="closeMapsPanel()" label=""
+                      tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
+                      (mouseenter)="alignMapsPanelTooltip($event)"
+                      pTooltip="Close maps configuration panel">
                 <span class="material-symbols-outlined">close</span>
             </p-button>
         } @else {
-            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label="" tooltipPosition="right" pTooltip="Open maps configuration panel">
+            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label=""
+                      tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
+                      (mouseenter)="alignMapsPanelTooltip($event)"
+                      pTooltip="Open maps configuration panel">
                 <span class="material-symbols-outlined">stacks</span>
             </p-button>
         }
@@ -232,8 +238,47 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.stateService.mapsDialogVisible = false;
     }
 
+    protected alignMapsPanelTooltip(event: MouseEvent) {
+        const target = event.currentTarget as HTMLElement | null;
+        if (!target) {
+            return;
+        }
+
+        const align = () => this.alignMapsPanelTooltipToTarget(target);
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(align);
+        } else {
+            window.setTimeout(align, 0);
+        }
+        window.setTimeout(align, 50);
+    }
+
     protected openLegalInfo() {
         this.stateService.legalInfoDialogVisible = true;
+    }
+
+    private alignMapsPanelTooltipToTarget(target: HTMLElement) {
+        const tooltip = document.querySelector<HTMLElement>('.maps-panel-button-tooltip');
+        if (!tooltip) {
+            return;
+        }
+
+        const button = target.querySelector<HTMLElement>('button') ?? target;
+        const targetRect = button.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const viewportPaddingPx = 4;
+        const left = Math.min(
+            Math.max(targetRect.left, viewportPaddingPx),
+            Math.max(viewportPaddingPx, window.innerWidth - tooltipRect.width - viewportPaddingPx)
+        );
+
+        tooltip.style.left = `${left + window.scrollX}px`;
+        tooltip.style.top = `${targetRect.bottom + window.scrollY + viewportPaddingPx}px`;
+
+        const arrow = tooltip.querySelector<HTMLElement>('.p-tooltip-arrow');
+        if (arrow) {
+            arrow.style.left = `${targetRect.left - left + targetRect.width / 2}px`;
+        }
     }
 
     private teardownMobileMenuTracking() {
