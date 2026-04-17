@@ -117,6 +117,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private viewerLayoutResizeObserver?: ResizeObserver;
     private viewerLayoutElement?: HTMLElement;
     private mobileMenubarStateFrame?: number;
+    private mapsPanelTooltipAlignFrame?: number;
+    private mapsPanelTooltipSafetyTimeout?: number;
     private viewportMobileMenubar = false;
     private viewerLayoutMobileMenubar = false;
 
@@ -164,7 +166,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy() {
         this.teardownMobileMenuTracking();
         this.teardownViewerLayoutTracking();
-        if (typeof window !== 'undefined' && this.mobileMenubarStateFrame !== undefined) {
+        this.cancelMapsPanelTooltipAlignment();
+        if (this.mobileMenubarStateFrame !== undefined) {
             window.cancelAnimationFrame(this.mobileMenubarStateFrame);
         }
         this.mobileMenubarStateFrame = undefined;
@@ -172,9 +175,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     private setupMobileMenuTracking() {
-        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-            return;
-        }
         this.mediaQueryList = window.matchMedia(MAIN_BAR_MEDIA_QUERY);
         this.viewportMobileMenubar = this.mediaQueryList.matches;
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
@@ -182,11 +182,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.viewportMobileMenubar = event.matches;
             this.scheduleMobileMenubarStateUpdate();
         };
-        if (typeof this.mediaQueryList.addEventListener === 'function') {
-            this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
-        } else {
-            this.mediaQueryList.addListener(this.mediaQueryChangeListener);
-        }
+        this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
     showPreferencesDialog() {
@@ -244,13 +240,18 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
+        this.cancelMapsPanelTooltipAlignment();
         const align = () => this.alignMapsPanelTooltipToTarget(target);
-        if (typeof window.requestAnimationFrame === 'function') {
-            window.requestAnimationFrame(align);
-        } else {
-            window.setTimeout(align, 0);
-        }
-        window.setTimeout(align, 50);
+        this.mapsPanelTooltipAlignFrame = window.requestAnimationFrame(() => {
+            this.mapsPanelTooltipAlignFrame = undefined;
+            align();
+        });
+        // PrimeNG creates and measures the tooltip asynchronously; a second pass
+        // catches the occasional post-frame size/position correction.
+        this.mapsPanelTooltipSafetyTimeout = window.setTimeout(() => {
+            this.mapsPanelTooltipSafetyTimeout = undefined;
+            align();
+        }, 50);
     }
 
     protected openLegalInfo() {
@@ -281,15 +282,22 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    private cancelMapsPanelTooltipAlignment() {
+        if (this.mapsPanelTooltipAlignFrame !== undefined) {
+            window.cancelAnimationFrame(this.mapsPanelTooltipAlignFrame);
+            this.mapsPanelTooltipAlignFrame = undefined;
+        }
+        if (this.mapsPanelTooltipSafetyTimeout !== undefined) {
+            window.clearTimeout(this.mapsPanelTooltipSafetyTimeout);
+            this.mapsPanelTooltipSafetyTimeout = undefined;
+        }
+    }
+
     private teardownMobileMenuTracking() {
         if (!this.mediaQueryList || !this.mediaQueryChangeListener) {
             return;
         }
-        if (typeof this.mediaQueryList.removeEventListener === 'function') {
-            this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
-        } else {
-            this.mediaQueryList.removeListener(this.mediaQueryChangeListener);
-        }
+        this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
         this.mediaQueryChangeListener = undefined;
         this.mediaQueryList = undefined;
     }
@@ -317,18 +325,16 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
 
         this.viewerLayoutElement = viewerLayoutElement;
-        if (typeof ResizeObserver !== 'undefined') {
-            this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
-                this.ngZone.run(() => {
-                    const [entry] = entries;
-                    const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
-                    if (typeof width === 'number') {
-                        this.updateViewerLayoutMobileState(width);
-                    }
-                });
+        this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
+            this.ngZone.run(() => {
+                const [entry] = entries;
+                const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
+                if (typeof width === 'number') {
+                    this.updateViewerLayoutMobileState(width);
+                }
             });
-            this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
-        }
+        });
+        this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
     }
 
     private teardownViewerLayoutTracking() {
@@ -355,10 +361,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (this.mobileMenubarStateFrame !== undefined) {
             return;
         }
-        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-            this.updateMobileMenubarState();
-            return;
-        }
         this.ngZone.runOutsideAngular(() => {
             this.mobileMenubarStateFrame = window.requestAnimationFrame(() => {
                 this.mobileMenubarStateFrame = undefined;
@@ -375,10 +377,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     private getViewerLayoutMobileBreakpointPx(): number {
-        if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
-            return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * 16;
-        }
-
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
         const effectiveRootFontSize = Number.isFinite(rootFontSize) ? rootFontSize : 16;
         return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * effectiveRootFontSize;

@@ -327,6 +327,7 @@ export class MapTileStreamClient {
 
         const chunks: TileRequestPayload[] = [];
         let currentRequests: any[] = [];
+        let nextChunkIndex = 0;
 
         const makeChunk = (requests: any[], index: number, isLast: boolean): TileRequestPayload => ({
             requests,
@@ -339,20 +340,21 @@ export class MapTileStreamClient {
             if (!currentRequests.length) {
                 return;
             }
-            chunks.push(makeChunk(currentRequests, chunks.length, false));
+            chunks.push(makeChunk(currentRequests, nextChunkIndex++, false));
             currentRequests = [];
         };
 
         for (const request of tileLayerRequests) {
             const candidateRequests = [...currentRequests, request];
-            const candidatePayload = JSON.stringify(makeChunk(candidateRequests, chunks.length, false));
+            const currentChunkIndex = nextChunkIndex;
+            const candidatePayload = JSON.stringify(makeChunk(candidateRequests, currentChunkIndex, false));
             if (currentRequests.length
                 && this.byteLength(candidatePayload) > TARGET_TILE_REQUEST_CHUNK_BYTES) {
                 finalizeCurrentChunk();
             }
 
             currentRequests.push(request);
-            const currentPayload = JSON.stringify(makeChunk(currentRequests, chunks.length, false));
+            const currentPayload = JSON.stringify(makeChunk(currentRequests, nextChunkIndex, false));
             if (currentRequests.length === 1
                 && this.byteLength(currentPayload) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
                 throw new Error(
@@ -499,10 +501,7 @@ export class MapTileStreamClient {
     }
 
     private resolveUrl(): string {
-        const base = (typeof document !== "undefined" && document.baseURI)
-            ? document.baseURI
-            : window.location.href;
-        const url = new URL(this.path, base);
+        const url = new URL(this.path, document.baseURI);
         if (url.protocol === "http:") {
             url.protocol = "ws:";
         } else if (url.protocol === "https:") {
@@ -772,11 +771,8 @@ export class MapTileStreamClient {
     }
 
     private resolvePullUrl(clientId: number): string {
-        const base = (typeof document !== "undefined" && document.baseURI)
-            ? document.baseURI
-            : window.location.href;
         const normalizedPath = this.path.replace(/\/+$/, "");
-        const pullUrl = new URL(`${normalizedPath}/next`, base);
+        const pullUrl = new URL(`${normalizedPath}/next`, document.baseURI);
         pullUrl.searchParams.set("clientId", String(clientId));
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
         pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));

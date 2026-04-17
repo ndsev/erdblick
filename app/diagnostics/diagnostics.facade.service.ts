@@ -61,8 +61,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const metadata = {
             erdblickVersion: this.stateService.erdblickVersion.getValue() || undefined,
             distributionVersions: this.stateService.distributionVersions.getValue() || undefined,
-            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-            url: typeof window !== 'undefined' ? window.location.href : undefined
+            userAgent: navigator.userAgent,
+            url: window.location.href
         };
 
         const bundle: DiagnosticsExportBundle = {

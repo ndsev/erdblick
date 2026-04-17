@@ -37,6 +37,7 @@ interface SelectionTileRequest {
         tileIds: Array<number>
     };
     tileKey: string;
+    /** Keep the request pending until the selected tile has enough stages for inspection. */
     resolveWhenInspectionComplete?: boolean;
     resolve: null | ((tile: FeatureTile) => void);
     reject: null | ((why: any) => void);
@@ -248,9 +249,7 @@ export class MapDataService {
 
         this.styleService.styleRemovedForId.subscribe(styleId => {
             this.viewVisualizationState.forEach(state => {
-                state.visualizationQueue = [];
-                state.visualizationQueueSet.clear();
-                state.visualizationQueueOrderDirty = false;
+                state.visualizationQueue.clear();
                 for (const tileVisu of state.removeVisualizations(styleId)) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                 }
@@ -657,84 +656,11 @@ export class MapDataService {
         viewIndex: number,
         viewState: ViewVisualizationState
     ): ITileVisualization | undefined {
-        const queue = viewState.visualizationQueue;
-        if (!queue.length) {
-            return undefined;
-        }
-        this.ensureVisualizationQueueSorted(viewState);
-        const blockedTileIds = this.inFlightBlockedTileIdsByView[viewIndex];
-        if (!blockedTileIds || !blockedTileIds.size) {
-            const entry = queue.shift();
-            if (entry) {
-                viewState.visualizationQueueSet.delete(entry);
-            }
-            return entry;
-        }
-        for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
-            const candidate = queue[queueIndex];
-            if (blockedTileIds.has(candidate.tile.tileId)) {
-                continue;
-            }
-            if (queueIndex === 0) {
-                const entry = queue.shift();
-                if (entry) {
-                    viewState.visualizationQueueSet.delete(entry);
-                }
-                return entry;
-            }
-            const [entry] = queue.splice(queueIndex, 1);
-            viewState.visualizationQueueSet.delete(entry);
-            return entry;
-        }
-        return undefined;
-    }
-
-    private ensureVisualizationQueueSorted(viewState: ViewVisualizationState): void {
-        if (!viewState.visualizationQueueOrderDirty) {
-            return;
-        }
-        this.sortVisualizationQueue(viewState);
-    }
-
-    private sortVisualizationQueue(viewState: ViewVisualizationState): void {
-        const queue = viewState.visualizationQueue;
-        viewState.visualizationQueueOrderDirty = false;
-        if (queue.length < 2) {
-            return;
-        }
-        const rankedQueue = queue.map((visualization, index) => ({
-            visualization,
-            rank: visualization.renderRank(),
-            tileKey: visualization.tile.mapTileKey,
-            styleId: visualization.styleId,
-            index
-        }));
-        rankedQueue.sort((lhs, rhs) => {
-            if (lhs.rank !== rhs.rank) {
-                return lhs.rank - rhs.rank;
-            }
-            const tileKeyCompare = lhs.tileKey.localeCompare(rhs.tileKey);
-            if (tileKeyCompare !== 0) {
-                return tileKeyCompare;
-            }
-            const styleIdCompare = lhs.styleId.localeCompare(rhs.styleId);
-            if (styleIdCompare !== 0) {
-                return styleIdCompare;
-            }
-            return lhs.index - rhs.index;
-        });
-        for (let i = 0; i < rankedQueue.length; i++) {
-            queue[i] = rankedQueue[i].visualization;
-        }
+        return viewState.visualizationQueue.dequeueNext(this.inFlightBlockedTileIdsByView[viewIndex]);
     }
 
     private queueVisualization(viewState: ViewVisualizationState, visualization: ITileVisualization): void {
-        viewState.visualizationQueueOrderDirty = true;
-        if (viewState.visualizationQueueSet.has(visualization)) {
-            return;
-        }
-        viewState.visualizationQueue.push(visualization);
-        viewState.visualizationQueueSet.add(visualization);
+        viewState.visualizationQueue.enqueue(visualization);
     }
 
     private shouldRequeueVisualizationAfterRender(
@@ -766,9 +692,6 @@ export class MapDataService {
 
     private startFrameTimeSampling() {
         if (this.frameTimeSamplingStarted) {
-            return;
-        }
-        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
             return;
         }
         this.frameTimeSamplingStarted = true;
@@ -1371,12 +1294,11 @@ export class MapDataService {
             this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
         }
 
-        viewState.visualizationQueue = viewState.visualizationQueue.filter(visu =>
+        viewState.visualizationQueue.retain(visu =>
             visu.styleId !== optionNode.styleId ||
             visu.tile.mapName !== optionNode.mapId ||
             visu.tile.layerName !== optionNode.layerId
         );
-        viewState.visualizationQueueSet = new Set(viewState.visualizationQueue);
 
         const optionValue = optionNode.value[viewIndex];
         for (const visu of viewState.getVisualizations(optionNode.styleId)) {
@@ -1621,9 +1543,7 @@ export class MapDataService {
             }
 
             // Update tile visualization queue.
-            state.visualizationQueue = [];
-            state.visualizationQueueSet.clear();
-            state.visualizationQueueOrderDirty = false;
+            state.visualizationQueue.clear();
             // Schedule new or dirty visualizations.
             for (const [layerName, tilesForLayer] of visibleTilesByLayer.entries()) {
                 const applicableStyles: ErdblickStyle[] = [];
@@ -2085,8 +2005,6 @@ export class MapDataService {
                     visu.updateStatus(false);
                     continue;
                 }
-                const isQueued = viewState.visualizationQueueSet.has(visu);
-
                 visu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
                 this.applyTileRenderPolicyToVisualization(viewIndex, visu);
                 const isDirty = visu.isDirty();
@@ -2096,10 +2014,7 @@ export class MapDataService {
                 }
 
                 visu.updateStatus(true);
-                viewState.visualizationQueueOrderDirty = true;
-                if (!isQueued) {
-                    this.queueVisualization(viewState, visu);
-                }
+                this.queueVisualization(viewState, visu);
             }
         }
 
@@ -2427,7 +2342,7 @@ export class MapDataService {
         return result;
     }
 
-    private queueBackgroundSelectionTileRequest(
+    private pinTileForSelectionInspection(
         mapId: string,
         layerId: string,
         tileId: bigint,
@@ -2437,6 +2352,8 @@ export class MapDataService {
             return;
         }
 
+        // This path expresses selection intent only: the selected tile should stay
+        // requested until inspection data is complete, but no caller awaits it.
         this.selectionTileRequests.push({
             remoteRequest: {
                 mapId,
@@ -2488,7 +2405,7 @@ export class MapDataService {
                 if (!inspectionDataComplete) {
                     if (parsedTileKey) {
                         const [mapId, layerId, tileId] = parsedTileKey;
-                        this.queueBackgroundSelectionTileRequest(mapId, layerId, tileId, canonicalTileKey);
+                        this.pinTileForSelectionInspection(mapId, layerId, tileId, canonicalTileKey);
                     }
                     features.push(new FeatureWrapper(resolvedFeatureId, tile));
                     continue;
@@ -2749,9 +2666,7 @@ export class MapDataService {
                 console.warn('Error destroying tile visualization:', error);
             }
         }
-        this.viewVisualizationState[viewIndex].visualizationQueue = [];
-        this.viewVisualizationState[viewIndex].visualizationQueueSet.clear();
-        this.viewVisualizationState[viewIndex].visualizationQueueOrderDirty = false;
+        this.viewVisualizationState[viewIndex].visualizationQueue.clear();
         if (viewIndex >= 0 && viewIndex < this.inFlightVisualizationRendersByView.length) {
             this.inFlightVisualizationRendersByView[viewIndex] = 0;
         }

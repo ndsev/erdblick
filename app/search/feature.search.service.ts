@@ -446,7 +446,7 @@ export class FeatureSearchService {
 
         for (const tile of this.orderedTilesForSearchProcessing()) {
             if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                if (this.mapService.getRequestedMaxStageForTile(tile) !== null) {
+                if (this.isTileStillExpected(tile)) {
                     this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
                     this.currentSearch.markTilePending(tile.mapTileKey);
                 }
@@ -765,6 +765,10 @@ export class FeatureSearchService {
         return this.mapService.getPrioritisedTiles(viewIndex);
     }
 
+    private isTileStillExpected(tile: FeatureTile): boolean {
+        return this.mapService.getRequestedMaxStageForTile(tile) !== null;
+    }
+
     private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
         const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
         if (!tileBlobs.length) {
@@ -815,7 +819,7 @@ export class FeatureSearchService {
                 continue;
             }
             if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                if (this.mapService.getRequestedMaxStageForTile(tile) === null) {
+                if (!this.isTileStillExpected(tile)) {
                     this.pendingSearchTilesByKey.delete(tileKey);
                     activeSearch.markTileReady(tileKey);
                     stateChanged = true;

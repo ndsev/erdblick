@@ -10,18 +10,11 @@ type ScheduleFn = (cb: () => void) => number;
 type CancelFn = (handle: number) => void;
 
 function defaultSchedule(cb: () => void): number {
-    if (typeof requestAnimationFrame === "function") {
-        return requestAnimationFrame(cb);
-    }
-    return window.setTimeout(cb, 0);
+    return window.requestAnimationFrame(cb);
 }
 
 function defaultCancel(handle: number): void {
-    if (typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(handle);
-        return;
-    }
-    clearTimeout(handle);
+    window.cancelAnimationFrame(handle);
 }
 
 interface LayerEntry {

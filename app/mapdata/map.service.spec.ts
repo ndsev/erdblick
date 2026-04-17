@@ -58,9 +58,7 @@ class WebSocketStub {
 }
 
 vi.stubGlobal('WebSocket', WebSocketStub as any);
-if (typeof window !== 'undefined') {
-    (window as any).WebSocket = WebSocketStub as any;
-}
+(window as any).WebSocket = WebSocketStub as any;
 
 type MapDataServiceCtorType = typeof import('./map.service').MapDataService;
 let MapDataServiceCtor: MapDataServiceCtorType;
@@ -478,7 +476,7 @@ describe('MapDataService', () => {
 
         expect(enabledVisu.showTileBorder).toBe(true);
         expect(enabledVisu.prefersHighFidelity).toBe(true);
-        expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
+        expect(viewStates[0].visualizationQueue.items).toContain(enabledVisu);
     });
 
     it('requeues a visualization immediately when it finishes stale after an in-flight policy change', () => {
@@ -553,12 +551,12 @@ describe('MapDataService', () => {
 
         expect(dispatchedTask).toBeTruthy();
         expect(dispatchedTask.visualization).toBe(visu);
-        expect(viewStates[0].visualizationQueue).toHaveLength(0);
+        expect(viewStates[0].visualizationQueue.items).toHaveLength(0);
 
         dispatchedTask.onDone();
 
         expect(visu.updateStatus).toHaveBeenCalledWith(true);
-        expect(viewStates[0].visualizationQueue).toContain(visu);
+        expect(viewStates[0].visualizationQueue.items).toContain(visu);
 
         subscription.unsubscribe();
         scheduleOutsideAngularSpy.mockRestore();
@@ -581,14 +579,15 @@ describe('MapDataService', () => {
         (service as any).queueVisualization(viewState, later);
         (service as any).queueVisualization(viewState, earlier);
 
-        const sortSpy = vi.spyOn(service as any, 'sortVisualizationQueue');
+        expect(later.renderRank).not.toHaveBeenCalled();
+        expect(earlier.renderRank).not.toHaveBeenCalled();
 
         expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(earlier);
-        expect(sortSpy).toHaveBeenCalledOnce();
+        expect(later.renderRank).toHaveBeenCalledOnce();
+        expect(earlier.renderRank).toHaveBeenCalledOnce();
         expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(later);
-        expect(sortSpy).toHaveBeenCalledOnce();
-
-        sortSpy.mockRestore();
+        expect(later.renderRank).toHaveBeenCalledOnce();
+        expect(earlier.renderRank).toHaveBeenCalledOnce();
     });
 
     it('tracks visualization queue membership without scanning the full queue', () => {
@@ -606,12 +605,12 @@ describe('MapDataService', () => {
         (service as any).queueVisualization(viewState, visualization);
         (service as any).queueVisualization(viewState, visualization);
 
-        expect(viewState.visualizationQueue).toHaveLength(1);
-        expect(viewState.visualizationQueueSet.has(visualization)).toBe(true);
+        expect(viewState.visualizationQueue.items).toHaveLength(1);
+        expect(viewState.visualizationQueue.has(visualization)).toBe(true);
 
         expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(visualization);
-        expect(viewState.visualizationQueue).toHaveLength(0);
-        expect(viewState.visualizationQueueSet.has(visualization)).toBe(false);
+        expect(viewState.visualizationQueue.items).toHaveLength(0);
+        expect(viewState.visualizationQueue.has(visualization)).toBe(false);
     });
 
     it('builds a tiles WebSocket request body based on selection tile requests', async () => {

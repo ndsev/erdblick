@@ -67,15 +67,129 @@ function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean):
     };
 }
 
+export class VisualizationQueue {
+    private readonly queue: ITileVisualization[] = [];
+    private readonly queued = new Set<ITileVisualization>();
+    private orderDirty = false;
+
+    get length(): number {
+        return this.queue.length;
+    }
+
+    get items(): readonly ITileVisualization[] {
+        return this.queue;
+    }
+
+    has(visualization: ITileVisualization): boolean {
+        return this.queued.has(visualization);
+    }
+
+    enqueue(visualization: ITileVisualization): void {
+        this.orderDirty = true;
+        if (this.queued.has(visualization)) {
+            return;
+        }
+        this.queue.push(visualization);
+        this.queued.add(visualization);
+    }
+
+    dequeueNext(blockedTileIds?: ReadonlyMap<bigint, number>): ITileVisualization | undefined {
+        if (!this.queue.length) {
+            return undefined;
+        }
+        this.ensureSorted();
+
+        if (!blockedTileIds || !blockedTileIds.size) {
+            return this.removeAt(0);
+        }
+
+        const queueIndex = this.queue.findIndex(candidate => !blockedTileIds.has(candidate.tile.tileId));
+        return queueIndex < 0 ? undefined : this.removeAt(queueIndex);
+    }
+
+    retain(predicate: (visualization: ITileVisualization) => boolean): void {
+        if (!this.queue.length) {
+            return;
+        }
+
+        let removed = false;
+        const retained = this.queue.filter(visualization => {
+            const keep = predicate(visualization);
+            removed = removed || !keep;
+            return keep;
+        });
+        if (!removed) {
+            return;
+        }
+
+        this.queue.length = 0;
+        this.queue.push(...retained);
+        this.queued.clear();
+        for (const visualization of this.queue) {
+            this.queued.add(visualization);
+        }
+    }
+
+    clear(): void {
+        this.queue.length = 0;
+        this.queued.clear();
+        this.orderDirty = false;
+    }
+
+    private ensureSorted(): void {
+        if (!this.orderDirty) {
+            return;
+        }
+        this.sort();
+    }
+
+    private sort(): void {
+        this.orderDirty = false;
+        if (this.queue.length < 2) {
+            return;
+        }
+        const rankedQueue = this.queue.map((visualization, index) => ({
+            visualization,
+            rank: visualization.renderRank(),
+            tileKey: visualization.tile.mapTileKey,
+            styleId: visualization.styleId,
+            index
+        }));
+        rankedQueue.sort((lhs, rhs) => {
+            if (lhs.rank !== rhs.rank) {
+                return lhs.rank - rhs.rank;
+            }
+            const tileKeyCompare = lhs.tileKey.localeCompare(rhs.tileKey);
+            if (tileKeyCompare !== 0) {
+                return tileKeyCompare;
+            }
+            const styleIdCompare = lhs.styleId.localeCompare(rhs.styleId);
+            if (styleIdCompare !== 0) {
+                return styleIdCompare;
+            }
+            return lhs.index - rhs.index;
+        });
+        for (let i = 0; i < rankedQueue.length; i++) {
+            this.queue[i] = rankedQueue[i].visualization;
+        }
+    }
+
+    private removeAt(index: number): ITileVisualization | undefined {
+        const [entry] = this.queue.splice(index, 1);
+        if (entry) {
+            this.queued.delete(entry);
+        }
+        return entry;
+    }
+}
+
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     visibleTileIds: Set<bigint> = new Set();
     visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
     tileRenderPolicy = new Map<bigint, TileRenderPolicy>();
     tileOrder = new Map<bigint, number>();
-    visualizationQueue: ITileVisualization[] = [];
-    visualizationQueueSet = new Set<ITileVisualization>();
-    visualizationQueueOrderDirty = false;
+    readonly visualizationQueue = new VisualizationQueue();
     private visualizedTileLayers: Map<string, Map<string, ITileVisualization>> = new Map();
 
     getVisualization(styleId: string, tileKey: string): ITileVisualization | undefined {
