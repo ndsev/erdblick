@@ -1,5 +1,6 @@
-import {Component, ViewContainerRef} from '@angular/core';
+import {Component, OnDestroy, OnInit} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
+import {Subscription} from "rxjs";
 
 interface SurveyConfig {
     id: string;
@@ -49,7 +50,7 @@ interface SurveyConfig {
     styles: [``],
     standalone: false
 })
-export class SurveyComponent {
+export class SurveyComponent implements OnInit, OnDestroy {
     surveyEnabled: boolean = false;
     isSurveyHidden: boolean = false;
     showFireworks: boolean = false;
@@ -59,21 +60,29 @@ export class SurveyComponent {
     backgroundColor: string = "blueviolet";
     private fireworksAnimating: boolean = false;
     private fireworksQueue: number = 0;
+    private configSubscription?: Subscription;
+    private configApplyTimeout?: number;
 
     constructor(private httpClient: HttpClient) {
+    }
 
-        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
+    ngOnInit() {
+        this.configSubscription = this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
-                try {
-                    this.applySurveyConfig(data);
-                } catch (error) {
-                    console.error(error);
-                }
+                this.scheduleApplySurveyConfig(data);
             },
             error: error => {
                 console.error(error);
             }
         });
+    }
+
+    ngOnDestroy() {
+        this.configSubscription?.unsubscribe();
+        if (this.configApplyTimeout !== undefined) {
+            window.clearTimeout(this.configApplyTimeout);
+            this.configApplyTimeout = undefined;
+        }
     }
 
     dismissSurvey(event: any) {
@@ -112,8 +121,28 @@ export class SurveyComponent {
         }, 800);
     }
 
+    private scheduleApplySurveyConfig(config: any) {
+        if (this.configApplyTimeout !== undefined) {
+            window.clearTimeout(this.configApplyTimeout);
+        }
+        // `config.json` can be served from caches fast enough to arrive during initial startup CD.
+        // Apply in the next macrotask to avoid dev-mode ExpressionChanged errors.
+        this.configApplyTimeout = window.setTimeout(() => {
+            this.configApplyTimeout = undefined;
+            try {
+                this.applySurveyConfig(config);
+            } catch (error) {
+                console.error(error);
+            }
+        }, 0);
+    }
+
     private applySurveyConfig(config: any) {
         this.surveyEnabled = false;
+        this.surveyHref = "";
+        this.surveyLinkHtml = "";
+        this.surveyEmoji = "";
+        this.backgroundColor = "blueviolet";
 
         if (!config || !Array.isArray(config["surveys"])) {
             return;
@@ -144,7 +173,6 @@ export class SurveyComponent {
             return;
         }
 
-        this.surveyEnabled = true;
         this.surveyHref = activeSurvey.link;
         this.surveyLinkHtml = activeSurvey.linkHtml;
 
@@ -154,6 +182,7 @@ export class SurveyComponent {
         if (typeof activeSurvey.background === 'string' && activeSurvey.background.length) {
             this.backgroundColor = activeSurvey.background;
         }
+        this.surveyEnabled = true;
     }
 
     private parseSurveyDate(dateString: string, endOfDay: boolean): Date | null {

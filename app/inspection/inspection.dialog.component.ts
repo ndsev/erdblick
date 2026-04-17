@@ -32,7 +32,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                                 <p-tag severity="success" value="DATA" [rounded]="true" />
                             }
                             <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title" 
-                                 tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
+                                 tooltipPosition="bottom"
                                  (click)="toggleLockedState($event)">
                                 <span class="material-symbols-outlined">
                                     @if (panel().locked) {
