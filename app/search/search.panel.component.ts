@@ -39,7 +39,7 @@ interface ExtendedSearchTarget extends SearchTarget {
                 @if (completion.visible || completion.pending) {
                     <div class="completion-popup" (mousedown)="onCompletionPopupDown($event)"
                          [style.top.px]="completion.top"
-                         [style.left.px]="completion.left" [style.z-index]="50000">
+                         [style.left.px]="completion.left" [style.z-index]="completion.zIndex">
                         @for (item of completionItems; track $index) {
                             <div [ngClass]="{'selected': $index === completion.selectionIndex}"
                                  (click)="applyCompletion(item.query)">
@@ -64,6 +64,7 @@ interface ExtendedSearchTarget extends SearchTarget {
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
                           [baseZIndex]="30040"
+                          [focusOnShow]="false"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
@@ -130,6 +131,7 @@ interface ExtendedSearchTarget extends SearchTarget {
     standalone: false
 })
 export class SearchPanelComponent implements AfterViewInit {
+    private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
 
     searchItems: Array<SearchTarget> = [];
     activeSearchItems: Array<ExtendedSearchTarget> = [];
@@ -155,6 +157,8 @@ export class SearchPanelComponent implements AfterViewInit {
         pendingDelay: 600,
         // Delay for requesting completion candidates
         completionDelay: 150,
+        // Keep completion above Search Actions dialog without using a hardcoded global z-index.
+        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1,
     };
 
     mapSelectionVisible: boolean = false;
@@ -362,6 +366,9 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.completion.visible ||
                 this.textarea.nativeElement === document.activeElement;
 
+            if (length > 0 && focusValid) {
+                this.refreshCompletionZIndex();
+            }
             this.completion.visible = length > 0 && focusValid;
         });
 
@@ -376,6 +383,7 @@ export class SearchPanelComponent implements AfterViewInit {
         this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();
+                this.refreshCompletionZIndex();
             }, 10);
         });
 
@@ -593,6 +601,24 @@ export class SearchPanelComponent implements AfterViewInit {
         this.updateCursor();
         this.searchService.showFeatureSearchDialog = true;
         this.setSearchValue(this.searchInputValue);
+        this.refreshCompletionZIndex();
+    }
+
+    private refreshCompletionZIndex() {
+        const container = this.dialog?.container();
+        if (!container) {
+            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
+            return;
+        }
+
+        const inlineZIndex = Number.parseInt(container.style.zIndex, 10);
+        const computedZIndex = Number.parseInt(window.getComputedStyle(container).zIndex, 10);
+        const dialogZIndex = Number.isFinite(inlineZIndex)
+            ? inlineZIndex
+            : (Number.isFinite(computedZIndex)
+                ? computedZIndex
+                : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
+        this.completion.zIndex = dialogZIndex + 1;
     }
 
     setSearchValue(value: string) {

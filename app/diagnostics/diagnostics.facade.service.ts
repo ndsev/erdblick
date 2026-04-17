@@ -26,7 +26,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
 
     constructor(mapService: MapDataService,
                 private readonly stateService: AppStateService) {
-        super(mapService);
+        super(mapService, stateService);
     }
 
     openPerformanceDialog() {
@@ -61,8 +61,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const metadata = {
             erdblickVersion: this.stateService.erdblickVersion.getValue() || undefined,
             distributionVersions: this.stateService.distributionVersions.getValue() || undefined,
-            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-            url: typeof window !== 'undefined' ? window.location.href : undefined
+            userAgent: navigator.userAgent,
+            url: window.location.href
         };
 
         const bundle: DiagnosticsExportBundle = {

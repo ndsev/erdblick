@@ -32,6 +32,7 @@ declare let window: DebugWindow;
             <feature-search></feature-search>
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
+            <survey></survey>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         }
         <legal-dialog></legal-dialog>

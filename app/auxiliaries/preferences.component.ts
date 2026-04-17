@@ -4,9 +4,14 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {
+    clampTilesLoadLimit,
+    clampMapZoomStep,
+    DEFAULT_MAP_ZOOM_STEP,
+    MAX_MAP_ZOOM_STEP,
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
     MAX_DECK_STYLE_WORKERS,
+    MIN_MAP_ZOOM_STEP,
     AppStateService,
     DEFAULT_DECK_STYLE_WORKER_COUNT
 } from "../shared/appstate.service";
@@ -64,6 +69,34 @@ import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.p
                               label=""
                               icon="pi pi-check"
                               [disabled]="!inspectionsLimitChanged"></p-button>
+                </div>
+            </div>
+            <p-divider></p-divider>
+            <div class="slider-container">
+                <label [for]="mapZoomStepInput">Zoom Speed
+                    <i class="pi pi-info-circle"
+                       pTooltip="Controls mouse-wheel zoom sensitivity and the Q/E / +/- zoom step."
+                       tooltipPosition="top"></i>
+                </label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="mapZoomStepInput"
+                               (ngModelChange)="onMapZoomStepInputChange($event)"
+                               (keydown.enter)="applyMapZoomStep()"/>
+                        <p-slider [(ngModel)]="mapZoomStepInput"
+                                  (ngModelChange)="onMapZoomStepSliderChange($event)"
+                                  class="w-full"
+                                  [min]="MIN_MAP_ZOOM_STEP"
+                                  [max]="MAX_MAP_ZOOM_STEP"
+                                  [step]="0.05"></p-slider>
+                    </div>
+                    <p-button (click)="applyMapZoomStep()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!mapZoomStepChanged"></p-button>
                 </div>
             </div>
             <p-divider></p-divider>
@@ -189,9 +222,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     pinLowFiToMaxLodSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
+    mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     deckStyleWorkersCountChanged: boolean = false;
+    mapZoomStepChanged: boolean = false;
     toggleOptions = [
         {label: 'Off', value: false},
         {label: 'On', value: true}
@@ -239,6 +274,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.deckStyleWorkersCountState.subscribe(count => {
             this.deckStyleWorkersCountInput = count;
         }));
+        this.subscriptions.push(this.stateService.mapZoomStepState.subscribe(step => {
+            this.mapZoomStepInput = step;
+        }));
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
@@ -258,9 +296,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.tilesToLoadInput = this.stateService.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
         this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
+        this.mapZoomStepInput = this.stateService.mapZoomStep;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.deckStyleWorkersCountChanged = false;
+        this.mapZoomStepChanged = false;
         this.dialogStack.bringToFront(this.preferencesDialog);
     }
 
@@ -273,8 +313,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        this.tilesToLoadInput = limit;
-        this.stateService.tilesLoadLimit = limit;
+        const cappedLimit = clampTilesLoadLimit(limit);
+        this.tilesToLoadInput = cappedLimit;
+        this.stateService.tilesLoadLimit = cappedLimit;
         this.tilesToLoadChanged = false;
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
@@ -322,6 +363,21 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.deckStyleWorkersOverrideSetting = enabled;
         this.stateService.deckStyleWorkersOverride = enabled;
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    }
+
+    applyMapZoomStep() {
+        if (!this.mapZoomStepChanged) {
+            return;
+        }
+        const step = Number(this.mapZoomStepInput);
+        if (!Number.isFinite(step) || step < MIN_MAP_ZOOM_STEP || step > MAX_MAP_ZOOM_STEP) {
+            this.messageService.showError(`Please enter a zoom speed between ${MIN_MAP_ZOOM_STEP} and ${MAX_MAP_ZOOM_STEP}.`);
+            return;
+        }
+        const clampedStep = clampMapZoomStep(step);
+        this.mapZoomStepInput = clampedStep;
+        this.stateService.mapZoomStep = clampedStep;
+        this.mapZoomStepChanged = false;
     }
 
     applyDeckStyleWorkersCount() {
@@ -409,6 +465,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
     }
 
+    protected onMapZoomStepSliderChange(value: number) {
+        this.mapZoomStepInput = value;
+        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
+    }
+
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
         this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
@@ -422,6 +483,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onDeckStyleWorkersCountInputChange(value: number | string) {
         this.deckStyleWorkersCountInput = value;
         this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
+    }
+
+    protected onMapZoomStepInputChange(value: number | string) {
+        this.mapZoomStepInput = value;
+        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
     }
 
     private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
@@ -447,4 +513,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
     protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
+    protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
+    protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
 }

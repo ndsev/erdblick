@@ -58,9 +58,7 @@ class WebSocketStub {
 }
 
 vi.stubGlobal('WebSocket', WebSocketStub as any);
-if (typeof window !== 'undefined') {
-    (window as any).WebSocket = WebSocketStub as any;
-}
+(window as any).WebSocket = WebSocketStub as any;
 
 type MapDataServiceCtorType = typeof import('./map.service').MapDataService;
 let MapDataServiceCtor: MapDataServiceCtorType;
@@ -478,7 +476,7 @@ describe('MapDataService', () => {
 
         expect(enabledVisu.showTileBorder).toBe(true);
         expect(enabledVisu.prefersHighFidelity).toBe(true);
-        expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
+        expect(viewStates[0].visualizationQueue.items).toContain(enabledVisu);
     });
 
     it('requeues a visualization immediately when it finishes stale after an in-flight policy change', () => {
@@ -542,7 +540,7 @@ describe('MapDataService', () => {
         const viewStates = (service as any).viewVisualizationState as any[];
         viewStates[0].visibleTileIds = new Set<bigint>([1n]);
         viewStates[0].putVisualization('enabled-style', tile.mapTileKey, visu);
-        viewStates[0].visualizationQueue = [visu];
+        (service as any).queueVisualization(viewStates[0], visu);
 
         let dispatchedTask: any = null;
         const subscription = service.tileVisualizationTopic.subscribe(task => {
@@ -553,15 +551,66 @@ describe('MapDataService', () => {
 
         expect(dispatchedTask).toBeTruthy();
         expect(dispatchedTask.visualization).toBe(visu);
-        expect(viewStates[0].visualizationQueue).toHaveLength(0);
+        expect(viewStates[0].visualizationQueue.items).toHaveLength(0);
 
         dispatchedTask.onDone();
 
         expect(visu.updateStatus).toHaveBeenCalledWith(true);
-        expect(viewStates[0].visualizationQueue).toContain(visu);
+        expect(viewStates[0].visualizationQueue.items).toContain(visu);
 
         subscription.unsubscribe();
         scheduleOutsideAngularSpy.mockRestore();
+    });
+
+    it('sorts visualization queues lazily before dequeueing work', () => {
+        const {service} = createMapDataService();
+        const viewStates = (service as any).viewVisualizationState as any[];
+        const viewState = viewStates[0];
+        const makeVisualization = (rank: number, tileKey: string) => ({
+            tile: {
+                tileId: BigInt(rank),
+                mapTileKey: tileKey,
+            },
+            styleId: 'style',
+            renderRank: vi.fn().mockReturnValue(rank),
+        });
+        const later = makeVisualization(2, 'tile-b');
+        const earlier = makeVisualization(1, 'tile-a');
+        (service as any).queueVisualization(viewState, later);
+        (service as any).queueVisualization(viewState, earlier);
+
+        expect(later.renderRank).not.toHaveBeenCalled();
+        expect(earlier.renderRank).not.toHaveBeenCalled();
+
+        expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(earlier);
+        expect(later.renderRank).toHaveBeenCalledOnce();
+        expect(earlier.renderRank).toHaveBeenCalledOnce();
+        expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(later);
+        expect(later.renderRank).toHaveBeenCalledOnce();
+        expect(earlier.renderRank).toHaveBeenCalledOnce();
+    });
+
+    it('tracks visualization queue membership without scanning the full queue', () => {
+        const {service} = createMapDataService();
+        const viewState = ((service as any).viewVisualizationState as any[])[0];
+        const visualization = {
+            tile: {
+                tileId: 1n,
+                mapTileKey: 'tile-a',
+            },
+            styleId: 'style',
+            renderRank: vi.fn().mockReturnValue(0),
+        };
+
+        (service as any).queueVisualization(viewState, visualization);
+        (service as any).queueVisualization(viewState, visualization);
+
+        expect(viewState.visualizationQueue.items).toHaveLength(1);
+        expect(viewState.visualizationQueue.has(visualization)).toBe(true);
+
+        expect((service as any).dequeueNextRenderableVisualization(0, viewState)).toBe(visualization);
+        expect(viewState.visualizationQueue.items).toHaveLength(0);
+        expect(viewState.visualizationQueue.has(visualization)).toBe(false);
     });
 
     it('builds a tiles WebSocket request body based on selection tile requests', async () => {
@@ -593,6 +642,7 @@ describe('MapDataService', () => {
                 mapId: 'm1',
                 layerId: 'layerA',
                 tileIdsByNextStage: [[42]],
+                priorityTileIds: [42],
             },
         ]);
 
@@ -736,7 +786,7 @@ describe('MapDataService', () => {
     it('records tile layers and legal info on arrival', () => {
         const {service, tileParser} = createMapDataService();
 
-        const statsSpy = vi.spyOn(service.statsDialogNeedsUpdate, 'next');
+        const tileDataSpy = vi.spyOn(service.tileDataChanged, 'next');
         const legalSpy = vi.spyOn(service.legalInformationUpdated, 'next');
 
         const tileMetadata = {
@@ -752,7 +802,10 @@ describe('MapDataService', () => {
         service.addTileFeatureLayer(tileBlob as any, null, false);
 
         expect(service.loadedTileLayers.size).toBe(1);
-        expect(statsSpy).toHaveBeenCalled();
+        expect(tileDataSpy).toHaveBeenCalledWith(expect.objectContaining({
+            tileKey: tileMetadata.mapTileKey,
+            reason: 'loaded'
+        }));
         expect(legalSpy).toHaveBeenCalledWith(true);
         const legalSet = service.legalInformationPerMap.get('m1')!;
         expect(legalSet.has('LICENSE A')).toBe(true);

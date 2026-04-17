@@ -17,7 +17,11 @@ const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
-export const MAX_NUM_TILES_TO_LOAD = 512;
+export const DEFAULT_NUM_TILES_TO_LOAD = 512;
+export const MAX_NUM_TILES_TO_LOAD = 512 * 1024;
+export const DEFAULT_MAP_ZOOM_STEP = 0.5;
+export const MIN_MAP_ZOOM_STEP = 0.001;
+export const MAX_MAP_ZOOM_STEP = 1.0;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
@@ -39,6 +43,20 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+export function clampTilesLoadLimit(value: number): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_NUM_TILES_TO_LOAD;
+    }
+    return Math.min(MAX_NUM_TILES_TO_LOAD, Math.max(0, Math.floor(value)));
+}
+
+export function clampMapZoomStep(value: number): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_MAP_ZOOM_STEP;
+    }
+    return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
+}
 
 export interface Versions {
     name: string;
@@ -404,6 +422,13 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly mapZoomStepState = this.createState<number>({
+        name: 'mapZoomStep',
+        defaultValue: DEFAULT_MAP_ZOOM_STEP,
+        schema: z.coerce.number(),
+        fromStorage: value => clampMapZoomStep(Number(value))
+    });
+
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
         name: 'layerSyncOptions',
         defaultValue: false,
@@ -480,8 +505,9 @@ export class AppStateService implements OnDestroy {
 
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
-        defaultValue: MAX_NUM_TILES_TO_LOAD,
+        defaultValue: DEFAULT_NUM_TILES_TO_LOAD,
         schema: z.coerce.number().nonnegative(),
+        fromStorage: value => clampTilesLoadLimit(Number(value)),
         urlParamName: 'tll'
     });
 
@@ -922,6 +948,8 @@ export class AppStateService implements OnDestroy {
     set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
+    get mapZoomStep() {return this.mapZoomStepState.getValue();}
+    set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get search() {return this.searchState.getValue();}
     set search(val: [number, string] | []) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
@@ -938,7 +966,7 @@ export class AppStateService implements OnDestroy {
     get styleVisibility() {return this.styleVisibilityState.getValue();}
     set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
-    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
+    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(clampTilesLoadLimit(Number(val)));};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {
         const numeric = Number(val);

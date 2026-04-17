@@ -170,19 +170,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             })
         );
 
-        if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-            this.mediaQueryList = window.matchMedia('(max-width: 56em)');
-            this.isNarrow = this.mediaQueryList.matches;
-            this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
-                this.isNarrow = event.matches;
-                this.cdr.markForCheck();
-            };
-            if (typeof this.mediaQueryList.addEventListener === 'function') {
-                this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
-            } else {
-                this.mediaQueryList.addListener(this.mediaQueryChangeListener);
-            }
-        }
+        this.mediaQueryList = window.matchMedia('(max-width: 56em)');
+        this.isNarrow = this.mediaQueryList.matches;
+        this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
+            this.isNarrow = event.matches;
+            this.cdr.markForCheck();
+        };
+        this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
     ngAfterViewInit() {
@@ -247,11 +241,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     ngOnDestroy() {
         this.teardownViewerContextMenuHandling();
         if (this.mediaQueryList && this.mediaQueryChangeListener) {
-            if (typeof this.mediaQueryList.removeEventListener === 'function') {
-                this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
-            } else {
-                this.mediaQueryList.removeListener(this.mediaQueryChangeListener);
-            }
+            this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
         }
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();

@@ -865,6 +865,14 @@ void FeatureLayerVisualizationBase::addFeature(
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
+        // Attribute/relation/validity hover ids should not also trigger the
+        // whole-feature hover highlight. Only emit feature highlights when the
+        // bare feature id itself is part of the highlighted subset.
+        if (highlightMode_ == FeatureStyleRule::HoverHighlight
+            && !featureIdSubset_.empty()
+            && !featureIdSubset_.contains(resolveFeatureId())) {
+            break;
+        }
         if (auto geomCollection = feature->geomOrNull()) {
             auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.index()];
             auto const effectiveOffset = effectiveOffsetForSlot(rule, currentOffsetSlot);

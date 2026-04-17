@@ -17,6 +17,8 @@ export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
+const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
+const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 
 export interface MapTileStreamStatusRequest {
     index: number;
@@ -49,6 +51,18 @@ export interface MapTileStreamRequestContextPayload {
     clientId?: number;
 }
 
+interface TileRequestChunk {
+    index: number;
+    isLast: boolean;
+}
+
+interface TileRequestPayload {
+    requests: any[];
+    stringPoolOffsets?: unknown;
+    requestId?: number;
+    chunk?: TileRequestChunk;
+}
+
 export interface MapTileStreamTransportCompressionStats {
     totalPullResponses: number;
     totalPullGzipResponses: number;
@@ -65,6 +79,7 @@ export class MapTileStreamClient {
     private socket: WebSocket | null = null;
     private connecting: Promise<void> | null = null;
     private readonly decoder = new TextDecoder();
+    private readonly encoder = new TextEncoder();
     public parser: TileLayerParser;
     private lastRequestPromise: Promise<void> | null = null;
     private awaitingCompletion: boolean = false;
@@ -87,11 +102,12 @@ export class MapTileStreamClient {
     private readonly pullParallelism: number = 2;
     private readonly pullWaitMs: number = 25000;
     private readonly pullRetryDelayMs: number = 50;
-    private readonly pullBatchMaxBytesCap: number = 5 * 1024 * 1024;
+    private readonly pullBatchMaxBytesCap: number = 64 * 1024 * 1024;
     private readonly pullBatchMinBytes: number = 64 * 1024;
     private readonly pullDownstreamEwmaAlpha: number = 0.2;
     private pullCompressionEnabled: boolean = false;
     private downstreamBytesPerSecondEwma: number = 512 * 1024;
+    private pullBatchMaxBytesBudget: number = 512 * 1024;
     private totalPullResponses: number = 0;
     private totalPullGzipResponses: number = 0;
     private totalUncompressedBytes: number = 0;
@@ -235,6 +251,11 @@ export class MapTileStreamClient {
     }
 
     sendRequest(body: object | string) {
+        const payload = typeof body === "string" ? body : JSON.stringify(body);
+        return this.sendSerializedRequests([payload]);
+    }
+
+    private sendSerializedRequests(payloads: string[]) {
         this.awaitingCompletion = true;
         this.lastStatusPayload = null;
         this.resetCompletionPromise();
@@ -243,8 +264,9 @@ export class MapTileStreamClient {
                 if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
                     throw new Error("WebSocket is not open.");
                 }
-                const payload = typeof body === "string" ? body : JSON.stringify(body);
-                this.socket.send(payload);
+                for (const payload of payloads) {
+                    this.socket.send(payload);
+                }
             })
             .catch(err => {
                 this.rejectCompletion(err);
@@ -253,10 +275,11 @@ export class MapTileStreamClient {
         return this;
     }
 
-    async updateRequest(tileLayerRequests: any) {
+    async updateRequest(tileLayerRequests: any[]) {
+        const stringPoolOffsets = this.parser!.getFieldDictOffsets();
         const requestBodyBase = {
             requests: tileLayerRequests,
-            stringPoolOffsets: this.parser!.getFieldDictOffsets(),
+            stringPoolOffsets,
         };
 
         const newRequestBody = JSON.stringify(requestBodyBase);
@@ -269,12 +292,12 @@ export class MapTileStreamClient {
         const previousRequestId = this.latestRequestedRequestId;
         const requestId = this.nextRequestId++;
         this.latestRequestedRequestId = requestId;
-        const requestBody = {
-            ...requestBodyBase,
-            requestId,
-        };
         try {
-            this.sendRequest(requestBody);
+            const requestPayloads = this.buildRequestPayloads(
+                tileLayerRequests,
+                stringPoolOffsets,
+                requestId);
+            this.sendSerializedRequests(requestPayloads);
             await this.waitForSend();
             return true;
         } catch (err) {
@@ -283,6 +306,73 @@ export class MapTileStreamClient {
             console.error("Failed to send /tiles request.", err);
             return false;
         }
+    }
+
+    private buildRequestPayloads(
+        tileLayerRequests: any[],
+        stringPoolOffsets: unknown,
+        requestId: number): string[]
+    {
+        // Chunk only between complete request groups. map.service keeps these
+        // groups disjoint by map/layer/tile-level, so the server can schedule
+        // each chunk immediately while keeping one logical request id.
+        const singlePayload = JSON.stringify({
+            requests: tileLayerRequests,
+            stringPoolOffsets,
+            requestId,
+        } satisfies TileRequestPayload);
+        if (this.byteLength(singlePayload) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
+            return [singlePayload];
+        }
+
+        const chunks: TileRequestPayload[] = [];
+        let currentRequests: any[] = [];
+        let nextChunkIndex = 0;
+
+        const makeChunk = (requests: any[], index: number, isLast: boolean): TileRequestPayload => ({
+            requests,
+            requestId,
+            chunk: {index, isLast},
+            ...(index === 0 ? {stringPoolOffsets} : {}),
+        });
+
+        const finalizeCurrentChunk = () => {
+            if (!currentRequests.length) {
+                return;
+            }
+            chunks.push(makeChunk(currentRequests, nextChunkIndex++, false));
+            currentRequests = [];
+        };
+
+        for (const request of tileLayerRequests) {
+            const candidateRequests = [...currentRequests, request];
+            const currentChunkIndex = nextChunkIndex;
+            const candidatePayload = JSON.stringify(makeChunk(candidateRequests, currentChunkIndex, false));
+            if (currentRequests.length
+                && this.byteLength(candidatePayload) > TARGET_TILE_REQUEST_CHUNK_BYTES) {
+                finalizeCurrentChunk();
+            }
+
+            currentRequests.push(request);
+            const currentPayload = JSON.stringify(makeChunk(currentRequests, nextChunkIndex, false));
+            if (currentRequests.length === 1
+                && this.byteLength(currentPayload) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
+                throw new Error(
+                    `Single /tiles request group exceeds ${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`);
+            }
+        }
+        finalizeCurrentChunk();
+
+        if (chunks.length === 0) {
+            return [singlePayload];
+        }
+
+        chunks[chunks.length - 1].chunk!.isLast = true;
+        return chunks.map(chunk => JSON.stringify(chunk));
+    }
+
+    private byteLength(payload: string): number {
+        return this.encoder.encode(payload).byteLength;
     }
 
     async waitForSend(): Promise<void> {
@@ -411,10 +501,7 @@ export class MapTileStreamClient {
     }
 
     private resolveUrl(): string {
-        const base = (typeof document !== "undefined" && document.baseURI)
-            ? document.baseURI
-            : window.location.href;
-        const url = new URL(this.path, base);
+        const url = new URL(this.path, document.baseURI);
         if (url.protocol === "http:") {
             url.protocol = "ws:";
         } else if (url.protocol === "https:") {
@@ -684,11 +771,8 @@ export class MapTileStreamClient {
     }
 
     private resolvePullUrl(clientId: number): string {
-        const base = (typeof document !== "undefined" && document.baseURI)
-            ? document.baseURI
-            : window.location.href;
         const normalizedPath = this.path.replace(/\/+$/, "");
-        const pullUrl = new URL(`${normalizedPath}/next`, base);
+        const pullUrl = new URL(`${normalizedPath}/next`, document.baseURI);
         pullUrl.searchParams.set("clientId", String(clientId));
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
         pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));
@@ -697,8 +781,14 @@ export class MapTileStreamClient {
     }
 
     private currentPullMaxBytes(): number {
-        const estimated = Math.max(this.pullBatchMinBytes, Math.floor(this.downstreamBytesPerSecondEwma));
-        return Math.min(this.pullBatchMaxBytesCap, estimated);
+        return this.pullBatchMaxBytesBudget;
+    }
+
+    private updatePullMaxBytes(estimatedBytesPerSecond: number) {
+        const estimated = Math.max(this.pullBatchMinBytes, Math.floor(estimatedBytesPerSecond));
+        this.pullBatchMaxBytesBudget = Math.min(
+            this.pullBatchMaxBytesCap,
+            Math.max(this.pullBatchMaxBytesBudget, estimated));
     }
 
     private recordDownstreamSample(bytes: number, elapsedMs: number) {
@@ -711,6 +801,7 @@ export class MapTileStreamClient {
         }
         this.downstreamBytesPerSecondEwma = this.pullDownstreamEwmaAlpha * bytesPerSecond
             + (1 - this.pullDownstreamEwmaAlpha) * this.downstreamBytesPerSecondEwma;
+        this.updatePullMaxBytes(this.downstreamBytesPerSecondEwma);
     }
 
     private recordPullTransportSample(response: Response, uncompressedBytes: number) {

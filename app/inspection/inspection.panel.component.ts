@@ -33,7 +33,7 @@ interface InspectionPanelContentAdapter {
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
-                        <span class="title-container">
+                        <span class="title-container" [class.feature]="panel().sourceData === undefined">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
                                                (mousedown)="$event.stopPropagation()"
@@ -431,10 +431,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
 
     private refreshPanelContentLayout() {
         const refresh = () => this.getPanelContentAdapter()?.refreshLayout();
-        if (typeof window === "undefined") {
-            refresh();
-            return;
-        }
         window.requestAnimationFrame(() => {
             window.requestAnimationFrame(() => refresh());
         });
@@ -530,10 +526,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     private scheduleAutoExpand() {
-        if (typeof window === "undefined") {
-            this.accordionValue = '0';
-            return;
-        }
         this.clearScheduledAutoExpand();
         this.autoExpandRafFirst = window.requestAnimationFrame(() => {
             this.autoExpandRafFirst = undefined;
@@ -545,9 +537,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     private clearScheduledAutoExpand() {
-        if (typeof window === "undefined") {
-            return;
-        }
         if (this.autoExpandRafFirst !== undefined) {
             window.cancelAnimationFrame(this.autoExpandRafFirst);
             this.autoExpandRafFirst = undefined;

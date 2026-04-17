@@ -3,8 +3,10 @@ import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {IconLayer, ScatterplotLayer, TextLayer} from "@deck.gl/layers";
 import {coreLib} from "../integrations/wasm";
 import {HighlightMode} from "../../build/libs/core/erdblick-core";
+import {SceneMode} from "../integrations/geo";
 import {IRenderSceneHandle} from "./render-view.model";
 import {DeckLayerRegistry} from "./deck/deck-layer-registry";
+import {Matrix4} from "@math.gl/core";
 
 export type MapViewLayerStyleRule = string;
 type PositionHash = string;
@@ -12,10 +14,11 @@ type Cartographic = {x: number, y: number, z: number};
 
 type DeckColor = [number, number, number, number];
 type DeckPosition = [number, number, number];
-type DeckScene = {layerRegistry?: DeckLayerRegistry};
+type DeckScene = {layerRegistry?: DeckLayerRegistry, sceneMode?: SceneMode};
 const DECK_NO_DEPTH_TEST_PARAMETERS = {
     depthTest: false
 } as any;
+const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 
 interface DeckMergedPoint {
     featureAddresses: number[];
@@ -204,6 +207,7 @@ export class MergedPointsTile {
         if (!registry) {
             return;
         }
+        const modelMatrix = scene.sceneMode === SceneMode.SCENE2D ? DECK_FLAT_2D_MODEL_MATRIX : undefined;
 
         this.removeDeck(scene);
 
@@ -321,6 +325,7 @@ export class MergedPointsTile {
                 getLineWidth: (d: DeckMergedPoint) => d.outlineWidth,
                 lineWidthUnits: "pixels",
                 billboard,
+                modelMatrix,
                 parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 stroked: true,
                 filled: true,
@@ -353,6 +358,7 @@ export class MergedPointsTile {
                     anchorY: d.height / 2
                 }),
                 billboard,
+                modelMatrix,
                 parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 pickable: true,
                 getId: (d: DeckMergedIcon) => d.featureAddresses
@@ -380,6 +386,7 @@ export class MergedPointsTile {
                 sizeUnits: "pixels",
                 getPixelOffset: (d: DeckMergedLabel) => d.pixelOffset,
                 billboard,
+                modelMatrix,
                 parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 pickable: true,
                 getId: (d: DeckMergedLabel) => d.featureAddresses

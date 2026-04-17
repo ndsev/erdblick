@@ -290,7 +290,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     ngAfterViewInit() {
         this.scheduleScrollerRecalc();
         const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
-        if (hostElement && typeof ResizeObserver !== "undefined") {
+        if (hostElement) {
             this.resizeObserver = new ResizeObserver(() => this.scheduleScrollerRecalc());
             this.resizeObserver.observe(hostElement);
             const container = hostElement.closest(".resizable-container");
@@ -298,11 +298,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 this.resizeObserver.observe(container);
             }
         }
-        if (typeof window !== "undefined") {
-            window.addEventListener("resize", this.onWindowResize);
-            window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
-            window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
-        }
+        window.addEventListener("resize", this.onWindowResize);
+        window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
+        window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
     }
 
     ngOnDestroy() {
@@ -310,11 +308,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.destroyed = true;
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
-        if (typeof window !== "undefined") {
-            window.removeEventListener("resize", this.onWindowResize);
-            window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
-            window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
-        }
+        window.removeEventListener("resize", this.onWindowResize);
+        window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
+        window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
         if (this.scrollerRecalcFrame !== undefined) {
             window.cancelAnimationFrame(this.scrollerRecalcFrame);
             this.scrollerRecalcFrame = undefined;
@@ -369,7 +365,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     private scheduleScrollerRecalc() {
-        if (this.destroyed || typeof window === "undefined") {
+        if (this.destroyed) {
             return;
         }
         if (this.frozen) {
@@ -407,9 +403,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     measurePreferredContentHeightEm(): number | undefined {
-        if (typeof window === "undefined") {
-            return undefined;
-        }
         const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
         if (!hostElement) {
             return undefined;

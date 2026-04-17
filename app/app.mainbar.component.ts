@@ -26,11 +26,17 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
     },
     template: `
         @if (stateService.mapsDialogVisible) {
-            <p-button class="maps-button" (click)="closeMapsPanel()" label="" tooltipPosition="right" pTooltip="Close maps configuration panel">
+            <p-button class="maps-button" (click)="closeMapsPanel()" label=""
+                      tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
+                      (mouseenter)="alignMapsPanelTooltip($event)"
+                      pTooltip="Close maps configuration panel">
                 <span class="material-symbols-outlined">close</span>
             </p-button>
         } @else {
-            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label="" tooltipPosition="right" pTooltip="Open maps configuration panel">
+            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label=""
+                      tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
+                      (mouseenter)="alignMapsPanelTooltip($event)"
+                      pTooltip="Open maps configuration panel">
                 <span class="material-symbols-outlined">stacks</span>
             </p-button>
         }
@@ -111,6 +117,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private viewerLayoutResizeObserver?: ResizeObserver;
     private viewerLayoutElement?: HTMLElement;
     private mobileMenubarStateFrame?: number;
+    private mapsPanelTooltipAlignFrame?: number;
+    private mapsPanelTooltipSafetyTimeout?: number;
     private viewportMobileMenubar = false;
     private viewerLayoutMobileMenubar = false;
 
@@ -158,7 +166,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     ngOnDestroy() {
         this.teardownMobileMenuTracking();
         this.teardownViewerLayoutTracking();
-        if (typeof window !== 'undefined' && this.mobileMenubarStateFrame !== undefined) {
+        this.cancelMapsPanelTooltipAlignment();
+        if (this.mobileMenubarStateFrame !== undefined) {
             window.cancelAnimationFrame(this.mobileMenubarStateFrame);
         }
         this.mobileMenubarStateFrame = undefined;
@@ -166,9 +175,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     private setupMobileMenuTracking() {
-        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-            return;
-        }
         this.mediaQueryList = window.matchMedia(MAIN_BAR_MEDIA_QUERY);
         this.viewportMobileMenubar = this.mediaQueryList.matches;
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
@@ -176,11 +182,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.viewportMobileMenubar = event.matches;
             this.scheduleMobileMenubarStateUpdate();
         };
-        if (typeof this.mediaQueryList.addEventListener === 'function') {
-            this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
-        } else {
-            this.mediaQueryList.addListener(this.mediaQueryChangeListener);
-        }
+        this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
     showPreferencesDialog() {
@@ -232,19 +234,70 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.stateService.mapsDialogVisible = false;
     }
 
+    protected alignMapsPanelTooltip(event: MouseEvent) {
+        const target = event.currentTarget as HTMLElement | null;
+        if (!target) {
+            return;
+        }
+
+        this.cancelMapsPanelTooltipAlignment();
+        const align = () => this.alignMapsPanelTooltipToTarget(target);
+        this.mapsPanelTooltipAlignFrame = window.requestAnimationFrame(() => {
+            this.mapsPanelTooltipAlignFrame = undefined;
+            align();
+        });
+        // PrimeNG creates and measures the tooltip asynchronously; a second pass
+        // catches the occasional post-frame size/position correction.
+        this.mapsPanelTooltipSafetyTimeout = window.setTimeout(() => {
+            this.mapsPanelTooltipSafetyTimeout = undefined;
+            align();
+        }, 50);
+    }
+
     protected openLegalInfo() {
         this.stateService.legalInfoDialogVisible = true;
+    }
+
+    private alignMapsPanelTooltipToTarget(target: HTMLElement) {
+        const tooltip = document.querySelector<HTMLElement>('.maps-panel-button-tooltip');
+        if (!tooltip) {
+            return;
+        }
+
+        const button = target.querySelector<HTMLElement>('button') ?? target;
+        const targetRect = button.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const viewportPaddingPx = 4;
+        const left = Math.min(
+            Math.max(targetRect.left, viewportPaddingPx),
+            Math.max(viewportPaddingPx, window.innerWidth - tooltipRect.width - viewportPaddingPx)
+        );
+
+        tooltip.style.left = `${left + window.scrollX}px`;
+        tooltip.style.top = `${targetRect.bottom + window.scrollY + viewportPaddingPx}px`;
+
+        const arrow = tooltip.querySelector<HTMLElement>('.p-tooltip-arrow');
+        if (arrow) {
+            arrow.style.left = `${targetRect.left - left + targetRect.width / 2}px`;
+        }
+    }
+
+    private cancelMapsPanelTooltipAlignment() {
+        if (this.mapsPanelTooltipAlignFrame !== undefined) {
+            window.cancelAnimationFrame(this.mapsPanelTooltipAlignFrame);
+            this.mapsPanelTooltipAlignFrame = undefined;
+        }
+        if (this.mapsPanelTooltipSafetyTimeout !== undefined) {
+            window.clearTimeout(this.mapsPanelTooltipSafetyTimeout);
+            this.mapsPanelTooltipSafetyTimeout = undefined;
+        }
     }
 
     private teardownMobileMenuTracking() {
         if (!this.mediaQueryList || !this.mediaQueryChangeListener) {
             return;
         }
-        if (typeof this.mediaQueryList.removeEventListener === 'function') {
-            this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
-        } else {
-            this.mediaQueryList.removeListener(this.mediaQueryChangeListener);
-        }
+        this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
         this.mediaQueryChangeListener = undefined;
         this.mediaQueryList = undefined;
     }
@@ -272,18 +325,16 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
 
         this.viewerLayoutElement = viewerLayoutElement;
-        if (typeof ResizeObserver !== 'undefined') {
-            this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
-                this.ngZone.run(() => {
-                    const [entry] = entries;
-                    const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
-                    if (typeof width === 'number') {
-                        this.updateViewerLayoutMobileState(width);
-                    }
-                });
+        this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
+            this.ngZone.run(() => {
+                const [entry] = entries;
+                const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
+                if (typeof width === 'number') {
+                    this.updateViewerLayoutMobileState(width);
+                }
             });
-            this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
-        }
+        });
+        this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
     }
 
     private teardownViewerLayoutTracking() {
@@ -310,10 +361,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (this.mobileMenubarStateFrame !== undefined) {
             return;
         }
-        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-            this.updateMobileMenubarState();
-            return;
-        }
         this.ngZone.runOutsideAngular(() => {
             this.mobileMenubarStateFrame = window.requestAnimationFrame(() => {
                 this.mobileMenubarStateFrame = undefined;
@@ -330,10 +377,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     private getViewerLayoutMobileBreakpointPx(): number {
-        if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
-            return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * 16;
-        }
-
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
         const effectiveRootFontSize = Number.isFinite(rootFontSize) ? rootFontSize : 16;
         return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * effectiveRootFontSize;

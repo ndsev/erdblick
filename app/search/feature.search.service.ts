@@ -322,7 +322,10 @@ export class FeatureSearchService {
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
         this.updatePointColor();
-        this.mapService.statsDialogNeedsUpdate.subscribe(() => {
+        this.mapService.tileDataChanged.subscribe(change => {
+            if (!this.pendingSearchTilesByKey.has(change.tileKey)) {
+                return;
+            }
             this.enqueueReadyPendingSearchTiles();
         });
     }
@@ -443,8 +446,10 @@ export class FeatureSearchService {
 
         for (const tile of this.orderedTilesForSearchProcessing()) {
             if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
-                this.currentSearch.markTilePending(tile.mapTileKey);
+                if (this.isTileStillExpected(tile)) {
+                    this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
+                    this.currentSearch.markTilePending(tile.mapTileKey);
+                }
                 continue;
             }
             this.enqueueSearchTask(tile, this.currentSearch);
@@ -760,6 +765,10 @@ export class FeatureSearchService {
         return this.mapService.getPrioritisedTiles(viewIndex);
     }
 
+    private isTileStillExpected(tile: FeatureTile): boolean {
+        return this.mapService.getRequestedMaxStageForTile(tile) !== null;
+    }
+
     private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
         const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
         if (!tileBlobs.length) {
@@ -810,6 +819,11 @@ export class FeatureSearchService {
                 continue;
             }
             if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                if (!this.isTileStillExpected(tile)) {
+                    this.pendingSearchTilesByKey.delete(tileKey);
+                    activeSearch.markTileReady(tileKey);
+                    stateChanged = true;
+                }
                 continue;
             }
             this.pendingSearchTilesByKey.delete(tileKey);

@@ -113,7 +113,7 @@ export class DockableLayoutComponent implements OnDestroy {
     }
 
     private dispatchDockResizePauseStart() {
-        if (this.dockResizePauseActive || typeof window === "undefined") {
+        if (this.dockResizePauseActive) {
             return;
         }
         this.dockResizePauseActive = true;
@@ -121,7 +121,7 @@ export class DockableLayoutComponent implements OnDestroy {
     }
 
     private dispatchDockResizePauseEnd() {
-        if (!this.dockResizePauseActive || typeof window === "undefined") {
+        if (!this.dockResizePauseActive) {
             return;
         }
         this.dockResizePauseActive = false;
@@ -129,9 +129,6 @@ export class DockableLayoutComponent implements OnDestroy {
     }
 
     private scheduleDockResizePauseEnd() {
-        if (typeof window === "undefined") {
-            return;
-        }
         this.clearScheduledDockResizePauseEnd();
         this.dockPauseEndRafFirst = window.requestAnimationFrame(() => {
             this.dockPauseEndRafFirst = undefined;
@@ -143,9 +140,6 @@ export class DockableLayoutComponent implements OnDestroy {
     }
 
     private clearScheduledDockResizePauseEnd() {
-        if (typeof window === "undefined") {
-            return;
-        }
         if (this.dockPauseEndRafFirst !== undefined) {
             window.cancelAnimationFrame(this.dockPauseEndRafFirst);
             this.dockPauseEndRafFirst = undefined;
