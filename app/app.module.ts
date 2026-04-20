@@ -106,6 +106,7 @@ import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.compo
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
 
+/** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
         primary: {
@@ -124,6 +125,7 @@ export const ErdblickTheme = definePreset(Aura, {
     }
 });
 
+/** Updates the pre-bootstrap global loading spinner shown before Angular starts. */
 const updateGlobalSpinner = (message: string) => {
     const messageEl = document.getElementById('global-spinner-message');
     if (messageEl) {
@@ -138,6 +140,7 @@ const updateGlobalSpinner = (message: string) => {
     }
 };
 
+/** App initializer that brings up the WASM core, styles, map data, and search workers in order. */
 export const initializeServices = () => {
     const styleService = inject(StyleService);
     const mapService = inject(MapDataService);
@@ -279,5 +282,6 @@ export const initializeServices = () => {
         })
     ]
 })
+/** Root Angular module for the full erdblick application. */
 export class AppModule {
 }

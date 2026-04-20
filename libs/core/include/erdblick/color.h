@@ -9,19 +9,22 @@ namespace erdblick
 {
 
 /**
- * Color Class
+ * Lightweight RGB color value with parsing helpers for CSS-style literals.
+ *
+ * A default-constructed instance is intentionally marked invalid so callers can
+ * distinguish "missing color" from an explicit black value.
  */
 class Color : public glm::u8vec3
 {
 public:
 
     /**
-      * Default constructor - will result in an invalid color.
+      * Construct an invalid sentinel color.
      */
     Color();
 
     /**
-      * Copy constructor
+      * Copy an existing color including its validity flag.
      */
     Color(const Color&);
 

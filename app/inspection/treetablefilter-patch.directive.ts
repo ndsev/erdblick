@@ -16,9 +16,11 @@ import {TreeTableNode} from "primeng/api";
     selector: 'p-treeTable',
     standalone: false
 })
+/** Patches PrimeNG's strict tree filtering so inspection trees stay usable for deep matches. */
 export class TreeTableFilterPatchDirective implements AfterContentInit {
     constructor(private tt: TreeTable) {}
 
+    /** Replaces PrimeNG's recursive filter helper with erdblick's expand-and-keep-siblings variant. */
     ngAfterContentInit() {
         this.tt.findFilteredNodes = (node: TreeTableNode, paramsWithoutNode: any): true | undefined => {
             console.assert(paramsWithoutNode.isStrictMode);

@@ -5,9 +5,11 @@ import {Dialog} from "primeng/dialog";
     selector: '[onEnterClick]',
     standalone: false
 })
+/** Small directive that turns Enter into a click for button-like controls. */
 export class OnEnterClickDirective {
     constructor(private el: ElementRef) {}
 
+    /** Clicks the host element when Enter is pressed while it has focus. */
     @HostListener('keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
         if (event.key === 'Enter') {
@@ -17,6 +19,7 @@ export class OnEnterClickDirective {
 }
 
 @Injectable({providedIn: 'root'})
+/** Global keyboard shortcut registry shared across dialogs and panels. */
 export class KeyboardService {
     private renderer: Renderer2;
     private dialogStack: Array<Dialog> = [];
@@ -28,6 +31,7 @@ export class KeyboardService {
         this.listenToKeyboardEvents();
     }
 
+    /** Installs the global keydown listener once for the application lifetime. */
     private listenToKeyboardEvents() {
         this.renderer.listen('window', 'keydown', (event: KeyboardEvent) => {
             const target = event.target as HTMLElement;
@@ -56,6 +60,7 @@ export class KeyboardService {
         });
     }
 
+    /** Normalizes a keyboard event into the shortcut key used by the registry. */
     private getKeyCombination(event: KeyboardEvent): string {
         let key = '';
         if (event.ctrlKey) {
@@ -65,6 +70,7 @@ export class KeyboardService {
         return key;
     }
 
+    /** Registers a shortcut and optionally ignores it while the user edits text inputs. */
     registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean = false): void {
         // TODO: If registered for the focused view, only apply shortcuts to the view which gets focused on
         this.shortcuts.set(keys, callback);
@@ -73,6 +79,7 @@ export class KeyboardService {
         }
     }
 
+    /** Clears shortcuts when the service is torn down in tests. */
     ngOnDestroy() {
         this.shortcuts.clear();
     }

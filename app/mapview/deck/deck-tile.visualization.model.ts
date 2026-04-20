@@ -35,18 +35,21 @@ import {
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
 
+/** Style wrapper for wasm styles that expose erdblick-specific lifecycle and fidelity helpers. */
 interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
     hasExplicitLowFidelityRules(): boolean;
     hasRelationRules(mode: HighlightMode): boolean;
 }
 
+/** Deck-scene subset consumed by tile visualizations when they need the registry or scene mode. */
 interface DeckSceneHandle {
     deck?: unknown;
     layerRegistry?: DeckLayerRegistry;
     sceneMode?: SceneMode;
 }
 
+/** Callback surface used to query how many points are already merged at a location. */
 interface MergeCountProvider {
     count: (
         geoPos: {x: number, y: number, z: number},
@@ -58,21 +61,25 @@ interface MergeCountProvider {
 
 type DeckFeatureAddressBuffer = Uint32Array | Array<number | null>;
 
+/** Extra picking metadata attached to deck layers emitted by this visualization. */
 interface DeckPickLayerMetadata {
     tileKey: string;
     featureAddresses?: DeckFeatureAddressBuffer;
     featureAddressesByPath?: DeckFeatureAddressBuffer;
 }
 
+/** Picking metadata for path layers, including dash layout hints. */
 interface DeckPathLayerMetadata extends DeckPickLayerMetadata {
     dashJustified?: boolean;
 }
 
+/** Binary attribute wrapper matching deck's binary-data layer input format. */
 interface DeckBinaryAttribute<T extends ArrayLike<number>> {
     value: T;
     size: number;
 }
 
+/** Binary deck path-layer payload grouped by billboard and depth-test mode. */
 interface DeckPathLayerData {
     length: number;
     billboard: boolean;
@@ -88,6 +95,7 @@ interface DeckPathLayerData {
     };
 }
 
+/** Binary deck point-layer payload grouped by billboard and depth-test mode. */
 interface DeckPointLayerData {
     length: number;
     billboard: boolean;
@@ -101,6 +109,7 @@ interface DeckPointLayerData {
     };
 }
 
+/** Binary deck polygon-layer payload grouped by depth-test mode. */
 interface DeckSurfaceLayerData {
     length: number;
     depthTest: boolean;
@@ -113,6 +122,7 @@ interface DeckSurfaceLayerData {
     };
 }
 
+/** Label-layer payload grouped by billboard and depth-test mode. */
 interface DeckLabelLayerData {
     length: number;
     billboard: boolean;
@@ -121,10 +131,12 @@ interface DeckLabelLayerData {
     data: DeckRenderableLabelDatum[];
 }
 
+/** Label datum normalized to deck's tuple-based position format. */
 type DeckRenderableLabelDatum = Omit<DeckLabelDatum, "position"> & {
     position: [number, number, number];
 };
 
+/** Raw path buffers read back from wasm before they are regrouped for deck consumption. */
 interface DeckPathRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
@@ -136,6 +148,7 @@ interface DeckPathRawBuffers {
     dashArrays?: Float32Array;
 }
 
+/** Raw point buffers read back from wasm before they are regrouped for deck consumption. */
 interface DeckPointRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
@@ -145,6 +158,7 @@ interface DeckPointRawBuffers {
     featureAddresses: Uint32Array;
 }
 
+/** Raw surface buffers read back from wasm before they are regrouped for deck consumption. */
 interface DeckSurfaceRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
@@ -154,6 +168,7 @@ interface DeckSurfaceRawBuffers {
     featureAddresses: Uint32Array;
 }
 
+/** Complete geometry output of one wasm render pass, before deck-layer regrouping. */
 interface DeckWasmRenderOutput {
     surfaceLayerData: DeckSurfaceLayerData[];
     pathLayerData: DeckPathLayerData[];
@@ -166,6 +181,7 @@ interface DeckWasmRenderOutput {
     workerTimings: DeckWorkerTimings | null;
 }
 
+/** Cached low-fi bundle grouped by LOD after wasm output has been translated for deck. */
 interface DeckLowFiBundleData {
     lod: number;
     surfaceLayerData: DeckSurfaceLayerData[];
@@ -218,14 +234,17 @@ type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualizati
     renderResult(): DeckVisualizationBufferResult;
 };
 
+/** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
 function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
     return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
 }
 
+/** Returns the wasm fidelity enum used by deck tile rendering. */
 function deckRuleFidelityEnum(): DeckRuleFidelityEnum {
     return coreLib.RuleFidelity as DeckRuleFidelityEnum;
 }
 
+/** Icon-marker payload derived from arrow path geometry. */
 interface DeckArrowMarker {
     featureAddress: number | null;
     position: [number, number, number];
@@ -234,6 +253,7 @@ interface DeckArrowMarker {
     angleDeg: number;
 }
 
+/** Concrete registry keys for every deck layer emitted by one tile visualization variant. */
 interface DeckLayerKeys {
     surfaceLayerKey: string;
     pathLayerKey: string;
@@ -242,6 +262,7 @@ interface DeckLayerKeys {
     arrowLayerKey: string;
 }
 
+/** One logical render variant applied to the registry, e.g. base geometry or a low-fi LOD bundle. */
 interface DeckLayerRenderEntry {
     variantSuffix: string;
     orderOffset: number;
@@ -299,6 +320,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
 
 
+    /** Captures every render input needed to keep one tile/style visualization alive across rerenders. */
     constructor(viewIndex: number,
                 tile: FeatureTile,
                 pointMergeService: PointMergeService,
@@ -333,6 +355,10 @@ export class DeckTileVisualization implements ITileVisualization {
         this.viewIndex = viewIndex;
     }
 
+    /**
+     * Renders the tile into deck layers or merged-point scene state.
+     * Low-fi bundle switches may short-circuit to cached data instead of rerunning wasm.
+     */
     async render(sceneHandle: IRenderSceneHandle): Promise<boolean> {
         const registry = this.resolveRegistry(sceneHandle);
         if (this.deleted || this.style.isDeleted()) {
@@ -431,6 +457,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Resolves the registry keys used by the different geometry layers emitted for this visualization. */
     private resolveLayerKeys(variantSuffix = ""): DeckLayerKeys {
         const variant = this.composeLayerVariant(variantSuffix);
         return {
@@ -472,6 +499,7 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
+    /** Composes an optional variant suffix used to distinguish low-fi bundles and highlight variants. */
     private composeLayerVariant(variantSuffix: string): string | undefined {
         const parts: string[] = [];
         if (this.layerKeySuffix.length > 0) {
@@ -486,6 +514,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return parts.join("::");
     }
 
+    /** Removes this tile's contributions from merged-point corner tiles and re-renders surviving corners. */
     private clearMergedPointVisualizations(sceneHandle: IRenderSceneHandle): void {
         for (const affectedCornerTile of this.pointMergeService.remove(
             this.tile.tileId,
@@ -499,6 +528,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Applies one geometry result directly to the deck registry as the default variant. */
     private applyLayerDataToRegistry(
         sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
@@ -519,6 +549,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }]);
     }
 
+    /** Applies one or more cached low-fi bundles to the deck registry as separate variants. */
     private applyLowFiBundleDataToRegistry(
         sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
@@ -535,6 +566,10 @@ export class DeckTileVisualization implements ITileVisualization {
         })));
     }
 
+    /**
+     * Materializes the concrete deck layers for the supplied render entries and reconciles stale keys.
+     * Layer ordering is intentionally grouped by geometry family and variant offset.
+     */
     private applyLayerEntriesToRegistry(
         sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
@@ -722,6 +757,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.reconcileLayerKeys(registry, this.arrowLayerKeys, desiredArrowLayerKeys);
     }
 
+    /** Returns the 2D flattening matrix when the target scene is orthographic deck 2D. */
     private modelMatrixForScene(sceneHandle: IRenderSceneHandle): Matrix4 | null {
         if (sceneHandle.renderer !== "deck") {
             return null;
@@ -730,6 +766,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return deckScene?.sceneMode === SceneMode.SCENE2D ? DECK_FLAT_2D_MODEL_MATRIX : null;
     }
 
+    /** Builds the geometry-specific variant suffix used in deck layer keys. */
     private composeGeometryVariant(
         baseVariantSuffix: string,
         geometryKind: string,
@@ -751,10 +788,12 @@ export class DeckTileVisualization implements ITileVisualization {
         return parts.join("::");
     }
 
+    /** Chooses deck layer parameters that either honor or bypass depth testing. */
     private layerParametersForDepthTest(depthTest: boolean) {
         return depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS;
     }
 
+    /** Removes stale registry keys and replaces the active-key set with the desired keys. */
     private reconcileLayerKeys(
         registry: DeckLayerRegistry,
         activeLayerKeys: Set<string>,
@@ -771,6 +810,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Commits the post-render bookkeeping that drives dirtiness and low-fi-switch detection. */
     private completeRender(
         fidelity: "low" | "high" | "any" | null,
         activeLowFiLods: number[]
@@ -786,6 +826,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.activeRenderedLowFiLods = fidelity === "low" ? [...activeLowFiLods] : [];
     }
 
+    /** Returns true when at least one surface/path/point/label/arrow layer contains geometry. */
     private hasRenderableLayerData(
         surfaceLayerData: DeckSurfaceLayerData[],
         pathLayerData: DeckPathLayerData[],
@@ -800,6 +841,7 @@ export class DeckTileVisualization implements ITileVisualization {
             || arrowLayerData.some((data) => data.length > 0);
     }
 
+    /** Returns true when merged-point output contains any features. */
     private hasRenderableMergedPointFeatures(
         mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
     ): boolean {
@@ -809,6 +851,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return Object.values(mergedPointFeatures).some(features => features.length > 0);
     }
 
+    /** Keeps the currently visible low-fi output alive until high-fi data becomes renderable again. */
     private shouldKeepActiveLowFiFallback(
         fidelity: "low" | "high" | "any" | null,
         surfaceLayerData: DeckSurfaceLayerData[],
@@ -827,6 +870,7 @@ export class DeckTileVisualization implements ITileVisualization {
             && !this.hasRenderableMergedPointFeatures(mergedPointFeatures);
     }
 
+    /** Replaces the cached low-fi bundle map with the latest worker or main-thread output. */
     private updateLowFiBundleCache(lowFiBundles: DeckLowFiBundleData[]): void {
         this.lowFiBundleByLod.clear();
         for (const lowFiBundle of lowFiBundles) {
@@ -834,6 +878,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Returns the requested low-fi LOD after clamping to the supported 0-7 range. */
     private requestedLowFiLod(): number | null {
         const requestedLod = this.resolveMaxLowFiLod("low");
         if (requestedLod < 0) {
@@ -842,6 +887,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return Math.max(0, Math.min(7, Math.floor(requestedLod)));
     }
 
+    /** Selects the cached low-fi bundles that satisfy the current requested low-fi LOD. */
     private selectLowFiBundlesForCurrentRequest(): DeckLowFiBundleData[] {
         const requestedLod = this.requestedLowFiLod();
         if (requestedLod === null) {
@@ -852,10 +898,12 @@ export class DeckTileVisualization implements ITileVisualization {
             .sort((lhs, rhs) => lhs.lod - rhs.lod);
     }
 
+    /** Returns just the LOD numbers of the currently selected low-fi bundles. */
     private lowFiLodSelection(): number[] {
         return this.selectLowFiBundlesForCurrentRequest().map((bundle) => bundle.lod);
     }
 
+    /** Returns true when two low-fi bundle selections describe the same set of active LODs. */
     private sameLowFiLodSelection(lhs: number[], rhs: number[]): boolean {
         if (lhs.length !== rhs.length) {
             return false;
@@ -868,6 +916,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return true;
     }
 
+    /** Fast-path that swaps cached low-fi bundles into the registry without rerunning wasm. */
     private tryApplyCachedLowFiSwitch(
         sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
@@ -899,6 +948,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return true;
     }
 
+    /** Returns true when the requested low-fi LOD changed relative to what is currently rendered. */
     private hasPendingLowFiSwitch(): boolean {
         if (!this.rendered
             || this.currentFidelity() !== "low"
@@ -908,6 +958,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return !this.sameLowFiLodSelection(this.activeRenderedLowFiLods, this.lowFiLodSelection());
     }
 
+    /** Returns true when the currently requested fidelity differs from the last rendered fidelity. */
     private hasPendingFidelitySwitch(): boolean {
         if (!this.rendered) {
             return false;
@@ -919,6 +970,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return currentFidelity !== this.activeRenderedFidelity;
     }
 
+    /** Removes all deck layers and merged-point state owned by this visualization. */
     destroy(sceneHandle: IRenderSceneHandle): void {
         this.deleted = true;
         const registry = this.resolveRegistry(sceneHandle);
@@ -963,6 +1015,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.tileDataVersionAtLastRender = -1;
     }
 
+    /** Returns whether any relevant tile/style/fidelity input changed since the last successful render. */
     isDirty(): boolean {
         return (
             !this.rendered ||
@@ -973,6 +1026,7 @@ export class DeckTileVisualization implements ITileVisualization {
         );
     }
 
+    /** Returns the queue sort rank used by `VisualizationQueue`. */
     renderRank(): number {
         const hasData = this.tileHasData();
         const priorityBucket = (this.hasPendingLowFiSwitch() || this.hasPendingFidelitySwitch())
@@ -990,17 +1044,20 @@ export class DeckTileVisualization implements ITileVisualization {
             + hasDataRank;
     }
 
+    /** Updates whether this visualization is currently queued for rendering. */
     updateStatus(renderQueued?: boolean): void {
         if (renderQueued !== undefined) {
             this.renderQueued = renderQueued;
         }
     }
 
+    /** Applies a style option change locally; deck renderers currently treat every option update as dirty. */
     setStyleOption(optionId: string, value: string | number | boolean): boolean {
         this.options[optionId] = value;
         return true;
     }
 
+    /** Returns a compact highlight-mode label used in deck layer keys. */
     private highlightModeLabel(): string {
         switch (this.highlightMode.value) {
             case coreLib.HighlightMode.HOVER_HIGHLIGHT.value:
@@ -1012,6 +1069,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Builds the signature that determines whether a rerender is required. */
     private renderSignature(fidelity: "low" | "high" | "any" | null = this.currentFidelity()): string {
         return JSON.stringify({
             fidelity,
@@ -1024,6 +1082,10 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
+    /**
+     * Executes the wasm render path, preferring worker rendering for base geometry.
+     * Hover/selection highlights stay on the main thread to minimize interaction latency and races.
+     */
     private async renderWasm(fidelity: "low" | "high" | "any" | null): Promise<DeckPathLayerData[]> {
         if (fidelity === null) {
             return [];
@@ -1083,6 +1145,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Marshals the current tile/style state to the render-worker pool and translates the result back. */
     private async renderWasmInWorker(
         fidelity: "low" | "high" | "any",
         outputMode: DeckGeometryOutputMode
@@ -1172,6 +1235,7 @@ export class DeckTileVisualization implements ITileVisualization {
         );
     }
 
+    /** Adds the primary tile to a wasm visualization and runs it on the main thread. */
     private async addTilesAndRunMainThreadVisualization(
         deckVisu: DeckFeatureLayerVisualization
     ): Promise<number> {
@@ -1184,6 +1248,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return vertexCount;
     }
 
+    /** Resolves cross-tile relation targets and feeds the located auxiliary tiles into the visualization. */
     private async resolveExternalRelations(deckVisu: DeckFeatureLayerVisualization): Promise<void> {
         if (!this.shouldAddRelationAuxiliaryTiles()) {
             return;
@@ -1201,6 +1266,7 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
+    /** Executes the full wasm render path on the main thread and translates the result into deck layer data. */
     private async renderWasmOnMainThread(
         fidelity: "low" | "high" | "any",
         outputMode: DeckGeometryOutputMode
@@ -1230,6 +1296,7 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Converts low-fi bundle buffers from wasm output into deck-friendly grouped layer data. */
     private buildLowFiBundleData(
         rawBundles: DeckLowFiBundleBuffers[],
         coordinateOrigin: Float64Array
@@ -1260,6 +1327,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return [...bundlesByLod.values()].sort((lhs, rhs) => lhs.lod - rhs.lod);
     }
 
+    /** Converts raw wasm geometry buckets into the grouped deck layer-data structures used by this class. */
     private buildGeometryLayerData(
         coordinateOrigin: Float64Array,
         geometry: DeckGeometryBucketBuffers
@@ -1292,10 +1360,12 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
+    /** Reads the binary render result from the wasm visualization wrapper. */
     private readRenderResultFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
         return (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
     }
 
+    /** Builds path-layer data for both world-space and billboard path buckets. */
     private buildCombinedPathLayerData(
         coordinateOrigin: Float64Array,
         worldRaw: Omit<DeckPathRawBuffers, "coordinateOrigin">,
@@ -1307,6 +1377,7 @@ export class DeckTileVisualization implements ITileVisualization {
         ];
     }
 
+    /** Builds point-layer data for both world-space and billboard point buckets. */
     private buildCombinedPointLayerData(
         coordinateOrigin: Float64Array,
         worldRaw: Omit<DeckPointRawBuffers, "coordinateOrigin">,
@@ -1318,6 +1389,7 @@ export class DeckTileVisualization implements ITileVisualization {
         ];
     }
 
+    /** Builds label-layer data for both world-space and billboard label buckets. */
     private buildCombinedLabelLayerData(
         coordinateOrigin: Float64Array,
         worldRaw: DeckLabelDatum[],
@@ -1329,6 +1401,7 @@ export class DeckTileVisualization implements ITileVisualization {
         ];
     }
 
+    /** Extracts the meter-offset coordinate origin tuple from raw wasm output. */
     private coordinateOriginFromRaw(raw: Float64Array): [number, number, number] | null {
         if (raw.length < 3) {
             return null;
@@ -1336,6 +1409,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return [raw[0], raw[1], raw[2]];
     }
 
+    /** Regroups raw path buffers by depth-test state into deck binary path-layer payloads. */
     private buildPathLayerData(raw: DeckPathRawBuffers, billboard: boolean): DeckPathLayerData[] {
         const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
         if (!coordinateOrigin) {
@@ -1458,6 +1532,7 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
+    /** Regroups raw surface buffers by depth-test state into deck polygon-layer payloads. */
     private buildSurfaceLayerData(raw: DeckSurfaceRawBuffers): DeckSurfaceLayerData[] {
         const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
         if (!coordinateOrigin) {
@@ -1561,6 +1636,7 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
+    /** Regroups raw point buffers by depth-test state into deck scatterplot-layer payloads. */
     private buildPointLayerData(raw: DeckPointRawBuffers, billboard: boolean): DeckPointLayerData[] {
         const coordinateOrigin = this.coordinateOriginFromRaw(raw.coordinateOrigin);
         if (!coordinateOrigin) {
@@ -1636,6 +1712,7 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
+    /** Regroups label data by depth-test state and normalizes positions to deck tuples. */
     private buildLabelLayerData(
         coordinateOriginRaw: Float64Array,
         data: DeckLabelDatum[],
@@ -1671,6 +1748,7 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
+    /** Derives arrowhead icon markers from the first and last vertices of rendered arrow paths. */
     private buildArrowMarkers(pathData: DeckPathLayerData): DeckArrowMarker[] {
         const markers: DeckArrowMarker[] = [];
         const positions = pathData.attributes.getPath.value;
@@ -1730,18 +1808,22 @@ export class DeckTileVisualization implements ITileVisualization {
         return markers;
     }
 
+    /** Returns whether the backing tile currently has any stage payloads loaded. */
     private tileHasData(): boolean {
         return this.tile.hasData();
     }
 
+    /** Returns the tile's current feature count snapshot. */
     private tileFeatureCount(): number {
         return this.tile.numFeatures;
     }
 
+    /** Returns the configured high-fidelity stage for this visualization. */
     private resolvedHighFidelityStage(): number {
         return this.highFidelityStage;
     }
 
+    /** Returns the tile's highest loaded stage, normalized to a non-negative integer when present. */
     private highestLoadedStageOrDefault(): number | null {
         const highestLoadedStage = this.tile.highestLoadedStage();
         if (highestLoadedStage === null || highestLoadedStage === undefined || !Number.isFinite(highestLoadedStage)) {
@@ -1750,6 +1832,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return Math.max(0, Math.floor(highestLoadedStage));
     }
 
+    /** Chooses the fidelity that should currently be rendered from tile state and view policy. */
     private currentFidelity(): "low" | "high" | "any" | null {
         if (!this.tile.hasData() || this.tile.numFeatures <= 0) {
             return null;
@@ -1763,6 +1846,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return "low";
     }
 
+    /** Maps the local fidelity label to the wasm `RuleFidelity` enum. */
     private fidelityEnumValue(fidelity: "low" | "high" | "any"): RuleFidelity {
         const fidelityEnum = deckRuleFidelityEnum();
         if (fidelity === "high") {
@@ -1774,6 +1858,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return fidelityEnum.ANY;
     }
 
+    /** Returns the low-fi LOD limit to pass to wasm, or `-1` when low-fi limits are inactive. */
     private resolveMaxLowFiLod(fidelity: "low" | "high" | "any"): number {
         if (fidelity !== "low" || !this.styleHasExplicitLowFidelityRules) {
             return -1;
@@ -1784,6 +1869,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return this.maxLowFiLod;
     }
 
+    /** Maps the worker/main-thread output mode to the wasm geometry-output constant. */
     private mapGeometryOutputModeForWasm(outputMode: DeckGeometryOutputMode): number {
         const ctor = deckFeatureLayerVisualizationCtor();
         if (outputMode === DECK_GEOMETRY_OUTPUT_POINTS_ONLY
@@ -1797,14 +1883,17 @@ export class DeckTileVisualization implements ITileVisualization {
         return ctor.GEOMETRY_OUTPUT_ALL();
     }
 
+    /** Pushes the rendered vertex count back into the owning tile's diagnostics state. */
     private setTileVertexCount(count: number): void {
         this.tile.setVertexCount(Math.max(0, Math.floor(Number(count))));
     }
 
+    /** Returns a shallow copy of the current style options for worker-safe transport. */
     private copyStyleOptions(): Record<string, boolean | number | string> {
         return {...this.options};
     }
 
+    /** Builds the merged-point service key shared by all layers of this visualization. */
     private mapViewLayerStyleId(): MapViewLayerStyleRule {
         return this.pointMergeService.makeMapViewLayerStyleId(
             this.viewIndex,
@@ -1815,6 +1904,7 @@ export class DeckTileVisualization implements ITileVisualization {
         );
     }
 
+    /** Records one render duration sample under the style/highlight-specific diagnostics key. */
     private recordRenderTimeSample(durationMs: number, measuredDurationMs?: number): void {
         const sampleDuration = Number.isFinite(measuredDurationMs)
             ? measuredDurationMs as number
@@ -1828,6 +1918,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.tile.stats.set(timingListKey, [sampleDuration]);
     }
 
+    /** Records worker-side deserialize time into the tile's parse-time diagnostics bucket. */
     private recordWorkerParseTimeSample(durationMs?: number): void {
         if (!Number.isFinite(durationMs)) {
             return;
@@ -1840,6 +1931,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.tile.stats.set(FeatureTile.statParseTime, [durationMs as number]);
     }
 
+    /** Returns the diagnostics label used for the current highlight mode. */
     private statsHighlightModeLabel(): string {
         switch (this.highlightMode.value) {
             case coreLib.HighlightMode.HOVER_HIGHLIGHT.value:
@@ -1851,17 +1943,20 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Extracts the deck layer registry from the renderer-specific scene handle. */
     private resolveRegistry(sceneHandle: IRenderSceneHandle): DeckLayerRegistry {
         const scene = sceneHandle.scene as DeckSceneHandle;
         return scene.layerRegistry!;
     }
 
+    /** Returns and clears the latest worker timings after a render finished. */
     private consumeLatestWorkerTimings(): DeckWorkerTimings | null {
         const timings = this.latestWorkerTimings;
         this.latestWorkerTimings = null;
         return timings;
     }
 
+    /** Normalizes an angle to [0, 360). */
     private normalizeDegrees(value: number): number {
         const normalized = value % 360;
         return normalized < 0 ? normalized + 360 : normalized;

@@ -23,6 +23,12 @@ import {Textarea} from "primeng/textarea";
     standalone: true,
     imports: [DialogModule, ButtonModule, Textarea, FormsModule]
 })
+/**
+ * Minimal modal used for long-form alerts and copy dialogs.
+ *
+ * The component keeps its own `display` flag so callers can create it
+ * dynamically and destroy it once the user dismisses the modal.
+ */
 export class AlertDialogComponent implements AfterViewInit {
     headerText = input<string>('Default Header');
     messageText = input<string>('Default Body Text');
@@ -33,11 +39,13 @@ export class AlertDialogComponent implements AfterViewInit {
     displayChange = output<boolean>();
     @ViewChild('textarea', { static: true }) txtRef!: ElementRef<HTMLTextAreaElement>;
 
+    /** Closes the dialog and notifies the dynamic host component. */
     close() {
         this.display = false;
         this.displayChange.emit(this.display);
     }
 
+    /** Selects the textarea contents when the caller wants copy-friendly focus. */
     ngAfterViewInit() {
         if (this.selected()) {
             this.txtRef.nativeElement.select();

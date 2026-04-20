@@ -104,6 +104,12 @@ const completionsList = [
     styles: [],
     standalone: false
 })
+/**
+ * YAML editor wrapper used for style sheets and datasource configuration.
+ *
+ * The component recreates the CodeMirror instance on demand because callers can
+ * swap the edited document and read-only mode dynamically.
+ */
 export class EditorComponent implements AfterViewInit, OnDestroy {
 
     @ViewChild('editor') private editorRef!: ElementRef;
@@ -118,6 +124,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     constructor(public editorService: EditorService,
                 public renderer: Renderer2) {}
 
+    /** Creates or recreates the CodeMirror view when the shared editor service activates it. */
     ngAfterViewInit(): void {
         this.editorService.updateEditorState.subscribe(state => {
             if (!state) {
@@ -151,6 +158,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Builds the CodeMirror state from the current editor-service settings. */
     createEditorState() {
         const root = document.documentElement; // or your app's root element
         const isDark = root.classList.contains('erdblick-dark');
@@ -177,11 +185,13 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Tears down observers and the CodeMirror view when the host disappears. */
     ngOnDestroy(): void {
         this.modeObserver?.disconnect();
         this.editorView?.destroy();
     }
 
+    /** Validates YAML syntax in-editor so malformed styles fail before save. */
     yamlLinter: Extension = linter((view) => {
         return new Promise((resolve) => {
             const results: Diagnostic[] = [];
@@ -203,6 +213,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         });
     });
 
+    /** Prevents middle-click paste from inserting clipboard contents into the editor. */
     stopMouseWheelClipboard: Extension = EditorView.domEventHandlers({
         mousedown: (event, view) => {
             if (event.button === 1) {
@@ -214,6 +225,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     });
 
 
+    /** Supplies the static style-schema completions for YAML editing. */
     styleCompletions: CompletionSource = (context: CompletionContext) => {
         let word = context.matchBefore(/\w*/);
         if (!word || (word.from == word.to && !context.explicit)) {
@@ -225,6 +237,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         }
     };
 
+    /** Returns the save keybinding used by every embedded editor instance. */
     saveCmd() {
         return {
             key: 'Mod-s',

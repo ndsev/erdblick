@@ -12,9 +12,11 @@
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
+/** Configure LSan defaults for the WASM sanitizer build. */
 const char *__lsan_default_options() {
     return "verbosity=1:malloc_context_size=64";
 }
+/** Configure ASan defaults for the WASM sanitizer build. */
 const char *__asan_default_options() {
     return "verbosity=1:malloc_context_size=64:detect_container_overflow=0";
 }
@@ -102,16 +104,19 @@ size_t getFreeMemory() {
     return totalMemory - dynamicTop + i.fordblks;
 }
 
+/** Export the integer value used for the "all geometry" deck output mode. */
 int deckGeometryOutputAll()
 {
     return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::All);
 }
 
+/** Export the integer value used for the "points only" deck output mode. */
 int deckGeometryOutputPointsOnly()
 {
     return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::PointsOnly);
 }
 
+/** Export the integer value used for the "non-points only" deck output mode. */
 int deckGeometryOutputNonPointsOnly()
 {
     return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::NonPointsOnly);
@@ -141,6 +146,7 @@ constexpr double CANONICAL_CAMERA_ASPECT_RATIO = 16.0 / 9.0;
 constexpr double EARTH_RADIUS_METERS = 6378137.0;
 constexpr double WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
 
+/** Wrap longitudes into the canonical `[-180, 180)` interval expected by mapget tiles. */
 double normalizeLongitude(double longitude)
 {
     longitude = std::fmod(longitude + 180.0, 360.0);
@@ -149,6 +155,7 @@ double normalizeLongitude(double longitude)
     return longitude - 180.0;
 }
 
+/** Validate that viewport inputs are finite and within plausible geographic bounds. */
 bool isFiniteViewport(Viewport const& viewport)
 {
     return std::isfinite(viewport.south) &&
@@ -164,6 +171,11 @@ bool isFiniteViewport(Viewport const& viewport)
         viewport.height <= 180.0;
 }
 
+/**
+ * Build a deterministic viewport used for zoom/fidelity policy decisions.
+ *
+ * The synthetic camera sits at the equator, points straight down, and only varies by altitude.
+ */
 Viewport canonicalViewportForAltitude(double altitudeMeters)
 {
     const auto safeAltitude = std::max(1.0, altitudeMeters);
@@ -250,6 +262,7 @@ em::val getTileIds(Viewport const& vp, int level, int limit)
     return resultArray;
 }
 
+/** Count visible tiles for the provided viewport without materializing the prioritized id list. */
 uint32_t getNumTileIds(Viewport const& vp, int level) {
     if (!isFiniteViewport(vp) || level < 0 || level > 62)
         return 0;
@@ -270,6 +283,7 @@ uint32_t getNumTileIdsForCanonicalCamera(double altitudeMeters, int level)
     return getNumTileIds(canonicalViewportForAltitude(altitudeMeters), level);
 }
 
+/** Evaluate the same camera-relative tile priority function used by `getTileIds()`. */
 double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
     if (!isFiniteViewport(vp))
         return 0.0;
@@ -383,6 +397,7 @@ std::string demangle(const char* name) {
  * and return the final diagnostics message objects.
  */
 em::val simfilGetDiagnostics(const std::string& query, em::val const& ndiagnosticsList) {
+    /** Expose a `std::vector<uint8_t>` as an input stream without copying it again. */
     struct Uint8StreamBuffer : public std::streambuf {
         Uint8StreamBuffer(std::vector<std::uint8_t>& buf) {
             auto begin = reinterpret_cast<char*>(buf.data());
@@ -438,14 +453,14 @@ em::val simfilGetDiagnostics(const std::string& query, em::val const& ndiagnosti
     return std::move(*result);
 }
 
-/** Create a test style. */
+/** Register the JS callback that receives translated WASM exception type/message pairs. */
 void setExceptionHandler(em::val handler) {
     simfil::ThrowHandler::instance().set([handler](auto&& type, auto&& message){
         handler(demangle(type.c_str()), message);
     });
 }
 
-/**  Validate provided SIMFIL query */
+/** Validate a SIMFIL query by compiling it against a fresh default environment. */
 void validateSimfil(const std::string &query) {
     auto env = mapget::makeEnvironment(simfil::Environment::WithNewStringCache);
     simfil::compile(*env, query, false, true);

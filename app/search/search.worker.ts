@@ -1,6 +1,9 @@
 import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 
+/**
+ * Worker payload for evaluating a full search query against one tile and its overlays.
+ */
 export interface SearchWorkerTask {
     type: 'SearchWorkerTask';
     tileId: bigint;
@@ -13,6 +16,9 @@ export interface SearchWorkerTask {
     groupId: string;
 }
 
+/**
+ * Worker payload for generating completion candidates from one tile snapshot.
+ */
 export interface CompletionWorkerTask {
     type: 'CompletionWorkerTask';
     tileBlobs: Uint8Array[];
@@ -26,12 +32,21 @@ export interface CompletionWorkerTask {
     groupId: string;
 }
 
+/**
+ * Encodes the optional spatial location attached to a search match.
+ *
+ * The worker returns both cartesian and cartographic forms so the main thread can
+ * build overlays without re-reading the tile data.
+ */
 export interface SearchResultPosition {
     cartesian: {x: number, y: number, z: number},
     cartographic: {x: number, y: number, z: number} | null,
     cartographicRad: {longitude: number, latitude: number, height: number}
 }
 
+/**
+ * Timing information emitted by the core search engine for one traced function.
+ */
 export interface TraceResult {
     name: string;
     calls: bigint;
@@ -39,6 +54,9 @@ export interface TraceResult {
     values: Array<string>;
 }
 
+/**
+ * Human-facing query diagnostic emitted by simfil validation or execution.
+ */
 export interface DiagnosticsMessage {
     query: string;
     message: string;
@@ -46,6 +64,12 @@ export interface DiagnosticsMessage {
     fix: null | string;
 }
 
+/**
+ * Search result bundle returned for one tile.
+ *
+ * The main thread merges many of these structures into the result tree, marker overlays,
+ * and diagnostics views.
+ */
 export interface SearchResultForTile {
     type: 'SearchResultForTile';
     tileId: bigint;
@@ -60,6 +84,9 @@ export interface SearchResultForTile {
     groupId?: string;
 }
 
+/**
+ * One autocompletion suggestion produced for the current query and cursor position.
+ */
 export interface CompletionCandidate {
     text: string;   /// The completion
     kind: string;   /// Type of the completion ("constant", "field", ...)
@@ -70,6 +97,9 @@ export interface CompletionCandidate {
     hint: string;   /// Extra information
 }
 
+/**
+ * Completion candidates contributed by one tile.
+ */
 export interface CompletionCandidatesForTile {
     type: 'CompletionCandidatesForTile';
     query: string;
@@ -78,10 +108,16 @@ export interface CompletionCandidatesForTile {
     groupId?: string;
 }
 
+/**
+ * Handshake request that asks a freshly created worker to report the loaded module URL.
+ */
 export interface WorkerInitMessage {
     type: 'WorkerInit';
 }
 
+/**
+ * Handshake response used to clone the search worker script for additional workers.
+ */
 export interface WorkerReadyMessage {
     type: 'WorkerReady';
     scriptUrl: string;
@@ -92,6 +128,12 @@ export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile;
 export type WorkerInboundMessage = WorkerTask | WorkerInitMessage;
 export type WorkerOutboundMessage = WorkerResult | WorkerReadyMessage;
 
+/**
+ * Parses the base stage blob and attaches any overlay blobs to the same TileFeatureLayer.
+ *
+ * Search and completion work on the merged tile view so staged overlays behave the same way
+ * they do in the renderer and inspection code.
+ */
 function parseTileWithOverlays(parser: any, tileBlobs: Uint8Array[]): TileFeatureLayer | null {
     if (!tileBlobs.length) {
         return null;
@@ -119,6 +161,9 @@ function parseTileWithOverlays(parser: any, tileBlobs: Uint8Array[]): TileFeatur
     return baseTile;
 }
 
+/**
+ * Executes one search task and posts either matches or a serialized error back to the main thread.
+ */
 function processSearch(task: SearchWorkerTask) {
     let postError = (name: string, message: string) => {
         let result: SearchResultForTile = {
@@ -179,6 +224,11 @@ function processSearch(task: SearchWorkerTask) {
     }
 }
 
+/**
+ * Executes one completion task and returns candidates for the current query prefix.
+ *
+ * Completion failures are logged but intentionally not surfaced as blocking UI errors.
+ */
 function processCompletion(task: CompletionWorkerTask) {
     try {
         // Parse the tile.
@@ -230,6 +280,9 @@ function processCompletion(task: CompletionWorkerTask) {
     }
 }
 
+/**
+ * Entry point shared by the worker handshake and the actual search/completion execution.
+ */
 addEventListener('message', async ({data}) => {
     const task = (data as WorkerInboundMessage);
 

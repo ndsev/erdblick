@@ -7,6 +7,7 @@
 namespace
 {
 
+/** Render binary source-data blobs as readable integers when possible, hex otherwise. */
 auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
 {
     if (auto decoded = value.decodeBigEndianI64())

@@ -6,6 +6,12 @@ import {environment} from "../environments/environment";
 export type AppStateToStorageFun<T> = (value: T) => unknown;
 export type AppStateFromStorageFun<T> = (value: ZodTypeAny, currentValue: T) => T;
 
+/**
+ * Construction options for one persisted application state entry.
+ *
+ * The same definition drives local-storage persistence and optional URL
+ * hydration, so the schema and conversion hooks must tolerate both sources.
+ */
 export interface AppStateOptions<T> {
     name: string;
     defaultValue: T;
@@ -30,7 +36,7 @@ export const Boolish = z.union([
     z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
 ]);
 
-// TODO: Do we actually need this?
+/** Normalizes wrapper schemas so the serializer can inspect the real value type. */
 function unwrapScalar(schema: z.ZodTypeAny): z.ZodTypeAny {
     // unwrap until it stabilizes
     while (true) {
@@ -47,6 +53,7 @@ function unwrapScalar(schema: z.ZodTypeAny): z.ZodTypeAny {
     return schema;
 }
 
+/** Returns whether the schema ultimately behaves like a single scalar URL token. */
 function isScalar(schema: z.ZodTypeAny): boolean {
     if (schema === Boolish) {
         return true;
@@ -70,6 +77,7 @@ function isScalar(schema: z.ZodTypeAny): boolean {
     return scalarKinds.some(type => unwrapped instanceof type);
 }
 
+/** Coerces a compact URL token into the closest primitive expected by the schema. */
 function coerceFromString(txt: string, schema: ZodTypeAny): any {
     const unwrapped = unwrapScalar(schema);
 
@@ -82,6 +90,7 @@ function coerceFromString(txt: string, schema: ZodTypeAny): any {
     return txt; // unions/refinements/others: let zod finalize
 }
 
+/** Guards run-length expansion so tokens like `ax2` stay plain strings when needed. */
 function schemaAcceptsRunLengthValue(token: string, schema: ZodTypeAny): boolean {
     const unwrapped = unwrapScalar(schema);
 
@@ -106,6 +115,7 @@ function schemaAcceptsRunLengthValue(token: string, schema: ZodTypeAny): boolean
     return false;
 }
 
+/** Expands compact `<value>x<count>` tokens used in URL-friendly array encodings. */
 function expandRunLengthTokens(parts: string[], schema: ZodTypeAny): string[] {
     const expanded: string[] = [];
     for (const token of parts) {
@@ -128,6 +138,7 @@ function expandRunLengthTokens(parts: string[], schema: ZodTypeAny): string[] {
     return expanded;
 }
 
+/** Splits a comma-separated URL payload and tolerates legacy percent-encoded segments. */
 function splitCSV(val: string): string[] {
     if (!val) {
         return [];
@@ -144,16 +155,18 @@ function splitCSV(val: string): string[] {
         .filter(s => s.length > 0 || s === '');
 }
 
+/** Joins primitive arrays into the compact CSV form used by URL state entries. */
 function joinCSV(values: unknown[]): string {
     return values.map(v => String(compactBooleans(v))).join(',');
 }
 
+/** Distinguishes the legacy JSON-array encoding from the compact CSV form. */
 function looksLikeJsonArray(raw: string): boolean {
     const trimmed = raw.trim();
     return trimmed.startsWith('[') && trimmed.endsWith(']');
 }
 
-/** Detect array-of-arrays-of-primitives */
+/** Detects schemas that can use the colon-separated nested CSV URL encoding. */
 function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.ZodArray<ZodTypeAny>> {
     if (!(schema instanceof z.ZodArray)) return false;
     const el = (schema as z.ZodArray<any>).element;
@@ -162,16 +175,12 @@ function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.
     return isScalar(inner);
 }
 
-/**
- * Use colon ":" to join of CSV groups
- * */
+/** Joins nested primitive arrays into colon-separated CSV groups for the URL. */
 function joinColonCSV(groups: unknown[][]): string {
     return groups.map(g => joinCSV(g)).join(':');
 }
 
-/**
- * Split by colon ":" into CSV groups; empty segment => empty array
- * */
+/** Reverses `joinColonCSV`, preserving empty groups as empty arrays. */
 function splitColonCSV(val: string): string[][] {
     if (!val) {
         return [];
@@ -181,6 +190,7 @@ function splitColonCSV(val: string): string[][] {
         .map(seg => (seg === '' ? [] : splitCSV(seg)));
 }
 
+/** Deep equality used to suppress redundant state emissions after hydration. */
 export function deepEquals(a: unknown, b: unknown): boolean {
     if (a === b) {
         return true;
@@ -244,6 +254,7 @@ export function deepEquals(a: unknown, b: unknown): boolean {
     return false;
 }
 
+/** Deep clone helper for default values that must not be shared between view slots. */
 function deepCopy<V>(value: V): V {
     if (value === null || typeof value !== "object") {
         return value;
@@ -301,6 +312,7 @@ export class AppState<T> extends BehaviorSubject<T> {
         pool.set(options.name, this as unknown as AppState<unknown>);
     }
 
+    /** Restores the original default value and emits it like any other state update. */
     resetToDefault(): void {
         this.next(this.defaultValue);
     }
@@ -323,6 +335,7 @@ export class AppState<T> extends BehaviorSubject<T> {
         return !!el && (unwrapScalar(el) instanceof z.ZodObject) && this.urlFormEncode;
     }
 
+    /** Indicates whether this state participates in URL hydration and serialization. */
     isUrlState(): boolean {
         return (this.urlParamName !== undefined || this.urlFormEncode) &&
             !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false);
@@ -502,6 +515,7 @@ export class AppState<T> extends BehaviorSubject<T> {
         }
     }
 
+    /** Lists the form field names used by object-style URL encoding, if enabled. */
     getFormFieldNames(): readonly string[] {
         // Keep original behavior for non-array object states
         if (!this.urlFormEncode || !(unwrapScalar(this.schema) instanceof z.ZodObject)) return [];
@@ -517,6 +531,10 @@ export class MapViewState<T> {
     public appState: AppState<Array<T>>;
     private readonly defaultValue: T;
 
+    /**
+     * Wraps a scalar state definition so each view gets its own slot while still
+     * serializing as one persisted array.
+     */
     constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
         this.defaultValue = deepCopy(options.defaultValue);
         this.appState = new AppState(pool, {
@@ -544,6 +562,7 @@ export class MapViewState<T> {
         });
     }
 
+    /** Updates one view slot, extending the backing array with copied defaults as needed. */
     next(viewIndex: number, value: T) {
         const currentValue = [...this.appState.getValue()];
         if (viewIndex >= currentValue.length) {
@@ -555,6 +574,7 @@ export class MapViewState<T> {
         this.appState.next(currentValue);
     }
 
+    /** Subscribes to one view slot without exposing the internal array shape. */
     subscribe(viewIndex: number, cb: (value: T) => void) {
         return this.appState.pipe(
             map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
@@ -562,6 +582,7 @@ export class MapViewState<T> {
         ).subscribe(cb);
     }
 
+    /** Pipes one view slot through RxJS operators while preserving fallback defaults. */
     pipe<R = T>(viewIndex: number, ...ops: OperatorFunction<T, any>[]): Observable<R> {
         const base$ = this.appState.pipe(
             map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
@@ -570,6 +591,7 @@ export class MapViewState<T> {
         return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
     }
 
+    /** Returns the current value for one view, falling back to a deep-copied default. */
     getValue(viewIndex: number): T {
         const arr = this.appState.getValue();
         if (arr[viewIndex] !== undefined) {
@@ -578,11 +600,13 @@ export class MapViewState<T> {
         return deepCopy(this.defaultValue);
     }
 
+    /** Returns the number of stored view slots. */
     length() {
         return this.appState.getValue().length;
     }
 }
 
+/** Rewrites booleans to `1/0` recursively so storage and URL payloads stay compact. */
 function compactBooleans(value: unknown): unknown {
     if (typeof value === "boolean") {
         return value ? 1 : 0;
@@ -620,6 +644,12 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
     layerNamesState: AppState<string[]>;
     numViewsState: AppState<number>;
 
+    /**
+     * Tracks per-style option values across layers and views.
+     *
+     * Unlike normal `AppState` instances this is always URL-backed because style
+     * sharing depends on it even in visualization-only mode.
+     */
     constructor(pool: Map<string, AppState<unknown>>) {
         super(pool, {
             name: "styleOptions",
@@ -639,10 +669,12 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         this.numViewsState = numViewsState as AppState<number>;
     }
 
+    /** Styles are always shareable URL state, even in visualization-only builds. */
     override isUrlState(): boolean {
         return true;
     }
 
+    /** Serializes style options into the compact grouped query-param format. */
     override serialize(_: boolean): Record<string, string> | undefined {
         const result: Record<string, string> = {};
         if (this.value.size === 0) {
@@ -735,6 +767,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         return result;
     }
 
+    /** Hydrates grouped style-option query params back into the internal per-layer map. */
     override deserialize(raw: string | Params) {
         // A raw local storage string must be converted to the Record<string, string>
         if (typeof raw === 'string') {
@@ -800,6 +833,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         }
     }
 
+    /** Detects whether a query-param key belongs to the grouped style-option format. */
     public isStyleOptionUrlParamKey(key: string): boolean {
         // Example: STY0~0-2~showOptionA~showOptionB
         // Constraints: at least 3 segments separated by '~' (styleId, layers, one option)
@@ -813,16 +847,19 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         return /^\d+(?:-\d+)*$/.test(layerPart);
     }
 
+    /** Builds the internal storage key used for one map/layer/style/option tuple. */
     public styleOptionKey(mapId: string, layerId: string, shortStyleId: string, optionId: string): string {
         // Use a slash-delimited compound key; mapId may contain '/'.
         const mapLayerId = `${mapId}/${layerId}`;
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
     }
 
+    /** Builds an internal style-option key when the map/layer prefix is already combined. */
     private styleOptionKeyFromMapLayer(mapLayerId: string, shortStyleId: string, optionId: string): string {
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
     }
 
+    /** Normalizes legacy shorthand option ids emitted by older URLs. */
     private normalizeStyleOptionId(optionId: string): string {
         if (optionId.startsWith(".")) {
             return `show${optionId.slice(1)}`;
@@ -830,6 +867,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         return optionId;
     }
 
+    /** Expands grouped style-option run-length tokens such as `1x8`. */
     private expandStyleRunLengthTokens(tokens: string[]): string[] {
         const expanded: string[] = [];
         for (const token of tokens) {
@@ -851,10 +889,12 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         return expanded;
     }
 
+    /** Restricts run-length expansion to tokens the style system can unambiguously coerce. */
     private isStylePrimitiveToken(token: string): boolean {
         return /^(?:true|false|0|1|-?\d+(?:\.\d+)?)$/i.test(token);
     }
 
+    /** Coerces hydrated style option values to the declared UI control type. */
     public coerceOptionValue(value: any, optionType: string): string|number|boolean {
         const t = (optionType || '').toLowerCase();
         if (t === 'bool' || t === 'boolean') {

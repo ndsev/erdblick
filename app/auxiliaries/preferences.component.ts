@@ -211,6 +211,12 @@ import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.p
     ],
     standalone: false
 })
+/**
+ * Preferences dialog for local viewer behavior and persistent UI settings.
+ *
+ * The component mirrors state from `AppStateService` into editable controls so
+ * invalid intermediate text input does not immediately mutate persisted state.
+ */
 export class PreferencesComponent implements OnInit, OnDestroy {
 
     @ViewChild('pref') preferencesDialog?: Dialog;
@@ -280,17 +286,20 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
+    /** Restores the persisted dark-mode preference and applies the initial theme class. */
     ngOnInit() {
         const saved = (localStorage.getItem(this.DARK_MODE_KEY) as 'off' | 'on' | 'auto' | null);
         this.darkModeSetting = saved ?? 'auto';
         this.applyDarkModeSetting(this.darkModeSetting);
     }
 
+    /** Releases subscriptions and any active system-theme listener. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.cleanupMediaQueryListener();
     }
 
+    /** Refreshes staged form values when the dialog opens and brings it to the front. */
     onDialogShow() {
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
         this.tilesToLoadInput = this.stateService.tilesLoadLimit;
@@ -304,6 +313,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.dialogStack.bringToFront(this.preferencesDialog);
     }
 
+    /** Validates and applies the tile load limit. */
     applyTileLimits() {
         if (!this.tilesToLoadChanged) {
             return;
@@ -321,10 +331,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
 
+    /** Clears persisted viewer state and reloads the application. */
     clearURLProperties() {
         this.stateService.resetStorage();
     }
 
+    /** Removes imported styles from both memory and storage. */
     clearImportedStyles() {
         for (let styleId of this.styleService.styles.keys()) {
             if (this.styleService.styles.get(styleId)!.imported) {
@@ -334,6 +346,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.styleService.clearStorageForImportedStyles();
     }
 
+    /** Restores built-in styles and clears persisted overrides. */
     clearModifiedStyles() {
         for (let [styleId, style] of this.styleService.styles) {
             if (!style.imported && style.modified) {
@@ -343,28 +356,33 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.styleService.clearStorageForBuiltinStyles();
     }
 
+    /** Toggles compressed tile pulls. */
     setTilePullCompressionEnabled(enabled: boolean) {
         this.tilePullCompressionEnabledSetting = enabled;
         this.stateService.tilePullCompressionEnabled = enabled;
     }
 
+    /** Enables or disables threaded deck rendering and syncs auto worker count when needed. */
     setDeckThreadedRenderingEnabled(enabled: boolean) {
         this.deckThreadedRenderingEnabledSetting = enabled;
         this.stateService.deckThreadedRenderingEnabled = enabled;
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
+    /** Toggles low-fi pinning to the maximum LOD. */
     setPinLowFiToMaxLod(enabled: boolean) {
         this.pinLowFiToMaxLodSetting = enabled;
         this.stateService.pinLowFiToMaxLod = enabled;
     }
 
+    /** Enables or disables manual worker-count override. */
     setDeckStyleWorkersOverride(enabled: boolean) {
         this.deckStyleWorkersOverrideSetting = enabled;
         this.stateService.deckStyleWorkersOverride = enabled;
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
+    /** Validates and applies the persisted zoom-step preference. */
     applyMapZoomStep() {
         if (!this.mapZoomStepChanged) {
             return;
@@ -380,6 +398,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.mapZoomStepChanged = false;
     }
 
+    /** Validates and applies the explicit deck render worker count. */
     applyDeckStyleWorkersCount() {
         if (!this.deckThreadedRenderingEnabledSetting || !this.deckStyleWorkersOverrideSetting || !this.deckStyleWorkersCountChanged) {
             return;
@@ -394,12 +413,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.deckStyleWorkersCountChanged = false;
     }
 
+    /** Persists the dark-mode setting and applies it immediately. */
     setDarkMode(setting: 'off' | 'on' | 'auto') {
         this.darkModeSetting = setting;
         localStorage.setItem(this.DARK_MODE_KEY, setting);
         this.applyDarkModeSetting(setting);
     }
 
+    /** Applies the selected dark-mode policy, including system-following auto mode. */
     private applyDarkModeSetting(setting: 'off' | 'on' | 'auto') {
         if (setting === 'on') {
             this.cleanupMediaQueryListener();
@@ -420,6 +441,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.updateDarkClass(this.mediaQueryList.matches);
     }
 
+    /** Adds or removes the root dark-mode class. */
     private updateDarkClass(isDark: boolean) {
         const root = document.documentElement;
         if (isDark) {
@@ -429,6 +451,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
+    /** Detaches the current `matchMedia` listener when dark mode stops following the system. */
     private cleanupMediaQueryListener() {
         if (this.mediaQueryList) {
             this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
@@ -436,6 +459,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
+    /** Validates and applies the maximum number of simultaneous inspections. */
     protected applyInspectionsLimits() {
         if (!this.inspectionsLimitChanged) {
             return;
@@ -450,46 +474,55 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.messageService.showSuccess("Successfully updated inspections limit!");
     }
 
+    /** Updates the pending tile-limit value from the slider. */
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
         this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
     }
 
+    /** Updates the pending inspections limit from the slider. */
     protected onInspectionsLimitSliderChange(value: number) {
         this.limitSimultaneousInspectionsInput = value;
         this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
     }
 
+    /** Updates the pending worker count from the slider. */
     protected onDeckStyleWorkersCountSliderChange(value: number) {
         this.deckStyleWorkersCountInput = value;
         this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
     }
 
+    /** Updates the pending zoom-step value from the slider. */
     protected onMapZoomStepSliderChange(value: number) {
         this.mapZoomStepInput = value;
         this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
     }
 
+    /** Updates the pending tile-limit value from the text input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
         this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
     }
 
+    /** Updates the pending inspections-limit value from the text input. */
     protected onInspectionsLimitInputChange(value: number | string) {
         this.limitSimultaneousInspectionsInput = value;
         this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
     }
 
+    /** Updates the pending worker-count value from the text input. */
     protected onDeckStyleWorkersCountInputChange(value: number | string) {
         this.deckStyleWorkersCountInput = value;
         this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
     }
 
+    /** Updates the pending zoom-step value from the text input. */
     protected onMapZoomStepInputChange(value: number | string) {
         this.mapZoomStepInput = value;
         this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
     }
 
+    /** Treats blank or invalid numeric text as a pending unsaved change. */
     private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
         if (typeof value === "string" && value.trim().length === 0) {
             return true;
@@ -498,6 +531,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         return !Number.isFinite(parsedValue) || parsedValue !== currentValue;
     }
 
+    /** Keeps the worker-count state aligned with the automatic recommendation unless overridden. */
     private syncDeckStyleWorkersCountToAutoIfNeeded(): void {
         if (this.stateService.deckStyleWorkersOverride) {
             return;

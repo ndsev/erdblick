@@ -149,6 +149,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
     styles: [``],
     standalone: false
 })
+/** Floating dialog wrapper for one undocked inspection panel. */
 export class InspectionPanelDialogComponent implements OnDestroy {
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     dialogIndex = input.required<number>();
@@ -187,6 +188,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
+    /** Derives the title and source-data layer switcher state from the current panel payload. */
     private updateHeaderFor(panel: InspectionPanelModel<FeatureWrapper>) {
         if (panel.sourceData !== undefined) {
             const selection = panel.sourceData!;
@@ -224,6 +226,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Returns from source-data inspection to the panel's feature selection. */
     protected onGoBack(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
@@ -234,31 +237,37 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setSelection(p.features, p.id);
     }
 
+    /** Applies the currently chosen source-data layer switch. */
     protected onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
             this.selectedLayerItem.command();
         }
     }
 
+    /** Stops header click propagation so opening the dropdown does not trigger drag or accordion actions. */
     protected onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
     }
 
+    /** Surfaces source-data loading failures in the dialog body. */
     protected onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
     }
 
+    /** Toggles whether this inspection panel is pinned against selection replacement. */
     protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
         this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
+    /** Closes the floating inspection panel. */
     protected unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
     }
 
+    /** Moves the camera to the first feature represented by this dialog. */
     private focusOnFeature(event?: MouseEvent) {
         event?.stopPropagation();
         const panel = this.panel();
@@ -268,36 +277,43 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.mapService.zoomToFeature(undefined, panel.features[0]);
     }
 
+    /** UI wrapper around the focus action for toolbar buttons and menus. */
     protected focusOnFeatureAction(event: MouseEvent) {
         this.focusOnFeature(event);
     }
 
+    /** Opens the selected feature GeoJSON in a separate browser tab. */
     protected openGeoJsonInNewTabAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.openGeoJsonInNewTab();
     }
 
+    /** Starts a GeoJSON download for the feature panel content. */
     protected downloadGeoJsonAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.downloadGeoJson();
     }
 
+    /** Copies the current feature GeoJSON to the clipboard. */
     protected copyGeoJsonAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.copyGeoJson();
     }
 
+    /** Opens the compare popover anchored to the toolbar button. */
     protected openComparePopover(event: MouseEvent) {
         event.stopPropagation();
         this.refreshCompareOptions();
         this.comparePopover.toggle(event);
     }
 
+    /** Moves the floating dialog back into the docked inspection area. */
     protected dock(event: MouseEvent) {
         event.stopPropagation();
         this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
     }
 
+    /** Opens the overflow menu used on compact dialog widths. */
     protected openExtraMenu(event: MouseEvent) {
         event.stopPropagation();
         this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
@@ -337,6 +353,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.extraMenu.toggle(event);
     }
 
+    /** Reanchors the compare popover when it is launched from the overflow menu. */
     private openCompareFromMenu(menuEvent: MenuItemCommandEvent) {
         this.refreshCompareOptions();
         const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
@@ -350,6 +367,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Refreshes compare candidates and removes selections that are no longer valid. */
     protected refreshCompareOptions() {
         this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
@@ -357,6 +375,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         );
     }
 
+    /** Opens the comparison dialog with this panel as the base column. */
     protected applyComparison(event: MouseEvent) {
         event.stopPropagation();
         if (!this.selectedCompareIds.length) {
@@ -375,6 +394,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.comparePopover.hide();
     }
 
+    /** Initializes z-order, docking cues, and first-render layout once PrimeNG shows the dialog. */
     protected onDialogShow() {
         this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
@@ -383,6 +403,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         setTimeout(() => this.featurePanel?.refresh(), 0);
     }
 
+    /** Stores the final dialog position and docks automatically when released over the dock. */
     protected onDialogDragEnd() {
         this.endDrag();
         if (this.shouldDock()) {
@@ -393,6 +414,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.dialogStack.bringToFront(this.dialog);
     }
 
+    /** Persists the dialog size back into app state in em units. */
     protected onDialogResizeEnd() {
         const panel = this.panel();
         const container = this.getDialogContainer();
@@ -411,6 +433,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
     }
 
+    /** Rebuilds the PrimeNG dialog style map while preserving any already-applied runtime position. */
     private buildDialogStyle(panel: InspectionPanelModel<FeatureWrapper>): { [key: string]: string } {
         const nextStyle: { [key: string]: string } = {
             width: `${panel.size[0]}em`,
@@ -450,6 +473,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         return nextStyle;
     }
 
+    /** Removes transient drag listeners and dock highlight state. */
     ngOnDestroy() {
         this.endDrag();
         this.detachHeaderDownListener?.();
@@ -458,6 +482,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.clearDockCue();
     }
 
+    /** Freezes heavy tree components while the dialog is being dragged. */
     protected beginDrag(): void {
         this.featurePanel?.freezeTree();
         this.sourceDataPanel?.freezeTree();
@@ -467,6 +492,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
+    /** Clears drag listeners and unfreezes the embedded inspection tree. */
     protected endDrag(): void {
         this.detachPointerUpListener?.();
         this.detachPointerUpListener = undefined;
@@ -474,6 +500,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.sourceDataPanel?.unfreezeTree();
     }
 
+    /** Hooks PrimeNG drag events so the dock can be highlighted while the dialog overlaps it. */
     private bindDockDragCue() {
         const container = this.getDialogContainer();
         if (!container) {
@@ -500,6 +527,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
+    /** Restores the persisted dialog position or assigns the next cascade slot for a fresh dialog. */
     private applyInitialPosition() {
         const container = this.getDialogContainer();
         if (!container) {
@@ -525,6 +553,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setInspectionDialogPosition(panelId, {left, top}, index);
     }
 
+    /** Persists the dialog's current viewport position in app state. */
     private storeDialogPosition() {
         const container = this.getDialogContainer();
         if (!container) {
@@ -534,6 +563,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setInspectionDialogPosition(this.panel().id, {left: rect.left, top: rect.top}, this.dialogIndex());
     }
 
+    /** Writes an absolute fixed-position placement directly to the rendered dialog container. */
     private setDialogPosition(left: number, top: number) {
         const container = this.getDialogContainer();
         if (!container) {
@@ -545,6 +575,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         container.style.margin = '0';
     }
 
+    /** Returns whether the dialog overlaps the dock enough to trigger auto-docking on drop. */
     private shouldDock(): boolean {
         if (!this.getDialogContainer() || !this.dockElement) {
             return false;
@@ -557,6 +588,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         return overlap.width >= threshold && overlap.height > 0;
     }
 
+    /** Updates the dock highlight while PrimeNG is dragging the dialog. */
     private updateDockCue() {
         if (!this.dialog?.dragging) {
             this.clearDockCue();
@@ -569,6 +601,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Computes the current rectangle overlap between the dialog and the dock. */
     private getDockOverlap(): {width: number, height: number} | undefined {
         const container = this.getDialogContainer();
         if (!container || !this.dockElement) {
@@ -588,6 +621,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         return {width, height};
     }
 
+    /** Applies or clears the CSS class used to visualize a dock target. */
     private setDockCue(active: boolean) {
         if (!this.dockElement) {
             return;
@@ -599,10 +633,12 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Removes any active dock target highlight. */
     private clearDockCue() {
         this.setDockCue(false);
     }
 
+    /** Returns the actual PrimeNG dialog container element when it has been created. */
     private getDialogContainer(): HTMLElement | undefined {
         return this.dialog?.container() ?? undefined;
     }

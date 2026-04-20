@@ -226,6 +226,10 @@ export class MapDataService {
         });
     }
 
+    /**
+     * Wires the tile stream, style/state subscriptions, and the long-lived visualization pump.
+     * This is the service's real startup hook and must run before any viewport-driven work starts.
+     */
     public async initialize() {
         this.GeometryType = coreLib.GeomType;
 
@@ -379,6 +383,10 @@ export class MapDataService {
         });
     }
 
+    /**
+     * Continuously dispatches dirty visualizations under a small frame budget.
+     * Neighboring tiles are intentionally blocked from concurrent rendering to avoid duplicate point-merge work.
+     */
     private processVisualizationTasks() {
         if (this.tilePipelinePaused) {
             this.scheduleOutsideAngular(() => this.processVisualizationTasks(), 100);
@@ -474,10 +482,12 @@ export class MapDataService {
         this.scheduleOutsideAngular(() => this.processVisualizationTasks(), delay);
     }
 
+    /** Exposes the shared WASM tile parser used by `FeatureTile` and inspection helpers. */
     public get tileLayerParser(): TileLayerParser {
         return this.tileStream!.parser;
     }
 
+    /** Returns the number of visualizations known to the service and how many are fully rendered. */
     public getVisualizationCounts(): {total: number; done: number} {
         const result = {
             total: 0,
@@ -494,10 +504,12 @@ export class MapDataService {
         return result;
     }
 
+    /** Returns a snapshot of the current logical `/tiles` backend request progress. */
     public getBackendRequestProgress(): BackendRequestProgress {
         return {...this.backendRequestProgress};
     }
 
+    /** Aggregates the diagnostics shown in the tile-loading HUD and performance panel. */
     public getTileLoadingHudStats(): TileLoadingHudStats {
         let features = 0;
         let vertices = 0;
@@ -535,10 +547,12 @@ export class MapDataService {
         };
     }
 
+    /** Returns per-stage viewport completeness counters derived from requested vs. received tiles. */
     public getRequestedStageProgress(): Array<{done: number; total: number}> {
         return this.stageRequestProgress.map(counter => ({...counter}));
     }
 
+    /** Chooses human-readable stage labels, falling back to `Stage N` when layers disagree. */
     public getRequestedStageLabels(): string[] {
         const labelsByStage: Array<Set<string>> = [];
         const ensureStageLabelSet = (stage: number) => {
@@ -569,6 +583,7 @@ export class MapDataService {
         });
     }
 
+    /** Proxies `/tiles/next` compression stats while tolerating an uninitialized tile stream. */
     public getTileStreamTransportCompressionStats(): MapTileStreamTransportCompressionStats {
         return this.tileStream?.getTransportCompressionStats() ?? {
             totalPullResponses: 0,
@@ -583,6 +598,7 @@ export class MapDataService {
         };
     }
 
+    /** Returns the wall-clock duration of the current viewport load, or zero when idle. */
     private currentViewportRenderSeconds(): number {
         if (this.viewportLoadStartedAtMs === null) {
             return 0;
@@ -591,6 +607,7 @@ export class MapDataService {
         return Math.max(0, (endTime - this.viewportLoadStartedAtMs) / 1000);
     }
 
+    /** Returns the combined queued visualization count across all views. */
     private visualizationQueueLength(): number {
         return this.viewVisualizationState.reduce(
             (sum, state) => sum + state.visualizationQueue.length,
@@ -598,6 +615,7 @@ export class MapDataService {
         );
     }
 
+    /** Returns the per-view render concurrency allowed by the deck worker pipeline configuration. */
     private maxInFlightVisualizationRendersPerView(): number {
         if (!isDeckRenderWorkerPipelineEnabled()) {
             return 1;
@@ -609,6 +627,7 @@ export class MapDataService {
         return Math.max(1, Math.floor(configuredConcurrency));
     }
 
+    /** Returns the tile plus its Moore neighborhood for render deduplication around tile seams. */
     private tileNeighborhoodForConcurrentRenderBlock(tileId: bigint): bigint[] {
         const blockedTileIds = new Set<bigint>();
         blockedTileIds.add(tileId);
@@ -624,6 +643,7 @@ export class MapDataService {
         return Array.from(blockedTileIds.values());
     }
 
+    /** Marks one tile neighborhood as in-flight so concurrent renders do not overlap seam work. */
     private markTileInFlightForView(viewIndex: number, tileId: bigint): void {
         const blockedByView = this.inFlightBlockedTileIdsByView[viewIndex];
         if (!blockedByView) {
@@ -637,6 +657,7 @@ export class MapDataService {
         }
     }
 
+    /** Releases the in-flight neighborhood block once a visualization finished rendering. */
     private unmarkTileInFlightForView(viewIndex: number, tileId: bigint): void {
         const blockedByView = this.inFlightBlockedTileIdsByView[viewIndex];
         if (!blockedByView) {
@@ -652,6 +673,7 @@ export class MapDataService {
         }
     }
 
+    /** Pops the next visualization whose tile is not currently blocked by a neighbor render. */
     private dequeueNextRenderableVisualization(
         viewIndex: number,
         viewState: ViewVisualizationState
@@ -659,10 +681,12 @@ export class MapDataService {
         return viewState.visualizationQueue.dequeueNext(this.inFlightBlockedTileIdsByView[viewIndex]);
     }
 
+    /** Enqueues a visualization through the per-view queue helper so ordering invariants stay centralized. */
     private queueVisualization(viewState: ViewVisualizationState, visualization: ITileVisualization): void {
         viewState.visualizationQueue.enqueue(visualization);
     }
 
+    /** Returns true when a finished render should immediately be queued again because it became dirty meanwhile. */
     private shouldRequeueVisualizationAfterRender(
         viewIndex: number,
         visualization: ITileVisualization
@@ -684,12 +708,14 @@ export class MapDataService {
         return visualization.isDirty();
     }
 
+    /** Destroys cached merged-point artifacts for one view/layer/style family. */
     private clearMergedPointsForMapViewLayerStyleId(mapViewLayerStyleId: string): void {
         for (const removedMergedPointsTile of this.pointMergeService.clear(mapViewLayerStyleId)) {
             this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
         }
     }
 
+    /** Starts a RAF loop that keeps an EWMA frame-time estimate for diagnostics. */
     private startFrameTimeSampling() {
         if (this.frameTimeSamplingStarted) {
             return;
@@ -716,14 +742,17 @@ export class MapDataService {
         this.requestAnimationFrameOutsideAngular(sampleFrameTime);
     }
 
+    /** Returns the current EWMA frame time in milliseconds. */
     private currentFrameTimeMs(): number {
         return Math.max(0, this.frameTimeMsEwma || 0);
     }
 
+    /** Creates the stable key used to aggregate per-layer request progress. */
     private layerRequestKey(mapId: string, layerId: string): string {
         return `${mapId}/${layerId}`;
     }
 
+    /** Resolves stage labels for a layer, filling gaps with generic `Stage N` labels. */
     private getLayerStageLabels(
         mapId: string,
         layerId: string,
@@ -747,6 +776,7 @@ export class MapDataService {
         return result;
     }
 
+    /** Recomputes per-stage progress from the currently expected layers and the already loaded tiles. */
     private rebuildRequestedStageProgressFromLayerState() {
         this.stageRequestProgress = [];
         this.pendingRequestedTileKeysByStage = [];
@@ -792,6 +822,7 @@ export class MapDataService {
         }
     }
 
+    /** Replaces the expected-stage bookkeeping after a new viewport request was assembled. */
     private resetRequestedStageProgressFromExpected(
         expectedByLayer: Map<string, {
             mapId: string;
@@ -843,6 +874,7 @@ export class MapDataService {
         this.rebuildRequestedStageProgressFromLayerState();
     }
 
+    /** Expands the known stage count for a layer when incoming payloads reveal additional stages. */
     private trackObservedLayerStage(
         mapId: string,
         layerId: string,
@@ -878,6 +910,7 @@ export class MapDataService {
         this.rebuildRequestedStageProgressFromLayerState();
     }
 
+    /** Marks one requested tile/stage pair as received and updates the derived progress counters. */
     private markRequestedStageAsReceived(tileKey: string, stage: number) {
         if (!Number.isInteger(stage) || stage < 0 || stage >= this.pendingRequestedTileKeysByStage.length) {
             return;
@@ -893,6 +926,7 @@ export class MapDataService {
         counter.done = Math.max(0, counter.total - pendingSet.size);
     }
 
+    /** Closes the viewport render timer once backend requests and visualization work both finished. */
     private tryFinalizeViewportRenderDuration() {
         if (!this.backendRequestProgress.allDone) {
             return;
@@ -910,14 +944,17 @@ export class MapDataService {
         this.viewportRenderCompletedAtMs = performance.now();
     }
 
+    /** Reads the best-known vertex count from a tile for HUD statistics. */
     private vertexCountFromTileStats(tile: FeatureTile): number {
         return tile.vertexCount();
     }
 
+    /** Returns whether the `/tiles` websocket is currently connected. */
     public isTileStreamConnected(): boolean {
         return this.tileStream?.isOpen() ?? false;
     }
 
+    /** Pauses tile parsing, updates, and render-queue dispatch while diagnostics are inspecting the pipeline. */
     pauseTilePipeline(source: 'diagnostics' | string = 'diagnostics') {
         if (this.tilePipelinePaused) {
             return;
@@ -933,6 +970,7 @@ export class MapDataService {
         console.info(`Tile pipeline paused (${source})`);
     }
 
+    /** Resumes the tile pipeline and replays any deferred update request. */
     resumeTilePipeline(source: 'diagnostics' | string = 'diagnostics') {
         if (!this.tilePipelinePaused) {
             return;
@@ -952,6 +990,7 @@ export class MapDataService {
         }
     }
 
+    /** Convenience toggle for the diagnostics pause control. */
     toggleTilePipelinePause(source: 'diagnostics' | string = 'diagnostics') {
         if (this.tilePipelinePaused) {
             this.resumeTilePipeline(source);
@@ -960,6 +999,7 @@ export class MapDataService {
         }
     }
 
+    /** Updates backend progress and surfaces terminal request failures from `/tiles` status payloads. */
     private handleTilesRequestStatus(status: MapTileStreamStatusPayload) {
         if (!status || status.type !== "mapget.tiles.status") {
             return;
@@ -1008,6 +1048,7 @@ export class MapDataService {
         this.showErrorMessage(`Tile request failed: ${summary}${detail}`);
     }
 
+    /** Debounces expensive viewport updates while still guaranteeing a trailing refresh. */
     public scheduleUpdate() {
         this.updatePending = true;
         if (this.tilePipelinePaused) {
@@ -1025,6 +1066,7 @@ export class MapDataService {
         }, delay);
     }
 
+    /** Recomputes visible tiles, refreshes backend requests, evicts stale tiles, and updates visualizations. */
     private async runUpdate() {
         if (this.tilePipelinePaused) {
             this.updatePending = true;
@@ -1067,6 +1109,7 @@ export class MapDataService {
     }
 
 
+    /** Returns the best-known stage count for a layer from metadata, requests, and observed payloads. */
     getLayerStageCount(mapId: string, layerId: string): number {
         let stageCount = 1;
         const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
@@ -1096,6 +1139,7 @@ export class MapDataService {
         return stageCount;
     }
 
+    /** Returns the stage considered high-fidelity for rendering decisions and inspection labels. */
     private getLayerHighFidelityStage(mapId: string, layerId: string): number {
         const stageCount = this.getLayerStageCount(mapId, layerId);
         const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
@@ -1133,6 +1177,7 @@ export class MapDataService {
         return requestedMaxStage;
     }
 
+    /** Normalizes the style's requested minimum stage to a non-negative integer. */
     private styleMinimumStage(style: FeatureLayerStyle): number {
         const rawValue = style.minimumStage();
         if (!Number.isFinite(rawValue)) {
@@ -1141,6 +1186,10 @@ export class MapDataService {
         return Math.max(0, Math.floor(rawValue));
     }
 
+    /**
+     * Returns whether a tile has enough stage data for a style to render.
+     * Fully loaded lower-stage datasets are treated as complete even when the style asked for more.
+     */
     private tileSatisfiesStyleStage(tile: FeatureTile, style: FeatureLayerStyle): boolean {
         const requiredStage = this.styleMinimumStage(style);
         const highestLoadedStage = tile.highestLoadedStage();
@@ -1158,10 +1207,12 @@ export class MapDataService {
         return tile.isComplete(this.getLayerStageCount(tile.mapName, tile.layerName));
     }
 
+    /** Returns whether inspection can safely assume that every advertised stage for this tile is loaded. */
     public isTileInspectionDataComplete(tile: FeatureTile): boolean {
         return tile.isComplete(this.getLayerStageCount(tile.mapName, tile.layerName));
     }
 
+    /** Returns the earliest missing stage for a tile, clamped to the stage actually requested. */
     private tileMinimumMissingStage(
         mapId: string,
         layerId: string,
@@ -1184,6 +1235,7 @@ export class MapDataService {
         return tile.nextMissingStage(clampedMaxStage + 1);
     }
 
+    /** Returns the current fidelity policy that a view wants for a given tile. */
     private tileRenderPolicyForView(viewIndex: number, tile: FeatureTile): {
         prefersHighFidelity: boolean;
         maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
@@ -1195,6 +1247,7 @@ export class MapDataService {
         };
     }
 
+    /** Copies the current view policy into an existing visualization instance. */
     private applyTileRenderPolicyToVisualization(viewIndex: number, visualization: ITileVisualization): void {
         const policy = this.tileRenderPolicyForView(viewIndex, visualization.tile);
         visualization.highFidelityStage = this.getLayerHighFidelityStage(
@@ -1205,6 +1258,7 @@ export class MapDataService {
         visualization.maxLowFiLod = policy.maxLowFiLod;
     }
 
+    /** Decides whether a fidelity-policy change invalidates merged low-fi point state outright. */
     private shouldHardResetMergedPointsForPolicyChange(
         previousPrefersHighFidelity: boolean,
         previousMaxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
@@ -1223,6 +1277,7 @@ export class MapDataService {
         return styleHasExplicitLowFidelityRules && previousMaxLowFiLod !== visualization.maxLowFiLod;
     }
 
+    /** Normalizes tile keys so legacy and canonical string forms map to the same cache entry. */
     private canonicalizeMapTileKey(tileKey: string): string {
         const parsed = this.parseMapTileKeySafe(tileKey);
         if (!parsed) {
@@ -1232,6 +1287,7 @@ export class MapDataService {
         return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
     }
 
+    /** Parses tile keys defensively, including a fallback for older slash-separated forms. */
     private parseMapTileKeySafe(tileKey: string): [string, string, bigint] | null {
         try {
             const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
@@ -1249,6 +1305,7 @@ export class MapDataService {
         }
     }
 
+    /** Ensures a placeholder `FeatureTile` exists so selection and progress logic can reference missing tiles. */
     private ensureTilePlaceholder(mapId: string, layerId: string, tileId: bigint, preventCulling: boolean): boolean {
         const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
         const existing = this.loadedTileLayers.get(tileKey);
@@ -1271,6 +1328,7 @@ export class MapDataService {
         return true;
     }
 
+    /** Reapplies one changed style option to all existing visualizations of the affected layer. */
     private applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number) {
         if (viewIndex >= this.viewVisualizationState.length) {
             return;
@@ -1316,6 +1374,7 @@ export class MapDataService {
         }
     }
 
+    /** Enables or disables one view as the source for cross-view option synchronization. */
     public setSyncOptionsForView(viewIndex: number, enabled: boolean) {
         const current = this.stateService.getLayerSyncOption(viewIndex);
         if (current !== enabled) {
@@ -1328,10 +1387,12 @@ export class MapDataService {
         this.applySyncOptionsForView(viewIndex);
     }
 
+    /** Returns whether the given view currently drives option synchronization. */
     public isSyncOptionsForViewEnabled(viewIndex: number): boolean {
         return this.stateService.getLayerSyncOption(viewIndex);
     }
 
+    /** Mirrors layer, style, and OSM state to sibling views when global view sync is enabled. */
     private syncViewsIfEnabled(viewIndex: number): SyncViewsResult | null {
         if (!this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
             return null;
@@ -1346,6 +1407,7 @@ export class MapDataService {
         return result;
     }
 
+    /** Pushes one view's current style-option values into every compatible layer and sibling view. */
     private applySyncOptionsForView(viewIndex: number) {
         for (const layer of this.maps.allFeatureLayers()) {
             const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id);
@@ -1359,6 +1421,7 @@ export class MapDataService {
         }
     }
 
+    /** Replays sync settings after the number of views or tree contents changed. */
     private reapplySyncOptionsForAllViews() {
         const numViews = this.stateService.numViews;
         for (let viewIndex = 0; viewIndex < numViews; viewIndex++) {
@@ -1368,6 +1431,7 @@ export class MapDataService {
         }
     }
 
+    /** Copies one view's OSM overlay configuration to the other views. */
     private syncOsmSettingsFromView(viewIndex: number): boolean {
         const numViews = this.stateService.numViews;
         if (viewIndex < 0 || viewIndex >= numViews) {
@@ -1388,6 +1452,7 @@ export class MapDataService {
         return changed;
     }
 
+    /** Public entry point that syncs OSM settings only when layer sync is globally active. */
     public syncOsmSettings(viewIndex: number) {
         if (!this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
             return;
@@ -1395,6 +1460,7 @@ export class MapDataService {
         this.syncOsmSettingsFromView(viewIndex);
     }
 
+    /** Reloads `/sources`, rebuilds the map tree, and refreshes the parser's datasource metadata. */
     async reloadDataSources() {
         try {
             const result = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources"));
@@ -1410,6 +1476,7 @@ export class MapDataService {
         }
     }
 
+    /** Evicts cached tiles that are neither visible nor pinned for selection/inspection. */
     private updateEvictLoadedLayers() {
         // Evict present non-required tile layers.
         const evictTileLayer = (tileLayer: FeatureTile) => {
@@ -1439,6 +1506,7 @@ export class MapDataService {
         this.loadedTileLayers = newTileLayers;
     }
 
+    /** Reconciles visible tiles and styles with the per-view visualization caches and queues. */
     private updateVisualizations() {
         let anyRenderPolicyChanged = false;
         this.viewVisualizationState.forEach((state, viewIndex) => {
@@ -1571,6 +1639,7 @@ export class MapDataService {
         }
     }
 
+    /** Rebuilds hover and selection highlights when fidelity policy changes affect their geometry. */
     private refreshHighlightVisualizationsForCurrentPolicies(): void {
         const selectionGroups = this.selectionTopic.getValue();
         this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectionGroups);
@@ -1580,12 +1649,14 @@ export class MapDataService {
         }]);
     }
 
+    /** Forces the next highlight refresh to rebuild even if the tracked signature stayed unchanged. */
     public refreshHighlightVisualizations(): void {
         this.selectionHighlightSignature = "";
         this.hoverHighlightSignature = "";
         this.refreshHighlightVisualizationsForCurrentPolicies();
     }
 
+    /** Rebuilds one highlight family only when its signature differs from the last emitted one. */
     private refreshHighlightVisualizationIfNeeded(
         mode: HighlightMode,
         groups: {features: FeatureWrapper[], color?: string, id?: number}[]
@@ -1597,6 +1668,7 @@ export class MapDataService {
         this.visualizeHighlights(mode, groups, nextSignature);
     }
 
+    /** Returns the cached signature for one highlight family. */
     private getHighlightVisualizationSignature(mode: HighlightMode): string {
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
@@ -1608,6 +1680,7 @@ export class MapDataService {
         }
     }
 
+    /** Stores the cached signature for one highlight family. */
     private setHighlightVisualizationSignature(mode: HighlightMode, signature: string): void {
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
@@ -1621,6 +1694,10 @@ export class MapDataService {
         }
     }
 
+    /**
+     * Builds a stable signature for highlight inputs and render policies.
+     * Any change that can alter highlight geometry or styling must appear here.
+     */
     private buildHighlightVisualizationSignature(
         mode: HighlightMode,
         groups: {features: FeatureWrapper[], color?: string, id?: number}[]
@@ -1695,6 +1772,10 @@ export class MapDataService {
         return signatureParts.join("|");
     }
 
+    /**
+     * Recomputes the logical `/tiles` request from visible tiles and pinned selection tiles.
+     * Requests are grouped by map/layer/level so websocket chunking can stay backend-friendly.
+     */
     private async updateMapDataRequest() {
         if (this.tilePipelinePaused) {
             return;
@@ -1905,6 +1986,7 @@ export class MapDataService {
         }
     }
 
+    /** Hydrates an incoming tile payload, updates caches, and wakes any waiting render or inspection work. */
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return this.tileLayerParser.readTileLayerMetadata(wasmBlob);
@@ -1982,6 +2064,7 @@ export class MapDataService {
         }
     }
 
+    /** Requeues existing visualizations for a tile that just received additional stage data. */
     private updateWaitingVisualizationsForTile(tileLayer: FeatureTile): {
         foundExistingVisualization: boolean;
         visibleInAnyView: boolean;
@@ -2024,6 +2107,7 @@ export class MapDataService {
         };
     }
 
+    /** Creates all currently applicable style visualizations for a newly visible tile. */
     private createVisualizationsForTile(tileLayer: FeatureTile): void {
         for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
             if (!this.viewShowsFeatureTile(viewIndex, tileLayer)) {
@@ -2036,6 +2120,7 @@ export class MapDataService {
         }
     }
 
+    /** Fast-path helper that creates a visualization only if the style is currently applicable. */
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
         if (style.visible &&
             style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName) &&
@@ -2044,6 +2129,7 @@ export class MapDataService {
         }
     }
 
+    /** Constructs the concrete deck-backed visualization object for one tile/style/highlight combination. */
     private createTileVisualization(
         viewIndex: number,
         tile: FeatureTile,
@@ -2076,6 +2162,7 @@ export class MapDataService {
         );
     }
 
+    /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
     private async resolveRelationExternalTiles(
         requests: RelationLocateRequest[]
     ): Promise<RelationLocateResult> {
@@ -2133,6 +2220,7 @@ export class MapDataService {
         };
     }
 
+    /** Creates or refreshes one style visualization for a tile in a specific view. */
     private renderTileLayer(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
         const wasmStyle = style.featureLayerStyle;
         if (!wasmStyle) {
@@ -2202,6 +2290,7 @@ export class MapDataService {
         this.queueVisualization(viewState, visu);
     }
 
+    /** Updates one view's viewport snapshot and schedules a full tile/visualization refresh. */
     setViewport(viewIndex: number, viewport: Viewport) {
         const maxIndex = this.viewVisualizationState.length - 1;
         if (viewIndex > maxIndex) {
@@ -2212,6 +2301,7 @@ export class MapDataService {
         this.scheduleUpdate();
     }
 
+    /** Returns loaded tiles ordered by visibility, render order, and backend priority for diagnostics. */
     getPrioritisedTiles(viewIndex: number) {
         const viewState = this.viewVisualizationState[viewIndex];
         let tiles = new Array<{
@@ -2249,6 +2339,7 @@ export class MapDataService {
         return tiles.map(val => val.tile);
     }
 
+    /** Returns a loaded feature tile by key, accepting legacy and canonical key forms. */
     getFeatureTile(tileKey: string): FeatureTile | null {
         const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
         const tile = this.loadedTileLayers.get(canonicalTileKey);
@@ -2258,6 +2349,7 @@ export class MapDataService {
         return tile;
     }
 
+    /** Emits the paused-pipeline info toast only once per paused interval. */
     private showPausedTileLoadInfoOnce() {
         if (this.blockedTileLoadInfoShown) {
             return;
@@ -2266,6 +2358,7 @@ export class MapDataService {
         this.showInfoMessage('Tile pipeline is paused; cannot load additional tiles');
     }
 
+    /** Resolves an address-based feature reference back to a stable tile/feature id pair. */
     resolveTileFeatureIdByAddress(tileKey: string, featureAddress: number): TileFeatureId | null {
         if (!Number.isInteger(featureAddress) || featureAddress < 0) {
             return null;
@@ -2285,6 +2378,7 @@ export class MapDataService {
         } : null;
     }
 
+    /** Ensures a set of tiles is loaded, using selection-style pin requests for cache misses. */
     async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
         const result = new Map<string, FeatureTile>();
 
@@ -2342,6 +2436,7 @@ export class MapDataService {
         return result;
     }
 
+    /** Pins a tile until inspection has seen every advertised stage, without exposing a caller-visible promise. */
     private pinTileForSelectionInspection(
         mapId: string,
         layerId: string,
@@ -2368,6 +2463,10 @@ export class MapDataService {
         this.scheduleUpdate();
     }
 
+    /**
+     * Resolves tile/feature ids to `FeatureWrapper`s.
+     * `allowIncomplete` keeps selection restore usable before all tile stages arrived.
+     */
     async loadFeatures(
         tileFeatureIds: (TileFeatureId | null)[],
         options?: {allowIncomplete?: boolean}
@@ -2453,6 +2552,7 @@ export class MapDataService {
         return features;
     }
 
+    /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */
     async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
         const revision = ++this.hoverConversionRevision;
         const features = await this.loadFeatures(tileFeatureIds);
@@ -2479,6 +2579,7 @@ export class MapDataService {
         this.hoverTopic.next(features);
     }
 
+    /** Loads a feature and centers the target view on its reported center point. */
     async focusOnFeature(viewIndex: number, tileFeatureId: TileFeatureId) {
         const features = await this.loadFeatures([tileFeatureId]);
         if (!features.length) {
@@ -2489,6 +2590,10 @@ export class MapDataService {
         this.moveToWgs84PositionTopic.next({targetView: viewIndex, x: position.x, y: position.y});
     }
 
+    /**
+     * Moves one or more views to a feature using mesh normals when available and a center fallback otherwise.
+     * Passing `undefined` targets every view that currently shows the feature tile.
+     */
     zoomToFeature(viewIndex: number|undefined, featureWrapper: FeatureWrapper) {
         const runForTargetViewOrAllAffected = (cb: (viewIndex: number)=>void) => {
             if (viewIndex !== undefined) {
@@ -2556,6 +2661,7 @@ export class MapDataService {
         });
     }
 
+    /** Recreates all highlight visualizations for the supplied hover or selection groups. */
     private visualizeHighlights(
         mode: HighlightMode,
         groups: {features: FeatureWrapper[], color?: string, id?: number}[],
@@ -2643,6 +2749,7 @@ export class MapDataService {
         this.setHighlightVisualizationSignature(mode, signature);
     }
 
+    /** Deduplicates and publishes legal-info strings per map as tiles arrive. */
     private setLegalInfo(mapName: string, legalInfo: string): void {
         if (this.legalInformationPerMap.has(mapName)) {
             this.legalInformationPerMap.get(mapName)!.add(legalInfo);
@@ -2675,12 +2782,14 @@ export class MapDataService {
         }
     }
 
+    /** Persists map/layer visibility changes and schedules the resulting viewport refresh. */
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }
 
+    /** Toggles the diagnostic tile-border overlay in one view. */
     toggleViewTileBorderVisibility(viewIndex: number) {
         const nextState = !this.maps.getViewTileBorderState(viewIndex);
         this.maps.setViewTileBorderState(viewIndex, nextState);
@@ -2688,18 +2797,21 @@ export class MapDataService {
         this.scheduleUpdate();
     }
 
+    /** Sets the tile-grid coordinate mode and refreshes affected overlays. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.maps.setViewTileGridMode(viewIndex, mode);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }
 
+    /** Persists an explicit layer level for one view and refreshes visible tiles. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.maps.setMapLayerLevel(viewIndex, mapId, layerId, level);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }
 
+    /** Enables or disables auto-level, normalizing the stored level when auto mode is turned on. */
     setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
         if (autoLevel) {
             const configuredLevel = this.maps.getMapLayerLevel(viewIndex, mapId, layerId);
@@ -2711,10 +2823,12 @@ export class MapDataService {
         this.scheduleUpdate();
     }
 
+    /** Returns whether a map layer currently follows the auto-level heuristic in the given view. */
     isMapLayerAutoLevelEnabled(viewIndex: number, mapId: string, layerId: string): boolean {
         return this.maps.getMapLayerAutoLevel(viewIndex, mapId, layerId);
     }
 
+    /** Returns the currently active level, substituting the auto-selected level when needed. */
     getEffectiveMapLayerLevel(viewIndex: number, mapId: string, layerId: string): number {
         const configuredLevel = this.maps.getMapLayerLevel(viewIndex, mapId, layerId);
         if (!this.maps.getMapLayerAutoLevel(viewIndex, mapId, layerId)) {
@@ -2723,6 +2837,7 @@ export class MapDataService {
         return this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, configuredLevel);
     }
 
+    /** Chooses the deepest advertised level whose tile density stays below the auto-level threshold. */
     private autoSelectedMapLayerLevel(
         viewIndex: number,
         mapId: string,
@@ -2747,6 +2862,7 @@ export class MapDataService {
         return advertisedLevels[0];
     }
 
+    /** Returns the sorted unique zoom levels declared for a layer, clamped to sane bounds. */
     private advertisedLayerLevels(mapId: string, layerId: string): number[] {
         const mapItem = this.maps.maps.get(mapId);
         const layer = mapItem?.layers.get(layerId);
@@ -2760,6 +2876,7 @@ export class MapDataService {
         )].sort((lhs, rhs) => lhs - rhs);
     }
 
+    /** Clamps an arbitrary level down to the nearest advertised level that does not exceed it. */
     private clampLayerLevelToAdvertised(level: number, advertisedLevels: number[]): number {
         let clampedLevel = advertisedLevels[0];
         for (const advertisedLevel of advertisedLevels) {
@@ -2771,6 +2888,7 @@ export class MapDataService {
         return clampedLevel;
     }
 
+    /** Returns whether a tile should currently be visible in a view after viewport and level checks. */
     private viewShowsFeatureTile(viewIndex: number, tile: FeatureTile, skipViewportCheck: boolean = false) {
         if (viewIndex >= this.viewVisualizationState.length) {
             console.error("Attempt to access non-existing view index.");
@@ -2786,18 +2904,22 @@ export class MapDataService {
             tile.level() === this.getEffectiveMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
     }
 
+    /** Schedules timer work outside Angular so frequent render churn does not trigger global change detection. */
     private scheduleOutsideAngular(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
         return this.ngZone.runOutsideAngular(() => setTimeout(callback, delay));
     }
 
+    /** Schedules a RAF callback outside Angular for performance sampling. */
     private requestAnimationFrameOutsideAngular(callback: (timestamp: number) => void): number {
         return this.ngZone.runOutsideAngular(() => window.requestAnimationFrame(callback));
     }
 
+    /** Proxies an info toast through Angular's zone. */
     private showInfoMessage(message: string) {
         this.ngZone.run(() => this.messageService.showInfo(message));
     }
 
+    /** Proxies an error toast through Angular's zone. */
     private showErrorMessage(message: string) {
         this.ngZone.run(() => this.messageService.showError(message));
     }
@@ -2807,6 +2929,7 @@ export class MapDataService {
      *
      * @param layerName Layer id to get the name for
      */
+    /** Resolves a human-readable source-data layer name back to its internal layer id. */
     sourceDataLayerIdForLayerName(layerName: string) {
         for (const [_, mapInfo] of this.maps.maps.entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
@@ -2822,6 +2945,7 @@ export class MapDataService {
         return null;
     }
 
+    /** Returns every map that could expose source-data for a tile id at the matching level. */
     findSourceDataMapsForTileId(tileId: bigint): Array<{id: string, name: string}> {
         const level = coreLib.getTileLevel(tileId);
         const result: Array<{id: string, name: string}> = [];
@@ -2840,6 +2964,7 @@ export class MapDataService {
         return result;
     }
 
+    /** Returns the set of feature levels that are currently visible in one view across all layers. */
     visibleFeatureLevelsInView(viewIndex: number): Set<number> {
         const levels = new Set<number>();
         for (const [mapId, mapInfo] of this.maps.maps.entries()) {
@@ -2856,6 +2981,7 @@ export class MapDataService {
         return levels;
     }
 
+    /** Lists source-data or metadata layers for a map using human-readable names. */
     findLayersForMapId(mapId: string, isMetadata: boolean = false) {
         const map = this.maps.maps.get(mapId);
         if (map) {

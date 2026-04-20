@@ -11,11 +11,19 @@
 namespace erdblick
 {
 
+/**
+ * Stateful decoder for streamed mapget tile payloads and auxiliary dictionaries.
+ *
+ * The parser retains string-pool and layer-info caches across calls so streamed
+ * updates can be decoded incrementally and feature-id parsing can later reuse
+ * the same metadata.
+ */
 class TileLayerParser
 {
     friend class TestDataProvider;
 
 public:
+    /** Create a parser with empty stream state and metadata caches. */
     explicit TileLayerParser();
 
     /**
@@ -39,10 +47,7 @@ public:
      */
     TileSourceDataLayer readTileSourceDataLayer(SharedUint8Array const& buffer);
 
-    /**
-     * Parse only the stringified MapTileKey and tile id from the tile layer blob.
-     * Returns two-element JS list, containing both.
-     */
+    /** Cheap metadata view read from a tile blob without fully parsing the tile. */
     struct TileLayerMetadata {
         std::string id;
         std::string nodeId;
@@ -55,6 +60,7 @@ public:
         int32_t numFeatures;
         NativeJsValue scalarFields;
     };
+    /** Parse only cheap tile metadata without constructing the full feature/source-data model. */
     TileLayerMetadata readTileLayerMetadata(SharedUint8Array const& buffer);
 
     /**
@@ -92,8 +98,7 @@ public:
     void setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info);
 
     /**
-     * Aggregates a feature type id composition with map-layers
-     * that provide this type.
+     * Describes how one feature type can be reconstructed from a textual jump query.
      */
     struct FeatureJumpTarget
     {
@@ -112,6 +117,7 @@ public:
         mapget::KeyValuePairs parsedParams_;
         std::optional<std::string> error_;
 
+        /** Convert this jump-target parse result into the JS object consumed by the UI. */
         JsValue toJsValue() const;
     };
 
@@ -132,6 +138,10 @@ public:
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
 
+    /**
+     * Resolve layer metadata for a `(mapId, layerId)` pair using loaded datasource info
+     * and the optional fallback layer info used by tests.
+     */
     std::shared_ptr<mapget::LayerInfo>
     resolveMapLayerInfo(std::string const& mapId, std::string const& layerId);
 

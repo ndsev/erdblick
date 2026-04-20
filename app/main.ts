@@ -1,7 +1,7 @@
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
 import { AppModule } from './app.module';
 
-// Apply persisted dark mode before Angular bootstraps to avoid flicker
+/** Applies persisted dark mode before Angular bootstraps to avoid theme flicker. */
 (() => {
     try {
         const DARK_MODE_KEY = 'ui.darkMode';

@@ -29,6 +29,7 @@ constexpr double kArrowHeadLengthFraction = 0.35;
 constexpr double kArrowHeadWidthFraction = 0.55;
 constexpr double kArrowSegmentEpsilonMeters = 1e-6;
 
+/** Convert the JS `{x,y,z}` point payload emitted by the base class back into `mapget::Point`. */
 mapget::Point pointFromJsValue(JsValue const& xyzPos)
 {
     return {
@@ -38,6 +39,7 @@ mapget::Point pointFromJsValue(JsValue const& xyzPos)
     };
 }
 
+/** Convert normalized float RGBA colors into the byte array shape used by deck labels/icons. */
 JsValue rgbaBytesFromColor(glm::fvec4 const& color)
 {
     auto toByte = [](float value) {
@@ -52,11 +54,13 @@ JsValue rgbaBytesFromColor(glm::fvec4 const& color)
     });
 }
 
+/** Convert longitude to deck/math.gl world X units at the canonical 512-tile scale. */
 double mercatorWorldX(double longitudeDeg)
 {
     return (kMercatorTileSize * ((longitudeDeg * kDegToRad) + kPi)) / (2.0 * kPi);
 }
 
+/** Convert latitude to deck/math.gl world Y units at the canonical 512-tile scale. */
 double mercatorWorldY(double latitudeDeg)
 {
     auto const latitudeRad = latitudeDeg * kDegToRad;
@@ -64,6 +68,12 @@ double mercatorWorldY(double latitudeDeg)
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
 }
 
+/**
+ * Reproduce math.gl distance scales for the coordinate origin used by path buffers.
+ *
+ * Deck's `PathLayer` needs both the first-order units-per-meter scale and the
+ * second-order correction term so large world-coordinate paths stay stable.
+ */
 bool distanceScalesAt(
     double latitudeDeg,
     double& unitsPerMeter,

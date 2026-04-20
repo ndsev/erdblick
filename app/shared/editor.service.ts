@@ -2,6 +2,12 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 
 @Injectable()
+/**
+ * Shared coordinator for the single active CodeMirror instance.
+ *
+ * The current implementation assumes at most one live editor at a time and
+ * broadcasts lifecycle events to whichever component is mounted right now.
+ */
 export class EditorService {
 
     // TODO: Change to a stack of references to support many editors.

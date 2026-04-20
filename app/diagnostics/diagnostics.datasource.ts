@@ -24,6 +24,12 @@ import {
 const UPDATE_EVENT_DEBOUNCE_MS = 1000;
 
 @Injectable()
+/**
+ * Collects diagnostics snapshots, performance aggregates, and console-backed logs.
+ *
+ * The datasource is UI-facing but fed directly from `MapDataService`, so it
+ * throttles updates to avoid turning high tile throughput into diagnostics noise.
+ */
 export class DiagnosticsDatasource implements OnDestroy {
     readonly snapshot$ = new BehaviorSubject<DiagnosticsSnapshot>(this.buildSnapshot());
     readonly perfStats$ = new BehaviorSubject<PerfStat[]>([]);
@@ -67,10 +73,12 @@ export class DiagnosticsDatasource implements OnDestroy {
         );
     }
 
+    /** Tears down polling and update subscriptions. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
+    /** Rebuilds aggregated performance stats unless the tile pipeline is paused. */
     refreshPerfStats() {
         if (this.mapService.tilePipelinePaused) {
             return;
@@ -79,6 +87,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.perfStats$.next(stats);
     }
 
+    /** Refreshes performance stats only when the performance dialog is visible. */
     refreshPerfStatsIfVisible() {
         if (!this.appStateService.diagnosticsPerformanceDialogVisible) {
             return;
@@ -86,6 +95,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.refreshPerfStats();
     }
 
+    /** Appends backend-connectivity and tile-error log entries discovered since the last refresh. */
     refreshLogs() {
         const now = Date.now();
         const connected = this.mapService.isTileStreamConnected();
@@ -123,11 +133,13 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.appendLogEntries(newEntries);
     }
 
+    /** Runs the lightweight on-demand refresh path used after tile-data changes. */
     private refreshOnDemand() {
         this.refreshPerfStatsIfVisible();
         this.refreshLogs();
     }
 
+    /** Builds one diagnostics snapshot from the current tile pipeline state. */
     private buildSnapshot(): DiagnosticsSnapshot {
         const tiles = Array.from(this.mapService.loadedTileLayers.values());
         const expected = tiles.length;
@@ -193,10 +205,12 @@ export class DiagnosticsDatasource implements OnDestroy {
         };
     }
 
+    /** Convenience helper for appending a single log entry. */
     private appendLogEntry(entry: LogEntry) {
         this.appendLogEntries([entry]);
     }
 
+    /** Appends log entries while keeping the in-memory buffer bounded. */
     private appendLogEntries(entries: LogEntry[]) {
         if (!entries.length) {
             return;
@@ -205,6 +219,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.logs$.next(merged.slice(-MAX_LOGS));
     }
 
+    /** Monkey-patches console methods once so frontend logs also appear in the diagnostics log. */
     private patchConsoleLogging() {
         DiagnosticsDatasource.consoleLogHandler = (level: LogLevel, args: unknown[]) => this.handleConsoleLog(level, args);
         if (DiagnosticsDatasource.consolePatched) {
@@ -237,10 +252,12 @@ export class DiagnosticsDatasource implements OnDestroy {
         wrap('debug', 'info');
     }
 
+    /** Forwards patched console calls into the active datasource instance, if any. */
     private static forwardConsoleLog(level: LogLevel, args: unknown[]) {
         DiagnosticsDatasource.consoleLogHandler?.(level, args);
     }
 
+    /** Converts one console call into a structured diagnostics log entry. */
     private handleConsoleLog(level: LogLevel, args: unknown[]) {
         const entry: LogEntry = {
             at: Date.now(),
@@ -251,6 +268,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.appendLogEntry(entry);
     }
 
+    /** Produces the human-readable message string for a captured console call. */
     private formatConsoleMessage(args: unknown[]): string {
         if (!args.length) {
             return '(empty log)';
@@ -261,6 +279,7 @@ export class DiagnosticsDatasource implements OnDestroy {
             .join(' ');
     }
 
+    /** Preserves raw console arguments only when there is object/function payload worth inspecting. */
     private extractConsoleData(args: unknown[]): unknown {
         if (!args.length) {
             return undefined;
@@ -270,6 +289,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         return hasObjectPayload ? args : undefined;
     }
 
+    /** Stringifies one console argument without throwing on cyclic or exotic values. */
     private stringifyLogPart(value: unknown): string {
         if (value === null) {
             return 'null';
@@ -298,6 +318,7 @@ export class DiagnosticsDatasource implements OnDestroy {
     }
 }
 
+/** Extracts an explicit unit from a raw perf-stat key suffix. */
 function parsePerfUnit(key: string): string | undefined {
     const lower = key.toLowerCase();
     for (const entry of UNIT_SUFFIXES) {
@@ -308,6 +329,7 @@ function parsePerfUnit(key: string): string | undefined {
     return undefined;
 }
 
+/** Removes the configured unit suffix from a raw perf-stat key. */
 function stripPerfUnitSuffix(key: string): string {
     const lower = key.toLowerCase();
     for (const entry of UNIT_SUFFIXES) {
@@ -318,6 +340,7 @@ function stripPerfUnitSuffix(key: string): string {
     return key;
 }
 
+/** Infers count semantics from integer-only samples and count-like key names. */
 function inferCountUnit(key: string, values: number[]): string | undefined {
     if (!values.length) {
         return undefined;
@@ -331,6 +354,7 @@ function inferCountUnit(key: string, values: number[]): string | undefined {
     return undefined;
 }
 
+/** Resolves the best display unit for a perf stat, preferring explicit suffixes. */
 function resolvePerfUnit(key: string, values: number[]): string | undefined {
     const explicit = parsePerfUnit(key);
     if (explicit) {
@@ -340,6 +364,7 @@ function resolvePerfUnit(key: string, values: number[]): string | undefined {
     return inferCountUnit(baseKey, values);
 }
 
+/** Accumulator used while merging identical perf-stat keys across tiles. */
 type AggregatedPerfAccumulator = {
     sum: number;
     count: number;
@@ -348,10 +373,12 @@ type AggregatedPerfAccumulator = {
     peakTileIds: Set<string>;
 };
 
+/** Small guard that rejects `NaN`/`Infinity` samples from backend perf stats. */
 function isFiniteNumber(value: number): boolean {
     return Number.isFinite(value);
 }
 
+/** Aggregates raw per-tile perf stats into the tree-friendly diagnostics representation. */
 export function buildAggregatedPerfStats(tiles: Iterable<FeatureTile>, maxPeakTileIds: number = 5): PerfStat[] {
     const statsByKey = new Map<string, AggregatedPerfAccumulator>();
 

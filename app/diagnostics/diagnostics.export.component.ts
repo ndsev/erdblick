@@ -45,6 +45,7 @@ import {AppStateService} from '../shared/appstate.service';
     styles: [``],
     standalone: false
 })
+/** Dialog that configures and launches diagnostics JSON exports. */
 export class DiagnosticsExportDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
     exporting = false;
@@ -79,18 +80,22 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
         );
     }
 
+    /** Releases the persisted export-options subscription. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
+    /** Promotes the export dialog above other overlays. */
     onDialogShow() {
         this.dialogStack.bringToFront(this.dialog);
     }
 
+    /** Returns whether at least one diagnostics category is selected for export. */
     get canExport(): boolean {
         return this.exportOptions.includeProgress || this.exportOptions.includePerformance || this.exportOptions.includeLogs;
     }
 
+    /** Persists the current export-option toggles. */
     updateOptions() {
         this.stateService.diagnosticsExportOptions = {
             ...this.exportOptions,
@@ -98,6 +103,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
         };
     }
 
+    /** Builds and downloads the export bundle, guarding against duplicate clicks. */
     async export() {
         if (this.exporting) {
             return;

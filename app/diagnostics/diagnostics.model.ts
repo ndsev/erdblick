@@ -1,14 +1,18 @@
+/** Severity levels used by the diagnostics log. */
 export type LogLevel = 'info' | 'warn' | 'error';
 
+/** Simple `done/total` counter pair used throughout the diagnostics UI. */
 export interface ProgressCounter {
     done: number;
     total: number;
 }
 
+/** Named progress stage shown in the pipeline progress widget. */
 export interface StageProgressCounter extends ProgressCounter {
     label: string;
 }
 
+/** Miscellaneous loading metrics shown as compact bubbles in the progress HUD. */
 export interface LoadingStatBubbles {
     downstreamBytesPerSecond: number;
     pullResponses: number;
@@ -25,6 +29,7 @@ export interface LoadingStatBubbles {
     renderSeconds: number;
 }
 
+/** Full tile-pipeline progress model consumed by diagnostics widgets. */
 export interface TilePipelineProgress {
     stages: StageProgressCounter[];
     backend: ProgressCounter;
@@ -32,6 +37,7 @@ export interface TilePipelineProgress {
     bubbles: LoadingStatBubbles;
 }
 
+/** High-level counts for the currently tracked tiles. */
 export interface TileStateCounts {
     expected: number;
     loaded: number;
@@ -39,6 +45,7 @@ export interface TileStateCounts {
     errors: number;
 }
 
+/** Counts for rendered or queued visualization work. */
 export interface VisualizationCounts {
     present: number;
     queue: number;
@@ -46,6 +53,7 @@ export interface VisualizationCounts {
     features: number;
 }
 
+/** Backend connectivity state shown in the diagnostics UI. */
 export interface BackendState {
     connected: boolean;
     lastStatus?: string;
@@ -53,6 +61,7 @@ export interface BackendState {
     lastStatusAt?: number;
 }
 
+/** Point-in-time diagnostics snapshot combining tile, progress, and backend state. */
 export interface DiagnosticsSnapshot {
     at: number;
     tiles: TileStateCounts;
@@ -60,6 +69,7 @@ export interface DiagnosticsSnapshot {
     backend: BackendState;
 }
 
+/** Aggregated performance statistic derived from one raw backend stat path. */
 export interface PerfStat {
     key: string;
     path: string[];
@@ -69,6 +79,7 @@ export interface PerfStat {
     peakTileIds?: string[];
 }
 
+/** One diagnostics log entry, including optional structured payload data. */
 export interface LogEntry {
     at: number;
     level: LogLevel;
@@ -76,12 +87,14 @@ export interface LogEntry {
     data?: unknown;
 }
 
+/** Checkbox state for log-level filtering in dialogs and exports. */
 export interface DiagnosticsLogFilter {
     info: boolean;
     warn: boolean;
     error: boolean;
 }
 
+/** Persisted options for diagnostics export generation. */
 export interface DiagnosticsExportOptions {
     includeProgress: boolean;
     includePerformance: boolean;
@@ -89,6 +102,7 @@ export interface DiagnosticsExportOptions {
     logFilter: DiagnosticsLogFilter;
 }
 
+/** Tile-size histogram reported by `/status-data`. */
 export interface TileSizeDistribution {
     'tile-count'?: number;
     'total-tile-bytes'?: number;
@@ -101,6 +115,7 @@ export interface TileSizeDistribution {
     }>;
 }
 
+/** Subset of backend status data relevant for diagnostics export. */
 export interface BackendStatusDataSummary {
     timestampMs?: number;
     service?: {
@@ -113,6 +128,7 @@ export interface BackendStatusDataSummary {
     statusFetchError?: string;
 }
 
+/** JSON payload written when the user exports diagnostics. */
 export interface DiagnosticsExportBundle {
     exportedAt: string;
     metadata: {

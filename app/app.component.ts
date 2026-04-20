@@ -53,6 +53,13 @@ declare let window: DebugWindow;
     `],
     standalone: false
 })
+/**
+ * Root application component.
+ *
+ * Besides rendering the top-level dialogs and panels, it wires up global
+ * behaviors such as dialog stacking, drag-selection suppression, debug helpers,
+ * and startup version loading.
+ */
 export class AppComponent implements OnDestroy {
 
     title: string = "erdblick";
@@ -122,12 +129,14 @@ export class AppComponent implements OnDestroy {
         this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
     }
 
+    /** Removes global dialog listeners installed during startup. */
     ngOnDestroy() {
         this.detachDialogFocusListener?.();
         this.detachDialogDragStartListener?.();
         this.detachDialogDragEndListener?.();
     }
 
+    /** Keeps dialogs and the search wrapper in a deterministic z-order based on focus clicks. */
     private bindDialogFocusStacking() {
         const handler = (event: MouseEvent) => {
             const target = event.target as HTMLElement | null;
@@ -164,6 +173,7 @@ export class AppComponent implements OnDestroy {
         };
     }
 
+    /** Prevents accidental text selection while PrimeNG dialogs are dragged or resized. */
     private bindDialogDragSelectionGuard() {
         const handlePointerDown = (event: PointerEvent) => {
             if (event.button !== 0) {
@@ -204,6 +214,7 @@ export class AppComponent implements OnDestroy {
         };
     }
 
+    /** Applies or clears the global CSS state used while a dialog drag is active. */
     private setDialogDragSelection(active: boolean) {
         if (this.dialogDragActive === active) {
             return;
@@ -217,6 +228,7 @@ export class AppComponent implements OnDestroy {
         document.body?.classList.remove('dialog-dragging');
     }
 
+    /** Loads the bundled fallback version string when distribution metadata is unavailable. */
     getBasicVersion() {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
@@ -225,10 +237,12 @@ export class AppComponent implements OnDestroy {
             });
     }
 
+    /** Capitalizes the application title for use in the browser tab. */
     private capitalizeTitle(title: string) {
         return `${title.charAt(0).toUpperCase()}${title.slice(1)}`;
     }
 
+    /** Opens the diagnostics performance dialog from the global keyboard shortcut. */
     private openStatistics() {
         this.stateService.diagnosticsPerformanceDialogVisible = true;
     }

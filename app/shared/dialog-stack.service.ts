@@ -7,12 +7,17 @@ interface StackEntry {
 }
 
 @Injectable({providedIn: 'root'})
+/**
+ * Maintains deterministic z-ordering for PrimeNG dialogs created through
+ * different code paths.
+ */
 export class DialogStackService {
     private static readonly STACK_BASE_Z_INDEX = 200;
     private static readonly STACK_STEP = 2;
     private static readonly MAX_TRACKED_ELEMENTS = 100;
     private readonly stack: StackEntry[] = [];
 
+    /** Promotes the target dialog container to the top of the managed z-index stack. */
     bringToFront(target: Dialog | HTMLElement | undefined | null) {
         const entry = this.resolveEntry(target);
         if (!entry) {
@@ -33,6 +38,7 @@ export class DialogStackService {
         this.applyStackZIndex();
     }
 
+    /** Resolves the dialog container and surrounding mask for the given target. */
     private resolveEntry(target: Dialog | HTMLElement | undefined | null): StackEntry | undefined {
         if (!target) {
             return undefined;
@@ -55,6 +61,7 @@ export class DialogStackService {
         };
     }
 
+    /** Applies the current stack order to both dialog containers and their masks. */
     private applyStackZIndex() {
         for (let index = 0; index < this.stack.length; index++) {
             const entry = this.stack[index];
@@ -72,6 +79,7 @@ export class DialogStackService {
         }
     }
 
+    /** Removes disconnected dialogs so stale overlays do not consume z-index slots. */
     private pruneStack() {
         const retainedEntries: StackEntry[] = [];
         for (const entry of this.stack) {
@@ -85,6 +93,7 @@ export class DialogStackService {
         this.stack.push(...retainedEntries);
     }
 
+    /** Returns the PrimeNG mask element if the given node represents one. */
     private resolveMaskElement(element: HTMLElement | null | undefined): HTMLElement | undefined {
         if (!element) {
             return undefined;
@@ -95,6 +104,7 @@ export class DialogStackService {
         return undefined;
     }
 
+    /** Clears every z-index override associated with one tracked dialog entry. */
     private clearEntryZIndex(entry: StackEntry) {
         this.clearZIndex(entry.container);
         if (entry.wrapper) {
@@ -102,6 +112,7 @@ export class DialogStackService {
         }
     }
 
+    /** Removes the temporary z-index override from one element. */
     private clearZIndex(element: HTMLElement) {
         element.style.removeProperty('z-index');
     }

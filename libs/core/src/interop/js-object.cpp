@@ -12,6 +12,7 @@ namespace erdblick
 namespace {
 
 #ifdef EMSCRIPTEN
+/** Create a JS typed array and copy the provided span into it. */
 template <typename TypedArrayCtor, typename T>
 JsValue makeTypedArray(std::span<const T> data)
 {
@@ -21,6 +22,7 @@ JsValue makeTypedArray(std::span<const T> data)
     return JsValue(buffer);
 }
 #else
+/** Native-build fallback that preserves typed-array payloads as plain JSON arrays. */
 template <typename T>
 JsValue makeTypedArray(std::span<const T> data)
 {
@@ -29,9 +31,13 @@ JsValue makeTypedArray(std::span<const T> data)
 #endif
 
 #ifdef EMSCRIPTEN
+/** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Float32ArrayCtor { static constexpr auto value = "Float32Array"; };
+/** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Float64ArrayCtor { static constexpr auto value = "Float64Array"; };
+/** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Uint32ArrayCtor { static constexpr auto value = "Uint32Array"; };
+/** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Uint8ArrayCtor { static constexpr auto value = "Uint8Array"; };
 #endif
 

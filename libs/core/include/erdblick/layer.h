@@ -93,6 +93,7 @@ struct TileFeatureLayer
      */
     mapget::model_ptr<mapget::Feature> featureByAddress(uint32_t address) const;
 
+    /** Release the wrapped smart pointer. */
     ~TileFeatureLayer();
 
     /** Shared pointer to the underlying `mapget::TileFeatureLayer`. */

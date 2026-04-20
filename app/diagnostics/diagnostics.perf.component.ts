@@ -193,6 +193,12 @@ interface PerfTileScopeCounts {
     styles: [``],
     standalone: false
 })
+/**
+ * Dialog that explores aggregated tile performance statistics as a tree table.
+ *
+ * It supports filtering by map layer and tile id, derives display units from
+ * raw stats, and highlights unusually expensive timing rows.
+ */
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
     readonly dialogStyle: {[key: string]: string} = {
@@ -222,10 +228,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         );
     }
 
+    /** Releases subscriptions feeding the filter options and tree state. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
+    /** Refreshes the visible stats, rebuilds filters, and promotes the dialog. */
     onDialogShow() {
         this.diagnostics.refreshPerfStats();
         this.refreshAvailableMapLayers();
@@ -234,6 +242,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.dialogStack.bringToFront(this.dialog);
     }
 
+    /** Opens the diagnostics export dialog preconfigured for performance analysis. */
     openExport() {
         this.diagnostics.openExportDialog({
             includeProgress: false,
@@ -242,19 +251,23 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         });
     }
 
+    /** Rebuilds available tile ids and tree rows after the layer filter changed. */
     onLayerSelectionChange() {
         this.refreshAvailableTileIds();
         this.rebuildTreeNodes();
     }
 
+    /** Rebuilds the tree after the tile-id filter changed. */
     onTileIdSelectionChange() {
         this.rebuildTreeNodes();
     }
 
+    /** Stable row key for PrimeNG tree-table rendering. */
     trackNodeByPath = (index: number, row: TreeTableNode): string | number => {
         return row?.key ?? row?.data?.pathKey ?? index;
     };
 
+    /** Persists a node's expansion state by its path key. */
     onNodeExpand(node: TreeTableNode) {
         const pathKey = this.getNodePathKey(node);
         if (pathKey) {
@@ -262,6 +275,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Persists a node's collapsed state by its path key. */
     onNodeCollapse(node: TreeTableNode) {
         const pathKey = this.getNodePathKey(node);
         if (pathKey) {
@@ -269,6 +283,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Extracts a stable tree-path key from a tree node or its row data. */
     private getNodePathKey(node: TreeTableNode | undefined): string | undefined {
         if (!node) {
             return undefined;
@@ -283,6 +298,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Derives an explicit display unit from a perf-stat key suffix. */
     private parsePerfUnit(key: string): string | undefined {
         const lower = key.toLowerCase();
         for (const entry of UNIT_SUFFIXES) {
@@ -293,10 +309,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Infers count semantics from the key name when no explicit unit suffix exists. */
     private inferCountUnitFromKey(key: string): string | undefined {
         return COUNT_KEY_PATTERN.test(this.stripPerfUnitSuffix(key)) ? 'count' : undefined;
     }
 
+    /** Removes unit suffixes from perf-stat keys before building tree paths. */
     private stripPerfUnitSuffix(key: string): string {
         const lower = key.toLowerCase();
         for (const entry of UNIT_SUFFIXES) {
@@ -307,12 +325,14 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return key;
     }
 
+    /** Splits a perf-stat key into path segments for the tree-table hierarchy. */
     private splitPerfPath(key: string): string[] {
         const cleaned = this.stripPerfUnitSuffix(key);
         const segments = cleaned.split('/').map(segment => segment.trim()).filter(Boolean);
         return segments.length ? segments : [cleaned];
     }
 
+    /** Rebuilds the list of selectable map layers from currently loaded tiles. */
     private refreshAvailableMapLayers() {
         const mapLayersSet: Set<string> = new Set();
         for (const tile of this.mapService.loadedTileLayers.values()) {
@@ -337,6 +357,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.selectedMapLayers = validSelection;
     }
 
+    /** Rebuilds the list of selectable tile ids for the currently selected map layers. */
     private refreshAvailableTileIds() {
         const selectedLabels = new Set(this.selectedMapLayers.map(selection => selection.label));
         if (!selectedLabels.size) {
@@ -372,6 +393,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Compares layer-option lists to avoid resetting selection state unnecessarily. */
     private isSameLayerList(left: LayerOption[], right: LayerOption[]): boolean {
         if (left.length !== right.length) {
             return false;
@@ -384,6 +406,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return true;
     }
 
+    /** Compares tile-id option lists to avoid resetting selection state unnecessarily. */
     private isSameTileIdList(left: TileIdOption[], right: TileIdOption[]): boolean {
         if (left.length !== right.length) {
             return false;
@@ -396,6 +419,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return true;
     }
 
+    /** Sorts tile-id strings numerically when possible, else lexicographically. */
     private compareTileIdStrings(left: string, right: string): number {
         try {
             const leftValue = BigInt(left);
@@ -412,6 +436,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Rebuilds the displayed tree-table rows from the currently filtered perf stats. */
     private rebuildTreeNodes() {
         const filteredStats = this.computeFilteredPerfStats();
         this.computeDisplayUnits(filteredStats);
@@ -419,6 +444,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.treeNodes = nextTreeNodes;
     }
 
+    /** Filters aggregated perf stats by the active layer and tile-id selections. */
     private computeFilteredPerfStats(): PerfStat[] {
         const selectedLabels = new Set(this.selectedMapLayers.map(selection => selection.label));
         if (!selectedLabels.size) {
@@ -452,6 +478,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return buildAggregatedPerfStats(tileScopedNonEmptyTiles);
     }
 
+    /** Computes tile-scope counts used by the root badges and their tooltips. */
     private computeTileScopeCounts(scopedTiles: FeatureTile[],
                                    nonEmptyTiles: FeatureTile[],
                                    consideredSourceTiles: FeatureTile[]): PerfTileScopeCounts {
@@ -497,6 +524,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         };
     }
 
+    /** Returns an empty tile-scope counter object for uninitialized filter states. */
     private createEmptyTileScopeCounts(): PerfTileScopeCounts {
         return {
             consideredTiles: 0,
@@ -506,6 +534,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         };
     }
 
+    /** Resolves how many tiles contributed stats under the given root category. */
     private resolveConsideredTilesForRoot(key: string | undefined): number {
         if (!key) {
             return this.perfTileScopeCounts.consideredTiles;
@@ -517,6 +546,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return this.perfTileScopeCounts.consideredTilesByRoot.get(rootKey) ?? this.perfTileScopeCounts.consideredTiles;
     }
 
+    /** Builds the tooltip shown on root-category badges. */
     private buildRootBadgeTooltip(consideredTiles: number): string {
         return [
             `${consideredTiles} tile(s) considered`,
@@ -525,6 +555,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         ].join('\n');
     }
 
+    /** Chooses the badge color tokens for known top-level perf categories. */
     private resolveRootBadgeDt(key: string | undefined): Record<string, any> | undefined {
         if (!key) {
             return undefined;
@@ -538,6 +569,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Chooses shared display units for durations and byte values across the current result set. */
     private computeDisplayUnits(stats: PerfStat[]) {
         let maxAbsDurationMs = 0;
         let maxAbsBytes = 0;
@@ -566,6 +598,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.bytesDisplayUnit = this.resolveBytesDisplayUnit(maxAbsBytes);
     }
 
+    /** Builds the hierarchical tree-table node structure from flat perf stats. */
     private buildPerfTreeNodes(stats: PerfStat[]): TreeTableNode[] {
         const rootNodes: TreeTableNode[] = [];
         const nodeLookup = new Map<string, TreeTableNode>();
@@ -659,10 +692,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return rootNodes;
     }
 
+    /** Narrows generic tree-node data to the local row-data shape. */
     private getRowData(node: TreeTableNode): PerfTreeRowData {
         return node.data as PerfTreeRowData;
     }
 
+    /** Applies row-level CSS classes and top-level badges after the tree is built. */
     private assignRowClasses(nodes: TreeTableNode[]) {
         const visit = (items: TreeTableNode[], depth: number) => {
             for (const node of items) {
@@ -698,10 +733,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         visit(nodes, 0);
     }
 
+    /** Propagates aggregate peak and average values up the tree hierarchy. */
     private propagateParentStats(nodes: TreeTableNode[]) {
         nodes.forEach(node => this.buildParentAggregate(node));
     }
 
+    /** Computes the aggregate value for one node from its own values and its descendants. */
     private buildParentAggregate(node: TreeTableNode): ParentAggregate {
         const rowData = this.getRowData(node);
         const hasChildren = !!node.children?.length;
@@ -782,6 +819,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         };
     }
 
+    /** Extracts the aggregate contribution of one row when it has numeric values. */
     private extractNodeAggregate(rowData: PerfTreeRowData): ParentAggregate {
         const hasNumeric = this.isFiniteNumber(rowData.peak) || this.isFiniteNumber(rowData.average);
         if (!hasNumeric) {
@@ -808,14 +846,17 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         };
     }
 
+    /** Restricts parent aggregation to the supported comparable units. */
     private toSupportedUnit(unit?: string): SupportedUnit | undefined {
         return unit === 'ms' || unit === 'count' || unit === 'features' ? unit : undefined;
     }
 
+    /** Small helper that guards against non-finite numeric values. */
     private isFiniteNumber(value: number | undefined): value is number {
         return typeof value === 'number' && Number.isFinite(value);
     }
 
+    /** Highlights suspiciously expensive timing rows relative to their peers. */
     private assignTimeHighlightClasses(nodes: TreeTableNode[]) {
         const leafValues: number[] = [];
         const parentValuesByDepth = new Map<number, number[]>();
@@ -869,6 +910,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         apply(nodes, 0);
     }
 
+    /** Collects positive finite values for later median calculation. */
     private collectPositiveFiniteValue(target: number[], value: number | undefined) {
         if (!this.isFiniteNumber(value) || value <= 0) {
             return;
@@ -876,6 +918,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         target.push(value);
     }
 
+    /** Computes the median of a list of values for suspicious-row highlighting. */
     private computeMedian(values: number[]): number | undefined {
         if (!values.length) {
             return undefined;
@@ -888,6 +931,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return (sortedValues[midpoint - 1] + sortedValues[midpoint]) / 2;
     }
 
+    /** Maps a value-to-median ratio to the configured warning or bad CSS class. */
     private resolveSuspiciousClass(value: number | undefined, median: number | undefined): string | undefined {
         if (!this.isFiniteNumber(value) || !this.isFiniteNumber(median) || median <= 0) {
             return undefined;
@@ -901,6 +945,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Chooses the shared duration unit that keeps displayed values readable. */
     private resolveDurationDisplayUnit(maxAbsDurationMs: number): DurationDisplayUnit {
         if (maxAbsDurationMs >= 3_600_000) {
             return 'h';
@@ -914,6 +959,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return 'ms';
     }
 
+    /** Chooses the shared byte unit that keeps displayed values readable. */
     private resolveBytesDisplayUnit(maxAbsBytes: number): BytesDisplayUnit {
         if (maxAbsBytes >= 1024 * 1024 * 1024) {
             return 'GB';
@@ -927,10 +973,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return 'B';
     }
 
+    /** Converts `KB` or `MB` perf values back to raw bytes. */
     private toBytes(value: number, unit: 'KB' | 'MB'): number {
         return unit === 'KB' ? value * 1024 : value * 1024 * 1024;
     }
 
+    /** Converts raw bytes into the currently selected display unit. */
     private fromBytesToDisplayUnit(bytes: number, unit: BytesDisplayUnit): number {
         switch (unit) {
             case 'B':
@@ -944,6 +992,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Converts raw milliseconds into the currently selected duration display unit. */
     private fromMsToDisplayUnit(ms: number, unit: DurationDisplayUnit): number {
         switch (unit) {
             case 'ms':
@@ -957,6 +1006,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Formats a perf value in the currently selected shared display unit. */
     private formatValueWithUnit(value: number | undefined, unit: string | undefined): string | undefined {
         if (value === undefined || value === null) {
             return undefined;
@@ -980,6 +1030,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return unit ? `${formatted} ${unit}` : formatted;
     }
 
+    /** Formats the tooltip value shown for a raw perf metric. */
     private formatBaseTooltip(value: number | undefined, unit: string | undefined): string | undefined {
         if (value === undefined || value === null) {
             return undefined;
@@ -1006,6 +1057,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return this.formatDecimal(value, DISPLAY_DECIMALS);
     }
 
+    /** Formats a decimal number using the shared diagnostics precision. */
     private formatDecimal(value: number, decimals: number): string {
         return value.toFixed(decimals);
     }

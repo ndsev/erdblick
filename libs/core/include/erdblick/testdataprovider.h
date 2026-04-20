@@ -9,9 +9,16 @@
 namespace erdblick
 {
 
+/**
+ * In-process generator for synthetic tiles and styles used by demos and tests.
+ *
+ * The generated data is intentionally simple and random-looking; it exists to
+ * exercise parsing and rendering paths without depending on an external service.
+ */
 class TestDataProvider
 {
 public:
+    /** Initialize reusable layer metadata and seed the parser's fallback metadata caches. */
     TestDataProvider(TileLayerParser& tileLayerParser)
     {
         layerInfo_ = mapget::LayerInfo::fromJson(R"({
@@ -113,6 +120,7 @@ public:
         tileLayerParser.setFallbackLayerInfo(layerInfo_);
     }
 
+    /** Generate one synthetic feature tile around the given camera position and tile level. */
     std::shared_ptr<mapget::TileFeatureLayer> getTestLayer(double camX, double camY, uint16_t level)
     {
         static const std::vector<std::string> signTypes{"Stop", "Yield", "Parking", "No Entry", "Speed Limit"};

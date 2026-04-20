@@ -59,6 +59,12 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     `,
     standalone: false
 })
+/**
+ * Datasource configuration editor dialog.
+ *
+ * It loads the server-side config lazily, reuses the shared editor component,
+ * and warns before discarding unsaved edits.
+ */
 export class DatasourcesComponent {
     warningDialogVisible: boolean = false;
     wasModified: boolean = false;
@@ -98,11 +104,13 @@ export class DatasourcesComponent {
 
     }
 
+    /** Loads the datasource config and promotes the dialog in the overlay stack. */
     onEditorDialogShow() {
         this.loadConfigEditor();
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
+    /** Wires the shared editor service to the datasource document and save actions. */
     loadConfigEditor() {
         // this.datasourcesEditorDialogVisible = true;
         // this.editorService.updateEditorState.next(true);
@@ -115,6 +123,7 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Posts the edited datasource config back to the backend and clears the dirty flag. */
     applyEditedDatasourceConfig() {
         this.editorService.editableData = this.editorService.editedStateData.getValue();
         const configData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
@@ -128,6 +137,7 @@ export class DatasourcesComponent {
         this.warningDialogVisible = false;
     }
 
+    /** Sends the edited datasource config to the backend and reloads maps on success. */
     private postConfig(config: string) {
         this.loading = true;
         this.http.post("config", config, {observe: 'response', responseType: 'text'}).subscribe({
@@ -145,6 +155,7 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Fetches the editable datasource configuration and schema from the backend. */
     private getConfig() {
         this.readOnly = true;
         this.errorMessage = "";
@@ -179,6 +190,7 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Closes the editor or opens the discard-warning dialog when there are unsaved edits. */
     closeEditorDialog(event: any) {
         event.stopPropagation();
         if (this.wasModified) {
@@ -193,11 +205,13 @@ export class DatasourcesComponent {
         this.savedConfigSourceSubscription.unsubscribe();
     }
 
+    /** Confirms the discard flow by closing both the warning and the editor dialog. */
     closeWarningAndEditor(event: any) {
         this.wasModified = false;
         this.closeEditorDialog(event);
     }
 
+    /** Uses Escape to close the warning or editor dialog while the datasource editor is active. */
     @HostListener('window:keydown', ['$event'])
     onWindowKeydown(event: KeyboardEvent) {
         if (event.key !== 'Escape' || !this.editorService.datasourcesEditorVisible) {
@@ -212,6 +226,7 @@ export class DatasourcesComponent {
         this.closeEditorDialog(event);
     }
 
+    /** Promotes the discard-warning dialog above the editor dialog. */
     protected onWarningShow() {
         this.dialogStack.bringToFront(this.warningDialog);
     }

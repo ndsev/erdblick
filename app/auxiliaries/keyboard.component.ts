@@ -152,16 +152,19 @@ import {DialogStackService} from '../shared/dialog-stack.service';
     ],
     standalone: false
 })
+/** Static keyboard shortcut reference dialog. */
 export class KeyboardComponent {
     @ViewChild('keyboardDialog') keyboardDialog?: Dialog;
 
     constructor(public stateService: AppStateService,
                 private dialogStack: DialogStackService) {}
 
+    /** Promotes the keyboard-help dialog above other overlays. */
     onDialogShow() {
         this.dialogStack.bringToFront(this.keyboardDialog);
     }
 
+    /** Closes the keyboard-help dialog. */
     close() {
         this.stateService.controlsDialogVisible = false;
     }

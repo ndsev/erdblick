@@ -261,6 +261,10 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     `],
     standalone: false
 })
+/**
+ * Sidebar dialog that exposes map/layer visibility, level, metadata, and OSM controls.
+ * It mirrors `MapLayerTree` state into PrimeNG widgets and persists user actions back through `MapDataService`.
+ */
 export class MapPanelComponent {
 
     subscriptions: Subscription[] = [];
@@ -283,6 +287,7 @@ export class MapPanelComponent {
 
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
 
+    /** Wires UI subscriptions and keyboard shortcuts for the map/layer dialog. */
     constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
@@ -378,10 +383,12 @@ export class MapPanelComponent {
         );
     }
 
+    /** Keeps the floating dialog on top when PrimeNG reports that it became visible. */
     onMapLayerDialogShow() {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
+    /** Normalizes free-form opacity text input into the 0-100 slider range. */
     onOsmOpacityInput(event: any, viewIndex: number) {
         const inputElement = event.target as HTMLInputElement;
         const value = inputElement.value;
@@ -408,6 +415,7 @@ export class MapPanelComponent {
         this.updateOSMOverlay(viewIndex);
     }
 
+    /** Opens the bulk layer toggle menu for the selected map, group, or layer node. */
     showLayersToggleMenu(event: MouseEvent, viewIndex: number, mapId: string, layerId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
@@ -446,10 +454,12 @@ export class MapPanelComponent {
         ];
     }
 
+    /** Toggles the overall visibility of the maps dialog. */
     toggleLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
     }
 
+    /** Focuses a view on the union of the selected coverage rectangles or tile ids. */
     focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
         event.stopPropagation();
         let tileIds = coverages.map(coverage => {
@@ -480,6 +490,7 @@ export class MapPanelComponent {
         );
     }
 
+    /** Flattens child layer coverages so a map node can reuse the same focus action as layers. */
     flatCoverage(node: any): (number | CoverageRectItem)[] {
         if (!node || !node.children) {
             return [];
@@ -493,25 +504,30 @@ export class MapPanelComponent {
         return coverage;
     }
 
+    /** Persists OSM visibility and opacity for one view and re-syncs derived view state. */
     updateOSMOverlay(viewIndex: number) {
         this.stateService.setOsmState(viewIndex, this.osmEnabled[viewIndex], this.osmOpacityValue[viewIndex]);
         this.mapService.syncOsmSettings(viewIndex);
     }
 
+    /** Toggles the OSM overlay for one view while preserving the last opacity value. */
     toggleOSMOverlay(viewIndex: number) {
         this.osmEnabled[viewIndex] = !this.osmEnabled[viewIndex];
         this.updateOSMOverlay(viewIndex);
     }
 
+    /** Toggles one layer, one map, or one group subtree via `MapDataService`. */
     toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
         this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
+    /** Toggles diagnostic tile borders in the selected view. */
     toggleViewTileBorders(viewIndex: number) {
         this.mapService.toggleViewTileBorderVisibility(viewIndex);
         this.tileBordersEnabled[viewIndex] = this.mapService.maps.getViewTileBorderState(viewIndex);
     }
 
+    /** Cycles the tile grid overlay between the supported coordinate modes. */
     toggleViewTileGridMode(viewIndex: number) {
         const currentMode = this.tileGridModes[viewIndex] ?? "nds";
         const nextMode: TileGridMode = currentMode === "xyz" ? "nds" : "xyz";
@@ -519,6 +535,7 @@ export class MapPanelComponent {
         this.mapService.setViewTileGridMode(viewIndex, nextMode);
     }
 
+    /** Applies a manual layer level and disables auto-level first so the stepper has immediate effect. */
     onLayerLevelChanged(level: number | null, viewIndex: number, mapName: string, layerName: string) {
         if (level === null || !Number.isFinite(level)) {
             return;
@@ -529,11 +546,13 @@ export class MapPanelComponent {
         this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Math.max(0, Math.floor(level)));
     }
 
+    /** Toggles the auto-level heuristic for a single layer/view combination. */
     toggleLayerAutoLevel(viewIndex: number, mapName: string, layerName: string) {
         const nextState = !this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName);
         this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, nextState);
     }
 
+    /** Returns the effective level shown in the UI, substituting the current auto-level when enabled. */
     displayMapLayerLevel(viewIndex: number, mapName: string, layerName: string, fallbackLevel: number) {
         if (!this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
             return fallbackLevel;
@@ -541,11 +560,13 @@ export class MapPanelComponent {
         return this.mapService.getEffectiveMapLayerLevel(viewIndex, mapName, layerName);
     }
 
+    /** Persists a style option change and triggers visualization refresh for the affected view. */
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {
         this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
         this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
     }
 
+    /** Adds the second comparison view; the UI currently caps this at two views. */
     addView() {
         // Limit the increment for now since we do not yet support more than 2 views
         if (this.stateService.numViews < 2) {
@@ -553,6 +574,7 @@ export class MapPanelComponent {
         }
     }
 
+    /** Removes the secondary comparison view and keeps at least one view alive. */
     removeView(event: MouseEvent, index: number) {
         event.stopPropagation();
         // Right now we just decrement, but for more than 2 views we should consider the actual indices
@@ -563,6 +585,7 @@ export class MapPanelComponent {
         }
     }
 
+    /** Toggles cross-view synchronization for layer config and style options. */
     syncOptionsForView(viewIndex: number) {
         const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
         this.mapService.setSyncOptionsForView(viewIndex, nextState);
@@ -571,6 +594,7 @@ export class MapPanelComponent {
             this.mapService.isSyncOptionsForViewEnabled(index));
     }
 
+    /** Closes the maps dialog through persisted app state. */
     protected closeMapsPanel() {
         this.stateService.mapsDialogVisible = false;
     }

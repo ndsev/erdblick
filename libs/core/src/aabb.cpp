@@ -9,13 +9,16 @@ namespace erdblick
 namespace
 {
 
+/** Small epsilon used when deciding whether a box meaningfully crosses the anti-meridian. */
 constexpr double ANTIMERIDIAN_EPSILON = 1e-9;
 
+/** Lift a `Wgs84Point` into a GLM vector so arithmetic stays concise. */
 inline glm::dvec3 vec(Wgs84Point const& p)
 {
     return {p.x, p.y, p.z};
 }
 
+/** Convert a GLM vector back into the point type used by mapget APIs. */
 inline Wgs84Point point(glm::dvec3 const& p)
 {
     return {p.x, p.y, p.z};

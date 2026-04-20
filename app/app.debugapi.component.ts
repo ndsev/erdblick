@@ -116,6 +116,7 @@ export class ErdblickDebugApi {
         return coreLib.getTileFeatureLayerKey(mapId, layerId, numericTileId) as string;
     }
 
+    /** Ensures a feature tile is loaded before a console-side debugging action uses it. */
     async ensureTileLoaded(mapTileKey: string) {
         const existing = this.mapService.loadedTileLayers.get(mapTileKey);
         if (existing?.hasData()) {
@@ -125,6 +126,7 @@ export class ErdblickDebugApi {
         return loaded.get(mapTileKey) ?? null;
     }
 
+    /** Summarizes hover ids and validity geometry for one feature's inspection model. */
     featureInspectionHoverSummary(
         mapTileKey: string,
         featureId: string,
@@ -201,6 +203,7 @@ export class ErdblickDebugApi {
         });
     }
 
+    /** Builds a temporary deck visualization to inspect highlight rendering for specific features. */
     probeHighlightRendering(
         mapTileKey: string,
         styleId: string,

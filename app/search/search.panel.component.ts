@@ -14,6 +14,9 @@ import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
+/**
+ * Search target augmented with its current index in the flattened action list.
+ */
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
 }
@@ -130,6 +133,9 @@ interface ExtendedSearchTarget extends SearchTarget {
     `],
     standalone: false
 })
+/**
+ * Implements the omnibox-style search panel used for jumping, searching loaded features, and query completion.
+ */
 export class SearchPanelComponent implements AfterViewInit {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
 
@@ -174,6 +180,9 @@ export class SearchPanelComponent implements AfterViewInit {
     private savedSelectionEnd: number = 0;
     private savedSelectionDirection: 'forward' | 'backward' | 'none' = 'none';
 
+    /**
+     * Computes the static jump targets whose labels depend on the current query string.
+     */
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
         const value = this.searchInputValue.trim();
@@ -257,6 +266,9 @@ export class SearchPanelComponent implements AfterViewInit {
         return targetsArray;
     }
 
+    /**
+     * Wires the omnibox to global keyboard shortcuts, jump-target updates, history persistence, and completion streams.
+     */
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
                 public mapService: MapDataService,
@@ -377,6 +389,9 @@ export class SearchPanelComponent implements AfterViewInit {
         })
     }
 
+    /**
+     * Hooks dialog lifecycle events once the PrimeNG dialog reference exists.
+     */
     ngAfterViewInit() {
         this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery));
 
@@ -394,6 +409,9 @@ export class SearchPanelComponent implements AfterViewInit {
         });
     }
 
+    /**
+     * Reloads persisted search history and drops entries that no longer point at valid actions.
+     */
     private reloadSearchHistory() {
         const searchHistoryString = localStorage.getItem("searchHistory");
         if (searchHistoryString) {
@@ -409,6 +427,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Removes one persisted history entry and mirrors the change back to app state.
+     */
     removeSearchHistoryEntry(index: number) {
         this.searchHistory.splice(index, 1);
         const searchHistory: [number, string][] = this.searchHistory.map(entry => [entry.index, entry.input]);
@@ -419,6 +440,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Parses decimal or degree-minute-second WGS84 coordinate strings, optionally with a tile level.
+     */
     parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): {target: Rectangle | number[], label: string, coords: number[]} | undefined {
         let lon = 0;
         let lat = 0;
@@ -504,6 +528,9 @@ export class SearchPanelComponent implements AfterViewInit {
         return undefined;
     }
 
+    /**
+     * Converts a numeric mapget tile id into a WGS84 rectangle for camera jumps.
+     */
     parseMapgetTileId(value: string): Rectangle | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
@@ -518,6 +545,9 @@ export class SearchPanelComponent implements AfterViewInit {
         return undefined;
     }
 
+    /**
+     * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
+     */
     jumpToLocation(coordinates: number[] | undefined | Rectangle) {
         if (coordinates === null) {
             return;
@@ -553,6 +583,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Opens the parsed coordinates in Google Maps and returns them for local reuse.
+     */
     openInGM(value: string): number[] | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
@@ -568,6 +601,9 @@ export class SearchPanelComponent implements AfterViewInit {
         return;
     }
 
+    /**
+     * Opens the parsed coordinates in OpenStreetMap and returns them for local reuse.
+     */
     openInOSM(value: string): Rectangle | number[] | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
@@ -583,12 +619,18 @@ export class SearchPanelComponent implements AfterViewInit {
         return;
     }
 
+    /**
+     * Re-evaluates which jump targets are currently executable for the active input.
+     */
     validateMenuItems() {
         this.searchItems.forEach(item =>
             item.enabled = this.searchInputValue != "" && item.validate(this.searchInputValue)
         );
     }
 
+    /**
+     * Validates coordinate inputs by parsing them and checking geographic bounds.
+     */
     validateWGS84(value: string, isLonLat: boolean = false) {
         const result = this.parseWgs84Coordinates(value, isLonLat);
         if (result) {
@@ -597,6 +639,9 @@ export class SearchPanelComponent implements AfterViewInit {
         return false;
     }
 
+    /**
+     * Opens the action dialog and repositions the completion popup relative to the caret.
+     */
     showSearchOverlay() {
         this.updateCursor();
         this.searchService.showFeatureSearchDialog = true;
@@ -604,6 +649,9 @@ export class SearchPanelComponent implements AfterViewInit {
         this.refreshCompletionZIndex();
     }
 
+    /**
+     * Keeps the completion popup just above the PrimeNG search-actions dialog without hardcoding a global z-index.
+     */
     private refreshCompletionZIndex() {
         const container = this.dialog?.container();
         if (!container) {
@@ -621,6 +669,9 @@ export class SearchPanelComponent implements AfterViewInit {
         this.completion.zIndex = dialogZIndex + 1;
     }
 
+    /**
+     * Updates the omnibox value and recomputes active targets, inactive targets, and matching history entries.
+     */
     setSearchValue(value: string) {
         this.searchInputValue = value;
         if (!value) {
@@ -657,15 +708,24 @@ export class SearchPanelComponent implements AfterViewInit {
         );
     }
 
+    /**
+     * Resolves the pending multi-map selection dialog used by jump targets.
+     */
     setSelectedMap(value: string|null) {
         this.jumpService.setSelectedMap!(value);
         this.mapSelectionVisible = false;
     }
 
+    /**
+     * Persists the currently selected target and input so the central search-state flow executes it.
+     */
     targetToHistory(index: number) {
         this.stateService.setSearchHistoryState([index, this.searchInputValue]);
     }
 
+    /**
+     * Executes the chosen search target by either jumping locally or delegating to its side-effect callback.
+     */
     runTarget(index: number) {
         const item = this.searchItems[index];
         if (item.jump !== undefined) {
@@ -679,6 +739,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Recomputes the completion popup anchor from the textarea caret position.
+     */
     updateCursor() {
         const textarea = this.textarea.nativeElement;
         const rect = textarea.getBoundingClientRect();
@@ -698,10 +761,16 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Prevents the popup click from stealing focus before a completion item can be applied.
+     */
     onCompletionPopupDown(event: MouseEvent) {
         event.preventDefault();
     }
 
+    /**
+     * Hides completion asynchronously and remembers the text selection for later restoration.
+     */
     onBlur() {
         this.savedSelectionStart = this.textarea.nativeElement.selectionStart || 0;
         this.savedSelectionEnd = this.textarea.nativeElement.selectionEnd || 0;
@@ -712,6 +781,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }, 0);
     }
 
+    /**
+     * Restores the saved selection if the field regains focus after a popup interaction.
+     */
     onFocus() {
         if (!this.completion.visible) {
             setTimeout(() => {
@@ -724,6 +796,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Triggers completion requests for text-changing keys after updating the caret position.
+     */
     onKeyup(event: KeyboardEvent) {
         this.updateCursor();
 
@@ -736,6 +811,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Handles omnibox keyboard behavior, including completion navigation and dialog dismissal.
+     */
     onKeydown(event: KeyboardEvent) {
         const textarea = this.textarea.nativeElement;
         const dismissCompletionKeys = [
@@ -800,6 +878,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Applies either an explicit completion string or the currently selected completion candidate.
+     */
     applyCompletion(text: string | undefined = undefined) {
         if (this.completion.visible || text) {
             if (text !== undefined) {
@@ -821,6 +902,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Rotates the completion selection index with wrap-around.
+     */
     selectNextCompletion(next: boolean = true) {
         const direction = next && +1 || -1
         const count = this.completionItems.length || 0;
@@ -840,6 +924,9 @@ export class SearchPanelComponent implements AfterViewInit {
         this.completion.visible = count > 0;
     }
 
+    /**
+     * Replays one persisted search history entry through the shared search-state channel.
+     */
     selectHistoryEntry(index: number) {
         const entry = this.searchHistory[index];
         if (entry.index !== undefined && entry.input !== undefined) {
@@ -847,6 +934,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Expands and focuses the omnibox when the action dialog opens.
+     */
     expandTextarea() {
         this.jumpService.searchIsFocused = true;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
@@ -856,6 +946,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }, 100)
     }
 
+    /**
+     * Restores the compact single-line omnibox once the dialog closes.
+     */
     shrinkTextarea() {
         this.cursorPosition = this.textarea.nativeElement.selectionStart || 0;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
@@ -863,17 +956,26 @@ export class SearchPanelComponent implements AfterViewInit {
         this.jumpService.searchIsFocused = false;
     }
 
+    /**
+     * Programmatically focuses the omnibox for the global keyboard shortcut.
+     */
     clickOnSearchToStart() {
         this.textarea.nativeElement.click();
         this.textarea.nativeElement.focus();
     }
 
     @HostListener('document:pointerdown', ['$event'])
+    /**
+     * Pointer-event path for dismissing the action dialog when clicking outside it.
+     */
     handlePointerDown(event: PointerEvent): void {
         this.handleGlobalDown(event);
     }
 
     @HostListener('document:mousedown', ['$event'])
+    /**
+     * Mouse fallback for browsers that do not emit PointerEvent.
+     */
     handleMouseDown(event: MouseEvent): void {
         if (window.PointerEvent) {
             return;
@@ -881,6 +983,9 @@ export class SearchPanelComponent implements AfterViewInit {
         this.handleGlobalDown(event);
     }
 
+    /**
+     * Central outside-click filter that ignores interactive controls and map-view interactions.
+     */
     private handleGlobalDown(event: Event): void {
         const target = event.target instanceof HTMLElement ? event.target : null;
         const clickedInsideComponent = target ? this.elRef.nativeElement.contains(target as Node) : false;
@@ -908,6 +1013,9 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Starts a new completion request for the current query and cursor position.
+     */
     completeQuery(query: string, point: number | undefined) {
         if (!query) {
             this.completion.visible = false;
@@ -920,6 +1028,9 @@ export class SearchPanelComponent implements AfterViewInit {
         this.completion.selectionIndex = 0;
     }
 
+    /**
+     * Clears both local popup state and the search service's outstanding completion job.
+     */
     resetCompletion() {
         this.completeQuery("", undefined);
         this.completion.selectionIndex = 0;

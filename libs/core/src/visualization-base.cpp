@@ -17,21 +17,25 @@ namespace erdblick
 {
 
 namespace {
+/** Map a geometry enum onto the bit mask used for quick rule prefiltering. */
 constexpr uint32_t geomTypeBit(mapget::GeomType const& g) {
     return 1u << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
 }
 
+/** Check whether a local XYZ offset actually changes geometry placement. */
 bool hasLocalOffset(glm::dvec3 const& offset)
 {
     return offset.x != .0 || offset.y != .0 || offset.z != .0;
 }
 
+/** Parsed hover id broken down into the base feature and optional attribute/validity indices. */
 struct ParsedHoverAttributeId {
     std::string_view baseFeatureId_;
     uint32_t attributeIndex_ = 0;
     std::optional<uint32_t> validityIndex_;
 };
 
+/** Parse an unsigned integer suffix and reject partial or malformed matches. */
 std::optional<uint32_t> parseTrailingUint(std::string_view value) {
     uint32_t parsed = 0;
     auto const* begin = value.data();
@@ -43,6 +47,7 @@ std::optional<uint32_t> parseTrailingUint(std::string_view value) {
     return parsed;
 }
 
+/** Strip attribute/relation hover suffixes so subset lookups can fall back to the base feature id. */
 std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     constexpr std::string_view attributeSuffix = ":attribute#";
     constexpr std::string_view relationSuffix = ":relation#";
@@ -59,6 +64,7 @@ std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     return featureId.substr(0, cut);
 }
 
+/** Decode hover ids emitted by inspection/highlight code back into attribute subset selectors. */
 std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view featureId) {
     constexpr std::string_view attributeSuffix = ":attribute#";
     constexpr std::string_view validitySuffix = ":validity#";
@@ -91,6 +97,7 @@ std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view fea
     return result;
 }
 
+/** Build a cache key that keeps any-mode and wildcard-mode ASTs separate. */
 std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
     std::string key;
     key.reserve(expression.size() + 3);

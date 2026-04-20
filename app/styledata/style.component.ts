@@ -229,6 +229,12 @@ import {oneDark} from "@codemirror/theme-one-dark";
     `],
     standalone: false
 })
+/**
+ * Styles dialog, editor, and comparison workflow.
+ *
+ * This component keeps UI state for editing, importing, exporting, and comparing
+ * styles while delegating actual style parsing and lifecycle tracking to `StyleService`.
+ */
 export class StyleComponent implements OnDestroy {
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
@@ -275,24 +281,29 @@ export class StyleComponent implements OnDestroy {
         });
     }
 
+    /** Releases the compare view and its theme observer. */
     ngOnDestroy() {
         this.compareModeObserver?.disconnect();
         this.styleCompareView?.destroy();
     }
 
+    /** Promotes the styles dialog above other overlays. */
     onStylesDialogShow() {
         this.dialogStack.bringToFront(this.stylesDialog);
     }
 
+    /** Promotes the style editor dialog above other overlays. */
     onEditorDialogShow() {
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
+    /** Brings the compare dialog to the front and creates the merge view. */
     onStyleCompareDialogShow() {
         this.dialogStack.bringToFront(this.styleCompareDialog);
         this.setupCompareView();
     }
 
+    /** Tears down compare-view resources when the compare dialog closes. */
     onStyleCompareDialogHide() {
         this.compareModeObserver?.disconnect();
         this.compareModeObserver = undefined;
@@ -301,6 +312,7 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareLeftModified = false;
     }
 
+    /** Opens the bulk-toggle menu for one style entry. */
     showStylesToggleMenu(event: MouseEvent, styleId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
@@ -347,6 +359,7 @@ export class StyleComponent implements OnDestroy {
         ];
     }
 
+    /** Persists visibility changes for one style and optionally triggers a redraw. */
     applyStyleConfig(styleId: string, redraw: boolean=true) {
         const style = this.styleService.styles.get(styleId);
         if (style === undefined || style === null) {
@@ -358,6 +371,7 @@ export class StyleComponent implements OnDestroy {
         }
     }
 
+    /** Resets a builtin style to its baseline or reloads it from the server. */
     resetStyle(styleId: string) {
         const restoredStyleId = this.styleService.resetModifiedBuiltinStyle(styleId);
         if (restoredStyleId) {
@@ -371,12 +385,14 @@ export class StyleComponent implements OnDestroy {
         this.refreshUpdatedStylesDialogVisibility();
     }
 
+    /** Exports one style as YAML. */
     exportStyle(styleId: string) {
         if(!this.styleService.exportStyleYamlFile(styleId)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
     }
 
+    /** Imports a user-provided YAML style file. */
     importStyle(event: any) {
         if (event.files && event.files.length > 0) {
             const file: File = event.files[0];
@@ -394,10 +410,12 @@ export class StyleComponent implements OnDestroy {
         }
     }
 
+    /** Removes an imported style. */
     removeStyle(styleId: string) {
         this.styleService.deleteStyle(styleId);
     }
 
+    /** Opens the style editor for one style and tracks dirty-state changes. */
     showStyleEditor(styleId: string) {
         this.styleService.selectedStyleIdForEditing = styleId;
         this.editorService.datasourcesEditorVisible = false;
@@ -413,6 +431,7 @@ export class StyleComponent implements OnDestroy {
         });
     }
 
+    /** Applies the current editor contents to the selected style. */
     applyEditedStyle() {
         const styleId = this.styleService.selectedStyleIdForEditing;
         const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
@@ -438,6 +457,7 @@ export class StyleComponent implements OnDestroy {
         }
     }
 
+    /** Closes the editor or opens the discard-warning dialog when unsaved edits exist. */
     closeEditorDialog(event: any) {
         event.stopPropagation();
         if (this.sourceWasModified) {
@@ -452,12 +472,14 @@ export class StyleComponent implements OnDestroy {
         this.savedStyleSourceSubscription.unsubscribe();
     }
 
+    /** Discards pending edits in the style editor. */
     discardStyleEdits() {
         this.editorService.updateEditorState.next(false);
         this.sourceWasModified = false;
         this.warningDialogVisible = false;
     }
 
+    /** Uses Escape to close the warning or editor dialog while the style editor is active. */
     @HostListener('window:keydown', ['$event'])
     onWindowKeydown(event: KeyboardEvent) {
         if (event.key !== 'Escape' || !this.editorService.styleEditorVisible) {
@@ -472,14 +494,17 @@ export class StyleComponent implements OnDestroy {
         this.closeEditorDialog(event);
     }
 
+    /** Opens the style-definition documentation in a new browser tab. */
     openStyleHelp() {
         window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
     }
 
+    /** Keeps PrimeNG keyvalue iteration in insertion order. */
     unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
         return 0;
     }
 
+    /** Toggles visibility for every style nested under one style group. */
     toggleStyleGroup(id: string, enabled: boolean) {
         if (!id || id === 'ungrouped') {
             return;
@@ -497,10 +522,12 @@ export class StyleComponent implements OnDestroy {
         this.mapService.scheduleUpdate();
     }
 
+    /** Narrows a tree node to a style-group node. */
     private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {
         return e.type === "Group";
     }
 
+    /** Finds a style group by id inside the nested style-group tree. */
     private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | undefined {
         for (const elem of elements) {
             if (!this.checkIsStyleGroup(elem)) {
@@ -517,6 +544,7 @@ export class StyleComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Collects every leaf style id reachable from a style group. */
     private collectStyleIds(group: ErdblickStyleGroup): string[] {
         const ids: string[] = [];
         for (const child of group.children) {
@@ -529,30 +557,36 @@ export class StyleComponent implements OnDestroy {
         return ids;
     }
 
+    /** Reapplies a style after one of its option controls changed. */
     toggleOption(styleId: string) {
         this.applyStyleConfig(styleId);
     }
 
+    /** Clears the updated-style flags after the user acknowledged them. */
     resetUpdatedStyleIds() {
         this.styleService.updateStyleHashes();
         this.warningDialogVisible = false;
         this.refreshUpdatedStylesDialogVisibility();
     }
 
+    /** Returns builtin styles that were modified locally and updated on the server. */
     getUpdatedModifiedStyles(): UpdatedModifiedStyleEntry[] {
         return this.styleService.getUpdatedModifiedStyles();
     }
 
+    /** Opens style comparison for the "Modified" tag next to a builtin style. */
     openCompareFromModifiedTag(event: MouseEvent, styleId: string) {
         event.stopPropagation();
         this.openStyleCompareDialog(styleId, false);
     }
 
+    /** Opens style comparison for an entry in the updated-styles dialog. */
     openCompareFromUpdatedChip(event: Event, styleIdOrUrl: string) {
         event.stopPropagation();
         this.openStyleCompareDialog(styleIdOrUrl, true);
     }
 
+    /** Applies edits from the compare dialog back into the selected builtin style. */
     applyComparedStyle() {
         if (!this.styleCompareLeftModified || !this.styleCompareStyleId) {
             return;
@@ -575,6 +609,7 @@ export class StyleComponent implements OnDestroy {
         this.setupCompareView();
     }
 
+    /** Closes the compare dialog or discards unsaved left-side edits first. */
     closeOrDiscardComparedStyle(event: MouseEvent) {
         event.stopPropagation();
         if (this.styleCompareLeftModified) {
@@ -584,6 +619,7 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareDialog?.close(event);
     }
 
+    /** Exports the style currently shown in the compare dialog. */
     exportComparedStyle() {
         if (!this.styleCompareStyleId) {
             return;
@@ -591,6 +627,7 @@ export class StyleComponent implements OnDestroy {
         this.exportStyle(this.styleCompareStyleId);
     }
 
+    /** Resets the builtin style currently shown in the compare dialog. */
     resetComparedStyle() {
         if (!this.styleCompareStyleId) {
             return;
@@ -608,10 +645,12 @@ export class StyleComponent implements OnDestroy {
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
 
+    /** Promotes the editor discard-warning dialog above other overlays. */
     protected onWarningShow() {
         this.dialogStack.bringToFront(this.warningDialog);
     }
 
+    /** Initializes compare-dialog state from a builtin style id or builtin style URL. */
     private openStyleCompareDialog(styleIdOrUrl: string, fromUpdatedModifiedDialog: boolean) {
         const style = this.styleService.styles.get(styleIdOrUrl)
             ?? Array.from(this.styleService.styles.values()).find(
@@ -634,6 +673,7 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareDialogVisible = true;
     }
 
+    /** Creates or recreates the CodeMirror merge view used by the compare dialog. */
     private setupCompareView() {
         const host = this.styleCompareHost?.nativeElement;
         if (!host || !this.styleCompareStyleId || !this.styleCompareDialogVisible) {
@@ -677,6 +717,7 @@ export class StyleComponent implements OnDestroy {
         this.observeCompareTheme();
     }
 
+    /** Restores the original left-side compare source after discard. */
     private discardComparedStyleEdits() {
         if (!this.styleCompareView) {
             this.styleCompareLeftModified = false;
@@ -693,15 +734,18 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareLeftModified = false;
     }
 
+    /** Returns the trimmed left-side source currently shown in the compare view. */
     private getComparedLeftSource(): string {
         return this.styleCompareView?.a.state.doc.toString().replace(/\n+$/, '')
             ?? this.styleCompareLeftSource.replace(/\n+$/, '');
     }
 
+    /** Shows or hides the updated-styles dialog depending on current lifecycle state. */
     private refreshUpdatedStylesDialogVisibility() {
         this.styleUpdateDialogVisible = this.styleService.getUpdatedModifiedStyles().length > 0;
     }
 
+    /** Tracks dark-mode changes so the compare editors stay aligned with the app theme. */
     private observeCompareTheme() {
         const root = document.documentElement;
         this.compareModeObserver?.disconnect();
@@ -722,6 +766,7 @@ export class StyleComponent implements OnDestroy {
         this.compareModeObserver.observe(root, {attributes: true, attributeFilter: ['class']});
     }
 
+    /** Returns the CodeMirror theme extension matching the current app theme. */
     private currentCodeMirrorTheme() {
         const isDark = document.documentElement.classList.contains(this.DARK_MODE_CLASS);
         const lightTheme = EditorView.theme({}, {dark: false});

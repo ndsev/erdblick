@@ -10,6 +10,7 @@ import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
 import {ErdblickStyle, FeatureStyleOptionWithStringType, StyleService} from "../styledata/style.service";
 
+/** Removes the synthetic group prefix from nested map ids for tree display. */
 export function removeGroupPrefix(id: string) {
     if (id.includes('/')) {
         const pureId = id.split('/').at(-1);
@@ -50,6 +51,7 @@ export interface MapInfoItem extends Record<string, any> {
     addOn: boolean;
 }
 
+/** Tree node that mirrors one style option entry for a concrete map/layer pairing. */
 export class StyleOptionNode {
     id: string;
     type: string;
@@ -61,6 +63,7 @@ export class StyleOptionNode {
     shortStyleId: string;
     styleId: string;
 
+    /** Builds the stable key used by the tree and persisted style option state. */
     constructor(mapId: string, layerId: string, definition: FeatureStyleOptionWithStringType, styleId: string, shortStyleId: string) {
         this.id = definition.id;
         this.shortStyleId = shortStyleId;
@@ -73,6 +76,7 @@ export class StyleOptionNode {
     }
 }
 
+/** Tree node that represents one feature layer and the per-view controls attached to it. */
 export class LayerTreeNode {
     id: string;
     type: string;
@@ -83,6 +87,7 @@ export class LayerTreeNode {
     children: StyleOptionNode[] = [];
     expanded: boolean = true;
 
+    /** Wraps raw layer metadata into the structure consumed by the map tree. */
     constructor(layerInfo: LayerInfoItem, mapId: string) {
         this.info = layerInfo;
         this.mapId = mapId;
@@ -92,6 +97,7 @@ export class LayerTreeNode {
     }
 }
 
+/** Tree node for one map entry, including its feature layers and per-view visibility state. */
 export class MapTreeNode {
     id: string;
     type: string = "Map";
@@ -102,6 +108,7 @@ export class MapTreeNode {
     expanded: boolean = true;
     visible: boolean[] = [];  // This is an array, because the values are stored per MapView.
 
+    /** Materializes layer child nodes once so the tree can be reconfigured without rebuilding metadata. */
     constructor(mapInfo: MapInfoItem) {
         this.info = mapInfo;
         this.key = mapInfo.mapId;
@@ -112,10 +119,15 @@ export class MapTreeNode {
         this.onlyFeatureLayers = Array.from(this.layers.values().filter(layer => layer.type !== "SourceData"));
     }
 
+    /** Returns the feature-layer children that PrimeNG renders beneath this map node. */
     get children() {
         return this.onlyFeatureLayers;
     }
 
+    /**
+     * Recomputes per-view map visibility from the child layer switches.
+     * The tree uses this aggregate state for parent checkboxes and auto-collapse.
+     */
     updateVisibilityFromChildren(numViews: number) {
         // Set the visibility state for this map node for each view,
         // based on the view config state of the layers. We must assume
@@ -137,6 +149,7 @@ export class MapTreeNode {
         }
     }
 
+    /** Iterates every feature layer below this map node. */
     *allFeatureLayers() {
         for (const child of this.children) {
             yield child;
@@ -144,6 +157,7 @@ export class MapTreeNode {
     }
 }
 
+/** Tree node for synthetic folder/group entries derived from slash-separated map ids. */
 export class GroupTreeNode {
     id: string;
     key: string;
@@ -152,17 +166,20 @@ export class GroupTreeNode {
     expanded: boolean = true;
     visible: boolean[] = [];  // This is an array, because the values are stored per MapView.
 
+    /** Preserves the full group path as both key and id so nested lookup stays unambiguous. */
     constructor(key: string) {
         this.key = key;
         this.id = key;  // FIXME removeGroupPrefix(key); ???
     }
 
+    /** Iterates every feature layer nested anywhere below this group. */
     *allFeatureLayers(): IterableIterator<LayerTreeNode> {
         for (const child of this.children) {
             yield* child.allFeatureLayers();
         }
     }
 
+    /** Recomputes aggregate visibility from the group's descendant maps and child groups. */
     updateVisibilityFromChildren(numViews: number) {
         // Set the visibility state for this group node for each view,
         // based on the view config state of the maps. We must assume
@@ -183,11 +200,17 @@ export interface SyncViewsResult {
     viewConfigChanged: boolean;
 }
 
+/**
+ * Holds the map/layer/style tree shown in the maps panel.
+ * The tree owns UI-only grouping and visibility state, while `AppStateService`
+ * remains the source of truth for persisted per-view settings.
+ */
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
     private mapsForMapIds: Map<string, MapTreeNode> = new Map();
     private sizeOfTree: number = 0;
 
+    /** Builds the tree and keeps it synchronized with app state and the loaded style sheets. */
     constructor(
         mapInfo: MapInfoItem[],
         private selectionTopic: BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>,
@@ -210,15 +233,20 @@ export class MapLayerTree {
         });
     }
 
+    /** Exposes the flat map lookup used by callers that already know the map id. */
     get maps() {
         return this.mapsForMapIds;
     }
 
+    /** Returns the approximate node count for diagnostics and tree heuristics. */
     get size() {
         return this.sizeOfTree;
     }
 
-    // Pure function that computes new map groups
+    /**
+     * Builds the nested group/map structure from the backend `/sources` response.
+     * Group nodes are synthetic and derived solely from slash-separated map ids.
+     */
     private initializeMapGroups(mapInfo: MapInfoItem[]) {
         const groups = new Map<string, GroupTreeNode>();
         const ungrouped: Array<MapTreeNode> = [];
@@ -273,6 +301,7 @@ export class MapLayerTree {
         this.nodes = [...groups.values(), ...ungrouped];
     }
 
+    /** Rebuilds the style-option children for every layer from the currently visible style sheets. */
     private initializeStyleOptions(styleSheets: ErdblickStyle[]) {
         for (const map of this.maps.values()) {
             for (const layer of map.allFeatureLayers()) {
@@ -290,6 +319,10 @@ export class MapLayerTree {
         }
     }
 
+    /**
+     * Reapplies persisted per-view layer configuration and style option values to the tree.
+     * This is called after map/style changes and when the number of views changes.
+     */
     configureTreeParameters() {
         let defaultVisibility = true;
         for (const mapOrGroupItem of this.nodes) {
@@ -318,6 +351,7 @@ export class MapLayerTree {
         }
     }
 
+    /** Returns the current visible flag for a concrete map layer in a specific view. */
     getMapLayerVisibility(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -349,6 +383,7 @@ export class MapLayerTree {
         }
     }
 
+    /** Updates one layer, one map, or one group subtree and persists the visibility change. */
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         const mapOrGroupItem = this.findChildById(mapOrGroupId);
         if (mapOrGroupItem === undefined) {
@@ -367,22 +402,27 @@ export class MapLayerTree {
         this.configureTreeParameters();
     }
 
+    /** Persists whether tile borders are shown for the given view. */
     setViewTileBorderState(viewIndex: number, enabled: boolean) {
         this.stateService.viewTileBordersState.next(viewIndex, enabled);
     }
 
+    /** Returns whether tile borders are enabled for the given view. */
     getViewTileBorderState(viewIndex: number) {
         return this.stateService.viewTileBordersState.getValue(viewIndex);
     }
 
+    /** Persists the tile grid coordinate mode shown in the given view. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.stateService.viewTileGridModeState.next(viewIndex, mode);
     }
 
+    /** Returns the configured tile grid coordinate mode for the given view. */
     getViewTileGridMode(viewIndex: number): TileGridMode {
         return this.stateService.viewTileGridModeState.getValue(viewIndex);
     }
 
+    /** Persists the explicit layer level for a single view. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -396,6 +436,7 @@ export class MapLayerTree {
         this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
     }
 
+    /** Persists whether a layer follows the auto-level heuristic in a given view. */
     setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -409,6 +450,7 @@ export class MapLayerTree {
         this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
     }
 
+    /** Iterates the configured layer levels for one view across every known feature layer. */
     *allLevels(viewIndex: number) {
         for (let [_, map] of this.maps) {
             for (let layer of map.children) {
@@ -421,6 +463,7 @@ export class MapLayerTree {
         }
     }
 
+    /** Returns the persisted layer level, falling back to the historical default level 13. */
     getMapLayerLevel(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -433,6 +476,7 @@ export class MapLayerTree {
         return layer.viewConfig[viewIndex].level;
     }
 
+    /** Returns whether auto-level is enabled, defaulting to true for missing config. */
     getMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -445,6 +489,7 @@ export class MapLayerTree {
         return layer.viewConfig[viewIndex].autoLevel;
     }
 
+    /** Returns the persisted style option values for one layer/style combination in one view. */
     getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -459,16 +504,19 @@ export class MapLayerTree {
         ) as Record<string, boolean|number|string>;
     }
 
+    /** Iterates all feature layers across groups and maps in tree order. */
     *allFeatureLayers(): IterableIterator<LayerTreeNode> {
         for (const child of this.nodes) {
             yield* child.allFeatureLayers();
         }
     }
 
+    /** Runtime type guard for synthetic group nodes. */
     private checkIsMapGroup (e: any): e is GroupTreeNode {
         return e.type === "Group";
     }
 
+    /** Recursively resolves a tree node by id across group and map children. */
     private findChildById(id: string, elements: (GroupTreeNode | MapTreeNode)[]|undefined = undefined): GroupTreeNode | MapTreeNode | undefined {
         if (!elements) {
             elements = this.nodes;
@@ -485,6 +533,10 @@ export class MapLayerTree {
         return undefined;
     }
 
+    /**
+     * Copies style option values from one layer to every other compatible layer in the tree.
+     * Compatibility means matching style id and option ids, not matching map/layer ids.
+     */
     syncLayers(viewIndex: number, mapId: string, layerId: string): StyleOptionNode[] {
         const sourceMap = this.maps.get(mapId);
         if (!sourceMap) {
@@ -557,6 +609,10 @@ export class MapLayerTree {
         return changedOptions;
     }
 
+    /**
+     * Mirrors one view's layer/style state into the other views when view sync is enabled.
+     * The return value lets callers update only the visualizations affected by the copied state.
+     */
     syncViews(viewIndex: number): SyncViewsResult {
         const numViews = this.stateService.numViewsState.getValue();
         if (numViews < 2) {
