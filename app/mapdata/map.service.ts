@@ -2,7 +2,7 @@ import {Injectable, NgZone} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {MapTileRequestStatus, MapTileStreamClient} from "./tilestream";
 import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from "./features.model";
-import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
+import type {MapTileStreamDebugState, MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
@@ -78,6 +78,41 @@ export interface TileDataChange {
     tileKey: string;
     tile: FeatureTile;
     reason: TileDataChangeReason;
+}
+
+export interface MapLayerDebugSummary {
+    mapVisibleByView: boolean[];
+    layerVisibleByView: boolean[];
+    autoLevelByView: boolean[];
+    levelByView: number[];
+    loadedTileCountForLayer: number;
+    loadedTileStageSummary: Array<{
+        tileKey: string;
+        tileId: string;
+        highestLoadedStage: number | null;
+        hasData: boolean;
+    }>;
+    requestedTileCountForLayer: number;
+    requestedStageCounts: number[];
+    requestedTileSample: Array<{
+        tileKey: string;
+        requestedMaxStage: number;
+        highestLoadedStage: number | null;
+    }>;
+}
+
+export interface MapReadinessDebugSummary {
+    mapId: string;
+    layerId: string;
+    numViews: number;
+    viewSync: string[];
+    backendRequestProgress: BackendRequestProgress;
+    tilePipelinePaused: boolean;
+    loadedTileCountTotal: number;
+    selectionPanelCount: number;
+    hoverCount: number;
+    tileStream: MapTileStreamDebugState | null;
+    layer: MapLayerDebugSummary;
 }
 
 interface RequestedLayerProgressState {
@@ -593,6 +628,64 @@ export class MapDataService {
             compressionRatioPct: null,
             compressionSavingsPct: null,
             knownCompressedCoveragePct: 0,
+        };
+    }
+
+    /** Summarizes one map/layer's readiness state for Playwright and console diagnostics. */
+    public getDebugReadinessSummary(mapId: string, layerId: string): MapReadinessDebugSummary {
+        const mapNode = this.maps.maps.get(mapId);
+        const layerNode = mapNode?.layers.get(layerId);
+        const requestedLayerState = this.requestedLayerProgressByKey.get(this.layerRequestKey(mapId, layerId));
+
+        const loadedTileStageSummary: MapLayerDebugSummary['loadedTileStageSummary'] = [];
+        for (const [tileKey, tile] of this.loadedTileLayers.entries()) {
+            const [tileMapId, tileLayerId, tileId] = coreLib.parseMapTileKey(tileKey) as [string, string, bigint];
+            if (tileMapId !== mapId || tileLayerId !== layerId) {
+                continue;
+            }
+            loadedTileStageSummary.push({
+                tileKey,
+                tileId: tileId.toString(),
+                highestLoadedStage: tile.highestLoadedStage(),
+                hasData: tile.hasData()
+            });
+        }
+        loadedTileStageSummary.sort((lhs, rhs) => lhs.tileKey.localeCompare(rhs.tileKey));
+
+        const requestedTileSample: MapLayerDebugSummary['requestedTileSample'] = [];
+        if (requestedLayerState) {
+            for (const [tileKey, requestedMaxStage] of requestedLayerState.tileMaxRequestedStageByKey.entries()) {
+                requestedTileSample.push({
+                    tileKey,
+                    requestedMaxStage,
+                    highestLoadedStage: this.loadedTileLayers.get(tileKey)?.highestLoadedStage() ?? null
+                });
+            }
+            requestedTileSample.sort((lhs, rhs) => lhs.tileKey.localeCompare(rhs.tileKey));
+        }
+
+        return {
+            mapId,
+            layerId,
+            numViews: this.stateService.numViews,
+            viewSync: [...this.stateService.viewSync],
+            backendRequestProgress: {...this.backendRequestProgress},
+            tilePipelinePaused: this.tilePipelinePaused,
+            loadedTileCountTotal: this.loadedTileLayers.size,
+            selectionPanelCount: this.selectionTopic.getValue().length,
+            hoverCount: this.hoverTopic.getValue().length,
+            tileStream: this.tileStream?.getDebugState() ?? null,
+            layer: {
+                mapVisibleByView: [...(mapNode?.visible ?? [])],
+                layerVisibleByView: layerNode?.viewConfig.map(config => config.visible) ?? [],
+                autoLevelByView: layerNode?.viewConfig.map(config => config.autoLevel) ?? [],
+                levelByView: layerNode?.viewConfig.map(config => config.level) ?? [],
+                loadedTileCountForLayer: loadedTileStageSummary.length,
+                loadedTileStageSummary: loadedTileStageSummary.slice(0, 16),
+                requestedTileCountForLayer: requestedLayerState?.tileMaxRequestedStageByKey.size ?? 0,
+                requestedStageCounts: this.stageRequestProgress.map(progress => progress.total - progress.done),
+                requestedTileSample: requestedTileSample.slice(0, 16)
+            }
         };
     }
 

@@ -203,6 +203,11 @@ export class ErdblickDebugApi {
         });
     }
 
+    /** Returns a compact readiness snapshot for one map/layer pair while debugging CI failures. */
+    debugReadiness(mapId: string, layerId: string) {
+        return this.mapService.getDebugReadinessSummary(mapId, layerId);
+    }
+
     /** Builds a temporary deck visualization to inspect highlight rendering for specific features. */
     probeHighlightRendering(
         mapTileKey: string,
