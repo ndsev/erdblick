@@ -48,6 +48,37 @@ type ReadinessDiagnostics = {
     extra?: Record<string, unknown>;
 };
 
+async function waitForLayerRequestStartup(
+    page: Page,
+    mapId: string,
+    layerId: string,
+    timeoutMs: number
+): Promise<boolean> {
+    try {
+        await page.waitForFunction(({nextMapId, nextLayerId}) => {
+            const readiness = window.ebDebug?.debugReadiness?.(nextMapId, nextLayerId) as {
+                loadedTileCountTotal?: number;
+                tileStream?: { isOpen?: boolean } | null;
+                layer?: { requestedTileCountForLayer?: number } | null;
+            } | null;
+            if (!readiness) {
+                return false;
+            }
+            return (readiness.loadedTileCountTotal ?? 0) > 0
+                || !!readiness.tileStream?.isOpen
+                || (readiness.layer?.requestedTileCountForLayer ?? 0) > 0;
+        }, {
+            nextMapId: mapId,
+            nextLayerId: layerId
+        }, {
+            timeout: timeoutMs
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function logReadinessDiagnostics(page: Page, details: ReadinessDiagnostics): Promise<void> {
     const snapshot = await page.evaluate(({label, mapId, layerId, extra}) => {
         const ebDebug = window.ebDebug;
@@ -231,7 +262,20 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
     const layerCheckboxInput = layerNode.locator('input.p-checkbox-input[type="checkbox"]').first();
     await expect(layerCheckboxInput).toBeVisible();
     await layerCheckboxInput.check();
+    await page.waitForFunction(({nextMapId, nextLayerId}) => {
+        const readiness = window.ebDebug?.debugReadiness?.(nextMapId, nextLayerId) as {
+            layer?: { layerVisibleByView?: boolean[] } | null;
+        } | null;
+        return !!readiness?.layer?.layerVisibleByView?.some(Boolean);
+    }, {
+        nextMapId: mapLabel,
+        nextLayerId: layerLabel
+    });
     await closeLayerDialog(page);
+    const requestStartupObserved = await waitForLayerRequestStartup(page, mapLabel, layerLabel, 2000);
+    if (!requestStartupObserved) {
+        await emitReadinessDiagnostics(page, 'enableMapLayer-no-request-startup', mapLabel, layerLabel);
+    }
 }
 
 /**

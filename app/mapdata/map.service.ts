@@ -101,6 +101,30 @@ export interface MapLayerDebugSummary {
     }>;
 }
 
+export interface ViewReadinessDebugSummary {
+    viewIndex: number;
+    viewport: {
+        south: number;
+        west: number;
+        width: number;
+        height: number;
+        camPosLon: number;
+        camPosLat: number;
+        orientation: number;
+    };
+    visibleLevels: number[];
+    visibleTileCountsByLevel: Array<{
+        level: number;
+        count: number;
+    }>;
+}
+
+export interface UpdateTraceDebugEntry {
+    timeMs: number;
+    event: string;
+    details: Record<string, unknown>;
+}
+
 export interface MapReadinessDebugSummary {
     mapId: string;
     layerId: string;
@@ -112,7 +136,9 @@ export interface MapReadinessDebugSummary {
     selectionPanelCount: number;
     hoverCount: number;
     tileStream: MapTileStreamDebugState | null;
+    views: ViewReadinessDebugSummary[];
     layer: MapLayerDebugSummary;
+    recentUpdateTrace: UpdateTraceDebugEntry[];
 }
 
 interface RequestedLayerProgressState {
@@ -171,6 +197,8 @@ export class MapDataService {
     private nextVisualizationViewIndex: number = 0;
     private inFlightVisualizationRendersByView: number[] = [];
     private inFlightBlockedTileIdsByView: Array<Map<bigint, number>> = [];
+    private readonly debugUpdateTrace: UpdateTraceDebugEntry[] = [];
+    private static readonly DEBUG_UPDATE_TRACE_LIMIT = 64;
     // Increments for every selection-state emission. Async selection projection
     // work captures this value and bails out if a newer emission started meanwhile.
     // This prevents stale async completions from overwriting newer close/dock updates.
@@ -675,6 +703,9 @@ export class MapDataService {
             selectionPanelCount: this.selectionTopic.getValue().length,
             hoverCount: this.hoverTopic.getValue().length,
             tileStream: this.tileStream?.getDebugState() ?? null,
+            views: this.viewVisualizationState
+                .slice(0, this.stateService.numViews)
+                .map((_, viewIndex) => this.summarizeViewReadiness(viewIndex)),
             layer: {
                 mapVisibleByView: [...(mapNode?.visible ?? [])],
                 layerVisibleByView: layerNode?.viewConfig.map(config => config.visible) ?? [],
@@ -685,7 +716,37 @@ export class MapDataService {
                 requestedTileCountForLayer: requestedLayerState?.tileMaxRequestedStageByKey.size ?? 0,
                 requestedStageCounts: this.stageRequestProgress.map(progress => progress.total - progress.done),
                 requestedTileSample: requestedTileSample.slice(0, 16)
-            }
+            },
+            recentUpdateTrace: this.debugUpdateTrace.slice(-24)
+        };
+    }
+
+    /** Captures a small rolling trace of update-path decisions for CI-only readiness debugging. */
+    private recordDebugUpdateTrace(event: string, details: Record<string, unknown> = {}): void {
+        this.debugUpdateTrace.push({
+            timeMs: Date.now(),
+            event,
+            details
+        });
+        const overflow = this.debugUpdateTrace.length - MapDataService.DEBUG_UPDATE_TRACE_LIMIT;
+        if (overflow > 0) {
+            this.debugUpdateTrace.splice(0, overflow);
+        }
+    }
+
+    /** Summarizes one view's current viewport and visible-tile cache. */
+    private summarizeViewReadiness(viewIndex: number): ViewReadinessDebugSummary {
+        const state = this.viewVisualizationState[viewIndex];
+        return {
+            viewIndex,
+            viewport: {...state.viewport},
+            visibleLevels: Array.from(state.visibleTileIdsPerLevel.keys()).sort((lhs, rhs) => lhs - rhs),
+            visibleTileCountsByLevel: Array.from(state.visibleTileIdsPerLevel.entries())
+                .map(([level, tileIds]) => ({
+                    level,
+                    count: tileIds.length
+                }))
+                .sort((lhs, rhs) => lhs.level - rhs.level)
         };
     }
 
@@ -1144,13 +1205,24 @@ export class MapDataService {
         this.updatePending = true;
         if (this.tilePipelinePaused) {
             this.updateRequestedWhilePaused = true;
+            this.recordDebugUpdateTrace("scheduleUpdate:paused", {
+                updateInProgress: this.updateInProgress,
+                hasTimer: !!this.updateTimer
+            });
             return;
         }
         if (this.updateTimer) {
+            this.recordDebugUpdateTrace("scheduleUpdate:deduped", {
+                updateInProgress: this.updateInProgress
+            });
             return;
         }
         const elapsed = Date.now() - this.lastUpdateAt;
         const delay = Math.max(0, this.updateDebounceMs - elapsed);
+        this.recordDebugUpdateTrace("scheduleUpdate:armed", {
+            delay,
+            updateInProgress: this.updateInProgress
+        });
         this.updateTimer = this.scheduleOutsideAngular(() => {
             this.updateTimer = null;
             this.runUpdate().then();
@@ -1162,14 +1234,19 @@ export class MapDataService {
         if (this.tilePipelinePaused) {
             this.updatePending = true;
             this.updateRequestedWhilePaused = true;
+            this.recordDebugUpdateTrace("runUpdate:aborted-paused");
             return;
         }
         if (this.updateInProgress) {
             this.updatePending = true;
+            this.recordDebugUpdateTrace("runUpdate:deduped-in-progress");
             return;
         }
         this.updateInProgress = true;
         this.updatePending = false;
+        this.recordDebugUpdateTrace("runUpdate:start", {
+            numViews: this.stateService.numViews
+        });
         try {
             // Get the tile IDs for the current viewport for each view.
             const tileLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
@@ -1181,11 +1258,18 @@ export class MapDataService {
                     this.stateService.pinLowFiToMaxLod
                 );
             });
+            this.recordDebugUpdateTrace("runUpdate:recalculated-tile-ids", {
+                tileLimit,
+                views: this.viewVisualizationState
+                    .slice(0, this.stateService.numViews)
+                    .map((_, viewIndex) => this.summarizeViewReadiness(viewIndex))
+            });
 
             await this.updateMapDataRequest();
             if (this.tilePipelinePaused) {
                 this.updatePending = true;
                 this.updateRequestedWhilePaused = true;
+                this.recordDebugUpdateTrace("runUpdate:paused-after-request");
                 return;
             }
             this.updateEvictLoadedLayers();
@@ -1193,6 +1277,9 @@ export class MapDataService {
         } finally {
             this.updateInProgress = false;
             this.lastUpdateAt = Date.now();
+            this.recordDebugUpdateTrace("runUpdate:complete", {
+                updatePending: this.updatePending
+            });
             if (this.updatePending) {
                 this.scheduleUpdate();
             }
@@ -2042,8 +2129,26 @@ export class MapDataService {
         });
 
         this.resetRequestedStageProgressFromExpected(expectedByLayer);
+        this.recordDebugUpdateTrace("updateMapDataRequest:prepared", {
+            selectionTileRequests: this.selectionTileRequests.length,
+            requestCount: requests.length,
+            requestSummary: requests.slice(0, 8).map(request => ({
+                mapId: request.mapId,
+                layerId: request.layerId,
+                stageBucketCounts: request.tileIdsByNextStage.map(tileIds => tileIds.length),
+                priorityTileCount: request.priorityTileIds?.length ?? 0
+            })),
+            views: this.viewVisualizationState
+                .slice(0, this.stateService.numViews)
+                .map((_, viewIndex) => ({
+                    viewIndex,
+                    visibleLevels: Array.from(this.visibleFeatureLevelsInView(viewIndex)).sort((lhs, rhs) => lhs - rhs),
+                    visibleTileCountsByLevel: this.summarizeViewReadiness(viewIndex).visibleTileCountsByLevel
+                }))
+        });
 
         if (this.tilePipelinePaused) {
+            this.recordDebugUpdateTrace("updateMapDataRequest:skipped-paused");
             return;
         }
         const hasPendingRequestedStages = this.stageRequestProgress
@@ -2051,9 +2156,17 @@ export class MapDataService {
         if (!requests.length && hasPendingRequestedStages) {
             // Do not replace an active backend request with an empty one while
             // later stages are still expected to arrive automatically.
+            this.recordDebugUpdateTrace("updateMapDataRequest:kept-existing-request", {
+                hasPendingRequestedStages
+            });
             return;
         }
         const requestSent = await this.tileStream!.updateRequest(requests);
+        this.recordDebugUpdateTrace("updateMapDataRequest:sent", {
+            requestSent,
+            requestCount: requests.length,
+            hasPendingRequestedStages
+        });
         if (requestSent) {
             const previousProgress = this.backendRequestProgress;
             const hasPreviousProgress = previousProgress.total > 0;
@@ -2389,6 +2502,10 @@ export class MapDataService {
             return;
         }
         this.viewVisualizationState[viewIndex].viewport = viewport;
+        this.recordDebugUpdateTrace("setViewport", {
+            viewIndex,
+            viewport: {...viewport}
+        });
         this.scheduleUpdate();
     }
 
@@ -2876,6 +2993,12 @@ export class MapDataService {
     /** Persists map/layer visibility changes and schedules the resulting viewport refresh. */
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
+        this.recordDebugUpdateTrace("setMapLayerVisibility", {
+            viewIndex,
+            mapOrGroupId,
+            layerId,
+            state
+        });
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }
