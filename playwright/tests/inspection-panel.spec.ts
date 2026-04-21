@@ -48,12 +48,12 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         }).first();
         await expect(layerIdRow).toHaveCount(1);
 
-        // const pinIcon = panel.locator('.material-symbols-outlined', {
-        //     hasText: 'keep_off'
-        // }).first();
-        // Pin the first panel so the next selection opens a second panel.
-        // await expect(pinIcon).toBeVisible();
-        // await pinIcon.click();
+        const lockToggle = panel.locator('.title .material-symbols-outlined', {
+            hasText: 'lock_open_right'
+        }).first();
+        // Lock the first panel so the next selection opens a second panel.
+        await expect(lockToggle).toBeVisible();
+        await lockToggle.click();
 
         // Selecting another result should open a second inspection panel.
         await clickSearchResultLeaf(page, 1);
@@ -81,12 +81,20 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await expect(treeTable).toBeVisible();
 
         const header = panel.locator('.p-accordionheader').first();
-        await header.click();
+        const headerBox = await header.boundingBox();
+        if (!headerBox) {
+            throw new Error('Expected docked inspection header to have a bounding box');
+        }
+        const toggleClickPosition = {
+            x: Math.max(headerBox.width - 16, 4),
+            y: headerBox.height / 2
+        };
+        await header.click({ position: toggleClickPosition });
 
         await expect(accordionPanel).not.toHaveClass(/p-accordionpanel-active/);
         await expect(treeTable).not.toBeVisible();
 
-        await header.click();
+        await header.click({ position: toggleClickPosition });
 
         await expect(accordionPanel).toHaveClass(/p-accordionpanel-active/);
         await expect(treeTable).toBeVisible();

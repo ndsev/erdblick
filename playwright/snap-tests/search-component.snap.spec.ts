@@ -10,7 +10,7 @@ import {
 
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
-const SEARCH_QUERY = '**.layerId == Road';
+const SEARCH_QUERY = '**.layerId == "Road"';
 
 test.use({ stateSnapshot: 'style_editor_state' });
 
