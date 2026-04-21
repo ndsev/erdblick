@@ -22,6 +22,7 @@ import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
 
+/** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
     key: string,
     header: string,
@@ -29,6 +30,7 @@ export interface Column {
     transform: (colKey: string, rowData: any) => any
 }
 
+/** User-facing switches that control which inspection fields participate in tree filtering. */
 export class FeatureFilterOptions {
     filterByKeys: boolean = true;
     filterByValues: boolean = true;
@@ -198,6 +200,7 @@ export class FeatureFilterOptions {
     `,
     standalone: false
 })
+/** Shared tree-table renderer for feature inspection and source-data inspection content. */
 export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
@@ -287,10 +290,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }));
     }
 
+    /** Attaches resize observers and window listeners once the PrimeNG tree has been rendered. */
     ngAfterViewInit() {
         this.scheduleScrollerRecalc();
         const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
-        if (hostElement && typeof ResizeObserver !== "undefined") {
+        if (hostElement) {
             this.resizeObserver = new ResizeObserver(() => this.scheduleScrollerRecalc());
             this.resizeObserver.observe(hostElement);
             const container = hostElement.closest(".resizable-container");
@@ -298,23 +302,20 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 this.resizeObserver.observe(container);
             }
         }
-        if (typeof window !== "undefined") {
-            window.addEventListener("resize", this.onWindowResize);
-            window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
-            window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
-        }
+        window.addEventListener("resize", this.onWindowResize);
+        window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
+        window.addEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
     }
 
+    /** Releases resize listeners, pending frames, and reactive subscriptions. */
     ngOnDestroy() {
         this.unfreeze();
         this.destroyed = true;
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
-        if (typeof window !== "undefined") {
-            window.removeEventListener("resize", this.onWindowResize);
-            window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
-            window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
-        }
+        window.removeEventListener("resize", this.onWindowResize);
+        window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_START_EVENT, this.onDockResizePauseStart);
+        window.removeEventListener(InspectionTreeComponent.DOCK_RESIZE_PAUSE_END_EVENT, this.onDockResizePauseEnd);
         if (this.scrollerRecalcFrame !== undefined) {
             window.cancelAnimationFrame(this.scrollerRecalcFrame);
             this.scrollerRecalcFrame = undefined;
@@ -322,6 +323,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.forEach(s => s.unsubscribe());
     }
 
+    /** Suspends change detection and scroller work while an outer drag operation is in progress. */
     freeze(): void {
         if (this.destroyed) {
             return;
@@ -330,6 +332,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.applyFreezeState();
     }
 
+    /** Reattaches change detection after a temporary freeze. */
     unfreeze(): void {
         if (this.destroyed) {
             return;
@@ -338,10 +341,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.applyFreezeState();
     }
 
+    /** Combines manual freezes with dock resize freezes into one effective state flag. */
     private shouldStayFrozen(): boolean {
         return this.manualFreezeRequested || this.dockFreezeRequested;
     }
 
+    /** Applies the effective freeze state and replays any deferred scroller recalculation. */
     private applyFreezeState(): void {
         const shouldFreeze = this.shouldStayFrozen();
         if (shouldFreeze) {
@@ -368,8 +373,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.scheduleScrollerRecalc();
     }
 
+    /** Coalesces scroller geometry recalculations onto the next animation frame. */
     private scheduleScrollerRecalc() {
-        if (this.destroyed || typeof window === "undefined") {
+        if (this.destroyed) {
             return;
         }
         if (this.frozen) {
@@ -385,10 +391,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Public hook used by surrounding panels after size changes. */
     refreshLayout(): void {
         this.scheduleScrollerRecalc();
     }
 
+    /** Forces PrimeNG's virtual scroller to recompute its cached geometry after layout changes. */
     private recalculateScrollerGeometry(): void {
         if (this.destroyed || this.frozen) {
             this.pendingScrollerRecalcWhileFrozen = true;
@@ -406,10 +414,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.cdr.detectChanges();
     }
 
+    /** Measures the current rendered content height so parent panels can auto-size around it. */
     measurePreferredContentHeightEm(): number | undefined {
-        if (typeof window === "undefined") {
-            return undefined;
-        }
         const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
         if (!hostElement) {
             return undefined;
@@ -441,6 +447,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return totalHeightPx / rootFontSize;
     }
 
+    /** Clears the filter input and restores the original tree. */
     clearFilter() {
         this.filterString = "";
         this.table.filterGlobal("" , 'contains');
@@ -448,6 +455,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.emitFilterChange("");
     }
 
+    /** Handles escape-to-clear without leaking the key event to global shortcuts. */
     onKeydown(event: any) {
         event.stopPropagation();
 
@@ -456,6 +464,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Toggles row expansion unless the user clicked an explicit action control. */
     onRowClick(event: MouseEvent, rowNode: any) {
         const target = event.target as HTMLElement | null;
         if (target?.closest(".inspection-row-actions") || target?.closest(".p-treetable-toggler") || target?.closest("a")) {
@@ -466,6 +475,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.data = [...this.data];
     }
 
+    /** Opens feature-id navigation from the value column while preserving text-selection behavior. */
     onNodeClick(event: MouseEvent, rowData: any, colKey: string) {
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) {
@@ -478,6 +488,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Opens the row action menu for copy/docs/search-path helpers. */
     onRowActionsClick(event: MouseEvent, rowData: any) {
         this.inspectionMenu.toggle(event);
         event.stopPropagation();
@@ -510,6 +521,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Jumps or highlights the feature referenced by a FeatureId cell. */
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
         this.jumpService.highlightByJumpTargetFilter(
@@ -517,11 +529,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             rowData["value"]).then();
     }
 
+    /** Converts the rendered feature-id anchor back into the same value-click behavior. */
     onFeatureIdLinkClick(event: MouseEvent, rowData: any) {
         event.preventDefault();
         this.onValueClick(event, rowData);
     }
 
+    /** Activates row-based soft or strong hover highlighting while the pointer is over a row. */
     onRowHover(rowData: any) {
         this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
             ? rowData["softHoverGroupId"]
@@ -533,6 +547,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.highlightRowHoverTarget(rowData);
     }
 
+    /** Clears any hover highlight emitted from row-level annotations. */
     onRowHoverExit(rowData: any) {
         this.activeSoftHoverGroupId = undefined;
         this.activeStrongHoverGroupId = undefined;
@@ -549,6 +564,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Highlights feature-id values independently from the row hover group. */
     onNodeValueHover(rowData: any, colKey: string) {
         if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
@@ -562,6 +578,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
     }
 
+    /** Restores row-level hover once the pointer leaves a feature-id cell. */
     onNodeValueHoverExit(rowData: any, colKey: string) {
         if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
@@ -570,6 +587,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.highlightRowHoverTarget(rowData);
     }
 
+    /** Chooses the strongest available hover target annotation for a tree row and forwards it to the map. */
     private highlightRowHoverTarget(rowData: any) {
         const hoverId = typeof rowData["strongHoverGroupId"] === "string"
             ? String(rowData["strongHoverGroupId"])
@@ -591,10 +609,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }]).then();
     }
 
+    /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */
     protected isFeatureIdValueRow(rowData: any): boolean {
         return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;
     }
 
+    /** Tracks whether a FeatureId cell currently owns the dedicated hover highlight styling. */
     isHoveredFeatureIdValue(rowData: any, colKey: string): boolean {
         return colKey === "value" &&
             this.isFeatureIdValueRow(rowData) &&
@@ -602,6 +622,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             rowData["nodeId"] === this.activeFeatureIdNodeId;
     }
 
+    /** Extracts the row depth from PrimeNG's row wrapper regardless of the current template shape. */
     private rowLevel(rowNode: any): number {
         if (typeof rowNode?.level === "number") {
             return rowNode.level;
@@ -612,10 +633,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return 0;
     }
 
+    /** Hides row actions for root sections where copy/docs helpers are not useful. */
     shouldShowRowActions(rowNode: any, rowData: any): boolean {
         return this.rowLevel(rowNode) > 0 && rowData?.["type"] !== this.InspectionValueType.SECTION.value;
     }
 
+    /** Builds the CSS class map for stage badges, hover groups, and special inspection rows. */
     getRowClasses(rowData: any): Record<string, boolean> {
         const strongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
             ? rowData["strongHoverGroupId"]
@@ -632,6 +655,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         };
     }
 
+    /** Navigates from an inspection row to the referenced source-data address. */
     showSourceData(event: Event, sourceDataRef: any) {
         event.stopPropagation();
         if (!this.enableSourceDataNavigation()) {
@@ -647,6 +671,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Maps inspection value types to the CSS classes used by the table template. */
     getStyleClassByType(rowData: any): string {
         if (!rowData || !rowData.hasOwnProperty("type")) {
             return "standard-style";
@@ -661,10 +686,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Thin wrapper so menus and template actions share one clipboard helper. */
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
     }
 
+    /** Opens the GeoJSON actions menu for the current inspection payload. */
     showGeoJsonMenu(event: MouseEvent) {
         event.stopPropagation();
         if (!this.geoJson()) {
@@ -690,6 +717,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.geoJsonMenu.toggle(event);
     }
 
+    /** Copies the panel GeoJSON payload to the clipboard when available. */
     copyGeoJson() {
         const data = this.geoJson();
         if (!data) {
@@ -698,6 +726,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.copyToClipboard(data);
     }
 
+    /** Downloads the current inspection GeoJSON as a `.geojson` file. */
     downloadGeoJson() {
         const data = this.geoJson();
         if (!data) {
@@ -715,6 +744,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.messageService.showSuccess('GeoJSON download started');
     }
 
+    /** Opens the current inspection GeoJSON in a separate tab via a blob URL. */
     openGeoJsonInNewTab() {
         const data = this.geoJson();
         if (!data) {
@@ -731,6 +761,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return `inspection-${this.panelId()}.geojson`;
     }
 
+    /** Applies the global filter and restores default expansion when the filter is cleared. */
     filterTree(filterString: string) {
         if (!filterString) {
             this.data = this.treeData();
@@ -741,6 +772,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.table.filterGlobal(query, "contains");
     }
 
+    /** Synchronizes the input field, tree filter state, and shared filter text binding. */
     onFilterInput(filterString: string) {
         const nextValue = filterString ?? "";
         this.filterString = nextValue;
@@ -748,6 +780,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.emitFilterChange(nextValue);
     }
 
+    /** Expands the inspection branches that are usually most useful on first render. */
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
@@ -764,11 +797,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     protected readonly InspectionValueType = coreLib.ValueType;
 
+    /** Distinguishes feature trees from source-data trees so only feature trees get default expansion. */
     private isFeatureInspectionTree(nodes: TreeTableNode[]): boolean {
         const firstKey = nodes[0]?.data?.["key"];
         return firstKey === "Feature" || firstKey === "Identifiers";
     }
 
+    /** Avoids emitting redundant filter changes back to the shared panel state. */
     private emitFilterChange(filterString: string) {
         if (this.suppressFilterEmit || this.lastEmittedFilterText === filterString) {
             return;

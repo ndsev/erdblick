@@ -18,6 +18,9 @@ const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 512;
+export const DEFAULT_MAP_ZOOM_STEP = 0.5;
+export const MIN_MAP_ZOOM_STEP = 0.001;
+export const MAX_MAP_ZOOM_STEP = 1.0;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
@@ -40,22 +43,26 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#58cf08"
 ]
 
+/** Version information shown in diagnostics and about dialogs. */
 export interface Versions {
     name: string;
     tag: string;
     whatsnew?: string;
 }
 
+/** Canonical frontend selection identity for one feature inside one map tile. */
 export interface TileFeatureId {
     featureId: string;
     mapTileKey: string;
 }
 
+/** Selection payload used for source-data/meta-data rows that are not regular features. */
 export interface SelectedSourceData {
     mapTileKey: string;
     address?: bigint;
 }
 
+/** Runtime model for one inspection panel, docked or floating. */
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
@@ -66,26 +73,31 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     undocked: boolean;
 }
 
+/** Persisted top-left dialog position in viewport pixels. */
 export interface AppDialogPosition {
     left: number;
     top: number;
 }
 
+/** Persisted dialog size in viewport pixels. */
 export interface AppDialogSize {
     width: number;
     height: number;
 }
 
+/** Generic persisted dialog layout record. */
 export interface AppDialogLayout {
     position: AppDialogPosition;
     size: AppDialogSize;
 }
 
+/** Persisted layout for floating inspection dialogs, including dock preference. */
 export interface InspectionDialogLayout extends AppDialogLayout {
     panelId: number;
     slot: number;
 }
 
+/** One selectable comparison candidate for the inspection comparison dialog. */
 export interface InspectionComparisonEntry {
     panelId: number;
     mapId: string;
@@ -93,32 +105,38 @@ export interface InspectionComparisonEntry {
     featureIds: TileFeatureId[];
 }
 
+/** Complete model for the inspection comparison dialog. */
 export interface InspectionComparisonModel {
     base: InspectionComparisonEntry;
     others: InspectionComparisonEntry[];
 }
 
+/** Command-style option that can populate an inspection comparison slot. */
 export interface InspectionComparisonOption {
     label: string;
     value: number;
 }
 
+/** Minimal persisted camera state shared between 2D and 3D views. */
 export interface CameraViewState {
     destination: { lon: number, lat: number, alt: number };
     orientation: { heading: number, pitch: number, roll: number };
 }
 
+/** Persisted enable/opacity settings for the OSM base layer. */
 export interface OsmViewState {
     enabled: boolean;
     opacity: number;
 }
 
+/** Per-view configuration entry for one map/layer selection. */
 export interface LayerViewConfig {
     autoLevel: boolean;
     level: number;
     visible: boolean;
 }
 
+/** Enumerates view properties that can be synchronized across split views. */
 export interface ViewSyncOption {
     name: string;
     code: string;
@@ -127,8 +145,10 @@ export interface ViewSyncOption {
     tooltip: string;
 }
 
+/** Tile-grid overlay labeling mode used by the map panel and Deck overlay. */
 export type TileGridMode = "xyz" | "nds";
 
+/** Limits used while validating imported viewer snapshots. */
 interface SnapshotImportLimits {
     maxFileSizeBytes: number;
     maxTopLevelEntries: number;
@@ -137,16 +157,19 @@ interface SnapshotImportLimits {
     maxStringLength: number;
 }
 
+/** Result of snapshot normalization before schema validation is applied. */
 interface SnapshotNormalizationResult {
     normalized?: Record<string, unknown>;
     errors: string[];
 }
 
+/** Returns whether the layer id refers to source or meta-data rather than a feature layer. */
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
 }
 
+/** Rounds persisted coordinates so URLs remain stable and reasonably short. */
 function roundCoordinateStateValue(value: number): number {
     if (!Number.isFinite(value)) {
         return value;
@@ -154,6 +177,7 @@ function roundCoordinateStateValue(value: number): number {
     return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
 }
 
+/** Clamps OSM opacity into the supported percentage range. */
 function clampOsmOpacity(value: number): number {
     if (!Number.isFinite(value)) {
         return 30;
@@ -162,6 +186,15 @@ function clampOsmOpacity(value: number): number {
     return Math.max(0, Math.min(100, rounded));
 }
 
+/** Clamps persisted zoom-step settings to the supported deck interaction range. */
+export function clampMapZoomStep(value: number): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_MAP_ZOOM_STEP;
+    }
+    return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
+}
+
+/** Produces a detached clone suitable for app-state snapshots and comparisons. */
 function cloneStateValue<T>(value: T): T {
     if (value === null || typeof value !== 'object') {
         return value;
@@ -181,11 +214,8 @@ function cloneStateValue<T>(value: T): T {
 
 @Injectable({providedIn: 'root'})
 /**
- * Central application state coordinator.
- *
- * Responsibilities:
- * - hydrate from local storage + URL,
- * - serialize state changes back to storage/URL.
+ * Centralizes persisted viewer state, URL/storage hydration, dialog layout, selection state,
+ * and cross-view synchronization.
  */
 export class AppStateService implements OnDestroy {
 
@@ -425,6 +455,13 @@ export class AppStateService implements OnDestroy {
         name: 'tilePullCompressionEnabled',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly mapZoomStepState = this.createState<number>({
+        name: 'mapZoomStep',
+        defaultValue: DEFAULT_MAP_ZOOM_STEP,
+        schema: z.coerce.number(),
+        fromStorage: value => clampMapZoomStep(Number(value))
     });
 
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
@@ -704,6 +741,7 @@ export class AppStateService implements OnDestroy {
         {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
     ];
 
+    /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
@@ -750,10 +788,12 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Flushes all state slots to storage and URL after a batch update. */
     private syncAllStates() {
         this.statePool.values().forEach(state => this.onStateChanged(state, true));
     }
 
+    /** Copies synchronized view properties from the focused view to the others. */
     syncViews(): void {
         if (this.numViews < 2) {
             return;
@@ -768,6 +808,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Cancels pending persistence work when the service is destroyed. */
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
         if (this.urlSyncHandle !== null) {
@@ -792,6 +833,7 @@ export class AppStateService implements OnDestroy {
         return state;
     }
 
+    /** Seeds newly created views with defaults copied from the first view. */
     private seedAdditionalViews(previousViewCount: number, nextViewCount: number): void {
         if (nextViewCount <= previousViewCount) {
             return;
@@ -824,6 +866,7 @@ export class AppStateService implements OnDestroy {
         this.stylesState.next(nextStyles);
     }
 
+    /** Subscribes to all persisted state slots so storage and URL remain in sync. */
     private setupStateSubscriptions() {
         if (this.subscriptionsSetup) return;
         // NOTE: Is this the best way to implement the internal subscription mechanism?
@@ -836,6 +879,7 @@ export class AppStateService implements OnDestroy {
         this.subscriptionsSetup = true;
     }
 
+    /** Handles one state-slot change and schedules the required persistence work. */
     private onStateChanged(state: AppState<any>, force: boolean = false): void {
         if (!force && (this.isHydrating || !this.isReady)) {
             return;
@@ -849,6 +893,7 @@ export class AppStateService implements OnDestroy {
         this.scheduleFlush();
     }
 
+    /** Schedules the batched storage flush used after state changes. */
     private scheduleFlush(): void {
         if (this.flushHandle) {
             return;
@@ -865,6 +910,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Cancels any pending batched URL/storage synchronization timers. */
     private cancelPendingStateSync(): void {
         // Prevent stale, queued writes from a previous URL hydration cycle.
         this.pendingStorageSyncStates.clear();
@@ -875,6 +921,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Writes all storage-backed state slots to local storage. */
     private syncStorage(): void {
         for (const state of this.pendingStorageSyncStates) {
             try {
@@ -892,6 +939,7 @@ export class AppStateService implements OnDestroy {
         this.pendingStorageSyncStates.clear();
     }
 
+    /** Schedules debounced URL synchronization after state changes. */
     private scheduleUrlSync(): void {
         if (!this.pendingUrlSyncStates.size) {
             return;
@@ -912,6 +960,7 @@ export class AppStateService implements OnDestroy {
         }, delay);
     }
 
+    /** Executes the debounced URL synchronization immediately. */
     private flushUrlSync(): void {
         if (this.isHydrating) {
             this.pendingUrlSyncStates.clear();
@@ -934,6 +983,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Serializes URL-backed state and updates router query params accordingly. */
     private syncUrl(): 'replace' | 'merge' {
         // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
         const params: Record<string, string> = {};
@@ -963,6 +1013,7 @@ export class AppStateService implements OnDestroy {
         return queryParamsHandling;
     }
 
+    /** Restores storage-backed state slots from local storage during startup. */
     private hydrateFromStorage(): void {
         this.withHydration(() => {
             for (const state of this.statePool.values()) {
@@ -974,6 +1025,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Restores URL-backed state slots from the current route query params. */
     private hydrateFromUrl(params: Params): void {
         this.withHydration(() => {
             if (Object.keys(params).length === 0) {
@@ -986,6 +1038,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Runs a callback while suppressing persistence side effects during hydration. */
     private withHydration(callback: () => void): void {
         const previous = this.isHydrating;
         this.isHydrating = true;
@@ -996,6 +1049,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns the current limits applied when importing a snapshot. */
     getSnapshotImportLimits(): SnapshotImportLimits {
         const stateCount = this.statePool.size;
         return {
@@ -1011,6 +1065,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Exports the current persisted state into a snapshot object. */
     exportSnapshot(): Record<string, unknown> {
         const snapshot: Record<string, unknown> = Object.create(null);
         for (const [name, state] of this.statePool.entries()) {
@@ -1019,10 +1074,12 @@ export class AppStateService implements OnDestroy {
         return snapshot;
     }
 
+    /** Validates a snapshot without mutating the current application state. */
     validateSnapshot(snapshot: unknown): string[] {
         return this.normalizeSnapshot(snapshot).errors;
     }
 
+    /** Normalizes, validates, and applies a snapshot import. */
     importSnapshot(snapshot: unknown): string[] {
         const normalizedResult = this.normalizeSnapshot(snapshot);
         if (normalizedResult.errors.length) {
@@ -1055,6 +1112,7 @@ export class AppStateService implements OnDestroy {
         return [];
     }
 
+    /** Normalizes legacy snapshot shapes before schema validation is applied. */
     private normalizeSnapshot(snapshot: unknown): SnapshotNormalizationResult {
         const limits = this.getSnapshotImportLimits();
         const errors: string[] = [];
@@ -1102,6 +1160,7 @@ export class AppStateService implements OnDestroy {
         return errors.length ? {errors} : {normalized, errors: []};
     }
 
+    /** Recursively normalizes one snapshot subtree while collecting validation issues. */
     private normalizeSnapshotNode(
         value: unknown,
         path: string,
@@ -1176,6 +1235,8 @@ export class AppStateService implements OnDestroy {
     set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
+    get mapZoomStep() {return this.mapZoomStepState.getValue();}
+    set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get search() {return this.searchState.getValue();}
     set search(val: [number, string] | []) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
@@ -1264,14 +1325,17 @@ export class AppStateService implements OnDestroy {
         this.viewSyncState.next(sanitized);
     };
 
+    /** Returns whether layer visibility/options sync is enabled for the given view. */
     getLayerSyncOption(viewIndex: number): boolean {
         return this.layerSyncOptionsState.getValue(viewIndex);
     }
 
+    /** Sets whether layer visibility/options sync is enabled for the given view. */
     setLayerSyncOption(viewIndex: number, enabled: boolean): void {
         this.layerSyncOptionsState.next(viewIndex, enabled);
     }
 
+    /** Returns the persisted OSM state for the given view. */
     getOsmState(viewIndex: number): OsmViewState {
         const value = this.osmState.getValue(viewIndex);
         return {
@@ -1280,6 +1344,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Writes the OSM enable/opacity state for the given view. */
     setOsmState(viewIndex: number, enabled: boolean, opacity: number): void {
         this.osmState.next(viewIndex, {
             enabled,
@@ -1287,33 +1352,40 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Returns whether OSM is enabled for the given view. */
     getOsmEnabled(viewIndex: number): boolean {
         return this.getOsmState(viewIndex).enabled;
     }
 
+    /** Sets whether OSM is enabled for the given view. */
     setOsmEnabled(viewIndex: number, enabled: boolean): void {
         const current = this.getOsmState(viewIndex);
         this.setOsmState(viewIndex, enabled, current.opacity);
     }
 
+    /** Returns the configured OSM opacity for the given view. */
     getOsmOpacity(viewIndex: number): number {
         return this.getOsmState(viewIndex).opacity;
     }
 
+    /** Sets the configured OSM opacity for the given view. */
     setOsmOpacity(viewIndex: number, opacity: number): void {
         const current = this.getOsmState(viewIndex);
         this.setOsmState(viewIndex, current.enabled, opacity);
     }
 
+    /** Returns the persisted orientation for the given view. */
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
     }
 
+    /** Returns the persisted camera destination for the given view. */
     getCameraPosition(viewIndex: number) {
         const destination = this.cameraViewDataState.getValue(viewIndex).destination;
         return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
 
+    /** Internal helper that writes camera destination and orientation without extra policy. */
     private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
         // Fall back to the current orientation if none was passed.
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
@@ -1332,6 +1404,7 @@ export class AppStateService implements OnDestroy {
         this.cameraViewDataState.next(viewIndex, view);
     }
 
+    /** Persists camera destination/orientation and updates the focused view marker. */
     setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
         const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
         const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
@@ -1377,6 +1450,7 @@ export class AppStateService implements OnDestroy {
         this._setView(viewIndex, destination, orientation);
     }
 
+    /** Switches one view between 2D and 3D projection mode. */
     setProjectionMode(viewIndex: number, is2DMode: boolean) {
         if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
             // Unfocused view is trying to update itself when the views are synchronized
@@ -1408,6 +1482,7 @@ export class AppStateService implements OnDestroy {
     //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
 
      */
+    /** Updates the current selection, reusing or creating inspection panels as needed. */
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
         let allPanels = this.selectionState.getValue();
@@ -1550,6 +1625,7 @@ export class AppStateService implements OnDestroy {
         return;
     }
 
+    /** Persists the size of one inspection panel. */
     setInspectionPanelSize(id: number, size: [number, number]) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1560,6 +1636,7 @@ export class AppStateService implements OnDestroy {
         this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
     }
 
+    /** Updates the locked state of one inspection panel. */
     setInspectionPanelLockedState(id: number, isLocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1570,6 +1647,7 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    /** Persists whether one inspection panel is undocked. */
     setInspectionPanelUndockedState(id: number, undocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1587,10 +1665,12 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    /** Returns the persisted layout for a dialog if one exists. */
     getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
         return this.dialogLayoutsState.getValue()[id];
     }
 
+    /** Returns or creates the persisted layout record for a dialog. */
     ensureDialogLayout(id: string, fallbackFactory: () => AppDialogLayout): AppDialogLayout | InspectionDialogLayout {
         const existing = this.getDialogLayout(id);
         if (existing) {
@@ -1601,6 +1681,7 @@ export class AppStateService implements OnDestroy {
         return layout;
     }
 
+    /** Inserts or updates one persisted dialog layout record. */
     upsertDialogLayout(id: string, layout: AppDialogLayout | InspectionDialogLayout): void {
         const currentLayouts = this.dialogLayoutsState.getValue();
         const existing = currentLayouts[id];
@@ -1626,6 +1707,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Returns the floating layout record for one inspection panel, if present. */
     getInspectionDialogLayout(panelId: number): InspectionDialogLayout | undefined {
         const layout = this.getDialogLayout(this.inspectionLayoutId(panelId));
         if (layout && 'panelId' in layout && 'slot' in layout) {
@@ -1634,6 +1716,7 @@ export class AppStateService implements OnDestroy {
         return undefined;
     }
 
+    /** Returns or creates the floating layout record for one inspection panel. */
     ensureInspectionDialogLayout(
         panelId: number,
         preferredSlot: number,
@@ -1655,6 +1738,7 @@ export class AppStateService implements OnDestroy {
         return created;
     }
 
+    /** Updates the stored floating position for one inspection panel. */
     setInspectionDialogPosition(panelId: number, position: AppDialogPosition, preferredIndex?: number): void {
         if (!this.selectionState.getValue().some(panel => panel.id === panelId)) {
             return;
@@ -1680,6 +1764,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Removes persisted inspection-dialog layouts for panels that no longer exist. */
     pruneInspectionDialogLayout(activePanelIds: number[]) {
         const activeIds = new Set(activePanelIds.map(panelId => this.inspectionLayoutId(panelId)));
         const currentLayouts = this.dialogLayoutsState.getValue();
@@ -1697,14 +1782,17 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Opens the inspection comparison dialog with the supplied model. */
     openInspectionComparison(model: InspectionComparisonModel): void {
         this.inspectionComparisonState.next(model);
     }
 
+    /** Closes the inspection comparison dialog. */
     closeInspectionComparison(): void {
         this.inspectionComparisonState.next(null);
     }
 
+    /** Reorders docked inspection panels according to the supplied display order. */
     reorderInspectionPanels(dockedDisplayOrder: number[]) {
         const allPanels = this.selectionState.getValue();
         const dockedPanels = allPanels.filter(panel => !panel.undocked);
@@ -1734,6 +1822,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Sets the accent color stored for one inspection panel. */
     setInspectionPanelColor(id: number, color: string) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1744,6 +1833,7 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    /** Drops all unlocked inspection panels, preserving only pinned selections. */
     unsetUnlockedSelections() {
         const nextSelection = this.selectionState.getValue().filter(panel =>
             panel.locked || panel.sourceData !== undefined
@@ -1752,6 +1842,7 @@ export class AppStateService implements OnDestroy {
         this.sanitizeInspectionComparisonForSelection(nextSelection);
     }
 
+    /** Removes one inspection panel and any associated persisted layout state. */
     unsetPanel(id: number) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1763,6 +1854,7 @@ export class AppStateService implements OnDestroy {
         this.sanitizeInspectionComparisonForSelection(allPanels);
     }
 
+    /** Returns whether two inspection-panel orderings are identical by panel id. */
     private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
         if (a.length !== b.length) {
             return false;
@@ -1775,10 +1867,12 @@ export class AppStateService implements OnDestroy {
         return true;
     }
 
+    /** Builds the persisted layout id used for one floating inspection dialog. */
     private inspectionLayoutId(panelId: number): string {
         return `inspection:${panelId}`;
     }
 
+    /** Enables or disables the explicit location marker overlay. */
     setMarkerState(enabled: boolean) {
         this.markerState.next(enabled);
         if (!enabled) {
@@ -1786,6 +1880,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Updates the explicit location marker position, optionally delaying URL sync. */
     setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
@@ -1799,6 +1894,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns per-view visibility and level configuration for one map/layer pair. */
     mapLayerConfig(mapId: string, layerId: string, fallbackVisibility: boolean = true, fallbackLevel: number = 13): LayerViewConfig[] {
         if (isSourceOrMetaData(layerId)) {
             return [];
@@ -1830,6 +1926,7 @@ export class AppStateService implements OnDestroy {
         return result;
     }
 
+    /** Writes per-view visibility and level configuration for one map/layer pair. */
     setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
         if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViewsState.getValue()) {
             return;
@@ -1858,6 +1955,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns or seeds the stored values for one style option across all views. */
     styleOptionValues(
         mapId: string,
         layerId: string,
@@ -1923,6 +2021,7 @@ export class AppStateService implements OnDestroy {
         this.stylesState.next(this.styles);
     }
 
+    /** Returns whether the style is visible in the persisted style tree. */
     getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
         if (this.styleVisibility.hasOwnProperty(styleId)) {
             return this.styleVisibility[styleId];
@@ -1930,11 +2029,13 @@ export class AppStateService implements OnDestroy {
         return fallback;
     }
 
+    /** Updates the persisted visibility flag for one style. */
     setStyleVisibility(styleId: string, val: boolean) {
         this.styleVisibility[styleId] = val;
         this.styleVisibilityState.next(this.styleVisibility);
     }
 
+    /** Updates the active search-history selection and optionally persists the query. */
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
         const trimmed = value ? [value[0], value[1].trim()] as [number, string] : null;
         if (trimmed && saveHistory) {
@@ -1945,6 +2046,7 @@ export class AppStateService implements OnDestroy {
         this.lastSearchHistoryEntryState.next(trimmed);
     }
 
+    /** Persists one search-history entry into the bounded stored history list. */
     private saveHistoryStateValue(value: [number, string]) {
         const searchHistoryString = localStorage.getItem("searchHistory");
         if (searchHistoryString) {
@@ -1968,6 +2070,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Clears persisted app state from local storage and resets URL-backed state. */
     resetStorage() {
         for (const state of this.statePool.values()) {
             state.resetToDefault();
@@ -1979,6 +2082,7 @@ export class AppStateService implements OnDestroy {
         window.location.href = origin + pathname;
     }
 
+    /** Removes persisted map/layer/style references that no longer exist in the loaded data. */
     prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
         // 1) Build sets of present maps, layers and styles
         const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
@@ -2147,6 +2251,7 @@ export class AppStateService implements OnDestroy {
         this.syncAllStates();
     }
 
+    /** Drops stale comparison state when the current selection no longer supports it. */
     private sanitizeInspectionComparisonForSelection(panels: InspectionPanelModel<TileFeatureId>[]): void {
         const model = this.inspectionComparisonState.getValue();
         if (!model) {
@@ -2164,6 +2269,7 @@ export class AppStateService implements OnDestroy {
         this.inspectionComparisonState.next(nextModel);
     }
 
+    /** Removes ineligible panels from a comparison model and drops empty results. */
     private sanitizeInspectionComparisonModel(model: InspectionComparisonModel, eligiblePanelIds: Set<number>): InspectionComparisonModel | null {
         const entries = [model.base, ...model.others];
         const remainingEntries = entries.filter(entry => eligiblePanelIds.has(entry.panelId));
@@ -2179,6 +2285,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Builds comparison candidates from the currently selected feature panels. */
     buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
         return panels
             .filter(panel => excludePanelId === undefined || panel.id !== excludePanelId)
@@ -2189,14 +2296,17 @@ export class AppStateService implements OnDestroy {
             }));
     }
 
+    /** Narrows inspection panels to those that represent actual feature selections. */
     private isFeaturePanel(panel: InspectionPanelModel<FeatureWrapper> | undefined): panel is InspectionPanelModel<FeatureWrapper> {
         return !!panel && panel.features.length > 0 && panel.sourceData === undefined;
     }
 
+    /** Formats the user-facing label used for comparison entries. */
     private formatFeatureLabel(features: FeatureWrapper[]): string {
         return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
     }
 
+    /** Builds one comparison entry from an existing feature inspection panel. */
     private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
         return {
             panelId: panel.id,
@@ -2209,6 +2319,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Creates the comparison-dialog model for the selected set of feature panels. */
     createComparisonModel(basePanelId: number, otherPanelIds: number[], panels: InspectionPanelModel<FeatureWrapper>[]): InspectionComparisonModel | null {
         const panelsById = new Map(
             panels
@@ -2232,6 +2343,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Recomputes the cached list of currently enabled view-sync options. */
     updateSelectedSyncOptions() {
         const previousSelection = new Set(this.viewSync);
         const hasMovement = this.syncOptions.some(option =>

@@ -100,6 +100,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
     styles: [``],
     standalone: false
 })
+/** Dialog that filters, sorts, and exports captured diagnostics log entries. */
 export class DiagnosticsLogDialogComponent implements OnDestroy {
     readonly layoutId = 'diagnostics-log';
     @ViewChild('dialog') dialog?: AppDialogComponent;
@@ -141,32 +142,39 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
         );
     }
 
+    /** Releases dialog-local subscriptions. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
+    /** Refreshes logs and promotes the dialog above other overlays. */
     onDialogShow() {
         this.diagnostics.refreshLogs();
         this.dialogStack.bringToFront(this.dialog);
     }
 
+    /** Persists the log-level filter toggles. */
     updateFilter() {
         this.stateService.diagnosticsLogFilter = {...this.logFilter};
     }
 
+    /** Updates the sort order used by the reactive filtered-log stream. */
     setSortOrder(order: 'asc' | 'desc') {
         this.sortOrder = order;
         this.sortOrder$.next(order);
     }
 
+    /** Stable row key for PrimeNG table rendering. */
     trackByLogRow = (index: number, entry: {at: number; level: string; message: string}): string => {
         return `${entry.at}:${entry.level}:${entry.message}:${index}`;
     };
 
+    /** Convenience action that leaves only error logs enabled. */
     setErrorsOnly() {
         this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
     }
 
+    /** Opens the export dialog preconfigured to export only the visible logs. */
     openExport() {
         this.diagnostics.openExportDialog({
             includeProgress: false,
@@ -176,6 +184,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
         });
     }
 
+    /** Restores all log levels in the filter. */
     unsetAllFilter() {
         this.stateService.diagnosticsLogFilter = {info: true, warn: true, error: true};
     }

@@ -17,21 +17,25 @@ namespace erdblick
 {
 
 namespace {
+/** Map a geometry enum onto the bit mask used for quick rule prefiltering. */
 constexpr uint32_t geomTypeBit(mapget::GeomType const& g) {
     return 1u << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
 }
 
+/** Check whether a local XYZ offset actually changes geometry placement. */
 bool hasLocalOffset(glm::dvec3 const& offset)
 {
     return offset.x != .0 || offset.y != .0 || offset.z != .0;
 }
 
+/** Parsed hover id broken down into the base feature and optional attribute/validity indices. */
 struct ParsedHoverAttributeId {
     std::string_view baseFeatureId_;
     uint32_t attributeIndex_ = 0;
     std::optional<uint32_t> validityIndex_;
 };
 
+/** Parse an unsigned integer suffix and reject partial or malformed matches. */
 std::optional<uint32_t> parseTrailingUint(std::string_view value) {
     uint32_t parsed = 0;
     auto const* begin = value.data();
@@ -43,6 +47,7 @@ std::optional<uint32_t> parseTrailingUint(std::string_view value) {
     return parsed;
 }
 
+/** Strip attribute/relation hover suffixes so subset lookups can fall back to the base feature id. */
 std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     constexpr std::string_view attributeSuffix = ":attribute#";
     constexpr std::string_view relationSuffix = ":relation#";
@@ -59,6 +64,7 @@ std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     return featureId.substr(0, cut);
 }
 
+/** Decode hover ids emitted by inspection/highlight code back into attribute subset selectors. */
 std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view featureId) {
     constexpr std::string_view attributeSuffix = ":attribute#";
     constexpr std::string_view validitySuffix = ":validity#";
@@ -91,6 +97,7 @@ std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view fea
     return result;
 }
 
+/** Build a cache key that keeps any-mode and wildcard-mode ASTs separate. */
 std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
     std::string key;
     key.reserve(expression.size() + 3);
@@ -99,6 +106,32 @@ std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bo
     key.push_back(':');
     key.append(expression);
     return key;
+}
+
+/** Look up a feature across the primary and auxiliary tiles without assuming every tile knows the type id. */
+model_ptr<Feature> findFeatureAcrossTiles(
+    std::vector<mapget::TileFeatureLayer::Ptr> const& tiles,
+    std::string_view typeId,
+    KeyValueViewPairs const& featureId)
+{
+    for (auto const& tile : tiles) {
+        if (!tile || !tile->layerInfo() || !tile->layerInfo()->getTypeInfo(typeId, false)) {
+            continue;
+        }
+        if (auto feature = tile->find(typeId, featureId)) {
+            return feature;
+        }
+    }
+    return {};
+}
+
+/** Convenience overload for callers that currently hold owned id-part strings. */
+model_ptr<Feature> findFeatureAcrossTiles(
+    std::vector<mapget::TileFeatureLayer::Ptr> const& tiles,
+    std::string_view typeId,
+    KeyValuePairs const& featureId)
+{
+    return findFeatureAcrossTiles(tiles, typeId, castToKeyValueView(featureId));
 }
 
 }
@@ -164,7 +197,10 @@ void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
     }
 
     auto targetFeature =
-        visualization_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
+        findFeatureAcrossTiles(
+            visualization_.allTiles_,
+            targetRef->typeId(),
+            targetRef->keyValuePairs());
 
     auto relationsForTargetIt = relationsBySourceFeatureId_.end();
     if (targetFeature) {
@@ -529,13 +565,7 @@ void FeatureLayerVisualizationBase::processResolvedExternalReferences(
         auto const featureId = JsValue(firstResolution["featureId"]).toKeyValuePairs();
         #endif
 
-        mapget::model_ptr<mapget::Feature> targetFeature;
-        for (auto const& tile : allTiles_) {
-            targetFeature = tile->find(typeId, featureId);
-            if (targetFeature) {
-                break;
-            }
-        }
+        auto targetFeature = findFeatureAcrossTiles(allTiles_, typeId, featureId);
         if (!targetFeature) {
             std::cout << "Resolved target feature was not found in aux tiles!" << std::endl;
             continue;
@@ -865,6 +895,14 @@ void FeatureLayerVisualizationBase::addFeature(
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
+        // Attribute/relation/validity hover ids should not also trigger the
+        // whole-feature hover highlight. Only emit feature highlights when the
+        // bare feature id itself is part of the highlighted subset.
+        if (highlightMode_ == FeatureStyleRule::HoverHighlight
+            && !featureIdSubset_.empty()
+            && !featureIdSubset_.contains(resolveFeatureId())) {
+            break;
+        }
         if (auto geomCollection = feature->geomOrNull()) {
             auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.index()];
             auto const effectiveOffset = effectiveOffsetForSlot(rule, currentOffsetSlot);

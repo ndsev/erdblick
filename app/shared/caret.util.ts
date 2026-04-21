@@ -3,8 +3,15 @@
 // top-left corner. This avoids the CommonJS-only "textarea-caret"
 // package and keeps the bundle fully ESM.
 
+/** Coordinates of the text caret relative to the textarea content box. */
 export interface CaretCoordinates { top: number; left: number }
 
+/**
+ * Computes caret coordinates relative to the top-left of a textarea.
+ *
+ * The implementation mirrors the textarea styles in a hidden DOM node so
+ * popup placement follows wrapped lines accurately without external packages.
+ */
 export default function getCaretCoordinates(
   textarea: HTMLTextAreaElement,
   position: number
@@ -99,4 +106,3 @@ export default function getCaretCoordinates(
 
   return { top, left };
 }
-

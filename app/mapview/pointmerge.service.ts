@@ -3,8 +3,10 @@ import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {IconLayer, ScatterplotLayer, TextLayer} from "@deck.gl/layers";
 import {coreLib} from "../integrations/wasm";
 import {HighlightMode} from "../../build/libs/core/erdblick-core";
+import {SceneMode} from "../integrations/geo";
 import {IRenderSceneHandle} from "./render-view.model";
 import {DeckLayerRegistry} from "./deck/deck-layer-registry";
+import {Matrix4} from "@math.gl/core";
 
 export type MapViewLayerStyleRule = string;
 type PositionHash = string;
@@ -12,11 +14,13 @@ type Cartographic = {x: number, y: number, z: number};
 
 type DeckColor = [number, number, number, number];
 type DeckPosition = [number, number, number];
-type DeckScene = {layerRegistry?: DeckLayerRegistry};
+type DeckScene = {layerRegistry?: DeckLayerRegistry, sceneMode?: SceneMode};
 const DECK_NO_DEPTH_TEST_PARAMETERS = {
     depthTest: false
 } as any;
+const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 
+/** Deck-layer payload for merged scatter points that share one cartographic location. */
 interface DeckMergedPoint {
     featureAddresses: number[];
     featureTileKeys: string[];
@@ -29,6 +33,7 @@ interface DeckMergedPoint {
     depthTest: boolean;
 }
 
+/** Deck-layer payload for merged icon markers that share one cartographic location. */
 interface DeckMergedIcon {
     featureAddresses: number[];
     featureTileKeys: string[];
@@ -41,6 +46,7 @@ interface DeckMergedIcon {
     depthTest: boolean;
 }
 
+/** Deck-layer payload for merged text labels that share one cartographic location. */
 interface DeckMergedLabel {
     featureAddresses: number[];
     featureTileKeys: string[];
@@ -84,6 +90,7 @@ export class MergedPointsTile {
     private readonly deckIconLayerKeys = new Set<string>();
     private readonly deckLabelLayerKeys = new Set<string>();
 
+    /** Creates the corner-tile aggregate keyed by NW tile id and view/layer/style identity. */
     constructor(
         public readonly tileId: bigint,  // NW tile ID
         public readonly mapViewLayerStyleRuleId: MapViewLayerStyleRule)
@@ -91,6 +98,10 @@ export class MergedPointsTile {
         this.viewIndex = Number(mapViewLayerStyleRuleId.split(":")[0]);
     }
 
+    /**
+     * Inserts or augments one merged-point entry at this corner location.
+     * Feature addresses are deduplicated together with their source tile keys.
+     */
     add(point: MergedPointVisualization, sourceTileKey: string) {
         const normalizedFeatureAddresses = point.featureAddresses
             .filter((featureAddress): featureAddress is number =>
@@ -134,6 +145,7 @@ export class MergedPointsTile {
         }
     }
 
+    /** Counts merged feature references at one position, optionally excluding a specific source tile. */
     count(positionHash: PositionHash, excludedSourceTileKey?: string) {
         const feature = this.features.get(positionHash);
         if (!feature) {
@@ -155,10 +167,12 @@ export class MergedPointsTile {
         return count;
     }
 
+    /** Adds the deck representation of this merged corner tile to the active render scene. */
     renderScene(sceneHandle: IRenderSceneHandle) {
         this.renderDeck(sceneHandle.scene as DeckScene);
     }
 
+    /** Removes this merged corner tile from the active render scene. */
     removeScene(sceneHandle: IRenderSceneHandle) {
         this.removeDeck(sceneHandle.scene as DeckScene);
     }
@@ -172,6 +186,7 @@ export class MergedPointsTile {
         }
     }
 
+    /** Removes all merged features that originated from the supplied source tile key. */
     removeSource(sourceTileKey: string) {
         for (const [positionHash, feature] of this.features.entries()) {
             const featureTileKeys = feature.featureTileKeys ?? [];
@@ -199,11 +214,16 @@ export class MergedPointsTile {
         }
     }
 
+    /**
+     * Rebuilds the deck layers for the merged points, icons, and labels in this corner tile.
+     * Rendering is bucketed by billboard/depth-test mode because those flags require distinct deck layers.
+     */
     private renderDeck(scene: DeckScene) {
         const registry = scene.layerRegistry;
         if (!registry) {
             return;
         }
+        const modelMatrix = scene.sceneMode === SceneMode.SCENE2D ? DECK_FLAT_2D_MODEL_MATRIX : undefined;
 
         this.removeDeck(scene);
 
@@ -321,6 +341,7 @@ export class MergedPointsTile {
                 getLineWidth: (d: DeckMergedPoint) => d.outlineWidth,
                 lineWidthUnits: "pixels",
                 billboard,
+                modelMatrix,
                 parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 stroked: true,
                 filled: true,
@@ -353,6 +374,7 @@ export class MergedPointsTile {
                     anchorY: d.height / 2
                 }),
                 billboard,
+                modelMatrix,
                 parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 pickable: true,
                 getId: (d: DeckMergedIcon) => d.featureAddresses
@@ -380,6 +402,7 @@ export class MergedPointsTile {
                 sizeUnits: "pixels",
                 getPixelOffset: (d: DeckMergedLabel) => d.pixelOffset,
                 billboard,
+                modelMatrix,
                 parameters: depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS,
                 pickable: true,
                 getId: (d: DeckMergedLabel) => d.featureAddresses
@@ -387,6 +410,7 @@ export class MergedPointsTile {
         }
     }
 
+    /** Removes every deck layer that was previously emitted for this merged corner tile. */
     private removeDeck(scene: DeckScene) {
         const registry = scene.layerRegistry;
         if (!registry) {
@@ -406,10 +430,12 @@ export class MergedPointsTile {
         this.deckLabelLayerKeys.clear();
     }
 
+    /** Builds a stable deck layer id for one merged output layer kind. */
     private makeDeckLayerKey(kind: string): string {
         return `merged/${this.mapViewLayerStyleRuleId}/${this.tileId.toString()}/${kind}`;
     }
 
+    /** Normalizes color-like input into a deck-compatible RGBA tuple with a fallback. */
     private toDeckColor(input: any, fallback: DeckColor): DeckColor {
         if (Array.isArray(input) && input.length >= 4) {
             return [
@@ -589,6 +615,7 @@ export class PointMergeService
         }
     }
 
+    /** Builds the prefix key that groups merged-point state by view, layer, style, and highlight mode. */
     makeMapViewLayerStyleId(viewIndex: number, mapId: string, layerId: string, styleId: string, highlightMode: HighlightMode): MapViewLayerStyleRule {
         return `${viewIndex}:${mapId}:${layerId}:${styleId}:${highlightMode.value}`;
     }

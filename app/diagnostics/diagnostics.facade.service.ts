@@ -22,18 +22,25 @@ interface MapgetStatusDataResponse {
 }
 
 @Injectable({providedIn: 'root'})
+/**
+ * High-level diagnostics service used by the UI.
+ *
+ * It extends the datasource with dialog-opening helpers and export bundling.
+ */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
 
     constructor(mapService: MapDataService,
                 private readonly stateService: AppStateService) {
-        super(mapService);
+        super(mapService, stateService);
     }
 
+    /** Opens the performance dialog after refreshing the current aggregated stats. */
     openPerformanceDialog() {
         this.refreshPerfStats();
         this.stateService.diagnosticsPerformanceDialogVisible = true;
     }
 
+    /** Opens the log dialog and optionally prefilters it to errors only. */
     openLogDialog(errorsOnly: boolean = false) {
         this.refreshLogs();
         this.stateService.diagnosticsLogDialogVisible = true;
@@ -42,6 +49,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         }
     }
 
+    /** Opens the export dialog with optional preselected export options. */
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
@@ -54,6 +62,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         this.stateService.diagnosticsExportDialogVisible = true;
     }
 
+    /** Builds the export bundle from the currently cached diagnostics data. */
     createExportBundle(options: DiagnosticsExportOptions): DiagnosticsExportBundle {
         const snapshot = this.snapshot$.getValue();
         const perfStats = this.perfStats$.getValue();
@@ -61,8 +70,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const metadata = {
             erdblickVersion: this.stateService.erdblickVersion.getValue() || undefined,
             distributionVersions: this.stateService.distributionVersions.getValue() || undefined,
-            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-            url: typeof window !== 'undefined' ? window.location.href : undefined
+            userAgent: navigator.userAgent,
+            url: window.location.href
         };
 
         const bundle: DiagnosticsExportBundle = {
@@ -88,6 +97,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         return bundle;
     }
 
+    /** Downloads a diagnostics export bundle, enriching it with backend status when available. */
     async downloadExportBundle(options: DiagnosticsExportOptions, filename: string = 'diagnostics-export.json'): Promise<void> {
         const bundle = this.createExportBundle(options);
         await this.enrichBundleWithMapgetStatus(bundle);
@@ -100,6 +110,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         window.URL.revokeObjectURL(url);
     }
 
+    /** Applies the active log-level filter to a log entry list. */
     filterLogs(logs: LogEntry[], filter: DiagnosticsLogFilter): LogEntry[] {
         return logs.filter(entry => {
             if (entry.level === 'info') {
@@ -112,6 +123,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         });
     }
 
+    /** Fetches `/status-data` and attaches the relevant parts to the export bundle. */
     private async enrichBundleWithMapgetStatus(bundle: DiagnosticsExportBundle): Promise<void> {
         const statusQuery = '/status-data?includeTileSizeDistribution=1&includeCachedFeatureTreeBytes=0';
 
@@ -144,6 +156,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         }
     }
 
+    /** Returns the cached tile-size distribution payload when it has the expected shape. */
     private getTileSizeDistribution(value: unknown): TileSizeDistribution | undefined {
         if (!value || typeof value !== 'object') {
             return undefined;
@@ -152,6 +165,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         return value as TileSizeDistribution;
     }
 
+    /** Formats fetch/enrichment errors for inclusion in the export bundle metadata. */
     private stringifyError(error: unknown): string {
         if (error instanceof Error) {
             return error.message;
@@ -159,6 +173,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         return String(error);
     }
 
+    /** Narrows visibility only to expose the inherited destroy hook for Angular. */
     override ngOnDestroy(): void {
         super.ngOnDestroy();
     }

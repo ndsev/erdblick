@@ -34,6 +34,7 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
     styles: [``],
     standalone: false
 })
+/** Loads one source-data tile on demand and renders it through the shared inspection tree. */
 export class SourceDataPanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
@@ -92,6 +93,7 @@ export class SourceDataPanelComponent {
         });
     }
 
+    /** Fetches and parses one source-data layer over the WebSocket source-data endpoint. */
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
         const requestBody = {
@@ -173,6 +175,7 @@ export class SourceDataPanelComponent {
         return loadedLayer;
     }
 
+    /** Normalizes the parser output so the tree always receives a list of visible root nodes. */
     private treeDataFromRoot(root: any): TreeTableNode[] {
         if (!root) {
             return [];
@@ -183,10 +186,12 @@ export class SourceDataPanelComponent {
         return this.hasTreeNodeContent(root) ? [root] : [];
     }
 
+    /** Filters parser artifacts that do not contribute visible data to the tree. */
     private hasTreeNodeContent(node: any): boolean {
         return !!node && (node.data !== undefined || (Array.isArray(node.children) && node.children.length > 0));
     }
 
+    /** Builds a user-facing empty-state message for a tile without source data. */
     private noSourceDataMessage(mapTileKey: string): string {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
         const layerName = this.mapService.layerNameForSourceDataLayerId(String(layerId), String(layerId).startsWith("Metadata"));
@@ -199,6 +204,7 @@ export class SourceDataPanelComponent {
      *
      * @param message Error message
      */
+    /** Replaces the tree with an error state and notifies the parent panel. */
     setError(message: string) {
         this.loading = false;
         this.treeData = [];
@@ -213,6 +219,7 @@ export class SourceDataPanelComponent {
      * @param schema Zserio schema string
      * @return string HTML
      */
+    /** Turns known NDS schema type names into links to the public schema documentation. */
     schemaTypeURLFormatter(colKey: string, rowData: any) {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";
@@ -233,6 +240,7 @@ export class SourceDataPanelComponent {
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
+    /** Formats both scalar and bit-range source-data addresses for the table cell. */
     addressFormatter(colKey: string, rowData: any): string {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";
@@ -247,6 +255,7 @@ export class SourceDataPanelComponent {
         return address;
     }
 
+    /** Expands and highlights the row that covers the requested source-data address, if present. */
     selectItemWithAddress(address?: bigint) {
         let addressInRange: (address: any) => boolean | undefined;
         if (address !== undefined) {
@@ -332,18 +341,22 @@ export class SourceDataPanelComponent {
         this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
     }
 
+    /** Forwards layout refreshes to the shared inspection tree. */
     refreshLayout() {
         this.inspectionTree?.refreshLayout();
     }
 
+    /** Measures the rendered content height for dock auto-sizing. */
     measurePreferredHeightEm(): number | undefined {
         return this.inspectionTree?.measurePreferredContentHeightEm();
     }
 
+    /** Freezes the shared tree while an outer drag gesture is running. */
     freezeTree() {
         this.inspectionTree?.freeze();
     }
 
+    /** Re-enables the shared tree after a temporary drag freeze. */
     unfreezeTree() {
         this.inspectionTree?.unfreeze();
     }

@@ -31,4 +31,4 @@ jobs:
           cmake --build build-test
 
       - name: Run Tests
-        run: ctest --test-dir build-test --verbose --no-tests=error
+        run: ctest --test-dir build-test/test --verbose --no-tests=error

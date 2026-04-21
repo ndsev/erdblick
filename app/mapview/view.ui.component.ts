@@ -65,6 +65,10 @@ import {filter} from "rxjs/operators";
     styles: [``],
     standalone: false
 })
+/**
+ * Overlay UI for one render view.
+ * It hosts movement controls, projection toggles, and the animated compass bound to the active renderer.
+ */
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
 
@@ -88,6 +92,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     private mapView$: Observable<IRenderView | undefined>;
     private compassTickByView = new WeakMap<IRenderView, () => void>();
 
+    /** Bridges the current renderer input signal into subscriptions used by the compass and projection toggle. */
     constructor(public appModeService: AppModeService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
@@ -96,6 +101,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         this.mapView$ = toObservable(this.mapView);
     }
 
+    /** Hooks the compass needle to the renderer tick loop and registers the projection-toggle shortcut. */
     ngAfterViewInit(): void {
         const needle = this.needleRef.nativeElement;
         this.mapViewSubscription.add(this.mapView$.pipe(
@@ -135,6 +141,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         this.keyboardService.registerShortcut('t', this.toggleSceneMode.bind(this), true);
     }
 
+    /** Unsubscribes the compass tick from the current renderer when the UI overlay is destroyed. */
     ngOnDestroy(): void {
         const mapView = this.mapView();
         if (mapView) {
@@ -147,6 +154,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         this.mapViewSubscription.unsubscribe();
     }
 
+    /** Toggles the selected renderer between 2D and 3D mode through persisted app state. */
     toggleSceneMode() {
         const mapView = this.mapView();
         if (!mapView) {

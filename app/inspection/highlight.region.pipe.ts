@@ -5,9 +5,11 @@ import { DomSanitizer } from '@angular/platform-browser';
     name: 'highlightRegion',
     standalone: false,
 })
+/** Highlights a specific substring window while keeping the surrounding context compact. */
 export class HighlightRegion implements PipeTransform {
     constructor(private sanitizer: DomSanitizer) {}
 
+    /** Trims the preview around the hit so large source-data strings stay inspectable. */
     transform(value: string, start: number|undefined, size: number|undefined, epsilon: number): any {
         if (!value || !start || !size || start < 0 || size <= 0)
             return '';

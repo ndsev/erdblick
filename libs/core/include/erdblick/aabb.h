@@ -11,20 +11,29 @@
 namespace erdblick
 {
 
-/** Function which returns a priority penalty value for a tile */
+/** Type alias for viewport tile enumeration helpers. */
 using TileId = mapget::TileId;
+/** Scores a tile relative to the current camera; smaller values mean higher priority. */
 using TilePriorityFn = std::function<double(TileId const&)>;
 using Wgs84Point = mapget::Point;
 
 /**
- * Wgs84AABB Wgs84 axis-aligned bounding box.
+ * Axis-aligned WGS84 bounding box used for viewport culling and tile selection.
+ *
+ * The box stores south-west corner plus angular size and can represent regions
+ * that cross the anti-meridian. Most methods intentionally operate in geographic
+ * coordinates instead of projected meters because the primary consumer is tile
+ * selection rather than metric measurements.
  */
 class Wgs84AABB
 {
 public:
     using vec2_t = glm::dvec2;
 
+    /** Construct an empty box. */
     Wgs84AABB() = default;
+
+    /** Copy an existing bounding box. */
     Wgs84AABB(Wgs84AABB const& other) = default;
 
     /** Construct an AABB from a position and a size. */
@@ -73,7 +82,7 @@ public:
      */
     std::pair<Wgs84AABB, Wgs84AABB> splitOverAntiMeridian() const;
 
-    /** Calculate the mercator-projection vertical stretch factor. */
+    /** Calculate the average Mercator stretch factor over the latitude span of this box. */
     double avgMercatorStretch();
 
     /** Obtain the number of tiles for the given level contained in this AABB.

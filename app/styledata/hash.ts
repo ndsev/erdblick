@@ -1,4 +1,4 @@
-// shortId4.ts — zero-dependency, secure-context free (TypeScript)
+// Zero-dependency hashing helpers used for stable short ids and style lifecycle tracking.
 
 /** Crockford Base32 alphabet (no I, L, O, U). */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";

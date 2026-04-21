@@ -77,6 +77,7 @@ import {Color} from "../integrations/geo";
     styles: [``],
     standalone: false
 })
+/** Dialog for choosing which source-data layer should be inspected for a clicked tile. */
 export class SourceDataLayerSelectionDialogComponent {
     selectedTileId: SourceDataDropdownOption | undefined;
     selectedMapId: SourceDataDropdownOption | undefined;
@@ -108,6 +109,7 @@ export class SourceDataLayerSelectionDialogComponent {
         });
     }
 
+    /** Initializes the dialog state from either a menu-provided tile list or an explicit tile/map pair. */
     load(customTileId: string = "", customMapId: string = "") {
         this.showCustomTileIdInput = customTileId.length > 0;
         this.customTileId = customTileId;
@@ -145,6 +147,7 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
+    /** Recomputes available maps and layers when the user enters a custom tile id. */
     onCustomTileIdChange(tileIdString: string) {
         if (!tileIdString) {
             this.resetSelectionState();
@@ -158,6 +161,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.setCurrentTileId({id: tileId, name: tileIdString});
     }
 
+    /** Applies the current tile selection and cascades the dependent map/layer selections. */
     private setCurrentTileId(tileId: SourceDataDropdownOption) {
         this.selectedTileId = tileId;
         this.onTileIdChange(tileId);
@@ -177,6 +181,7 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
+    /** Updates the available maps and outlines the selected tile in the viewport. */
     onTileIdChange(tileId: SourceDataDropdownOption) {
         this.selectedMapId = undefined;
         this.selectedSourceDataLayer = undefined;
@@ -194,6 +199,7 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
+    /** Refreshes the available source-data layers for the currently selected map. */
     onMapIdChange(mapId: SourceDataDropdownOption) {
         this.selectedSourceDataLayer = undefined;
         const sourceDataLayers = this.sourceDataLayersPerMapId.get(mapId.id as string);
@@ -202,8 +208,10 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
+    /** Placeholder hook for future layer-specific side effects. */
     onLayerIdChange(_: SourceDataDropdownOption) {}
 
+    /** Persists the current choice and asks the right-click menu service to open the source-data panel. */
     requestSourceData() {
         if (this.selectedTileId === undefined ||
             this.selectedMapId === undefined ||
@@ -218,6 +226,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.close();
     }
 
+    /** Switches between menu-driven tile choice and free-form tile-id entry. */
     toggleCustomTileIdInput() {
         this.showCustomTileIdInput = !this.showCustomTileIdInput;
         if (!this.showCustomTileIdInput) {
@@ -228,6 +237,7 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
+    /** Resets the dialog to its loading state when PrimeNG hides it. */
     reset() {
         this.loading = true;
         this.resetSelectionState();
@@ -235,10 +245,12 @@ export class SourceDataLayerSelectionDialogComponent {
         this.customTileId = "";
     }
 
+    /** Closes the dialog through the shared right-click menu service. */
     close() {
         this.menuService.tileSourceDataDialogVisible = false;
     }
 
+    /** Clears all currently derived dropdown state. */
     private resetSelectionState() {
         this.errorString = "";
         this.selectedTileId = undefined;
@@ -250,6 +262,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.sourceDataLayersPerMapId.clear();
     }
 
+    /** Restores the last used map selection when it is still compatible with the chosen tile. */
     private restorePreferredMapSelection() {
         if (this.customMapId) {
             const mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
@@ -268,6 +281,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.selectedMapId = this.mapIds.find(entry => entry.id == savedMapId);
     }
 
+    /** Restores the last inspected source-data layer when it is available for the current map. */
     private restorePreferredLayerSelection() {
         const savedLayerId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.layerId;
         if (savedLayerId) {

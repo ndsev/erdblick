@@ -104,6 +104,10 @@ const completionsList = [
     styles: [],
     standalone: false
 })
+/**
+ * Wraps CodeMirror so dialogs can attach a shared editor session by id instead of each
+ * dialog owning its own editor implementation details.
+ */
 export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     @Input({required: true}) sessionId!: string;
@@ -117,9 +121,11 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
     private viewReady = false;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
 
+    /** Captures the shared editor-session service and DOM renderer used by the wrapper. */
     constructor(private readonly editorService: EditorService,
                 private readonly renderer: Renderer2) {}
 
+    /** Creates the initial editor view and starts listening for session replacement events. */
     ngAfterViewInit(): void {
         this.viewReady = true;
         this.sessionChangedSubscription = this.editorService.sessionChanged$.subscribe(changedSessionId => {
@@ -130,6 +136,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.initializeEditor();
     }
 
+    /** Rebuilds the editor when the bound session id changes. */
     ngOnChanges(changes: SimpleChanges): void {
         if (!this.viewReady) {
             return;
@@ -139,6 +146,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
     }
 
+    /** Disposes editor-owned subscriptions, observers, and CodeMirror state. */
     ngOnDestroy(): void {
         this.modeObserver?.disconnect();
         this.sessionSourceSubscription?.unsubscribe();
@@ -146,6 +154,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.editorView?.destroy();
     }
 
+    /** Recreates the CodeMirror instance for the currently selected editor session. */
     private initializeEditor(): void {
         const session = this.editorService.getSession(this.sessionId);
         this.sessionSourceSubscription?.unsubscribe();
@@ -193,6 +202,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.modeObserver.observe(root, {attributes: true, attributeFilter: ['class']});
     }
 
+    /** Removes any previously mounted CodeMirror DOM before a new view is created. */
     private clearEditorHost(): void {
         const childElements = this.editorRef.nativeElement.childNodes;
         for (const child of childElements) {
@@ -200,6 +210,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
     }
 
+    /** Builds the CodeMirror state for the active editor session, including theme wiring. */
     private createEditorState(): EditorState {
         const session = this.editorService.getSession(this.sessionId);
         if (!session) {
@@ -227,6 +238,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         });
     }
 
+    /** Selects language-specific CodeMirror extensions for YAML or JSON editing. */
     private languageExtensions(language: 'yaml' | 'json'): Extension[] {
         if (language === 'json') {
             return [
@@ -243,8 +255,10 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         ];
     }
 
+    /** Validates JSON source and surfaces parser errors inside the editor gutter. */
     private jsonLinter: Extension = linter(jsonParseLinter());
 
+    /** Validates YAML source and maps parser errors back into editor positions. */
     private yamlLinter: Extension = linter((view) => {
         return new Promise((resolve) => {
             const results: Diagnostic[] = [];
@@ -266,6 +280,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         });
     });
 
+    /** Prevents middle-click paste behavior from interfering with the editor. */
     private stopMouseWheelClipboard: Extension = EditorView.domEventHandlers({
         mousedown: (event) => {
             if (event.button === 1) {
@@ -276,6 +291,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
     });
 
+    /** Provides lightweight style-YAML completions for the shared editor. */
     private styleCompletions: CompletionSource = (context: CompletionContext) => {
         const word = context.matchBefore(/\w*/);
         if (!word || (word.from === word.to && !context.explicit)) {
@@ -287,6 +303,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         };
     };
 
+    /** Returns the standard save keybinding used by editor-hosting dialogs. */
     private saveCmd() {
         return {
             key: 'Mod-s',

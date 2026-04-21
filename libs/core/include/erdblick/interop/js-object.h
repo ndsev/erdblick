@@ -20,6 +20,7 @@ using NativeJsValue = nlohmann::json;
 #endif
 
 template<typename T>
+/** Helper for exhaustive `if constexpr` / `static_assert` branches over variants. */
 struct always_false : std::false_type {};
 
 /**
@@ -33,6 +34,7 @@ struct always_false : std::false_type {};
  */
 struct JsValue
 {
+    /** Unwrap nested `JsValue` arguments before forwarding them to JS/native backends. */
     template <class T>
     static auto UnpackNativeValue(T&& v)
     {
@@ -197,6 +199,7 @@ struct JsValue
      */
     [[nodiscard]] Type type() const;
 
+    /** Convert the wrapped native value into a concrete C++ type. */
     template <typename T>
     T as() const {
     #ifdef EMSCRIPTEN
@@ -209,7 +212,9 @@ struct JsValue
     /**
      * Dereference operator to access the underlying value.
      */
+    /** Access the wrapped native object for low-level interop code. */
     inline NativeJsValue& operator*() {return value_;};
+    /** Access the wrapped native object for low-level interop code. */
     inline const NativeJsValue& operator*() const {return value_;};
 
     /** Turn a [key, value, keyN, valueN, ...] list into KeyValuePairs. */

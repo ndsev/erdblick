@@ -33,6 +33,18 @@ std::shared_ptr<mapget::LayerInfo> relationTestLayerInfo()
                     {"partId": "areaId", "datatype": "STR"},
                     {"partId": "pointId", "datatype": "U32"}
                 ]]
+            },
+            {
+                "name": "SecondaryPointOfInterest",
+                "uniqueIdCompositions": [
+                    [
+                        {"partId": "areaId", "datatype": "STR"},
+                        {"partId": "poiRef", "datatype": "U32"}
+                    ],
+                    [
+                        {"partId": "poiRef", "datatype": "U32"}
+                    ]
+                ]
             }
         ]
     })json"));

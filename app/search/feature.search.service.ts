@@ -12,11 +12,17 @@ export const MAX_VISIBLE_TILES_PER_LEVEL = 69;
 export const MAX_ZOOM_LEVEL = 15;
 export const SAFE_ZOOM_LEVEL = 10;
 
+/**
+ * Synthetic primitive id used to correlate clustered markers back to search results.
+ */
 export interface SearchResultPrimitiveId {
     type: string,
     index: number
 }
 
+/**
+ * Flat marker datum exposed to the deck overlay that visualizes search results.
+ */
 export interface SearchResultPoint {
     coordinates: [number, number];
     mapId: string;
@@ -28,6 +34,9 @@ export interface SearchResultPoint {
 const TASK_SEARCH = 'SearchWorkerTask' as const;
 const TASK_COMPLETION = 'CompletionWorkerTask' as const;
 
+/**
+ * Expands one quadtree tile id into its four children using the mapget tile-id bit layout.
+ */
 function generateChildrenIds(parentTileId: bigint) {
     if (parentTileId == -1n) {
         return [0n, 4294967296n];
@@ -47,6 +56,9 @@ function generateChildrenIds(parentTileId: bigint) {
     ]
 }
 
+/**
+ * Internal quadtree node used to cluster search-result markers by visible tile level.
+ */
 class FeatureSearchQuadTreeNode {
     tileId: bigint;
     parentId: bigint | null;
@@ -57,6 +69,9 @@ class FeatureSearchQuadTreeNode {
     rectangle: Rectangle;
     center: Cartesian3 | null;
 
+    /**
+     * Creates a quadtree node and derives its WGS84 rectangle from the mapget tile id.
+     */
     constructor(tileId: bigint,
                 parentTileId: bigint | null,
                 level: number,
@@ -75,22 +90,34 @@ class FeatureSearchQuadTreeNode {
         this.center = null;
     }
 
+    /**
+     * Returns true if the given cartographic position lies inside this node's bounds.
+     */
     containsPoint(point: Cartographic) {
        return Rectangle.contains(this.rectangle, point);
     }
 
+    /**
+     * Returns true if any of the provided markers falls inside this node.
+     */
     contains(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
         return markers.some(marker =>
             this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
+    /**
+     * Returns only those markers that belong to this node's rectangle.
+     */
     filterPointsForNode(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
         return markers.filter(marker =>
             this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
+    /**
+     * Lazily creates only those child nodes that are relevant for the provided markers or center point.
+     */
     addChildren(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> | Cartographic) {
         const existingIds = this.children.map(child => child.tileId);
         const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
@@ -108,6 +135,9 @@ class FeatureSearchQuadTreeNode {
         }
     }
 
+    /**
+     * Accumulates the number of results that this node contributes for one map/layer pair.
+     */
     incrementCountForMapLayer(mapLayer: string, increment: number) {
         if (this.countPerLayer.has(mapLayer)) {
             const currentCount = this.countPerLayer.get(mapLayer)!;
@@ -118,14 +148,23 @@ class FeatureSearchQuadTreeNode {
     }
 }
 
+/**
+ * Lightweight quadtree used to aggregate search matches into zoom-dependent clusters.
+ */
 class FeatureSearchQuadTree {
     root: FeatureSearchQuadTreeNode;
     private maxDepth: number = MAX_ZOOM_LEVEL;
 
+    /**
+     * Starts with a synthetic root that represents the full globe.
+     */
     constructor() {
         this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, new Map());
     }
 
+    /**
+     * Uses the average cartesian position as a stable center for clustered markers.
+     */
     private calculateAveragePosition(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>): Cartesian3 {
         const sum = markers.reduce(
             (acc, marker) => {
@@ -140,6 +179,9 @@ class FeatureSearchQuadTree {
         return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
     }
 
+    /**
+     * Inserts all matches from one tile into the quadtree and propagates aggregate counts upward.
+     */
     insert(tileId: bigint, mapLayerId: string, results: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
         const markersCenter = this.calculateAveragePosition(results);
         const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
@@ -202,6 +244,9 @@ class FeatureSearchQuadTree {
         }
     }
 
+    /**
+     * Iterates over all nodes that exist at the requested clustering depth.
+     */
     *getNodesAtLevel(level: number): IterableIterator<FeatureSearchQuadTreeNode> {
         if (level < 0 || !this.root.children.length) {
             return;
@@ -229,13 +274,25 @@ class FeatureSearchQuadTree {
     }
 }
 
+/**
+ * Search-specific job group that also tracks tiles whose staged data is still loading.
+ *
+ * Search progress intentionally stays incomplete while these tiles are pending so the UI can show
+ * "Awaited tiles to load" instead of finishing too early.
+ */
 export class SearchState extends JobGroup {
     private pendingTileKeys: Set<string> = new Set<string>();
 
+    /**
+     * Creates a search group and optionally starts it in paused mode.
+     */
     constructor(query: string, id: string, public paused = false) {
         super('search', query, id);
     }
 
+    /**
+     * Adds a tile to the outstanding-data set that blocks search completion.
+     */
     markTilePending(tileKey: string): void {
         if (!tileKey) {
             return;
@@ -243,6 +300,9 @@ export class SearchState extends JobGroup {
         this.pendingTileKeys.add(tileKey);
     }
 
+    /**
+     * Removes a tile from the outstanding-data set once it can be searched or is no longer expected.
+     */
     markTileReady(tileKey: string): void {
         if (!tileKey) {
             return;
@@ -250,25 +310,42 @@ export class SearchState extends JobGroup {
         this.pendingTileKeys.delete(tileKey);
     }
 
+    /**
+     * Returns how many tiles are still awaited before the search can truly finish.
+     */
     getPendingTileCount(): number {
         return this.pendingTileKeys.size;
     }
 
+    /**
+     * Cancels the search and clears any pending-tile bookkeeping at the same time.
+     */
     override stop(): void {
         this.pendingTileKeys.clear();
         super.stop();
     }
 
+    /**
+     * Treats the search as complete only after worker tasks finish and no awaited tile remains.
+     */
     override isComplete(): boolean {
         return super.isComplete() && !this.pendingTileKeys.size;
     }
 
+    /**
+     * Extends the visible task count with still-pending tiles so the progress UI stays honest.
+     */
     override getTaskCount(): number {
         return super.getTaskCount() + this.pendingTileKeys.size;
     }
 }
 
 @Injectable({providedIn: 'root'})
+/**
+ * Coordinates feature search, query completion, result clustering, and search-marker overlays.
+ *
+ * The service keeps worker scheduling, staged tile readiness, and UI-friendly result caches in sync.
+ */
 export class FeatureSearchService {
     private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
     private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
@@ -319,18 +396,30 @@ export class FeatureSearchService {
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
+    /**
+     * Initializes marker styling and listens for staged tile updates that can unblock pending searches.
+     */
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
         this.updatePointColor();
-        this.mapService.statsDialogNeedsUpdate.subscribe(() => {
+        this.mapService.tileDataChanged.subscribe(change => {
+            if (!this.pendingSearchTilesByKey.has(change.tileKey)) {
+                return;
+            }
             this.enqueueReadyPendingSearchTiles();
         });
     }
 
+    /**
+     * Returns the icon atlas currently used for clustered search markers.
+     */
     getSearchClusterIconAtlasUrl(): string {
         return this.clusterIconAtlasUrl;
     }
 
+    /**
+     * Returns the static mapping JSON that pairs atlas sprites with cluster-marker states.
+     */
     getSearchClusterIconMappingUrl(): string {
         return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
     }
@@ -350,6 +439,9 @@ export class FeatureSearchService {
         return this.searchResultPointsVersionValue;
     }
 
+    /**
+     * Returns the cached flat search-marker list, rebuilding it only when the underlying map changes.
+     */
     getSearchResultPoints(): SearchResultPoint[] {
         if (this.searchResultPointsCacheDirty) {
             this.searchResultPointsCache = Array.from(this.searchResultPointsByFeatureKey.values());
@@ -358,6 +450,9 @@ export class FeatureSearchService {
         return this.searchResultPointsCache;
     }
 
+    /**
+     * Lazily initializes the worker pool the first time search or completion is used.
+     */
     public initializeWorkers(): Promise<void> {
         if (!this.workersReady) {
             this.workersReady = this.initWorkers();
@@ -365,6 +460,9 @@ export class FeatureSearchService {
         return this.workersReady;
     }
 
+    /**
+     * Boots the first module worker, then clones its script into additional workers via a blob URL.
+     */
     private async initWorkers(): Promise<void> {
         const maxWorkers = navigator.hardwareConcurrency || 4;
         if (maxWorkers <= 0) {
@@ -382,6 +480,9 @@ export class FeatureSearchService {
         }
     }
 
+    /**
+     * Waits for the worker handshake that reveals the resolved module URL.
+     */
     private waitForWorkerReady(worker: Worker): Promise<string> {
         return new Promise((resolve) => {
             const handler = (event: MessageEvent<any>) => {
@@ -397,6 +498,9 @@ export class FeatureSearchService {
         });
     }
 
+    /**
+     * Fetches the compiled worker module once so subsequent workers can reuse a cached blob URL.
+     */
     private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
         const response = await fetch(workerModuleUrl, {cache: 'force-cache'});
         if (!response.ok) {
@@ -406,6 +510,9 @@ export class FeatureSearchService {
         return URL.createObjectURL(blob);
     }
 
+    /**
+     * Installs the common message handler that feeds worker results back into the active job groups.
+     */
     private registerWorker(worker: Worker, index: number) {
         this.workers[index] = worker;
         this.workerBusy[index] = false;
@@ -431,6 +538,11 @@ export class FeatureSearchService {
         };
     }
 
+    /**
+     * Starts a fresh feature search over the currently prioritized tiles.
+     *
+     * Tiles whose staged data is still incomplete remain in a pending set until tileDataChanged says they are ready.
+     */
     run(query: string) {
         // Fresh search.
         this.clear();
@@ -443,8 +555,10 @@ export class FeatureSearchService {
 
         for (const tile of this.orderedTilesForSearchProcessing()) {
             if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
-                this.currentSearch.markTilePending(tile.mapTileKey);
+                if (this.isTileStillExpected(tile)) {
+                    this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
+                    this.currentSearch.markTilePending(tile.mapTileKey);
+                }
                 continue;
             }
             this.enqueueSearchTask(tile, this.currentSearch);
@@ -466,6 +580,9 @@ export class FeatureSearchService {
     // Send a task to each worker to start processing.
     // Further tasks will be picked up in the worker's
     // onMessage callback.
+    /**
+     * Fills idle workers with the next available search or completion task.
+     */
     private runWorkers() {
         this.workers.forEach((worker, index) => {
             if (this.workerBusy[index]) {
@@ -475,6 +592,9 @@ export class FeatureSearchService {
         });
     }
 
+    /**
+     * Pauses dispatch of further search tasks while preserving current partial results.
+     */
     pause() {
         if (!this.currentSearch) {
             return;
@@ -485,6 +605,9 @@ export class FeatureSearchService {
         this.progress.next(this.currentSearch);
     }
 
+    /**
+     * Resumes a paused search and hands queued work back to idle workers.
+     */
     resume() {
         if (!this.currentSearch) {
             return;
@@ -494,6 +617,9 @@ export class FeatureSearchService {
         this.runWorkers();
     }
 
+    /**
+     * Stops the active search without clearing the partial result state.
+     */
     stop() {
         if (!this.currentSearch) {
             return;
@@ -506,6 +632,9 @@ export class FeatureSearchService {
         this.progress.next(this.currentSearch);
     }
 
+    /**
+     * Resets all search, completion, diagnostics, and overlay state to the idle baseline.
+     */
     clear() {
         this.stop();
         this.resultTree = new FeatureSearchQuadTree();
@@ -533,15 +662,24 @@ export class FeatureSearchService {
     }
 
     /// Generate a new task id
+    /**
+     * Generates a unique task id for worker bookkeeping and callback routing.
+     */
     private generateTaskId(): string {
         return `task_${Date.now()}_${++this.taskIdCounter}`;
     }
 
     /// Generate a new task-group id
+    /**
+     * Generates a unique group id so stale worker responses can be ignored safely.
+     */
     private generateTaskGroupId(): string {
         return `group_${Date.now()}_${++this.taskGroupIdCounter}`;
     }
 
+    /**
+     * Aggregates all raw diagnostics blobs for the completed search that is still current in the UI.
+     */
     private getDiagnosticsForCompletedSearch(searchGroupId: string) {
         const completedSearchGroup = this.jobGroupManager.getGroup(searchGroupId);
         if (!completedSearchGroup || this.currentSearch?.id !== searchGroupId) {
@@ -552,6 +690,9 @@ export class FeatureSearchService {
         this.diagnosticsMessages.next(messages.slice(0, this.diagnosticsMessageLimit));
     }
 
+    /**
+     * Starts diagnostics aggregation only when the completed group still matches the visible search.
+     */
     private maybeStartDiagnosticsForCompletedSearch(group: JobGroup): void {
         if (group.type !== 'search' || !group.isComplete()) {
             return;
@@ -563,12 +704,18 @@ export class FeatureSearchService {
         this.getDiagnosticsForCompletedSearch(group.id);
     }
 
+    /**
+     * Cancels any in-flight completion job before a newer query supersedes it.
+     */
     public clearCurrentCompletion() {
         // Remove all pending completion tasks
         this.currentCompletion?.stop();
         this.currentCompletion = null;
     }
 
+    /**
+     * Starts a completion fan-out across the currently prioritized tiles.
+     */
     public completeQuery(query: string, point: number | undefined) {
         this.clearCurrentCompletion();
 
@@ -621,6 +768,9 @@ export class FeatureSearchService {
         this.runWorkers();
     }
 
+    /**
+     * Merges completion candidates from one tile, deduplicating by final query text.
+     */
     private addCompletionCandidates(candidates: CompletionCandidatesForTile) {
         if (candidates.groupId !== this.currentCompletion?.id)
             return;
@@ -633,6 +783,9 @@ export class FeatureSearchService {
         this.completionCandidates.next(this.completionCandidateList);
     }
 
+    /**
+     * Integrates one tile's matches into the visible result tree, overlays, traces, and diagnostics.
+     */
     private addSearchResult(tileResult: SearchResultForTile) {
         if (!this.currentSearch) {
             return;
@@ -719,6 +872,9 @@ export class FeatureSearchService {
         this.progress.next(this.currentSearch);
     }
 
+    /**
+     * Chooses the next task for a worker, preferring search over completion while a search is active.
+     */
     private scheduleNextTask(workerIndex: number) {
         let nextTask = undefined;
         if (this.currentSearch && !this.currentSearch.isComplete() && !this.currentSearch.paused) {
@@ -736,6 +892,9 @@ export class FeatureSearchService {
         this.workers[workerIndex].postMessage(nextTask);
     }
 
+    /**
+     * Rebuilds the cluster marker atlas for the current highlight color and notifies listeners.
+     */
     updatePointColor() {
         const normalizedColor = this.normalizeHexColor(this.pointColor);
         this.pointColor = normalizedColor;
@@ -750,6 +909,9 @@ export class FeatureSearchService {
             });
     }
 
+    /**
+     * Returns the currently focused view's prioritized tile list, which also defines search order.
+     */
     private orderedTilesForSearchProcessing(): FeatureTile[] {
         const viewCount = this.stateService.numViewsState.getValue();
         if (viewCount <= 0) {
@@ -760,6 +922,16 @@ export class FeatureSearchService {
         return this.mapService.getPrioritisedTiles(viewIndex);
     }
 
+    /**
+     * Returns whether the viewport still expects this tile, even if its data has not finished loading yet.
+     */
+    private isTileStillExpected(tile: FeatureTile): boolean {
+        return this.mapService.getRequestedMaxStageForTile(tile) !== null;
+    }
+
+    /**
+     * Builds a search-worker payload from the currently loaded stage blobs for one tile.
+     */
     private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
         const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
         if (!tileBlobs.length) {
@@ -783,6 +955,9 @@ export class FeatureSearchService {
         };
     }
 
+    /**
+     * Adds a search task to the job manager if the tile currently exposes any searchable blobs.
+     */
     private enqueueSearchTask(tile: FeatureTile, search: SearchState): boolean {
         const task = this.createSearchTask(tile, search);
         if (!task) {
@@ -792,6 +967,9 @@ export class FeatureSearchService {
         return true;
     }
 
+    /**
+     * Revisits tiles that were waiting for staged data and enqueues them as soon as they become searchable.
+     */
     private enqueueReadyPendingSearchTiles() {
         const activeSearch = this.currentSearch;
         if (!activeSearch || !this.pendingSearchTilesByKey.size) {
@@ -810,6 +988,11 @@ export class FeatureSearchService {
                 continue;
             }
             if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                if (!this.isTileStillExpected(tile)) {
+                    this.pendingSearchTilesByKey.delete(tileKey);
+                    activeSearch.markTileReady(tileKey);
+                    stateChanged = true;
+                }
                 continue;
             }
             this.pendingSearchTilesByKey.delete(tileKey);
@@ -829,6 +1012,9 @@ export class FeatureSearchService {
         }
     }
 
+    /**
+     * Canonicalizes 3-digit and 6-digit hex color inputs to a lower-case #rrggbb string.
+     */
     private normalizeHexColor(color: string): string {
         const hex = (color || "").trim();
         const validHex = /^#([0-9a-f]{6})$/i.exec(hex);
@@ -843,6 +1029,9 @@ export class FeatureSearchService {
         return "#ea4336";
     }
 
+    /**
+     * Splits a normalized hex color into RGB channel values.
+     */
     private parseHexRgb(color: string): [number, number, number] {
         return [
             parseInt(color.slice(1, 3), 16),
@@ -851,6 +1040,9 @@ export class FeatureSearchService {
         ];
     }
 
+    /**
+     * Extracts map and layer ids from a tile key, falling back to a plain split if parsing fails.
+     */
     private parseMapLayerIds(mapTileKey: string): {mapId: string; layerId: string} {
         try {
             const [mapId, layerId] = coreLib.parseMapTileKey(mapTileKey);
@@ -861,6 +1053,9 @@ export class FeatureSearchService {
         }
     }
 
+    /**
+     * Adds a unique search marker if the match exposes a valid cartographic position.
+     */
     private tryAddSearchResultPoint(
         mapId: string,
         layerId: string,
@@ -891,6 +1086,9 @@ export class FeatureSearchService {
         return true;
     }
 
+    /**
+     * Clears the marker caches and bumps the version only when something actually changed.
+     */
     private clearSearchResultPoints(): void {
         if (!this.searchResultPointsByFeatureKey.size
             && !this.searchResultPointsCache.length
@@ -903,6 +1101,9 @@ export class FeatureSearchService {
         this.searchResultPointsVersionValue += 1;
     }
 
+    /**
+     * Lazily recolors the cluster icon atlas so marker styling tracks the configured highlight color.
+     */
     private async ensureTintedClusterAtlas(color: string): Promise<string> {
         const cached = this.tintedAtlasByColor.get(color);
         if (cached) {
@@ -941,6 +1142,9 @@ export class FeatureSearchService {
         return tintedAtlasUrl;
     }
 
+    /**
+     * Loads the shared base atlas once and reuses the promise across recoloring passes.
+     */
     private loadBaseClusterAtlasImage(): Promise<HTMLImageElement> {
         if (this.baseAtlasImagePromise) {
             return this.baseAtlasImagePromise;
@@ -955,6 +1159,9 @@ export class FeatureSearchService {
         return this.baseAtlasImagePromise;
     }
 
+    /**
+     * Formats elapsed time for the diagnostics panel without dragging in a heavier date library.
+     */
     private formatTime(milliseconds: number): string {
         const mseconds = Math.floor(milliseconds % 1000);
         const seconds = Math.floor((milliseconds / 1000) % 60);

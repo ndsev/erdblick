@@ -13,6 +13,7 @@
 #include <sstream>
 #include <streambuf>
 
+/** Bind search/completion evaluation to a single parsed feature tile. */
 erdblick::FeatureLayerSearch::FeatureLayerSearch(TileFeatureLayer& tfl) : tfl_(tfl)
 {}
 

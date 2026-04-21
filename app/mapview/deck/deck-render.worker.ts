@@ -31,14 +31,17 @@ type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualizati
     renderResult(): DeckVisualizationBufferResult;
 };
 
+/** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
 function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
     return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
 }
 
+/** Returns the wasm fidelity enum used by the deck render worker. */
 function ruleFidelityEnum(): RuleFidelityEnum {
     return coreLib.RuleFidelity as RuleFidelityEnum;
 }
 
+/** Cheap blob fingerprint used to cache parsers without hashing megabytes of tile metadata. */
 function blobSignature(blob: Uint8Array): string {
     if (!blob.length) {
         return "0";
@@ -47,6 +50,7 @@ function blobSignature(blob: Uint8Array): string {
     return `${blob.length}:${blob[0]}:${mid}:${blob[blob.length - 1]}`;
 }
 
+/** Builds the parser-cache key from the datasource node and parser-context blobs. */
 function parserCacheKey(task: DeckTileRenderTask): string {
     return [
         task.nodeId,
@@ -56,6 +60,7 @@ function parserCacheKey(task: DeckTileRenderTask): string {
     ].join("|");
 }
 
+/** Reuses parser instances that share identical field dictionaries and datasource metadata. */
 function getOrCreateParser(task: DeckTileRenderTask): TileLayerParser {
     const key = parserCacheKey(task);
     const cached = parserCache.get(key);
@@ -69,6 +74,7 @@ function getOrCreateParser(task: DeckTileRenderTask): TileLayerParser {
     return parser;
 }
 
+/** Reuses parsed `FeatureLayerStyle` objects keyed by the raw style source text. */
 function getOrCreateStyle(styleSource: string): FeatureLayerStyle {
     const cached = styleCache.get(styleSource);
     if (cached) {
@@ -83,6 +89,7 @@ function getOrCreateStyle(styleSource: string): FeatureLayerStyle {
     return parsed;
 }
 
+/** Maps the serialized highlight-mode value back to the wasm enum expected by the renderer. */
 function resolveHighlightMode(modeValue: number): HighlightMode {
     if (modeValue === coreLib.HighlightMode.HOVER_HIGHLIGHT.value) {
         return coreLib.HighlightMode.HOVER_HIGHLIGHT;
@@ -93,6 +100,7 @@ function resolveHighlightMode(modeValue: number): HighlightMode {
     return coreLib.HighlightMode.NO_HIGHLIGHT;
 }
 
+/** Maps the serialized fidelity value back to the wasm enum expected by the renderer. */
 function resolveFidelity(fidelityValue: number): RuleFidelity {
     const ruleFidelity = ruleFidelityEnum();
     if (fidelityValue === ruleFidelity.HIGH.value) {
@@ -104,6 +112,7 @@ function resolveFidelity(fidelityValue: number): RuleFidelity {
     return ruleFidelity.ANY;
 }
 
+/** Adapts the main thread's merge-count snapshot into the callback shape expected by wasm rendering. */
 function createMergeCountProvider(snapshot: Record<string, number>): {
     count: (_geoPos: unknown, hashPos: string, _level: number, mapViewLayerStyleRuleId: string) => number
 } {
@@ -116,20 +125,24 @@ function createMergeCountProvider(snapshot: Record<string, number>): {
     };
 }
 
+/** Attaches every higher-stage tile layer as an overlay to the base layer before rendering. */
 function attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLayer[]): void {
     for (const overlay of overlays) {
         baseLayer.attachOverlay(overlay);
     }
 }
 
+/** Collects transferable buffers for one packed point bucket. */
 function transferPointBucket(bucket: DeckGeometryBucketBuffers["pointWorld"]): ArrayBuffer[] {
     return [bucket.positions.buffer, bucket.colors.buffer, bucket.radii.buffer, bucket.featureAddresses.buffer];
 }
 
+/** Collects transferable buffers for one packed surface bucket. */
 function transferSurfaceBucket(bucket: DeckGeometryBucketBuffers["surface"]): ArrayBuffer[] {
     return [bucket.positions.buffer, bucket.startIndices.buffer, bucket.colors.buffer, bucket.featureAddresses.buffer];
 }
 
+/** Collects transferable buffers for one packed path or arrow bucket. */
 function transferPathBucket(bucket: DeckGeometryBucketBuffers["pathWorld"]): ArrayBuffer[] {
     return [
         bucket.positions.buffer,
@@ -141,6 +154,7 @@ function transferPathBucket(bucket: DeckGeometryBucketBuffers["pathWorld"]): Arr
     ];
 }
 
+/** Flattens every transferable array buffer from one geometry result. */
 function transferGeometryBuffers(buffers: DeckGeometryBucketBuffers): ArrayBuffer[] {
     return [
         ...transferPointBucket(buffers.pointWorld),
@@ -153,6 +167,7 @@ function transferGeometryBuffers(buffers: DeckGeometryBucketBuffers): ArrayBuffe
     ];
 }
 
+/** Flattens every transferable array buffer from the full worker render result, including low-fi bundles. */
 function transferVisualizationResult(result: DeckVisualizationBufferResult): ArrayBuffer[] {
     const lowFiTransfers: ArrayBuffer[] = [];
     for (const bundle of result.lowFiBundles) {
@@ -165,10 +180,12 @@ function transferVisualizationResult(result: DeckVisualizationBufferResult): Arr
     ];
 }
 
+/** Reads the binary render result from the wasm visualization wrapper. */
 function readRenderResult(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
     return (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
 }
 
+/** Executes one full staged tile render inside the worker and returns deck-ready buffers. */
 function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     const totalStart = performance.now();
     let baseLayer: TileFeatureLayer | null = null;
@@ -247,6 +264,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     }
 }
 
+/** Creates empty geometry buffers used in the worker error path. */
 function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
     return {
         pointWorld: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureAddresses: new Uint32Array()},
@@ -285,6 +303,7 @@ function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
     };
 }
 
+/** Creates the zero-geometry result payload shared by worker failures. */
 function emptyResult(): Omit<DeckTileRenderResult, "type" | "taskId" | "tileKey" | "error"> {
     return {
         ...emptyGeometryBuffers(),
@@ -295,6 +314,7 @@ function emptyResult(): Omit<DeckTileRenderResult, "type" | "taskId" | "tileKey"
     };
 }
 
+/** Normalizes unknown worker exceptions to a readable error string for the main thread. */
 function toErrorMessage(error: unknown): string {
     if (error instanceof Error) {
         return error.message || error.toString();
@@ -302,6 +322,7 @@ function toErrorMessage(error: unknown): string {
     return String(error);
 }
 
+/** Worker entry point: initialize on handshake, otherwise render one tile task and transfer its buffers. */
 addEventListener("message", async ({data}) => {
     const message = data as DeckWorkerInboundMessage;
 

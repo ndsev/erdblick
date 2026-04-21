@@ -21,6 +21,7 @@ interface StyleConfigEntry {
     url: string
 }
 
+/** Original server-provided builtin style source kept for resets and comparisons. */
 interface BuiltinStyleBaseline {
     id: string,
     source: string
@@ -73,8 +74,10 @@ export interface ErdblickStyleGroup extends Record<string, any> {
 }
 
 /**
- * Retrieves and stores YAML style plain data
- * Keeps track of activated styles and error messages
+ * Central style repository for builtin and imported YAML styles.
+ *
+ * It owns style parsing, lifecycle tracking, storage of local modifications,
+ * grouping for the styles tree, and reapplication of visible styles.
  */
 @Injectable({providedIn: 'root'})
 export class StyleService {
@@ -107,6 +110,7 @@ export class StyleService {
         });
     }
 
+    /** Loads builtin styles from config, restores local modifications, and reapplies visible styles. */
     async initializeStyles(): Promise<void> {
         try {
             const data: any = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
@@ -147,6 +151,7 @@ export class StyleService {
         }
     }
 
+    /** Parses and registers one style source, optionally replacing an existing style id. */
     private initializeStyle(styleString: string, styleUrl: string, knownStyleId?: string, modified: boolean = false, imported: boolean = false) {
         if (!styleString) {
             this.erroredStyleIds.set(
@@ -205,6 +210,7 @@ export class StyleService {
         return styleId;
     }
 
+    /** Fetches raw YAML sources for the configured style URLs while preserving input order. */
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
         const requests = styles.map((style, index) =>
             this.httpClient.get(style.url, { responseType: 'text' }).pipe(
@@ -231,6 +237,7 @@ export class StyleService {
         return orderedMap;
     }
 
+    /** Reloads one builtin style from its configured URL and reapplies it. */
     async syncStyleYamlData(styleId: string) {
         if (!this.styles.has(styleId)) {
            return;
@@ -259,6 +266,7 @@ export class StyleService {
         }
     }
 
+    /** Exports the given style source as a downloadable YAML file. */
     exportStyleYamlFile(styleId: string): boolean {
         const content = this.styles.get(styleId);
         if (!content || !content.source) {
@@ -299,6 +307,7 @@ export class StyleService {
         return true;
     }
 
+    /** Imports a YAML file, registers it as an imported style, and reapplies it. */
     async importStyleYamlFile(event: any, file: File, fileUploader: FileUpload | undefined): Promise<boolean> {
         // Prevent the default upload behavior Dummy XHR, as we handle the file ourselves
         event.xhr = new XMLHttpRequest();
@@ -335,6 +344,7 @@ export class StyleService {
         return true;
     }
 
+    /** Deletes an imported style and restores a matching builtin style when one exists. */
     deleteStyle(styleId: string, force: boolean = false) {
         // Implement deletion with safety for imported styles and restoration of built-ins.
         const style = this.styles.get(styleId);
@@ -384,6 +394,7 @@ export class StyleService {
         }
     }
 
+    /** Replaces the source of an existing style and updates its lifecycle bookkeeping. */
     setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string|undefined {
         if (!this.styles.has(styleId)) {
             return styleId;
@@ -404,6 +415,7 @@ export class StyleService {
         return newStyleId;
     }
 
+    /** Restores a modified builtin style to its recorded baseline source. */
     resetModifiedBuiltinStyle(styleIdOrUrl: string): string | undefined {
         const style = this.resolveBuiltinStyle(styleIdOrUrl);
         if (!style) {
@@ -430,6 +442,7 @@ export class StyleService {
         return restoredStyleId;
     }
 
+    /** Returns the original builtin source for a style id or builtin URL. */
     getBuiltinBaselineSource(styleIdOrUrl: string): string | undefined {
         const style = this.resolveBuiltinStyle(styleIdOrUrl);
         if (style && this.builtinStyleBaselines.has(style.url)) {
@@ -441,12 +454,14 @@ export class StyleService {
         return undefined;
     }
 
+    /** Lists builtin styles that were modified locally and updated on the server. */
     getUpdatedModifiedStyles(): UpdatedModifiedStyleEntry[] {
         return [...this.styleHashes.entries()]
             .filter(([, state]) => state.isUpdated && state.isModified)
             .map(([url, state]) => ({id: state.id, url}));
     }
 
+    /** Persists modified builtin styles to local storage. */
     saveModifiedBuiltinStyles() {
         // Omit the 'parent' field which is injected by prime-ng,
         // so we do not get cyclic object errors.
@@ -456,6 +471,7 @@ export class StyleService {
         ));
     }
 
+    /** Persists imported styles to local storage. */
     saveImportedStyles() {
         // Omit the 'parent' field which is injected by prime-ng,
         // so we do not get cyclic object errors.
@@ -465,6 +481,7 @@ export class StyleService {
         ));
     }
 
+    /** Restores imported styles from local storage. */
     loadImportedStyles() {
         const importedStyleData = localStorage.getItem('importedStyleData');
         if (importedStyleData) {
@@ -477,6 +494,7 @@ export class StyleService {
         }
     }
 
+    /** Restores locally modified builtin styles from local storage. */
     loadModifiedBuiltinStyles() {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
@@ -497,14 +515,17 @@ export class StyleService {
         }
     }
 
+    /** Clears persisted imported styles. */
     clearStorageForImportedStyles() {
         localStorage.removeItem('importedStyleData');
     }
 
+    /** Clears persisted builtin-style modifications. */
     clearStorageForBuiltinStyles() {
         localStorage.removeItem('builtinStyleData');
     }
 
+    /** Parses one YAML style source through the WASM core and extracts its option metadata. */
     parseWasmStyle(styleString: string) {
         const styleUint8Array = this.textEncoder.encode(styleString);
         const yamlStyleNameRegex = /^\s*name\s*:\s*(?:(["'])(.*?)\1|([^\r\n#]+))/m;
@@ -548,12 +569,14 @@ export class StyleService {
         return undefined;
     }
 
+    /** Reloads one builtin style from its configured server URL. */
     reloadStyle(styleId: string) {
         if (this.styles.has(styleId)) {
             this.syncStyleYamlData(styleId);
         }
     }
 
+    /** Reapplies a style by removing and re-adding it to downstream consumers when visible. */
     reapplyStyle(styleId: string) {
         if (!this.styles.has(styleId)) {
             return;
@@ -567,6 +590,7 @@ export class StyleService {
         }
     }
 
+    /** Populates the tree-node fields PrimeNG expects for one style leaf. */
     private setStylesIdChildren(style: ErdblickStyle) {
         style.key = style.id;
         style.children = [];
@@ -578,6 +602,7 @@ export class StyleService {
         return style;
     }
 
+    /** Rebuilds the grouped styles tree shown in the styles dialog. */
     computeStyleGroups(): (ErdblickStyle|ErdblickStyleGroup)[] {
         const groups = new Map<string, ErdblickStyleGroup>();
         const ungrouped: Array<ErdblickStyle> = [];
@@ -661,14 +686,17 @@ export class StyleService {
         return [...groups.values(), ...ungrouped];
     }
 
+    /** Reapplies several styles by id. */
     reapplyStyles(styleIds: Array<string>) {
         styleIds.forEach(styleId => this.reapplyStyle(styleId));
     }
 
+    /** Reapplies every registered style. */
     reapplyAllStyles() {
         this.reapplyStyles([...this.styles.keys()]);
     }
 
+    /** Toggles one style's visibility and optionally reapplies it immediately. */
     toggleStyle(styleId: string, enabled: boolean|undefined = undefined, delayRepaint: boolean = false) {
         if (!this.styles.has(styleId)) {
             return;
@@ -681,6 +709,7 @@ export class StyleService {
         }
     }
 
+    /** Loads the persisted builtin-style hash map from local storage. */
     private loadStyleHashes(): Map<string, string> {
         const styleHashes = new Map<string, string>();
         const savedStyleHashes = localStorage.getItem('styleHashes');
@@ -692,6 +721,7 @@ export class StyleService {
         return styleHashes;
     }
 
+    /** Persists the current server-style hashes and clears the "updated" flags. */
     updateStyleHashes() {
         localStorage.removeItem('styleHashes');
         const pairs = Array.from(this.styleHashes, ([styleUrl, status]) => [styleUrl, status.sha256]);
@@ -706,6 +736,7 @@ export class StyleService {
         }
     }
 
+    /** Records the server baseline and lifecycle state for one builtin style. */
     private registerBuiltinServerSource(
         styleUrl: string,
         styleId: string,
@@ -730,6 +761,7 @@ export class StyleService {
         });
     }
 
+    /** Syncs lifecycle bookkeeping after a builtin style instance was recreated. */
     private synchronizeLifecycleForStyle(style?: ErdblickStyle) {
         if (!style || style.imported || !this.isBuiltinUrl(style.url)) {
             return;
@@ -743,10 +775,12 @@ export class StyleService {
         });
     }
 
+    /** Returns whether a URL belongs to the configured builtin-style set. */
     private isBuiltinUrl(styleUrl: string): boolean {
         return this.styleUrls.some(entry => entry.url === styleUrl);
     }
 
+    /** Resolves a builtin style from either its current id or its builtin URL. */
     private resolveBuiltinStyle(styleIdOrUrl: string): ErdblickStyle | undefined {
         const exactStyle = this.styles.get(styleIdOrUrl);
         if (exactStyle && !exactStyle.imported && this.isBuiltinUrl(exactStyle.url)) {

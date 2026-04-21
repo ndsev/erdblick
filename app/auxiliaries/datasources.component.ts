@@ -65,6 +65,10 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
     `,
     standalone: false
 })
+/**
+ * Hosts the datasource configuration editor and mediates loading, editing, and applying
+ * backend datasource configuration without leaving the viewer.
+ */
 export class DatasourcesComponent {
     readonly datasourcesEditorSessionId = 'datasources-editor';
     warningDialogVisible = false;
@@ -82,6 +86,7 @@ export class DatasourcesComponent {
     private editedConfigSourceSubscription: Subscription = new Subscription();
     private saveRequestedSubscription: Subscription = new Subscription();
 
+    /** Wires shared dialog, editor, and map services used by the datasource editor. */
     constructor(private readonly messageService: InfoMessageService,
                 public readonly stateService: AppStateService,
                 public readonly editorService: EditorService,
@@ -89,11 +94,13 @@ export class DatasourcesComponent {
                 private readonly mapService: MapDataService,
                 private readonly dialogStack: DialogStackService) {}
 
+    /** Initializes the editor session whenever the datasource dialog becomes visible. */
     onEditorDialogShow() {
         this.loadConfigEditor();
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
+    /** Tears down editor state when the dialog closes so stale subscriptions do not linger. */
     onEditorDialogHide() {
         this.cleanupEditorSubscriptions();
         this.editorService.closeSession(this.datasourcesEditorSessionId);
@@ -101,11 +108,13 @@ export class DatasourcesComponent {
         this.wasModified = false;
     }
 
+    /** Reloads the datasource configuration into a fresh editor session. */
     loadConfigEditor() {
         this.cleanupEditorSubscriptions();
         this.getConfig();
     }
 
+    /** Validates and posts the edited datasource configuration back to the backend. */
     applyEditedDatasourceConfig() {
         if (this.readOnly) {
             return;
@@ -122,6 +131,7 @@ export class DatasourcesComponent {
         this.editorService.updateSessionSource(this.datasourcesEditorSessionId, configData);
     }
 
+    /** Persists datasource configuration changes and refreshes map content after the backend accepts them. */
     private postConfig(config: string) {
         this.loading = true;
         this.http.post('config', config, {observe: 'response', responseType: 'text'}).subscribe({
@@ -139,6 +149,7 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Fetches the current datasource configuration and opens it in the shared JSON editor. */
     private getConfig() {
         this.readOnly = true;
         this.errorMessage = '';
@@ -189,6 +200,7 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Closes the editor or opens the discard warning when unsaved changes are present. */
     closeEditorDialog(event: any) {
         event.stopPropagation();
         if (this.wasModified) {
@@ -199,12 +211,14 @@ export class DatasourcesComponent {
         this.stateService.datasourcesEditorDialogVisible = false;
     }
 
+    /** Discards pending edits and then closes the editor dialog. */
     closeWarningAndEditor(event: any) {
         this.wasModified = false;
         this.closeEditorDialog(event);
     }
 
     @HostListener('window:keydown', ['$event'])
+    /** Handles the shared Escape behavior for the datasource editor and its discard warning. */
     onWindowKeydown(event: KeyboardEvent) {
         if (event.key !== 'Escape' || !this.stateService.datasourcesEditorDialogVisible) {
             return;
@@ -218,10 +232,12 @@ export class DatasourcesComponent {
         this.closeEditorDialog(event);
     }
 
+    /** Keeps the warning dialog above other floating dialogs when it opens. */
     protected onWarningShow() {
         this.dialogStack.bringToFront(this.warningDialog);
     }
 
+    /** Resets editor-related subscriptions before a fresh session is created. */
     private cleanupEditorSubscriptions() {
         this.editedConfigSourceSubscription.unsubscribe();
         this.saveRequestedSubscription.unsubscribe();

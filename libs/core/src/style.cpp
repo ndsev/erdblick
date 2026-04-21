@@ -12,14 +12,17 @@ namespace erdblick
 {
 
 namespace {
+/** Map highlight modes onto dense array indices for the precomputed rule caches. */
 constexpr size_t highlightModeIndex(FeatureStyleRule::HighlightMode mode) {
     return static_cast<size_t>(mode);
 }
 
+/** Collapse fidelity into the two cache buckets used by `FeatureLayerStyle`. */
 constexpr size_t fidelityIndex(FeatureStyleRule::Fidelity fidelity) {
     return fidelity == FeatureStyleRule::LowFidelity ? 1U : 0U;
 }
 
+/** Shared empty vector returned when no rule candidates apply. */
 const std::vector<uint32_t> kEmptyRuleIndices{};
 }
 

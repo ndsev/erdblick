@@ -4,6 +4,7 @@ import { environment } from '../environments/environment';
 @Injectable({
   providedIn: 'root'
 })
+/** Exposes compile-time application mode switches to Angular consumers. */
 export class AppModeService {
   readonly isVisualizationOnly = environment.visualizationOnly;
 }

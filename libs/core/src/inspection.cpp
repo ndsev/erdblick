@@ -13,6 +13,7 @@ using namespace mapget;
 namespace
 {
 
+/** Check whether a field name can be emitted as a bare GeoJSON-path identifier. */
 bool isBareGeoJsonPathField(std::string_view field)
 {
     if (field.empty()) {
@@ -32,6 +33,7 @@ bool isBareGeoJsonPathField(std::string_view field)
     });
 }
 
+/** Escape a field name for use inside a `["..."]` GeoJSON-path segment. */
 std::string escapedGeoJsonPathField(std::string_view field)
 {
     std::string escaped;
@@ -45,6 +47,7 @@ std::string escapedGeoJsonPathField(std::string_view field)
     return escaped;
 }
 
+/** Append one field segment to an existing GeoJSON path using bare or bracket notation. */
 std::string appendGeoJsonPathField(std::string_view base, std::string_view field)
 {
     if (isBareGeoJsonPathField(field)) {
@@ -95,6 +98,7 @@ auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
     return "0x" + value.toHex(false);
 }
 
+/** Resolve the layer's configured high-fidelity stage with safe fallbacks for legacy metadata. */
 uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
 {
     auto const layerInfo = layer.layerInfo();
@@ -104,6 +108,7 @@ uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
     return std::min(stages - 1U, configured);
 }
 
+/** Resolve the display label for a geometry stage using layer metadata when present. */
 std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
 {
     auto const layerInfo = layer.layerInfo();
@@ -113,6 +118,7 @@ std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
     return fmt::format("Stage {}", stage);
 }
 
+/** Hide stage labels for baseline/high-fi geometry and show them only for add-on stages. */
 bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
 {
     return stage > highFidelityStage(layer);
@@ -521,9 +527,15 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
         value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
     {
-        auto featureId = tile_->resolve<FeatureId>(*value);
-        singleValue = {convertString(featureId->toString()), ValueType::FeatureId};
-        fieldScope->mapId_ = JsValue(featureId->model().mapId());
+        auto vv = value->value();
+        if (std::holds_alternative<std::string_view>(vv)) {
+            singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::FeatureId};
+        } else if (std::holds_alternative<std::string>(vv)) {
+            singleValue = {convertString(std::get<std::string>(vv)), ValueType::FeatureId};
+        } else {
+            singleValue = {convertString(""), ValueType::FeatureId};
+        }
+        fieldScope->mapId_ = JsValue(tile_->mapId());
     }
     else {
         switch (value->type()) {

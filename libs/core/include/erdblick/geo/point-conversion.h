@@ -14,24 +14,31 @@ namespace nlohmann {
  * convert them to native JS objects (see call to em::value_object
  * in bindings.cpp).
  */
+/** JSON adapter allowing `mapget::Point` values to round-trip through debug/native builds. */
 template <>
 struct adl_serializer<mapget::Point> {
+    /** Serialize a `mapget::Point` as an `{x, y, z}` JSON object. */
     static void to_json(json& j, const mapget::Point& p) {
         j = json{{"x", p.x}, {"y", p.y}, {"z", p.z}};
     }
 
+    /** Deserialize a `mapget::Point` from an `{x, y, z}` JSON object. */
     static void from_json(const json& j, mapget::Point& p) {
         j.at("x").get_to(p.x);
         j.at("y").get_to(p.y);
         j.at("z").get_to(p.z);
     }
 };
+
+/** JSON adapter mirroring the `{x, y, z}` layout used for `mapget::Point`. */
 template <>
 struct adl_serializer<glm::dvec3> {
+    /** Serialize a `glm::dvec3` as an `{x, y, z}` JSON object. */
     static void to_json(json& j, const glm::dvec3& p) {
         j = json{{"x", p.x}, {"y", p.y}, {"z", p.z}};
     }
 
+    /** Deserialize a `glm::dvec3` from an `{x, y, z}` JSON object. */
     static void from_json(const json& j, glm::dvec3& p) {
         j.at("x").get_to(p.x);
         j.at("y").get_to(p.y);

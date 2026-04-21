@@ -104,9 +104,11 @@ import {AppStateService} from '../shared/appstate.service';
     ],
     standalone: false
 })
+/** About dialog that shows either packaged distribution versions or the raw erdblick version. */
 export class AboutComponent {
     constructor(public stateService: AppStateService) {}
 
+    /** Closes the about dialog. */
     close() {
         this.stateService.aboutDialogVisible = false;
     }

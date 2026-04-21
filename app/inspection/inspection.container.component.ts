@@ -59,6 +59,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
     styles: [``],
     standalone: false
 })
+/** Hosts all docked and floating inspection panels and manages drag-based docking/reordering. */
 export class InspectionContainerComponent implements OnDestroy {
     dockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
     undockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
@@ -97,14 +98,17 @@ export class InspectionContainerComponent implements OnDestroy {
         });
     }
 
+    /** Clears transient drag state when the container is destroyed. */
     ngOnDestroy() {
         this.resetDockDrag();
     }
 
+    /** Turns a docked panel into a floating dialog. */
     onEject(panel: InspectionPanelModel<FeatureWrapper>) {
         this.stateService.setInspectionPanelUndockedState(panel.id, true);
     }
 
+    /** Starts dock drag tracking for a docked inspection header. */
     onPanelDragRequest(payload: {panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}) {
         if (this.dragActive) {
             return;
@@ -128,6 +132,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.detachUp = this.renderer.listen('window', 'pointerup', (ev: PointerEvent) => this.onDockDragEnd(ev));
     }
 
+    /** Switches between reorder and undock modes once the pointer movement passes the drag threshold. */
     private onDockDragMove(event: PointerEvent) {
         if (!this.dragStart || event.pointerId !== this.dragPointerId) {
             return;
@@ -162,6 +167,7 @@ export class InspectionContainerComponent implements OnDestroy {
         }
     }
 
+    /** Applies the final reorder or undock action when the pointer is released. */
     private onDockDragEnd(event: PointerEvent) {
         if (event.pointerId !== this.dragPointerId) {
             return;
@@ -183,6 +189,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.resetDockDrag();
     }
 
+    /** Writes the new dock order back into app state if the dragged panel moved. */
     private applyReorder(panelId: number) {
         const displayOrder = this.dockedPanels.map(panel => panel.id);
         if (displayOrder.length < 2) {
@@ -210,6 +217,7 @@ export class InspectionContainerComponent implements OnDestroy {
         return true;
     }
 
+    /** Computes where the dragged panel would be inserted based on the current pointer position. */
     private updateDropTarget(clientY: number) {
         if (!this.dockContainerRef || this.dragPanelId === undefined) {
             return;
@@ -237,6 +245,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.dropAfterId = dropIndex >= elements.length ? elements[elements.length - 1].id : undefined;
     }
 
+    /** Defers undocking until after pointerup so PrimeNG dialog drag startup sees a clean event stream. */
     private queueUndock(panelId: number, event: PointerEvent) {
         const fallbackOffset = this.stateService.baseFontSize;
         const offsetX = this.dragPreviewElement ? this.dragPreviewOffset.x : fallbackOffset;
@@ -255,6 +264,7 @@ export class InspectionContainerComponent implements OnDestroy {
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
+    /** Creates the floating drag preview element on first actual movement. */
     private ensureDragPreview(event: PointerEvent) {
         if (this.dragPreviewElement || !this.dockContainerRef || this.dragPanelId === undefined) {
             return;
@@ -291,6 +301,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.dragPreviewElement = previewElement;
     }
 
+    /** Keeps the drag preview visually attached to the pointer. */
     private positionDragPreview(clientX: number, clientY: number) {
         if (!this.dragPreviewElement) {
             return;
@@ -299,6 +310,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.renderer.setStyle(this.dragPreviewElement, 'top', `${Math.round(clientY - this.dragPreviewOffset.y)}px`);
     }
 
+    /** Removes the temporary drag preview node from the DOM. */
     private clearDragPreview() {
         if (!this.dragPreviewElement) {
             return;
@@ -308,6 +320,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.dragPreviewOffset = {x: 0, y: 0};
     }
 
+    /** Clears every piece of transient state used by dock drag-and-drop. */
     private resetDockDrag() {
         this.detachMove?.();
         this.detachUp?.();
@@ -326,6 +339,7 @@ export class InspectionContainerComponent implements OnDestroy {
         document.body.classList.remove('dialog-dragging');
     }
 
+    /** Closes the dock container and clears the auto-collapse state in app state. */
     protected closeDock() {
         this.stateService.isDockOpen = false;
     }

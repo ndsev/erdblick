@@ -38,6 +38,12 @@ import {AppStateService} from "./shared/appstate.service";
     styles: [``],
     standalone: false
 })
+/**
+ * Top-level viewer layout that manages the right-hand inspection dock.
+ *
+ * It owns dock open/close state, user-resizing of the dock, and the temporary
+ * pause events used to suppress layout-sensitive work during dock transitions.
+ */
 export class DockableLayoutComponent implements OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
@@ -56,12 +62,14 @@ export class DockableLayoutComponent implements OnDestroy {
 
     protected readonly environment = environment;
 
+    /** Toggles dock visibility and emits resize-pause events around the transition. */
     protected toggleDock() {
         this.dispatchDockResizePauseStart();
         this.stateService.isDockOpen = !this.stateService.isDockOpen;
         this.scheduleDockResizePauseEnd();
     }
 
+    /** Clears listeners and ensures the resize-pause state is reset on teardown. */
     ngOnDestroy(): void {
         this.detachMove?.();
         this.detachUp?.();
@@ -70,6 +78,7 @@ export class DockableLayoutComponent implements OnDestroy {
         this.dispatchDockResizePauseEnd();
     }
     
+    /** Starts a manual dock resize interaction from the resize handle. */
     onResizeStart(ev: PointerEvent) {
         if (!this.stateService.isDockOpen || !this.dockRef) {
             return;
@@ -90,6 +99,7 @@ export class DockableLayoutComponent implements OnDestroy {
         this.detachCancel = this.renderer.listen('window', 'pointercancel', () => this.onPointerUp());
     }
 
+    /** Updates the dock width while the pointer-driven resize interaction is active. */
     private onPointerMove(ev: PointerEvent) {
         if (!this.dragging || !this.dockRef) return;
         // Compute new width from left edge drag: width = rightEdge - pointerX
@@ -97,6 +107,7 @@ export class DockableLayoutComponent implements OnDestroy {
         this.dockRef.nativeElement.style.width = `${newWidth}px`;
     }
 
+    /** Finishes the dock resize interaction and restores global pointer styles. */
     private onPointerUp() {
         if (!this.dragging) return;
         this.dragging = false;
@@ -112,26 +123,26 @@ export class DockableLayoutComponent implements OnDestroy {
         (document.body.style as any)['userSelect'] = '';
     }
 
+    /** Emits the global start event used to pause dock-sensitive work. */
     private dispatchDockResizePauseStart() {
-        if (this.dockResizePauseActive || typeof window === "undefined") {
+        if (this.dockResizePauseActive) {
             return;
         }
         this.dockResizePauseActive = true;
         window.dispatchEvent(new Event(DockableLayoutComponent.DOCK_RESIZE_PAUSE_START_EVENT));
     }
 
+    /** Emits the global end event used to resume dock-sensitive work. */
     private dispatchDockResizePauseEnd() {
-        if (!this.dockResizePauseActive || typeof window === "undefined") {
+        if (!this.dockResizePauseActive) {
             return;
         }
         this.dockResizePauseActive = false;
         window.dispatchEvent(new Event(DockableLayoutComponent.DOCK_RESIZE_PAUSE_END_EVENT));
     }
 
+    /** Defers the dock-resize pause end until layout has settled across two RAFs. */
     private scheduleDockResizePauseEnd() {
-        if (typeof window === "undefined") {
-            return;
-        }
         this.clearScheduledDockResizePauseEnd();
         this.dockPauseEndRafFirst = window.requestAnimationFrame(() => {
             this.dockPauseEndRafFirst = undefined;
@@ -142,10 +153,8 @@ export class DockableLayoutComponent implements OnDestroy {
         });
     }
 
+    /** Cancels any queued pause-end callbacks. */
     private clearScheduledDockResizePauseEnd() {
-        if (typeof window === "undefined") {
-            return;
-        }
         if (this.dockPauseEndRafFirst !== undefined) {
             window.cancelAnimationFrame(this.dockPauseEndRafFirst);
             this.dockPauseEndRafFirst = undefined;

@@ -155,6 +155,9 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
     styles: [``],
     standalone: false
 })
+/**
+ * Dialog that presents long-running feature-search progress, result grouping, diagnostics, and traces.
+ */
 export class FeatureSearchComponent {
     readonly featureSearchLayoutId = 'feature-search';
     isPanelVisible: boolean = false;
@@ -187,6 +190,9 @@ export class FeatureSearchComponent {
     @ViewChild('tree') tree!: Tree;
     @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
 
+    /**
+     * Subscribes to search progress and keeps the dialog state synchronized with the active search.
+     */
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapDataService,
@@ -219,11 +225,17 @@ export class FeatureSearchComponent {
         })
     }
 
+    /**
+     * Recomputes the virtual tree height once the dialog becomes measurable.
+     */
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
     }
 
+    /**
+     * Finalizes the result tabs once the active search group reports completion.
+     */
     searchResultReady() {
         const results = this.searchService.searchResults;
         const traces = this.searchService.traceResults;
@@ -250,6 +262,9 @@ export class FeatureSearchComponent {
         this.recalculateResultsByGroups();
     }
 
+    /**
+     * Highlights the selected result regardless of whether it came from the tree or a simple list event.
+     */
     selectResult(event: any) {
         // Support both listbox change and tree node select events
         const selected = event?.value || event?.node?.data || event;
@@ -259,6 +274,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Pauses or resumes worker dispatch while keeping already collected results visible.
+     */
     toggleSearchPaused() {
         if (!this.canPauseStopSearch) {
             return;
@@ -274,6 +292,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Stops the active search, freezes the partial result set, and surfaces any accumulated errors.
+     */
     stopSearch() {
         if (this.canPauseStopSearch) {
             this.searchService.stop();
@@ -290,6 +311,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Resets dialog-local state and clears the underlying search service when the dialog closes.
+     */
     onHide(_: any) {
         this.traces = [];
         this.diagnostics = [];
@@ -304,12 +328,18 @@ export class FeatureSearchComponent {
         this.isPanelVisible = false;
     }
 
+    /**
+     * Pushes a suggested query fix back into the omnibox workflow.
+     */
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
             this.searchService.fixedDiagnosticsSearchQuery.next(message.fix);
         }
     }
 
+    /**
+     * Rebuilds the PrimeNG tree according to the currently selected grouping dimensions.
+     */
     recalculateResultsByGroups() {
         // Convert results into PrimeNG TreeNodes based on selected grouping
         const results = this.results.map(result => {
@@ -399,6 +429,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Derives the tree scroller height from the dialog size so virtual scrolling stays usable while resizing.
+     */
     syncTreeScrollHeight(event: MouseEvent) {
         const target = event?.target as HTMLElement | null;
         // Find the dialog container regardless of which inner element fired the event

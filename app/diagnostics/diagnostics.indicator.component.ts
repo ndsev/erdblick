@@ -55,6 +55,7 @@ import {MapDataService} from '../mapdata/map.service';
     styles: [``],
     standalone: false
 })
+/** Compact diagnostics entry point shown in the main UI chrome. */
 export class DiagnosticsIndicatorComponent {
     @ViewChild('popover') popover?: Popover;
 
@@ -74,20 +75,24 @@ export class DiagnosticsIndicatorComponent {
     constructor(private readonly diagnostics: DiagnosticsFacadeService,
                 private readonly mapService: MapDataService) {}
 
+    /** Toggles the diagnostics popover. */
     togglePopover(event: MouseEvent) {
         this.popover?.toggle(event);
     }
 
+    /** Opens the full performance dialog and closes the popover. */
     openPerformance() {
         this.diagnostics.openPerformanceDialog();
         this.popover?.hide();
     }
 
+    /** Opens the diagnostics log and closes the popover. */
     openLog() {
         this.diagnostics.openLogDialog();
         this.popover?.hide();
     }
 
+    /** Opens the export dialog with all sections enabled and closes the popover. */
     openExport() {
         this.diagnostics.openExportDialog({
             includeProgress: true,
@@ -97,16 +102,19 @@ export class DiagnosticsIndicatorComponent {
         this.popover?.hide();
     }
 
+    /** Opens the diagnostics log prefiltered to errors without toggling the popover button itself. */
     openErrors(event: MouseEvent) {
         event.stopPropagation();
         this.diagnostics.openLogDialog(true);
     }
 
+    /** Shows the spinner while backend or rendering progress is still incomplete. */
     private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
         return !this.isCounterComplete(snapshot.progress.backend)
             || !this.isCounterComplete(snapshot.progress.rendered);
     }
 
+    /** Treats counters with no total as already complete to avoid spinner lockup. */
     private isCounterComplete(counter: ProgressCounter): boolean {
         return !counter.total || counter.done >= counter.total;
     }

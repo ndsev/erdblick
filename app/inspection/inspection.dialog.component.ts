@@ -151,6 +151,10 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
     styles: [``],
     standalone: false
 })
+/**
+ * Hosts one undocked inspection panel dialog, including dock-drop cues, comparison actions,
+ * and source-data layer switching.
+ */
 export class InspectionPanelDialogComponent implements OnDestroy {
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     dialogIndex = input.required<number>();
@@ -178,6 +182,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     private detachPointerUpListener?: () => void;
     private dockElement?: HTMLElement;
 
+    /** Wires dialog state to the active inspection panel and floating-dialog helpers. */
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
                 private renderer: Renderer2,
@@ -191,6 +196,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
+    /** Rebuilds the dialog title and source-data layer selector for the active panel content. */
     private updateHeaderFor(panel: InspectionPanelModel<FeatureWrapper>) {
         if (panel.sourceData !== undefined) {
             const selection = panel.sourceData!;
@@ -228,6 +234,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Returns from a nested selection back to the panel's top-level feature selection. */
     protected onGoBack(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
@@ -238,31 +245,37 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setSelection(p.features, p.id);
     }
 
+    /** Applies the currently selected source-data layer menu entry. */
     protected onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
             this.selectedLayerItem.command();
         }
     }
 
+    /** Stops header click handling when interacting with the layer dropdown. */
     protected onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
     }
 
+    /** Displays source-data rendering errors in the dialog body. */
     protected onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
     }
 
+    /** Toggles whether the panel survives global deselection. */
     protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
         this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
+    /** Closes and removes the inspection panel entirely. */
     protected unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
     }
 
+    /** Zooms the map to the primary feature represented by the panel. */
     private focusOnFeature(event?: MouseEvent) {
         event?.stopPropagation();
         const panel = this.panel();
@@ -272,36 +285,43 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.mapService.zoomToFeature(undefined, panel.features[0]);
     }
 
+    /** Menu/header action wrapper for focusing the primary feature. */
     protected focusOnFeatureAction(event: MouseEvent) {
         this.focusOnFeature(event);
     }
 
+    /** Opens the panel's GeoJSON export in a new browser tab. */
     protected openGeoJsonInNewTabAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.openGeoJsonInNewTab();
     }
 
+    /** Downloads the panel's GeoJSON export. */
     protected downloadGeoJsonAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.downloadGeoJson();
     }
 
+    /** Copies the panel's GeoJSON export to the clipboard. */
     protected copyGeoJsonAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.copyGeoJson();
     }
 
+    /** Opens the comparison popover after refreshing available comparison targets. */
     protected openComparePopover(event: MouseEvent) {
         event.stopPropagation();
         this.refreshCompareOptions();
         this.comparePopover.toggle(event);
     }
 
+    /** Re-docks the floating inspection panel into the dock area. */
     protected dock(event: MouseEvent) {
         event.stopPropagation();
         this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
     }
 
+    /** Opens the extra actions menu for the floating inspection panel. */
     protected openExtraMenu(event: MouseEvent) {
         event.stopPropagation();
         this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
@@ -341,6 +361,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.extraMenu.toggle(event);
     }
 
+    /** Reopens the comparison popover from the extra actions menu. */
     private openCompareFromMenu(menuEvent: MenuItemCommandEvent) {
         this.refreshCompareOptions();
         const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
@@ -354,6 +375,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Rebuilds valid comparison targets for the current selection context. */
     protected refreshCompareOptions() {
         this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
@@ -361,6 +383,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         );
     }
 
+    /** Opens the comparison dialog for the currently checked comparison targets. */
     protected applyComparison(event: MouseEvent) {
         event.stopPropagation();
         if (!this.selectedCompareIds.length) {
@@ -379,6 +402,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.comparePopover.hide();
     }
 
+    /** Restores persisted layout state and wires dock-drag cues when the dialog opens. */
     protected onDialogShow() {
         this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
@@ -418,6 +442,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         setTimeout(() => this.featurePanel?.refresh(), 0);
     }
 
+    /** Finalizes floating drag state and docks when the dialog overlaps the dock area enough. */
     protected onDialogDragEnd() {
         this.endDrag();
         if (this.shouldDock()) {
@@ -427,6 +452,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.dialogStack.bringToFront(this.dialog);
     }
 
+    /** Persists the dialog size after user-driven resize. */
     protected onDialogResizeEnd() {
         const panel = this.panel();
         const container = this.getDialogContainer();
@@ -445,6 +471,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
     }
 
+    /** Converts panel size in em units into the dialog style object expected by PrimeNG. */
     private buildDialogStyle(panel: InspectionPanelModel<FeatureWrapper>): { [key: string]: string } {
         return {
             width: `${panel.size[0]}em`,
@@ -452,6 +479,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         };
     }
 
+    /** Tears down drag listeners and temporary dock cues owned by the dialog. */
     ngOnDestroy() {
         this.endDrag();
         this.detachHeaderDownListener?.();
@@ -460,6 +488,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.clearDockCue();
     }
 
+    /** Freezes expensive inspection trees while the floating dialog is being dragged. */
     protected beginDrag(): void {
         this.featurePanel?.freezeTree();
         this.sourceDataPanel?.freezeTree();
@@ -469,6 +498,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
+    /** Unfreezes inspection trees and clears transient pointer listeners after dragging. */
     protected endDrag(): void {
         this.detachPointerUpListener?.();
         this.detachPointerUpListener = undefined;
@@ -476,6 +506,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.sourceDataPanel?.unfreezeTree();
     }
 
+    /** Attaches mouse listeners that highlight the dock when the dialog can be dropped there. */
     private bindDockDragCue() {
         const container = this.getDialogContainer();
         if (!container) {
@@ -502,6 +533,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
+    /** Returns whether the current floating dialog position should snap back into the dock. */
     private shouldDock(): boolean {
         if (!this.getDialogContainer() || !this.dockElement) {
             return false;
@@ -514,6 +546,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         return overlap.width >= threshold && overlap.height > 0;
     }
 
+    /** Updates the dock highlight based on the current drag overlap. */
     private updateDockCue() {
         if (!this.dialog?.dragging) {
             this.clearDockCue();
@@ -526,6 +559,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Computes the overlap area between the floating dialog and the dock container. */
     private getDockOverlap(): {width: number, height: number} | undefined {
         const container = this.getDialogContainer();
         if (!container || !this.dockElement) {
@@ -545,6 +579,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         return {width, height};
     }
 
+    /** Adds or removes the CSS cue that marks the dock as a drag target. */
     private setDockCue(active: boolean) {
         if (!this.dockElement) {
             return;
@@ -556,10 +591,12 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
+    /** Clears any active dock highlight cue. */
     private clearDockCue() {
         this.setDockCue(false);
     }
 
+    /** Returns the rendered PrimeNG dialog container, if present. */
     private getDialogContainer(): HTMLElement | undefined {
         return this.dialog?.container() ?? undefined;
     }

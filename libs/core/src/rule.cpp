@@ -8,6 +8,7 @@ namespace erdblick
 
 namespace
 {
+/** Parse the YAML arrow keyword into the enum used by rendering code. */
 std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowStr) {
     if (arrowStr == "none") {
         return FeatureStyleRule::NoArrow;
@@ -26,6 +27,7 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
     return {};
 }
 
+/** Parse one geometry keyword from YAML into the corresponding mapget geometry enum. */
 std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "point") {
         return mapget::GeomType::Points;

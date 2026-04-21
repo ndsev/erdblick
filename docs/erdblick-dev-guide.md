@@ -405,10 +405,12 @@ In `MapDataService` this flow is implemented roughly as follows:
   - `requestId` is a monotonically increasing client-side id.
   - `stringPoolOffsets` comes from the shared `TileLayerParser` field dictionary so the backend can skip already-known strings.
   - Request deduplication compares the request body without `requestId`, so identical logical requests are not resent.
+- Request groups are split by map, layer, and tile level. Each group uses staged `tileIdsByNextStage`; when a selected tile belongs to the group, its ID is also listed in `priorityTileIds` so mapget schedules its remaining stages before background viewport tiles.
+- Large request updates are chunked between complete request groups. The target chunk size is 1 MiB; one oversized group is refused above the 9 MiB safety limit instead of being split across messages.
 - `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance and decodes VTLV frames from a local frame queue. Parsing runs in `processFrameQueue()` with a ~10ms time budget per slice.
 - `mapget.tiles.request-context` includes a stable integer `clientId` for the lifetime of the current WS connection.
 - After receiving `clientId`, erdblick runs two parallel long-poll pulls (`GET /tiles/next?clientId=...&maxBytes=...`) and feeds each returned binary VTLV frame batch into the same frame queue used by WS control frames.
-- `maxBytes` is an adaptive micro-batch limit derived from the measured `/tiles/next` downstream throughput using an EWMA estimate, capped at 5 MiB.
+- `maxBytes` is an adaptive micro-batch limit derived from the measured `/tiles/next` downstream throughput using an EWMA estimate, capped at 64 MiB.
 - On each request update, mapget keeps the same WebSocket session/client id, drops queued tile frames that are no longer requested, and avoids re-requesting tiles that are already queued.
 - `Features` frames are forwarded to `MapDataService.addTileFeatureLayer()`, which hydrates `FeatureTile` instances, updates `loadedTileLayers`, and marks affected `TileVisualization` instances for rendering.
 - `Fields` frames are applied immediately through `TileLayerParser.readFieldDictUpdate(...)` so subsequent Feature/SourceData payloads can resolve string references.
@@ -503,17 +505,31 @@ Two important consequences:
 
 Frontend view policy is tile-count based **per zoom level**:
 
-- visible tiles `>= 128` -> `fidelity=low`, render `lod <= LOD_0`
-- visible tiles `>= 96` -> `fidelity=low`, render `lod <= LOD_1`
-- visible tiles `>= 80` -> `fidelity=low`, render `lod <= LOD_2`
-- visible tiles `>= 64` -> `fidelity=low`, render `lod <= LOD_3`
-- visible tiles `>= 56` -> `fidelity=low`, render `lod <= LOD_4`
-- visible tiles `>= 48` -> `fidelity=low`, render `lod <= LOD_5`
-- visible tiles `>= 40` -> `fidelity=low`, render `lod <= LOD_6`
-- visible tiles `>= 32` -> `fidelity=low`, render `lod <= LOD_7`
-- visible tiles `<= 31` -> `fidelity=high`, no low-fi LOD culling
+- visible tiles `>= 4096` -> `fidelity=low`, render `lod <= LOD_0`
+- visible tiles `>= 1024` -> `fidelity=low`, render `lod <= LOD_1`
+- visible tiles `>= 512` -> `fidelity=low`, render `lod <= LOD_2`
+- visible tiles `>= 256` -> `fidelity=low`, render `lod <= LOD_3`
+- visible tiles `>= 128` -> `fidelity=low`, render `lod <= LOD_4`
+- visible tiles `>= 64` -> `fidelity=low`, render `lod <= LOD_5`
+- visible tiles `>= 32` -> `fidelity=low`, render `lod <= LOD_6`
+- visible tiles `>= 16` -> `fidelity=low`, render `lod <= LOD_7`
+- visible tiles `< 16` -> `fidelity=high`, no low-fi LOD culling
 
 Stage retrieval is independent from this render policy: visible tiles are requested up to the layer max stage, and missing stages are streamed incrementally via `tileIdsByNextStage`.
+
+### Tile Request Staging and Priority
+
+Erdblick sends feature-layer tile requests as staged requests. A request entry contains `tileIdsByNextStage`, where bucket `N` lists tiles whose next missing stage is `N`. Mapget then expands such a tile to stages `N..maxStage` based on the layer metadata from `/sources`.
+
+Selection adds one scheduling concern on top of that:
+
+- Selected tiles are pinned with `preventCulling` so viewport eviction does not remove them while the inspection panel still references them.
+- Selected tile IDs are added to `priorityTileIds` inside their normal map/layer/level request group. This is a backend scheduling hint only; it does not request additional tiles and it does not alter stage semantics.
+- Background selection loads remain pending until `isTileInspectionDataComplete(tile)` is true. This keeps the inspection panel alive with partial data while making sure later stages still update the same `FeatureTile`.
+- `selectionTileUpdated` is emitted when a selected tile receives a new stage so inspection panels can rebuild.
+- `tileDataChanged` is the generic tile change signal for placeholder, loaded, and evicted tiles. Diagnostics, tile-grid overlays, and search use that signal instead of piggybacking on status-dialog refreshes.
+
+Feature search deliberately does not page in new tiles. It searches complete loaded tiles immediately and waits only for incomplete tiles that are currently expected by a visible view or a pinned selection request. If an incomplete tile falls out of the active request set, the search marks it ready instead of waiting forever.
 
 Runtime diagnostics for this selection are exposed via per-tile stats keys:
 

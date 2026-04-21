@@ -3,10 +3,12 @@ import {InfoMessageService} from "./info.service";
 
 
 @Injectable()
+/** Clipboard helper that falls back to a manual copy dialog outside secure contexts. */
 export class ClipboardService {
 
     constructor(private messageService: InfoMessageService) {}
 
+    /** Copies text to the system clipboard or opens a manual-copy dialog on failure. */
     copyToClipboard(text: string, info?: string) {
         try {
             const hint = "The clipboard is not available due to missing secure context (HTTPS). Copy the content manually:";

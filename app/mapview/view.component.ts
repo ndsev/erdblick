@@ -84,6 +84,10 @@ import {coreLib} from "../integrations/wasm";
     `],
     standalone: false
 })
+/**
+ * Host component for one interactive map view.
+ * It owns renderer creation, hover popovers, right-click context-menu preparation, and view-local mode toggles.
+ */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
@@ -147,6 +151,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         );
     }
 
+    /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
     ngOnInit() {
         this.subscriptions.push(
             this.menuService.menuItems.subscribe(items => {
@@ -171,21 +176,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             })
         );
 
-        if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-            this.mediaQueryList = window.matchMedia('(max-width: 56em)');
-            this.isNarrow = this.mediaQueryList.matches;
-            this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
-                this.isNarrow = event.matches;
-                this.cdr.markForCheck();
-            };
-            if (typeof this.mediaQueryList.addEventListener === 'function') {
-                this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
-            } else {
-                this.mediaQueryList.addListener(this.mediaQueryChangeListener);
-            }
-        }
+        this.mediaQueryList = window.matchMedia('(max-width: 56em)');
+        this.isNarrow = this.mediaQueryList.matches;
+        this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
+            this.isNarrow = event.matches;
+            this.cdr.markForCheck();
+        };
+        this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
+    /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
     ngAfterViewInit() {
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
@@ -201,6 +201,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         });
     }
 
+    /** Handles context-menu teardown and queued reopen requests when the menu is toggled while already open. */
     onContextMenuHide() {
         this.contextMenuVisible = false;
         if (this.pendingContextMenuOpenEvent && this.viewerContextMenu) {
@@ -215,6 +216,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
+    /** Tracks whether the PrimeNG context menu is currently visible. */
     onContextMenuShow() {
         this.contextMenuVisible = true;
     }
@@ -248,11 +250,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     ngOnDestroy() {
         this.teardownViewerContextMenuHandling();
         if (this.mediaQueryList && this.mediaQueryChangeListener) {
-            if (typeof this.mediaQueryList.removeEventListener === 'function') {
-                this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
-            } else {
-                this.mediaQueryList.removeListener(this.mediaQueryChangeListener);
-            }
+            this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
         }
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();
@@ -261,6 +259,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
+    /**
+     * Rebuilds view-local UI bindings after the renderer instance changed.
+     * This includes hover popovers, sync toggles, and the initial viewport refresh.
+     */
     private initializeViewer(mode2d: boolean) {
         this.createViewerForMode(mode2d).catch((error) => {
             console.error('Failed to initialize viewer:', error);
@@ -335,11 +337,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return `mapViewContainer-${this.viewIndex()}`;
     }
 
+    /** Clears the transient state used to distinguish a right-click from a right-drag gesture. */
     private resetRightPressTracking(): void {
         this.rightPressStart = null;
         this.rightPressMoved = false;
     }
 
+    /**
+     * Installs capturing pointer listeners directly on the viewer DOM element.
+     * This avoids PrimeNG/Cesium/deck interaction quirks and lets us suppress context menus after drags.
+     */
     private setupViewerContextMenuHandling(): void {
         const viewer = this.viewerElement?.nativeElement;
         if (!viewer) {
@@ -410,6 +417,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         });
     }
 
+    /** Removes the custom pointer/context-menu handlers installed on the viewer element. */
     private teardownViewerContextMenuHandling(): void {
         const viewer = this.viewerElement?.nativeElement;
         if (!viewer) {
@@ -440,6 +448,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.resetRightPressTracking();
     }
 
+    /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
     private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
         try {
             this.prepareSourceDataContextMenu(event);
@@ -450,6 +459,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         menu.show(this.contextMenuShowEvent(event) as MouseEvent);
     }
 
+    /** Copies the event coordinates we need because the original pointer event may no longer be usable later. */
     private copyContextMenuEvent(event: MouseEvent | PointerEvent): {clientX: number; clientY: number; pageX: number; pageY: number} {
         return {
             clientX: event.clientX,
@@ -459,6 +469,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         };
     }
 
+    /** Creates the minimal event-like object PrimeNG needs to position a context menu. */
     private contextMenuShowEvent(event: {pageX: number; pageY: number}): {pageX: number; pageY: number; preventDefault: () => void; stopPropagation: () => void} {
         return {
             pageX: event.pageX,
@@ -468,6 +479,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         };
     }
 
+    /**
+     * Derives source-data tile choices from the clicked world position and updates the menu service.
+     * The preferred tile tries to match picked feature tiles first, then visible feature levels.
+     */
     private prepareSourceDataContextMenu(event: {clientX: number; clientY: number}): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
             this.resetPreparedSourceData(true);
@@ -510,6 +525,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
+    /** Chooses the deepest available source-data tile among the features picked under the cursor. */
     private preferredPickedTileId(
         screenPos: {x: number; y: number},
         tileIds: SourceDataDropdownOption[]
@@ -538,6 +554,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return bestTileId;
     }
 
+    /** Falls back to the deepest source-data tile whose level matches currently visible feature data. */
     private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): bigint | null {
         const visibleLevels = this.mapService.visibleFeatureLevelsInView(this.viewIndex());
         const preferredTile = [...tileIds]
@@ -546,6 +563,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return preferredTile?.id as bigint | undefined ?? null;
     }
 
+    /** Clears the transient source-data context prepared for the right-click menu. */
     private resetPreparedSourceData(clearTileIds: boolean = false, clearOutline: boolean = true): void {
         this.menuService.preferredTileIdForSourceData = null;
         if (clearOutline) {

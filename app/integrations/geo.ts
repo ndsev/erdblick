@@ -2,13 +2,16 @@ const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 const EARTH_RADIUS_METERS = 6378137;
 
+/** Minimal `Cartesian2` replacement used by the lightweight geo integration shim. */
 class Cartesian2Impl {
     constructor(public x: number = 0, public y: number = 0) {}
 }
 
+/** Minimal `Cartesian3` replacement that implements only the vector ops erdblick needs. */
 class Cartesian3Impl {
     constructor(public x: number = 0, public y: number = 0, public z: number = 0) {}
 
+    /** Converts degrees plus height into an ECEF-like Cartesian approximation. */
     static fromDegrees(longitudeDegrees: number, latitudeDegrees: number, heightMeters: number = 0): Cartesian3Impl {
         const lon = longitudeDegrees * DEG_TO_RAD;
         const lat = latitudeDegrees * DEG_TO_RAD;
@@ -21,6 +24,7 @@ class Cartesian3Impl {
         );
     }
 
+    /** Returns Euclidean distance between two cartesian points. */
     static distance(lhs: Cartesian3Impl, rhs: Cartesian3Impl): number {
         const dx = lhs.x - rhs.x;
         const dy = lhs.y - rhs.y;
@@ -28,6 +32,7 @@ class Cartesian3Impl {
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
+    /** Subtracts two vectors into the provided result object. */
     static subtract(lhs: Cartesian3Impl, rhs: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = lhs.x - rhs.x;
         result.y = lhs.y - rhs.y;
@@ -35,6 +40,7 @@ class Cartesian3Impl {
         return result;
     }
 
+    /** Adds two vectors into the provided result object. */
     static add(lhs: Cartesian3Impl, rhs: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = lhs.x + rhs.x;
         result.y = lhs.y + rhs.y;
@@ -42,6 +48,7 @@ class Cartesian3Impl {
         return result;
     }
 
+    /** Computes the vector cross product into the provided result object. */
     static cross(lhs: Cartesian3Impl, rhs: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = lhs.y * rhs.z - lhs.z * rhs.y;
         result.y = lhs.z * rhs.x - lhs.x * rhs.z;
@@ -49,6 +56,7 @@ class Cartesian3Impl {
         return result;
     }
 
+    /** Normalizes a vector, returning zero when the input is effectively degenerate. */
     static normalize(vector: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         const length = Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z);
         if (length <= 1e-12) {
@@ -63,6 +71,7 @@ class Cartesian3Impl {
         return result;
     }
 
+    /** Negates a vector into the provided result object. */
     static negate(vector: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = -vector.x;
         result.y = -vector.y;
@@ -70,6 +79,7 @@ class Cartesian3Impl {
         return result;
     }
 
+    /** Multiplies a vector by a scalar into the provided result object. */
     static multiplyByScalar(vector: Cartesian3Impl, scalar: number, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = vector.x * scalar;
         result.y = vector.y * scalar;
@@ -78,17 +88,21 @@ class Cartesian3Impl {
     }
 }
 
+/** Minimal `Cartographic` replacement used by the Cesium compatibility layer. */
 class CartographicImpl {
     constructor(public longitude: number = 0, public latitude: number = 0, public height: number = 0) {}
 
+    /** Creates a cartographic position from degree input. */
     static fromDegrees(longitudeDegrees: number, latitudeDegrees: number, heightMeters: number = 0): CartographicImpl {
         return new CartographicImpl(longitudeDegrees * DEG_TO_RAD, latitudeDegrees * DEG_TO_RAD, heightMeters);
     }
 
+    /** Creates a cartographic position from radian input. */
     static fromRadians(longitude: number, latitude: number, heightMeters: number = 0): CartographicImpl {
         return new CartographicImpl(longitude, latitude, heightMeters);
     }
 
+    /** Converts the simplified cartesian representation back to longitude, latitude, and height. */
     static fromCartesian(cartesian: Cartesian3Impl): CartographicImpl {
         const lon = Math.atan2(cartesian.y, cartesian.x);
         const horizontal = Math.sqrt(cartesian.x * cartesian.x + cartesian.y * cartesian.y);
@@ -103,6 +117,7 @@ class CartographicImpl {
     }
 }
 
+/** Minimal rectangle helper used for viewport tests and extent unions. */
 class RectangleImpl {
     constructor(
         public west: number = 0,
@@ -111,6 +126,7 @@ class RectangleImpl {
         public north: number = 0
     ) {}
 
+    /** Creates a rectangle from degree input. */
     static fromDegrees(westDegrees: number, southDegrees: number, eastDegrees: number, northDegrees: number): RectangleImpl {
         return new RectangleImpl(
             westDegrees * DEG_TO_RAD,
@@ -120,6 +136,7 @@ class RectangleImpl {
         );
     }
 
+    /** Returns the union of two rectangles. */
     static union(lhs: RectangleImpl, rhs: RectangleImpl, result?: RectangleImpl | null): RectangleImpl {
         const out = result ?? new RectangleImpl();
         out.west = Math.min(lhs.west, rhs.west);
@@ -129,6 +146,7 @@ class RectangleImpl {
         return out;
     }
 
+    /** Tests whether a point lies inside the rectangle. */
     static contains(rect: RectangleImpl, point: {longitude?: number; latitude?: number; x?: number; y?: number}): boolean {
         const longitude = typeof point.longitude === "number" ? point.longitude : point.x;
         const latitude = typeof point.latitude === "number" ? point.latitude : point.y;
@@ -142,14 +160,17 @@ class RectangleImpl {
     }
 }
 
+/** Minimal color implementation with the alpha helper erdblick expects. */
 class ColorImpl {
     constructor(public r: number = 1, public g: number = 1, public b: number = 1, public a: number = 1) {}
 
+    /** Returns a copy of the color with a different alpha channel. */
     withAlpha(alpha: number): ColorImpl {
         return new ColorImpl(this.r, this.g, this.b, alpha);
     }
 }
 
+/** Lightweight collection used by the non-Cesium geo shim. */
 class PrimitiveCollectionImpl {
     private readonly primitives: any[] = [];
 
@@ -157,11 +178,13 @@ class PrimitiveCollectionImpl {
         return this.primitives.length;
     }
 
+    /** Adds a primitive and returns it, matching Cesium collection semantics. */
     add(primitive: any): any {
         this.primitives.push(primitive);
         return primitive;
     }
 
+    /** Removes a primitive if present. */
     remove(primitive: any): boolean {
         const index = this.primitives.indexOf(primitive);
         if (index < 0) {
@@ -295,9 +318,11 @@ export type JulianDate = any;
 export const JulianDate: any = DummyClass;
 
 export const GeoMath = {
+    /** Converts degrees to radians. */
     toRadians(value: number): number {
         return value * DEG_TO_RAD;
     },
+    /** Converts radians to degrees. */
     toDegrees(value: number): number {
         return value * RAD_TO_DEG;
     }

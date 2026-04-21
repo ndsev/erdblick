@@ -35,6 +35,10 @@ import {environment} from "../environments/environment";
     `],
     standalone: false
 })
+/**
+ * Container that lays out one or two `MapViewComponent`s and routes keyboard focus between them.
+ * The extra `version` signal forces splitter recreation when the number of views changes.
+ */
 export class MapViewContainerComponent {
     @ViewChildren(MapViewComponent) mapViewComponents!: QueryList<MapViewComponent>;
 
@@ -51,6 +55,7 @@ export class MapViewContainerComponent {
         )
     );
 
+    /** Keeps the container model in sync with app state and registers global focused-view shortcuts. */
     constructor(private stateService: AppStateService, private keyboardService: KeyboardService) {
         this.viewModel$.subscribe(vm => {
             this.version.update(_ => vm.panelCount);
@@ -67,6 +72,7 @@ export class MapViewContainerComponent {
 
     }
 
+    /** Cycles focused-view ownership left or right across the currently visible views. */
     cycleViewFocus(direction: number) {
         console.assert(direction === -1 || direction === 1);
         const nextView = (this.stateService.focusedView + direction) % this.stateService.numViews;
@@ -74,7 +80,8 @@ export class MapViewContainerComponent {
     }
 
     /**
-     * Setup keyboard shortcuts
+     * Registers movement/zoom shortcuts on the renderer instance of the focused view only.
+     * This is rerun whenever focus changes because the keyboard service stores concrete callbacks.
      */
     private setupKeyboardShortcutsForFocusedView() {
         if (environment.visualizationOnly) {

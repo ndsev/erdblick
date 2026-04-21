@@ -10,6 +10,9 @@ import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
 import {Cartographic, Rectangle} from "../integrations/geo";
 
+/**
+ * Response shape returned by the backend /locate endpoint for jump-target resolution.
+ */
 interface LocateResponse {
     responses: Array<Array<{
         tileId: string;
@@ -18,6 +21,11 @@ interface LocateResponse {
     }>>;
 }
 
+/**
+ * One action offered by the omnibox-style search panel.
+ *
+ * Targets can either jump to a location or execute a side effect such as starting a feature search.
+ */
 export interface SearchTarget {
     icon: string;
     color: string;
@@ -29,6 +37,9 @@ export interface SearchTarget {
     validate: (value: string) => boolean;
 }
 
+/**
+ * Core-lib jump-target description parsed from a feature id expression.
+ */
 interface FeatureJumpAction {
     name: string;
     error: string|null;
@@ -37,6 +48,12 @@ interface FeatureJumpAction {
 }
 
 @Injectable({providedIn: 'root'})
+/**
+ * Builds and executes the action list shown by the global search panel.
+ *
+ * The service merges static actions, feature-derived jump targets, plugin-provided actions,
+ * and the temporary map-selection flow used when a feature can exist in multiple maps.
+ */
 export class JumpTargetService {
 
     markedPosition: Subject<Array<number>> = new Subject<Array<number>>();
@@ -52,6 +69,9 @@ export class JumpTargetService {
     mapSelectionSubject = new Subject<Array<string>>();
     setSelectedMap: ((choice: string|null)=>void)|null = null;
 
+    /**
+     * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
+     */
     constructor(private httpClient: HttpClient,
                 private mapService: MapDataService,
                 private messageService: InfoMessageService,
@@ -100,6 +120,9 @@ export class JumpTargetService {
         });
     }
 
+    /**
+     * Returns the dynamic action that runs a simfil query across the currently loaded tiles.
+     */
     getFeatureMatchTarget(): SearchTarget {
         let simfilError = '';
         try {
@@ -127,10 +150,18 @@ export class JumpTargetService {
         }
     }
 
+    /**
+     * Accepts only plain numeric tile ids without embedded whitespace.
+     */
     validateMapgetTileId(value: string) {
         return value.trim().length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
     }
 
+    /**
+     * Builds the source-data inspection action for inputs of the form tileId [mapId] [sourceLayerId].
+     *
+     * The parser accepts quoted map and layer ids because both may contain spaces.
+     */
     getInspectTileSourceDataTarget() {
         const searchString = this.targetValueSubject.getValue();
         let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
@@ -251,10 +282,16 @@ export class JumpTargetService {
         }
     }
 
+    /**
+     * Loads the configured jump-target plugin bundle from /config at runtime.
+     */
     private loadJumpTargetsModule(jumpTargetsPath: string) {
         return import(/* @vite-ignore */ jumpTargetsPath);
     }
 
+    /**
+     * Recomputes the active search targets whenever the query string or plugin state changes.
+     */
     update() {
         let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
@@ -287,6 +324,9 @@ export class JumpTargetService {
         ]);
     }
 
+    /**
+     * Resolves a raw feature id expression to the first valid jump action and executes it.
+     */
     async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number) {
         let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
@@ -297,6 +337,11 @@ export class JumpTargetService {
         await this.highlightByJumpTarget(featureJumpTargets[validIndex], mapId, mode, cameraMoveViewIndex);
     }
 
+    /**
+     * Locates a specific feature, applies the requested highlight mode, and optionally moves the camera.
+     *
+     * If multiple maps are possible, the method waits for the search panel to provide a user choice first.
+     */
     async highlightByJumpTarget(
         action: FeatureJumpAction,
         mapId?: string | null,

@@ -51,6 +51,7 @@ import { AppStateService } from "../shared/appstate.service";
     ],
     standalone: false
 })
+/** Dialog that aggregates map-level legal and copyright notices. */
 export class LegalInfoDialogComponent {
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
@@ -69,6 +70,7 @@ export class LegalInfoDialogComponent {
         });
     }
 
+    /** Closes the legal-information dialog. */
     close() {
         this.stateService.legalInfoDialogVisible = false;
     }
