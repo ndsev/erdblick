@@ -1,341 +1,421 @@
 {
-    "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
-    "version": 1,
-    "newProjectRoot": "projects",
-    "projects": {
-        "erdblick": {
-            "projectType": "application",
-            "schematics": {
-                "@schematics/angular:component": {
-                    "style": "scss"
-                }
-            },
-            "root": "",
-            "sourceRoot": "app",
-            "prefix": "",
-            "architect": {
-                "build": {
-                    "builder": "@angular/build:application",
-                    "options": {
-                        "outputPath": "static",
-                        "index": "app/index.html",
-                        "browser": "app/main.ts",
-                        "polyfills": [
-                            "zone.js"
-                        ],
-                        "tsConfig": "tsconfig.app.json",
-                        "assets": [
-                            {
-                                "glob": "**/*",
-                                "input": "config/styles",
-                                "output": "/bundle/styles"
-                            },
-                            {
-                                "glob": "**/*",
-                                "input": "images",
-                                "output": "/bundle/images"
-                            },
-                            {
-                                "glob": "**/*.json",
-                                "input": "config",
-                                "output": "/"
-                            },
-                            {
-                                "glob": "**/*.js",
-                                "input": "config",
-                                "output": "/config"
-                            },
-                            {
-                                "glob": "VERSION",
-                                "input": ".",
-                                "output": "/bundle/"
-                            },
-                            {
-                                "glob": "LICENSE*",
-                                "input": "node_modules/@fontsource-variable/inter",
-                                "output": "/bundle/licenses/fonts/inter"
-                            },
-                            {
-                                "glob": "LICENSE*",
-                                "input": "node_modules/@fontsource/inter",
-                                "output": "/bundle/licenses/fonts/inter"
-                            },
-                            {
-                                "glob": "LICENSE*",
-                                "input": "node_modules/material-symbols",
-                                "output": "/bundle/licenses/icons/material-symbols"
-                            },
-                            {
-                                "glob": "erdblick-core.wasm",
-                                "input": "build/libs/core",
-                                "output": "/bundle/wasm"
-                            }
-                        ],
-                        "styles": [
-                            "node_modules/primeicons/primeicons.css",
-                            "node_modules/material-symbols/index.css",
-                            "app/styles.scss"
-                        ],
-                        "scripts": [],
-                        "webWorkerTsConfig": "tsconfig.worker.json"
-                    },
-                    "configurations": {
-                        "production": {
-                            "budgets": [
-                                {
-                                    "type": "initial",
-                                    "maximumWarning": "500kb",
-                                    "maximumError": "100mb"
-                                },
-                                {
-                                    "type": "anyComponentStyle",
-                                    "maximumWarning": "2kb",
-                                    "maximumError": "4kb"
-                                }
-                            ],
-                            "outputHashing": "all",
-                            "assets": [
-                                {
-                                    "glob": "**/*",
-                                    "input": "config/styles",
-                                    "output": "/bundle/styles"
-                                },
-                                {
-                                    "glob": "**/*",
-                                    "input": "images",
-                                    "output": "/bundle/images"
-                                },
-                                {
-                                    "glob": "**/*.json",
-                                    "input": "config",
-                                    "output": "/"
-                                },
-                                {
-                                    "glob": "**/*.js",
-                                    "input": "config",
-                                    "output": "/config"
-                                },
-                                {
-                                    "glob": "VERSION",
-                                    "input": ".",
-                                    "output": "/bundle/"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/@fontsource-variable/inter",
-                                    "output": "/bundle/licenses/fonts/inter"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/@fontsource/inter",
-                                    "output": "/bundle/licenses/fonts/inter"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/material-symbols",
-                                    "output": "/bundle/licenses/icons/material-symbols"
-                                },
-                                {
-                                    "glob": "erdblick-core.wasm",
-                                    "input": "build/libs/core",
-                                    "output": "/bundle/wasm"
-                                }
-                            ],
-                            "optimization": {
-                                "scripts": true,
-                                "styles": true,
-                                "fonts": true
-                            },
-                            "extractLicenses": false,
-                            "sourceMap": false,
-                            "namedChunks": false,
-                            "fileReplacements": [
-                                {
-                                    "replace": "app/environments/environment.ts",
-                                    "with": "app/environments/environment.prod.ts"
-                                }
-                            ]
-                        },
-                        "development": {
-                            "optimization": {
-                                "scripts": false,
-                                "styles": false,
-                                "fonts": false
-                            },
-                            "extractLicenses": false,
-                            "sourceMap": true,
-                            "namedChunks": true,
-                            "fileReplacements": [
-                                {
-                                    "replace": "app/environments/environment.ts",
-                                    "with": "app/environments/environment.ts"
-                                }
-                            ]
-                        },
-                        "test": {
-                            "optimization": {
-                                "scripts": false,
-                                "styles": false,
-                                "fonts": false
-                            },
-                            "extractLicenses": false,
-                            "sourceMap": true,
-                            "namedChunks": true,
-                            "tsConfig": "tsconfig.spec.json",
-                            "browser": "app/main.ts",
-                            "fileReplacements": []
-                        },
-                        "visualization-only": {
-                            "outputPath": "static-visualization-only",
-                            "budgets": [
-                                {
-                                    "type": "initial",
-                                    "maximumWarning": "500kb",
-                                    "maximumError": "100mb"
-                                },
-                                {
-                                    "type": "anyComponentStyle",
-                                    "maximumWarning": "2kb",
-                                    "maximumError": "4kb"
-                                }
-                            ],
-                            "outputHashing": "all",
-                            "assets": [
-                                {
-                                    "glob": "**/*",
-                                    "input": "config/styles",
-                                    "output": "/bundle/styles"
-                                },
-                                {
-                                    "glob": "**/*",
-                                    "input": "images",
-                                    "output": "/bundle/images"
-                                },
-                                {
-                                    "glob": "**/*.json",
-                                    "input": "config",
-                                    "output": "/"
-                                },
-                                {
-                                    "glob": "**/*.js",
-                                    "input": "config",
-                                    "output": "/config"
-                                },
-                                {
-                                    "glob": "VERSION",
-                                    "input": ".",
-                                    "output": "/bundle/"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/@fontsource-variable/inter",
-                                    "output": "/bundle/licenses/fonts/inter"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/@fontsource/inter",
-                                    "output": "/bundle/licenses/fonts/inter"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/material-symbols",
-                                    "output": "/bundle/licenses/icons/material-symbols"
-                                },
-                                {
-                                    "glob": "erdblick-core.wasm",
-                                    "input": "build/libs/core",
-                                    "output": "/bundle/wasm"
-                                }
-                            ],
-                            "optimization": {
-                                "scripts": true,
-                                "styles": true,
-                                "fonts": true
-                            },
-                            "extractLicenses": false,
-                            "sourceMap": false,
-                            "namedChunks": false,
-                            "fileReplacements": [
-                                {
-                                    "replace": "app/environments/environment.ts",
-                                    "with": "app/environments/environment.visualization-only.ts"
-                                }
-                            ]
-                        },
-                        "visualization-only-dev": {
-                            "outputPath": "static-visualization-only",
-                            "optimization": {
-                                "scripts": false,
-                                "styles": false,
-                                "fonts": false
-                            },
-                            "extractLicenses": false,
-                            "sourceMap": true,
-                            "namedChunks": true,
-                            "fileReplacements": [
-                                {
-                                    "replace": "app/environments/environment.ts",
-                                    "with": "app/environments/environment.visualization-only.ts"
-                                }
-                            ]
-                        }
-                    },
-                    "defaultConfiguration": "production"
-                },
-                "serve": {
-                    "builder": "@angular/build:dev-server",
-                    "configurations": {
-                        "production": {
-                            "buildTarget": "erdblick:build:production"
-                        },
-                        "development": {
-                            "buildTarget": "erdblick:build:development"
-                        },
-                        "visualization-only": {
-                            "buildTarget": "erdblick:build:visualization-only"
-                        },
-                        "visualization-only-dev": {
-                            "buildTarget": "erdblick:build:visualization-only-dev"
-                        }
-                    },
-                    "defaultConfiguration": "development"
-                },
-                "extract-i18n": {
-                    "builder": "@angular/build:extract-i18n",
-                    "options": {
-                        "buildTarget": "erdblick:build"
-                    }
-                },
-                "test": {
-                    "builder": "@angular/build:unit-test",
-                    "options": {
-                        "runner": "vitest",
-                        "tsConfig": "tsconfig.spec.json",
-                        "buildTarget": "erdblick:build:test",
-                        "setupFiles": [
-                            "test/vitest.setup.ts"
-                        ],
-                        "coverage": true,
-                        "coverageReporters": [
-                            "text-summary",
-                            "html",
-                            "lcov",
-                            "json-summary"
-                        ],
-                        "coverageExclude": [
-                        ],
-                        "exclude": [
-                            "app/app.component.spec.ts"
-                        ],
-                        "reporters": [
-                            "verbose"
-                        ]
-                    }
-                }
-            }
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "newProjectRoot": "projects",
+  "projects": {
+    "erdblick": {
+      "projectType": "application",
+      "schematics": {
+        "@schematics/angular:component": {
+          "style": "scss"
         }
-    },
-    "cli": {
-        "analytics": false
+      },
+      "root": "",
+      "sourceRoot": "app",
+      "prefix": "",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "static",
+            "index": "app/index.html",
+            "browser": "app/main.ts",
+            "polyfills": [
+              "zone.js"
+            ],
+            "tsConfig": "tsconfig.app.json",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "config/styles",
+                "output": "/bundle/styles"
+              },
+              {
+                "glob": "**/*",
+                "input": "images",
+                "output": "/bundle/images"
+              },
+              {
+                "glob": "**/*.json",
+                "input": "config",
+                "output": "/"
+              },
+              {
+                "glob": "**/*.js",
+                "input": "config",
+                "output": "/config"
+              },
+              {
+                "glob": "VERSION",
+                "input": ".",
+                "output": "/bundle/"
+              },
+              {
+                "glob": "LICENSE*",
+                "input": "node_modules/@fontsource-variable/inter",
+                "output": "/bundle/licenses/fonts/inter"
+              },
+              {
+                "glob": "LICENSE*",
+                "input": "node_modules/@fontsource/inter",
+                "output": "/bundle/licenses/fonts/inter"
+              },
+              {
+                "glob": "LICENSE*",
+                "input": "node_modules/material-symbols",
+                "output": "/bundle/licenses/icons/material-symbols"
+              },
+              {
+                "glob": "erdblick-core.wasm",
+                "input": "build/libs/core",
+                "output": "/bundle/wasm"
+              }
+            ],
+            "styles": [
+              "node_modules/primeicons/primeicons.css",
+              "node_modules/material-symbols/index.css",
+              "app/styles.scss"
+            ],
+            "scripts": [],
+            "webWorkerTsConfig": "tsconfig.worker.json"
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kb",
+                  "maximumError": "100mb"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "2kb",
+                  "maximumError": "4kb"
+                }
+              ],
+              "outputHashing": "all",
+              "assets": [
+                {
+                  "glob": "**/*",
+                  "input": "config/styles",
+                  "output": "/bundle/styles"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "images",
+                  "output": "/bundle/images"
+                },
+                {
+                  "glob": "**/*.json",
+                  "input": "config",
+                  "output": "/"
+                },
+                {
+                  "glob": "**/*.js",
+                  "input": "config",
+                  "output": "/config"
+                },
+                {
+                  "glob": "VERSION",
+                  "input": ".",
+                  "output": "/bundle/"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/@fontsource-variable/inter",
+                  "output": "/bundle/licenses/fonts/inter"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/@fontsource/inter",
+                  "output": "/bundle/licenses/fonts/inter"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/material-symbols",
+                  "output": "/bundle/licenses/icons/material-symbols"
+                },
+                {
+                  "glob": "erdblick-core.wasm",
+                  "input": "build/libs/core",
+                  "output": "/bundle/wasm"
+                }
+              ],
+              "optimization": {
+                "scripts": true,
+                "styles": true,
+                "fonts": true
+              },
+              "extractLicenses": false,
+              "sourceMap": false,
+              "namedChunks": false,
+              "fileReplacements": [
+                {
+                  "replace": "app/environments/environment.ts",
+                  "with": "app/environments/environment.prod.ts"
+                }
+              ]
+            },
+            "development": {
+              "optimization": {
+                "scripts": false,
+                "styles": false,
+                "fonts": false
+              },
+              "extractLicenses": false,
+              "sourceMap": true,
+              "namedChunks": true,
+              "fileReplacements": [
+                {
+                  "replace": "app/environments/environment.ts",
+                  "with": "app/environments/environment.ts"
+                }
+              ]
+            },
+            "test": {
+              "optimization": {
+                "scripts": false,
+                "styles": false,
+                "fonts": false
+              },
+              "extractLicenses": false,
+              "sourceMap": true,
+              "namedChunks": true,
+              "tsConfig": "tsconfig.spec.json",
+              "browser": "app/main.ts",
+              "fileReplacements": []
+            },
+            "visualization-only": {
+              "outputPath": "static-visualization-only",
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kb",
+                  "maximumError": "100mb"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "2kb",
+                  "maximumError": "4kb"
+                }
+              ],
+              "outputHashing": "all",
+              "assets": [
+                {
+                  "glob": "**/*",
+                  "input": "config/styles",
+                  "output": "/bundle/styles"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "images",
+                  "output": "/bundle/images"
+                },
+                {
+                  "glob": "**/*.json",
+                  "input": "config",
+                  "output": "/"
+                },
+                {
+                  "glob": "**/*.js",
+                  "input": "config",
+                  "output": "/config"
+                },
+                {
+                  "glob": "VERSION",
+                  "input": ".",
+                  "output": "/bundle/"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/@fontsource-variable/inter",
+                  "output": "/bundle/licenses/fonts/inter"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/@fontsource/inter",
+                  "output": "/bundle/licenses/fonts/inter"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/material-symbols",
+                  "output": "/bundle/licenses/icons/material-symbols"
+                },
+                {
+                  "glob": "erdblick-core.wasm",
+                  "input": "build/libs/core",
+                  "output": "/bundle/wasm"
+                }
+              ],
+              "optimization": {
+                "scripts": true,
+                "styles": true,
+                "fonts": true
+              },
+              "extractLicenses": false,
+              "sourceMap": false,
+              "namedChunks": false,
+              "fileReplacements": [
+                {
+                  "replace": "app/environments/environment.ts",
+                  "with": "app/environments/environment.visualization-only.ts"
+                }
+              ]
+            },
+            "visualization-only-dev": {
+              "outputPath": "static-visualization-only",
+              "optimization": {
+                "scripts": false,
+                "styles": false,
+                "fonts": false
+              },
+              "extractLicenses": false,
+              "sourceMap": true,
+              "namedChunks": true,
+              "fileReplacements": [
+                {
+                  "replace": "app/environments/environment.ts",
+                  "with": "app/environments/environment.visualization-only.ts"
+                }
+              ]
+            },
+            "playwright-coverage": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kb",
+                  "maximumError": "100mb"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "2kb",
+                  "maximumError": "4kb"
+                }
+              ],
+              "outputHashing": "all",
+              "assets": [
+                {
+                  "glob": "**/*",
+                  "input": "config/styles",
+                  "output": "/bundle/styles"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "images",
+                  "output": "/bundle/images"
+                },
+                {
+                  "glob": "**/*.json",
+                  "input": "config",
+                  "output": "/"
+                },
+                {
+                  "glob": "**/*.js",
+                  "input": "config",
+                  "output": "/config"
+                },
+                {
+                  "glob": "VERSION",
+                  "input": ".",
+                  "output": "/bundle/"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/@fontsource-variable/inter",
+                  "output": "/bundle/licenses/fonts/inter"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/@fontsource/inter",
+                  "output": "/bundle/licenses/fonts/inter"
+                },
+                {
+                  "glob": "LICENSE*",
+                  "input": "node_modules/material-symbols",
+                  "output": "/bundle/licenses/icons/material-symbols"
+                },
+                {
+                  "glob": "erdblick-core.wasm",
+                  "input": "build/libs/core",
+                  "output": "/bundle/wasm"
+                }
+              ],
+              "optimization": {
+                "scripts": true,
+                "styles": true,
+                "fonts": true
+              },
+              "extractLicenses": false,
+              "sourceMap": {
+                "scripts": true,
+                "styles": true,
+                "hidden": true,
+                "vendor": true
+              },
+              "namedChunks": false,
+              "fileReplacements": [
+                {
+                  "replace": "app/environments/environment.ts",
+                  "with": "app/environments/environment.prod.ts"
+                }
+              ]
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "erdblick:build:production"
+            },
+            "development": {
+              "buildTarget": "erdblick:build:development"
+            },
+            "visualization-only": {
+              "buildTarget": "erdblick:build:visualization-only"
+            },
+            "visualization-only-dev": {
+              "buildTarget": "erdblick:build:visualization-only-dev"
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "extract-i18n": {
+          "builder": "@angular/build:extract-i18n",
+          "options": {
+            "buildTarget": "erdblick:build"
+          }
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "runner": "vitest",
+            "tsConfig": "tsconfig.spec.json",
+            "buildTarget": "erdblick:build:test",
+            "setupFiles": [
+              "test/vitest.setup.ts"
+            ],
+            "coverage": true,
+            "coverageReporters": [
+              "text-summary",
+              "html",
+              "lcov",
+              "json-summary"
+            ],
+            "coverageExclude": [],
+            "exclude": [
+              "app/app.component.spec.ts"
+            ],
+            "reporters": [
+              "verbose"
+            ]
+          }
+        }
+      }
     }
+  },
+  "cli": {
+    "analytics": false
+  }
 }

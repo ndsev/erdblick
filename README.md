@@ -53,6 +53,20 @@ The default integration setup uses the Python example datasource from the vendor
 `mapget` Python package is missing), `/sources` may be empty and datasource-dependent tests will be
 reported as skipped while generic backend and debug-tile tests still run.
 
+Coverage output is written to `coverage/playwright/`. For human inspection, open:
+
+- `coverage/playwright/index.html` for the emitted-script V8 summary plus per-script tables.
+- `coverage/playwright/source/index.html` for the source-mapped Istanbul HTML report.
+
+The source-mapped report requires a frontend build with hidden source maps:
+
+```bash
+npm run build:integration-coverage
+MAPGET_BIN=$PWD/venv/bin/mapget npm run test:integration
+```
+
+The `*.ndjson` files in `coverage/playwright/` are raw intermediate artifacts used to build the JSON and HTML summaries.
+
 ## Styling System
 
 - Styles live in `config/styles/*.yaml` and can be edited inside the UI.

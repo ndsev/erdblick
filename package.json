@@ -13,7 +13,8 @@
     "test:integration:list": "playwright test --list",
     "test:integration:headed": "playwright test --headed",
     "test:integration:visual": "playwright test playwright/snap-tests",
-    "test:integration:update-snapshots": "playwright test playwright/snap-tests --update-snapshots"
+    "test:integration:update-snapshots": "playwright test playwright/snap-tests --update-snapshots",
+    "build:integration-coverage": "ng build -c playwright-coverage"
   },
   "private": true,
   "dependencies": {
@@ -66,10 +67,14 @@
     "baseline-browser-mapping": "^2.10.8",
     "eslint": "^10.0.3",
     "globals": "^17.4.0",
+    "istanbul-lib-coverage": "^3.2.2",
+    "istanbul-lib-report": "^3.0.1",
+    "istanbul-reports": "^3.2.0",
     "jsdom": "^29.0.0",
     "less": "^4.6.4",
     "playwright": "^1.58.2",
     "typescript": "~5.9.3",
+    "v8-to-istanbul": "^9.3.0",
     "vitest": "^4.1.4"
   }
 }
