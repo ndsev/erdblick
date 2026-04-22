@@ -40,10 +40,6 @@ declare global {
              * positions in different views.
              */
             getCamera: (viewIndex: number) => string | undefined;
-            /** Returns a concise internal loading summary for CI diagnostics. */
-            debugReadiness: (mapId: string, layerId: string) => unknown;
-            /** Returns deck-view-side viewport initialization diagnostics. */
-            debugDeckViews: () => unknown;
         };
     }
 }

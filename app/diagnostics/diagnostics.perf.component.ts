@@ -5,7 +5,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
 import {TreeTableNode} from 'primeng/api';
 import {MapDataService} from '../mapdata/map.service';
 import {FeatureTile} from '../mapdata/features.model';
-import {AppStateService} from '../shared/appstate.service';
+import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {PerfStat} from './diagnostics.model';
 import {buildAggregatedPerfStats} from './diagnostics.datasource';
 import {
@@ -70,7 +70,7 @@ interface PerfTileScopeCounts {
 @Component({
     selector: 'diagnostics-performance-dialog',
     template: `
-        <app-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="stateService.diagnosticsPerformanceDialogVisible"
+        <app-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="dialogVisible"
                   [modal]="false"
                   [persistLayout]="true" [layoutId]="layoutId"
                   [style]="dialogStyle"
@@ -201,7 +201,7 @@ interface PerfTileScopeCounts {
  * raw stats, and highlights unusually expensive timing rows.
  */
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
-    readonly layoutId = 'diagnostics-performance';
+    readonly layoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
         height: '75vh'
@@ -228,6 +228,14 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 this.rebuildTreeNodes();
             })
         );
+    }
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.layoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases subscriptions feeding the filter options and tree state. */

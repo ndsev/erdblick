@@ -4,7 +4,6 @@ import { requireMapSource } from '../utils/backend-helpers';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS } from '../utils/test-params';
 import {
     captureDocsScreenshotWithLabels,
-    emitReadinessDiagnostics,
     enableMapLayer,
     navigateToRoot,
     openLayerDialog,
@@ -66,16 +65,9 @@ test.describe('Snapshot – map panel and source data selection dialog', () => {
         await expect(mapPanel).toBeVisible();
 
         await page.mouse.move(0, 0);
-        try {
-            await expect(page).toHaveScreenshot('map-panel.png', {
-                maxDiffPixelRatio: 0.01
-            });
-        } catch (error) {
-            await emitReadinessDiagnostics(page, 'map-panel-snapshot-mismatch', TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX], {
-                locationIndex: LOCATION_INDEX
-            });
-            throw error;
-        }
+        await expect(page).toHaveScreenshot('map-panel.png', {
+            maxDiffPixelRatio: 0.01
+        });
 
         const sourceDataDialog = await openSourceDataSelectionDialog(page);
 

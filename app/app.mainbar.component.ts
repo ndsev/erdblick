@@ -1,9 +1,14 @@
 import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {MapDataService} from './mapdata/map.service';
-import {StyleService} from './styledata/style.service';
 import {
+    ABOUT_DIALOG_LAYOUT_ID,
+    DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
+    KEYBOARD_DIALOG_LAYOUT_ID,
+    LEGAL_INFO_DIALOG_LAYOUT_ID,
+    PREFERENCES_DIALOG_LAYOUT_ID,
     AppStateService,
+    STYLES_DIALOG_LAYOUT_ID,
     VIEW_SYNC_LAYERS,
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION,
@@ -24,7 +29,7 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
         '[class.main-bar-mobile-layout]': 'isMobileMenubar'
     },
     template: `
-        @if (stateService.mapsDialogVisible) {
+        @if (mapsPanelOpen) {
             <p-button class="maps-button" data-testid="maps-toggle" (click)="closeMapsPanel()" label=""
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
@@ -134,8 +139,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     copyright: string = '';
 
+    get mapsPanelOpen(): boolean {
+        return this.stateService.mapsOpenState.getValue();
+    }
+
     constructor(public mapService: MapDataService,
-                public styleService: StyleService,
                 public stateService: AppStateService,
                 private diagnostics: DiagnosticsFacadeService,
                 private elementRef: ElementRef<HTMLElement>,
@@ -194,12 +202,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the preferences dialog from the menu. */
     showPreferencesDialog() {
-        this.stateService.preferencesDialogVisible = true;
+        this.stateService.openDialog(PREFERENCES_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the keyboard-help dialog from the menu. */
     showControlsDialog() {
-        this.stateService.controlsDialogVisible = true;
+        this.stateService.openDialog(KEYBOARD_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the diagnostics performance dialog from the menu. */
@@ -228,27 +236,27 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the About dialog. */
     openAboutDialog() {
-        this.stateService.aboutDialogVisible = true;
+        this.stateService.openDialog(ABOUT_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the datasource editor dialog. */
     private openDatasources() {
-        this.stateService.datasourcesEditorDialogVisible = true;
+        this.stateService.openDialog(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the styles dialog. */
     private openStylesDialog() {
-        this.styleService.stylesDialogVisible = true;
+        this.stateService.openDialog(STYLES_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the maps panel. */
     protected showMapsPanel() {
-        this.stateService.mapsDialogVisible = true;
+        this.stateService.mapsOpenState.next(true);
     }
 
     /** Closes the maps panel. */
     protected closeMapsPanel() {
-        this.stateService.mapsDialogVisible = false;
+        this.stateService.mapsOpenState.next(false);
     }
 
     /** Schedules tooltip alignment for the maps-panel button tooltip. */
@@ -274,7 +282,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the legal-information dialog. */
     protected openLegalInfo() {
-        this.stateService.legalInfoDialogVisible = true;
+        this.stateService.openDialog(LEGAL_INFO_DIALOG_LAYOUT_ID);
     }
 
     /** Aligns the maps-panel tooltip under the triggering button and keeps it on-screen. */
@@ -540,12 +548,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Toggles one synchronized-view option and mirrors the change into state. */
     private toggleSyncOption(code: string): void {
-        this.stateService.syncOptions.forEach(option => {
-            if (option.code === code) {
-                option.value = !option.value;
-            }
-        });
-        this.stateService.updateSelectedSyncOptions();
+        const nextSelection = this.stateService.viewSync.includes(code)
+            ? this.stateService.viewSync.filter(currentCode => currentCode !== code)
+            : [...this.stateService.viewSync, code];
+        this.stateService.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Returns whether a menu item corresponds to an active synchronized-view option. */

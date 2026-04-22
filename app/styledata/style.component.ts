@@ -3,7 +3,7 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle, UpdatedModifiedStyleEntry} from "./style.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {KeyValue} from "@angular/common";
@@ -26,9 +26,9 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 @Component({
     selector: 'style-panel',
     template: `
-        <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
+        <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="stylesDialogVisible"
                   [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
-                  [persistLayout]="true" [layoutId]="'styles-dialog'"
+                  [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
                   (onShow)="onStylesDialogShow()">
             @if (styleService.styleGroups | async; as styleGroups) {
                 <ng-container>
@@ -139,7 +139,7 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <app-dialog header="Style Editor" [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
                   data-testid="style-editor-dialog" class="editor-dialog"
-                  [persistLayout]="true" [layoutId]="'style-editor-dialog'"
+                  [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
             <editor [sessionId]="styleEditorSessionId"></editor>
             <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
@@ -155,8 +155,8 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleService.selectedStyleIdForEditing)"
-                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export">
+                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
+                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId" label="Export" icon="pi pi-file-export">
                     </p-button>
                     <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
@@ -245,13 +245,14 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
  * styles while delegating actual style parsing and lifecycle tracking to `StyleService`.
  */
 export class StyleComponent implements OnDestroy {
+    readonly stylesDialogLayoutId = STYLES_DIALOG_LAYOUT_ID;
+    readonly styleEditorDialogLayoutId = STYLE_EDITOR_DIALOG_LAYOUT_ID;
     readonly styleEditorSessionId = 'style-editor';
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     styleEditorSourceSubscription: Subscription = new Subscription();
     styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
-    styleEditorVisible: boolean = false;
     private styleEditorOriginalSource: string = '';
     stylesCollapsed: boolean = false;
     styleCompareDialogVisible: boolean = false;
@@ -290,6 +291,22 @@ export class StyleComponent implements OnDestroy {
         });
     }
 
+    get stylesDialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.stylesDialogLayoutId);
+    }
+
+    set stylesDialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.stylesDialogLayoutId, visible);
+    }
+
+    get styleEditorVisible(): boolean {
+        return this.stateService.isDialogOpen(this.styleEditorDialogLayoutId);
+    }
+
+    set styleEditorVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.styleEditorDialogLayoutId, visible);
+    }
+
     /** Releases the compare view and its theme observer. */
     ngOnDestroy() {
         this.compareModeObserver?.disconnect();
@@ -306,6 +323,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Promotes the style editor dialog above other overlays. */
     onEditorDialogShow() {
+        this.ensureStyleEditorSession();
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
@@ -429,35 +447,16 @@ export class StyleComponent implements OnDestroy {
 
     /** Opens the style editor for one style and tracks dirty-state changes. */
     showStyleEditor(styleId: string) {
-        const source = this.styleService.styles.get(styleId)?.source;
-        if (source === undefined) {
+        if (!this.prepareStyleEditorSession(styleId)) {
             this.messageService.showError(`Could not load style source for ${styleId}.`);
             return;
         }
-        this.styleService.selectedStyleIdForEditing = styleId;
-        this.styleEditorOriginalSource = source.replace(/\n+$/, '');
-        this.editorService.createSession({
-            id: this.styleEditorSessionId,
-            source: `${source}\n\n\n\n\n`,
-            language: 'yaml',
-            readOnly: false
-        });
-        this.styleEditorSourceSubscription.unsubscribe();
-        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
-            editedStyleSource => {
-                this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
-            }
-        );
-        this.styleEditorSaveSubscription.unsubscribe();
-        this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
-            this.applyEditedStyle();
-        }) ?? new Subscription();
         this.styleEditorVisible = true;
     }
 
     /** Applies the current editor contents to the selected style. */
     applyEditedStyle() {
-        const styleId = this.styleService.selectedStyleIdForEditing;
+        const styleId = this.stateService.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
@@ -474,7 +473,7 @@ export class StyleComponent implements OnDestroy {
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
         // If there is no style ID returned, then setStyleSource failed.
         if (newStyleId) {
-            this.styleService.selectedStyleIdForEditing = newStyleId;
+            this.stateService.styleEditorTargetId = newStyleId;
             this.sourceWasModified = false;
             this.styleEditorOriginalSource = styleData;
             this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
@@ -521,9 +520,51 @@ export class StyleComponent implements OnDestroy {
         this.styleEditorVisible = false;
         this.warningDialogVisible = false;
         this.sourceWasModified = false;
+        this.stateService.styleEditorTargetId = null;
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
+    }
+
+    /** Recreates the editor session when a persisted style-editor dialog is restored on startup/import. */
+    private ensureStyleEditorSession(): void {
+        const targetStyleId = this.stateService.styleEditorTargetId;
+        if (!targetStyleId || this.editorService.hasSession(this.styleEditorSessionId)) {
+            return;
+        }
+        if (!this.prepareStyleEditorSession(targetStyleId)) {
+            this.messageService.showError(`Could not restore style editor for ${targetStyleId}.`);
+            this.styleEditorVisible = false;
+            this.stateService.styleEditorTargetId = null;
+        }
+    }
+
+    /** Opens a fresh editor session for the given style and subscribes dirty/save handling to it. */
+    private prepareStyleEditorSession(styleId: string): boolean {
+        const source = this.styleService.styles.get(styleId)?.source;
+        if (source === undefined) {
+            return false;
+        }
+        this.stateService.styleEditorTargetId = styleId;
+        this.styleEditorOriginalSource = source.replace(/\n+$/, '');
+        this.editorService.createSession({
+            id: this.styleEditorSessionId,
+            source: `${source}\n\n\n\n\n`,
+            language: 'yaml',
+            readOnly: false
+        });
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
+            editedStyleSource => {
+                this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
+            }
+        );
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
+            this.applyEditedStyle();
+        }) ?? new Subscription();
+        this.sourceWasModified = false;
+        return true;
     }
 
     /** Opens the style-definition documentation in a new browser tab. */

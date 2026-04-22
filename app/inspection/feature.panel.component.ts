@@ -143,6 +143,9 @@ export class FeaturePanelComponent implements OnDestroy {
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
         const selectedFeatureGeoJsonTexts: string[] = [];
         this.selectedFeatures.forEach(featureWrapper => {
+            if (!this.mapService.isTileInspectionDataComplete(featureWrapper.featureTile)) {
+                return;
+            }
             try {
                 featureWrapper.peek((feature: Feature) => {
                     selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);

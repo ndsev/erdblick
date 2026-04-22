@@ -30,6 +30,19 @@ export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const MAX_DECK_STYLE_WORKERS = 32;
 export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
+export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
+export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
+export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
+export const KEYBOARD_DIALOG_LAYOUT_ID = 'keyboard-dialog';
+export const DATASOURCES_EDITOR_DIALOG_LAYOUT_ID = 'datasources-editor-dialog';
+export const ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID = 'advanced-preferences-dialog';
+export const DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID = 'diagnostics-performance';
+export const DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID = 'diagnostics-log';
+export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
+export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
+export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
+export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
+export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -89,6 +102,7 @@ export interface AppDialogSize {
 export interface AppDialogLayout {
     position: AppDialogPosition;
     size: AppDialogSize;
+    open?: boolean;
 }
 
 /** Persisted layout for floating inspection dialogs, including dock preference. */
@@ -137,10 +151,9 @@ export interface LayerViewConfig {
 }
 
 /** Enumerates view properties that can be synchronized across split views. */
-export interface ViewSyncOption {
+export interface ViewSyncOptionDescriptor {
     name: string;
     code: string;
-    value: boolean;
     icon: string;
     tooltip: string;
 }
@@ -551,60 +564,6 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string())
     });
 
-    readonly legalInfoDialogVisibleState = this.createState<boolean>({
-        name: 'legalInfoDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly aboutDialogVisibleState = this.createState<boolean>({
-        name: 'aboutDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly preferencesDialogVisibleState = this.createState<boolean>({
-        name: 'preferencesDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly controlsDialogVisibleState = this.createState<boolean>({
-        name: 'controlsDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly datasourcesEditorDialogVisibleState = this.createState<boolean>({
-        name: 'datasourcesEditorDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly advancedPreferencesDialogVisibleState = this.createState<boolean>({
-        name: 'advancedPreferencesDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly diagnosticsPerformanceDialogVisibleState = this.createState<boolean>({
-        name: 'diagnosticsPerformanceDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly diagnosticsLogDialogVisibleState = this.createState<boolean>({
-        name: 'diagnosticsLogDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly diagnosticsExportDialogVisibleState = this.createState<boolean>({
-        name: 'diagnosticsExportDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
     readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
         name: 'diagnosticsLogFilter',
         defaultValue: {
@@ -656,6 +615,12 @@ export class AppStateService implements OnDestroy {
         name: 'mapsOpenState',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly styleEditorTargetState = this.createState<string | null>({
+        name: 'styleEditorTarget',
+        defaultValue: null,
+        schema: z.string().nullable()
     });
 
     readonly dockOpenState = this.createState<boolean>({
@@ -728,17 +693,20 @@ export class AppStateService implements OnDestroy {
                 width: z.coerce.number().positive(),
                 height: z.coerce.number().positive()
             }),
+            open: Boolish.optional(),
             panelId: z.coerce.number().optional(),
             slot: z.coerce.number().optional()
         }))
     });
 
-    // TODO: merge this functionality with the state?
-    readonly syncOptions: ViewSyncOption[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
+    private readonly pendingOpenDialogs = new Set<string>();
+
+    /** Immutable view-sync option descriptors consumed by the split-view UI. */
+    readonly syncOptions: readonly ViewSyncOptionDescriptor[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
     ];
 
     /** Registers all persisted state slots and wires startup hydration/persistence flow. */
@@ -1069,6 +1037,9 @@ export class AppStateService implements OnDestroy {
     exportSnapshot(): Record<string, unknown> {
         const snapshot: Record<string, unknown> = Object.create(null);
         for (const [name, state] of this.statePool.entries()) {
+            if (!state.isSnapshotState()) {
+                continue;
+            }
             snapshot[name] = state.toSnapshotValue();
         }
         return snapshot;
@@ -1095,6 +1066,9 @@ export class AppStateService implements OnDestroy {
                 errors.push(`Unknown snapshot state '${key}'.`);
                 continue;
             }
+            if (!state.isSnapshotState()) {
+                continue;
+            }
             try {
                 state.validateSnapshotValue(normalized[key]);
             } catch (error: any) {
@@ -1107,8 +1081,12 @@ export class AppStateService implements OnDestroy {
 
         for (const key of keys) {
             const state = this.statePool.get(key)!;
+            if (!state.isSnapshotState()) {
+                continue;
+            }
             state.applySnapshotValue(normalized[key]);
         }
+        this.pendingOpenDialogs.clear();
         return [];
     }
 
@@ -1140,8 +1118,13 @@ export class AppStateService implements OnDestroy {
         }
 
         for (const key of keys) {
-            if (!this.statePool.has(key)) {
+            const state = this.statePool.get(key);
+            if (!state) {
                 errors.push(`Unknown snapshot state '${key}'.`);
+                continue;
+            }
+            if (!state.isSnapshotState()) {
+                delete normalized[key];
             }
         }
         if (errors.length) {
@@ -1151,6 +1134,9 @@ export class AppStateService implements OnDestroy {
         // Validate all present entries before import to keep mutation transactional.
         for (const key of keys) {
             const state = this.statePool.get(key)!;
+            if (!state.isSnapshotState()) {
+                continue;
+            }
             try {
                 state.validateSnapshotValue(normalized[key]);
             } catch (error: any) {
@@ -1271,26 +1257,8 @@ export class AppStateService implements OnDestroy {
     set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
-    get mapsDialogVisible() {return this.mapsOpenState.getValue();};
-    set mapsDialogVisible(val: boolean) {this.mapsOpenState.next(val);};
-    get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
-    set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
-    get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
-    set aboutDialogVisible(val: boolean) {this.aboutDialogVisibleState.next(val);};
-    get preferencesDialogVisible() {return this.preferencesDialogVisibleState.getValue();}
-    set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
-    get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
-    set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
-    get datasourcesEditorDialogVisible() {return this.datasourcesEditorDialogVisibleState.getValue();}
-    set datasourcesEditorDialogVisible(val: boolean) {this.datasourcesEditorDialogVisibleState.next(val);};
-    get advancedPreferencesDialogVisible() {return this.advancedPreferencesDialogVisibleState.getValue();}
-    set advancedPreferencesDialogVisible(val: boolean) {this.advancedPreferencesDialogVisibleState.next(val);};
-    get diagnosticsPerformanceDialogVisible() {return this.diagnosticsPerformanceDialogVisibleState.getValue();}
-    set diagnosticsPerformanceDialogVisible(val: boolean) {this.diagnosticsPerformanceDialogVisibleState.next(val);};
-    get diagnosticsLogDialogVisible() {return this.diagnosticsLogDialogVisibleState.getValue();}
-    set diagnosticsLogDialogVisible(val: boolean) {this.diagnosticsLogDialogVisibleState.next(val);};
-    get diagnosticsExportDialogVisible() {return this.diagnosticsExportDialogVisibleState.getValue();}
-    set diagnosticsExportDialogVisible(val: boolean) {this.diagnosticsExportDialogVisibleState.next(val);};
+    get styleEditorTargetId() {return this.styleEditorTargetState.getValue();}
+    set styleEditorTargetId(val: string | null) {this.styleEditorTargetState.next(val);};
     get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
     set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
         this.diagnosticsLogFilterState.next({...val});
@@ -1670,6 +1638,45 @@ export class AppStateService implements OnDestroy {
         return this.dialogLayoutsState.getValue()[id];
     }
 
+    /** Returns whether the persisted layout marks the dialog as open. */
+    getDialogLayoutOpen(id: string): boolean {
+        return this.getDialogLayout(id)?.open ?? false;
+    }
+
+    /** Returns whether a persisted dialog should currently be mounted and visible. */
+    isDialogOpen(id: string): boolean {
+        const layout = this.getDialogLayout(id);
+        if (layout) {
+            return layout.open ?? false;
+        }
+        return this.pendingOpenDialogs.has(id);
+    }
+
+    /** Marks a persisted dialog as open or closed, even before its first measured layout exists. */
+    setDialogOpen(id: string, open: boolean): void {
+        const current = this.getDialogLayout(id);
+        if (current) {
+            this.pendingOpenDialogs.delete(id);
+            this.setDialogLayoutOpen(id, open);
+            return;
+        }
+        if (open) {
+            this.pendingOpenDialogs.add(id);
+            return;
+        }
+        this.pendingOpenDialogs.delete(id);
+    }
+
+    /** Convenience helper that opens one persisted dialog. */
+    openDialog(id: string): void {
+        this.setDialogOpen(id, true);
+    }
+
+    /** Convenience helper that closes one persisted dialog. */
+    closeDialog(id: string): void {
+        this.setDialogOpen(id, false);
+    }
+
     /** Returns or creates the persisted layout record for a dialog. */
     ensureDialogLayout(id: string, fallbackFactory: () => AppDialogLayout): AppDialogLayout | InspectionDialogLayout {
         const existing = this.getDialogLayout(id);
@@ -1704,6 +1711,22 @@ export class AppStateService implements OnDestroy {
         this.dialogLayoutsState.next({
             ...currentLayouts,
             [id]: nextLayout
+        });
+        this.pendingOpenDialogs.delete(id);
+    }
+
+    /** Persists the open/closed state for an existing dialog layout. */
+    setDialogLayoutOpen(id: string, open: boolean): void {
+        const current = this.getDialogLayout(id);
+        if (!current) {
+            return;
+        }
+        if ((current.open ?? false) === open) {
+            return;
+        }
+        this.upsertDialogLayout(id, {
+            ...current,
+            open
         });
     }
 
@@ -1779,6 +1802,11 @@ export class AppStateService implements OnDestroy {
         }
         if (changed) {
             this.dialogLayoutsState.next(nextLayouts);
+        }
+        for (const id of Object.keys(currentLayouts)) {
+            if (!(id in nextLayouts)) {
+                this.pendingOpenDialogs.delete(id);
+            }
         }
     }
 
@@ -2343,13 +2371,12 @@ export class AppStateService implements OnDestroy {
         };
     }
 
-    /** Recomputes the cached list of currently enabled view-sync options. */
-    updateSelectedSyncOptions() {
+    /** Applies the selection emitted by the view-sync toggle UI and mirrors it into state. */
+    updateSelectedSyncOptions(selectedCodes: string[]) {
         const previousSelection = new Set(this.viewSync);
-        const hasMovement = this.syncOptions.some(option =>
-            option.code === VIEW_SYNC_MOVEMENT && option.value);
-        const hasPosition = this.syncOptions.some(option =>
-            option.code === VIEW_SYNC_POSITION && option.value);
+        let nextSelection = Array.from(new Set(selectedCodes));
+        const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
+        const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
 
         if (hasMovement && hasPosition) {
             let valueToRemove = VIEW_SYNC_POSITION;
@@ -2362,15 +2389,10 @@ export class AppStateService implements OnDestroy {
             } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
                 valueToRemove = VIEW_SYNC_MOVEMENT;
             }
-            for (const option of this.syncOptions) {
-                if (option.code === valueToRemove) {
-                    option.value = false;
-                }
-            }
+            nextSelection = nextSelection.filter(code => code !== valueToRemove);
         }
 
-        this.viewSync = this.syncOptions.filter(option =>
-            option.value).map(option=> option.code);
+        this.viewSync = nextSelection;
         this.syncViews();
     }
 }

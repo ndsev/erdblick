@@ -6,7 +6,7 @@ import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
 import {DialogStackService} from "../shared/dialog-stack.service";
@@ -159,8 +159,7 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
  * Dialog that presents long-running feature-search progress, result grouping, diagnostics, and traces.
  */
 export class FeatureSearchComponent {
-    readonly featureSearchLayoutId = 'feature-search';
-    isPanelVisible: boolean = false;
+    readonly featureSearchLayoutId = FEATURE_SEARCH_DIALOG_LAYOUT_ID;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
@@ -223,6 +222,14 @@ export class FeatureSearchComponent {
             if (this.diagnostics.length > 0 && this.results.length === 0)
                 this.resultPanelIndex = 'diagnostics';
         })
+    }
+
+    get isPanelVisible(): boolean {
+        return this.stateService.isDialogOpen(this.featureSearchLayoutId);
+    }
+
+    set isPanelVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.featureSearchLayoutId, visible);
     }
 
     /**

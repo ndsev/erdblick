@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS } from '../utils/test-params';
-import {emitReadinessDiagnostics, enableMapLayer, navigateToArea, navigateToRoot} from '../utils/ui-helpers';
+import {enableMapLayer, navigateToArea, navigateToRoot} from '../utils/ui-helpers';
 
 /**
  * Integration tests for the Python example datasource.
@@ -16,12 +16,8 @@ test.describe('Python example datasource integration', () => {
         await requireTestMapSource(request);
 
         const tilePullRequests: string[] = [];
-        const tileRequestUrls: string[] = [];
         // Capture outgoing long-poll pulls for the `/tiles` stream.
         page.on('request', (req) => {
-            if (req.url().includes('/tiles')) {
-                tileRequestUrls.push(`${req.method()} ${req.url()}`);
-            }
             if (req.url().includes('/tiles/next') && req.method() === 'GET') {
                 tilePullRequests.push(req.url());
             }
@@ -32,16 +28,8 @@ test.describe('Python example datasource integration', () => {
         await navigateToArea(page, ...TEST_VIEW_POSITIONS[0]);
 
         // Eventually the UI should activate the tile stream pull loop.
-        try {
-            await expect.poll(() => tilePullRequests.length, {
-                timeout: 15000
-            }).toBeGreaterThan(0);
-        } catch (error) {
-            await emitReadinessDiagnostics(page, 'tile-request-no-pulls', TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], {
-                tilePullRequestCount: tilePullRequests.length,
-                tileRequestSample: tileRequestUrls.slice(0, 16)
-            });
-            throw error;
-        }
+        await expect.poll(() => tilePullRequests.length, {
+            timeout: 15000
+        }).toBeGreaterThan(0);
     });
 });

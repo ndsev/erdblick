@@ -4,12 +4,14 @@ import {Injectable} from '@angular/core';
 interface StackEntry {
     container: HTMLElement;
     wrapper?: HTMLElement;
+    close?: (event?: Event) => void;
 }
 
 /** Minimal shape required to bring an app dialog to the top of the z-index stack. */
 interface DialogLike {
     container: () => HTMLElement | undefined;
     wrapper?: HTMLElement | null;
+    close?: (event?: Event) => void;
 }
 
 @Injectable({providedIn: 'root'})
@@ -32,6 +34,10 @@ export class DialogStackService {
         this.pruneStack();
         const existingEntryIndex = this.stack.findIndex(stackEntry => stackEntry.container === entry.container);
         if (existingEntryIndex !== -1) {
+            const existingEntry = this.stack[existingEntryIndex];
+            if (!entry.close) {
+                entry.close = existingEntry.close;
+            }
             this.stack.splice(existingEntryIndex, 1);
         }
         this.stack.push(entry);
@@ -63,8 +69,27 @@ export class DialogStackService {
         }
         return {
             container,
-            wrapper: this.resolveMaskElement(target.wrapper ?? container.parentElement)
+            wrapper: this.resolveMaskElement(target.wrapper ?? container.parentElement),
+            close: typeof target.close === 'function' ? target.close.bind(target) : undefined
         };
+    }
+
+    /** Closes the topmost tracked dialog when it exposes a close path or close button. */
+    closeTopDialog(event?: Event): boolean {
+        this.pruneStack();
+        for (let index = this.stack.length - 1; index >= 0; index--) {
+            const entry = this.stack[index];
+            if (entry.close) {
+                entry.close(event);
+                return true;
+            }
+            const closeButton = entry.container.querySelector<HTMLElement>('.p-dialog-header-close-button');
+            if (closeButton) {
+                closeButton.click();
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Applies monotonically increasing z-indices to the retained stack entries. */

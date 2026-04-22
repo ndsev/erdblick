@@ -109,30 +109,6 @@ interface DeckGestureEventLike {
     };
 }
 
-interface DeckViewportAttemptDebugEntry {
-    timeMs: number;
-    event: string;
-    details: Record<string, unknown>;
-}
-
-export interface DeckViewDebugSummary {
-    viewIndex: number;
-    canvasId: string;
-    isSetup: boolean;
-    deckReady: boolean;
-    containerPresent: boolean;
-    containerClientWidth: number | null;
-    containerClientHeight: number | null;
-    canvasClientWidth: number | null;
-    canvasClientHeight: number | null;
-    canvasRectWidth: number | null;
-    canvasRectHeight: number | null;
-    viewState: DeckCameraState;
-    lastViewport: Viewport | null;
-    setupError: string | null;
-    recentViewportTrace: DeckViewportAttemptDebugEntry[];
-}
-
 /**
  * Minimal deck.gl map view scaffold used to wire renderer switching and camera-state sync.
  * Detailed deck tile rendering is introduced in later migration tasks.
@@ -167,8 +143,6 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
     // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
     private static readonly TILE_GRID_DEBUG_SOLID = false;
-    private static readonly DEBUG_VIEW_TRACE_LIMIT = 48;
-    private static readonly debugViewSummaries = new Map<number, DeckViewDebugSummary>();
     private static readonly NO_DEPTH_PARAMETERS: LumaParameters = {
         depthWriteEnabled: false,
         depthCompare: "always",
@@ -220,9 +194,6 @@ export abstract class DeckMapView implements IRenderView {
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
     private isHoveringFeature = false;
-    private lastViewport: Viewport | null = null;
-    private setupError: string | null = null;
-    private readonly debugViewportTrace: DeckViewportAttemptDebugEntry[] = [];
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
     private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
@@ -234,21 +205,6 @@ export abstract class DeckMapView implements IRenderView {
     protected abstract readonly sceneMode: SceneMode;
     protected abstract readonly allowPitchAndBearing: boolean;
     protected readonly useOrthographicProjection: boolean = false;
-
-    /** Returns the latest per-view deck-side readiness snapshots for CI diagnostics. */
-    static getDebugSummaries(): DeckViewDebugSummary[] {
-        return Array.from(this.debugViewSummaries.values())
-            .sort((lhs, rhs) => lhs.viewIndex - rhs.viewIndex)
-            .map(summary => ({
-                ...summary,
-                viewState: {...summary.viewState},
-                lastViewport: summary.lastViewport ? {...summary.lastViewport} : null,
-                recentViewportTrace: summary.recentViewportTrace.map(entry => ({
-                    ...entry,
-                    details: {...entry.details}
-                }))
-            }));
-    }
 
     /** Creates the deck-backed view wrapper for one canvas and app-state view index. */
     constructor(id: number,
@@ -268,80 +224,50 @@ export abstract class DeckMapView implements IRenderView {
         if (!container) {
             throw new Error(`Deck container #${this.canvasId} not found.`);
         }
-        try {
-            this.setupError = null;
-            this.recordViewportDebug("setup:start", {
-                containerClientWidth: container.clientWidth,
-                containerClientHeight: container.clientHeight
-            });
-            container.innerHTML = "";
-            const canvas = this.createDeckCanvas(container);
-            this.recordViewportDebug("setup:canvas-created", {
-                canvasClientWidth: canvas.clientWidth,
-                canvasClientHeight: canvas.clientHeight
-            });
-            this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
-            this.recordViewportDebug("setup:canvas-sized", {
-                drawingBufferWidth: canvas.width,
-                drawingBufferHeight: canvas.height
-            });
-            const gl = canvas.getContext("webgl2");
-            if (!gl) {
-                this.setupError = `WebGL2 context for #${this.canvasId} could not be created.`;
-                this.recordViewportDebug("setup:webgl2-context-missing", {
-                    webgl1Supported: !!document.createElement("canvas").getContext("webgl")
-                });
-                throw new Error(this.setupError);
-            }
-            this.recordViewportDebug("setup:webgl2-context-created");
-
-            this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
-
-            const deckProps: DeckProps<DeckMercatorView> = {
-                gl,
-                // Lowering device pixel ratio reduces redraw pressure during live resizes.
-                useDevicePixels: DeckMapView.CANVAS_USE_DEVICE_PIXELS,
-                views: new DeckMercatorView({
-                    id: `deck-view-${this._viewIndex}`,
-                    repeat: true,
-                    orthographic: this.useOrthographicProjection
-                }),
-                initialViewState: this.viewState,
-                viewState: this.viewState,
-                layers: [],
-                controller: this.createDeckControllerOptions(),
-                onDeviceInitialized: (device) => {
-                    this.deckDevice = device;
-                    this.recordViewportDebug("deck:onDeviceInitialized");
-                },
-                onResize: ({width, height}) => {
-                    this.recordViewportDebug("deck:onResize", {width, height});
-                    this.updateViewport();
-                    this.scheduleTileGridOverlayUpdate();
-                    this.scheduleSearchResultsOverlayUpdate();
-                    this.scheduleCanvasResize(width, height);
-                },
-                getCursor: this.deckCursor,
-                onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
-                onHover: (info) => this.onHover(info),
-                onClick: (info, event) => this.onClick(info, event)
-            };
-            this.deck = new DeckGlDeck(deckProps);
-            this.recordViewportDebug("setup:deck-created");
-            this.layerRegistry.setDeck(this.deck);
-
-            this.setupSubscriptions();
-            this.updateViewport();
-            this.mapService.refreshHighlightVisualizations();
-            this.requestRender();
-            this.updateDebugSummary();
-        } catch (error) {
-            this.setupError = error instanceof Error ? error.message : String(error);
-            this.recordViewportDebug("setup:error", {
-                error: this.setupError
-            });
-            throw error;
+        container.innerHTML = "";
+        const canvas = this.createDeckCanvas(container);
+        this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
+        const gl = canvas.getContext("webgl2");
+        if (!gl) {
+            throw new Error(`WebGL2 context for #${this.canvasId} could not be created.`);
         }
+
+        this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
+
+        const deckProps: DeckProps<DeckMercatorView> = {
+            gl,
+            // Lowering device pixel ratio reduces redraw pressure during live resizes.
+            useDevicePixels: DeckMapView.CANVAS_USE_DEVICE_PIXELS,
+            views: new DeckMercatorView({
+                id: `deck-view-${this._viewIndex}`,
+                repeat: true,
+                orthographic: this.useOrthographicProjection
+            }),
+            initialViewState: this.viewState,
+            viewState: this.viewState,
+            layers: [],
+            controller: this.createDeckControllerOptions(),
+            onDeviceInitialized: (device) => {
+                this.deckDevice = device;
+            },
+            onResize: ({width, height}) => {
+                this.updateViewport();
+                this.scheduleTileGridOverlayUpdate();
+                this.scheduleSearchResultsOverlayUpdate();
+                this.scheduleCanvasResize(width, height);
+            },
+            getCursor: this.deckCursor,
+            onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
+            onHover: (info) => this.onHover(info),
+            onClick: (info, event) => this.onClick(info, event)
+        };
+        this.deck = new DeckGlDeck(deckProps);
+        this.layerRegistry.setDeck(this.deck);
+
+        this.setupSubscriptions();
+        this.updateViewport();
+        this.mapService.refreshHighlightVisualizations();
+        this.requestRender();
     }
 
     /** Tears down deck, overlay state, and every subscription associated with this view. */
@@ -379,7 +305,6 @@ export abstract class DeckMapView implements IRenderView {
         if (container) {
             container.innerHTML = "";
         }
-        DeckMapView.debugViewSummaries.delete(this._viewIndex);
     }
 
     /** Returns whether the deck renderer is currently initialized. */
@@ -440,47 +365,6 @@ export abstract class DeckMapView implements IRenderView {
         canvas.style.display = "block";
         container.appendChild(canvas);
         return canvas;
-    }
-
-    /** Appends one bounded deck-view trace entry and refreshes the exported debug summary. */
-    private recordViewportDebug(event: string, details: Record<string, unknown> = {}): void {
-        this.debugViewportTrace.push({
-            timeMs: Date.now(),
-            event,
-            details
-        });
-        const overflow = this.debugViewportTrace.length - DeckMapView.DEBUG_VIEW_TRACE_LIMIT;
-        if (overflow > 0) {
-            this.debugViewportTrace.splice(0, overflow);
-        }
-        this.updateDebugSummary();
-    }
-
-    /** Publishes the current view-side readiness state for Playwright diagnostics. */
-    private updateDebugSummary(): void {
-        const container = document.getElementById(this.canvasId) as HTMLDivElement | null;
-        const canvas = this.deck?.getCanvas() ?? container?.querySelector("canvas") ?? null;
-        const rect = canvas?.getBoundingClientRect() ?? null;
-        DeckMapView.debugViewSummaries.set(this._viewIndex, {
-            viewIndex: this._viewIndex,
-            canvasId: this.canvasId,
-            isSetup: !!canvas,
-            deckReady: this.deck !== null,
-            containerPresent: !!container,
-            containerClientWidth: container?.clientWidth ?? null,
-            containerClientHeight: container?.clientHeight ?? null,
-            canvasClientWidth: canvas?.clientWidth ?? null,
-            canvasClientHeight: canvas?.clientHeight ?? null,
-            canvasRectWidth: rect?.width ?? null,
-            canvasRectHeight: rect?.height ?? null,
-            viewState: {...this.viewState},
-            lastViewport: this.lastViewport ? {...this.lastViewport} : null,
-            setupError: this.setupError,
-            recentViewportTrace: this.debugViewportTrace.slice(-24).map(entry => ({
-                ...entry,
-                details: {...entry.details}
-            }))
-        });
     }
 
     /** Keeps the WebGL drawing buffer in sync with the CSS size and configured device-pixel policy. */
@@ -664,7 +548,6 @@ export abstract class DeckMapView implements IRenderView {
     computeViewport(): Viewport | undefined {
         const viewport = this.createWebMercatorViewport();
         if (!viewport) {
-            this.recordViewportDebug("computeViewport:no-web-mercator-viewport");
             return undefined;
         }
 
@@ -694,7 +577,6 @@ export abstract class DeckMapView implements IRenderView {
             }
         }
         if (!sampledCoordinates.length) {
-            this.recordViewportDebug("computeViewport:no-sampled-coordinates");
             return undefined;
         }
 
@@ -702,7 +584,6 @@ export abstract class DeckMapView implements IRenderView {
         const longitudes = sampledCoordinates.map(coordinate => this.unwrapLongitudeNear(centerLon, coordinate[0]));
         const latitudes = sampledCoordinates.map(coordinate => coordinate[1]);
         if (![...longitudes, ...latitudes].every(Number.isFinite)) {
-            this.recordViewportDebug("computeViewport:non-finite-sample");
             return undefined;
         }
 
@@ -713,7 +594,6 @@ export abstract class DeckMapView implements IRenderView {
         const sizeLon = Math.abs(east - west);
         const sizeLat = Math.abs(north - south);
         if (![west, east, south, north, sizeLon, sizeLat].every(Number.isFinite)) {
-            this.recordViewportDebug("computeViewport:non-finite-bounds");
             return undefined;
         }
         if (sizeLon >= DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN) {
@@ -727,11 +607,6 @@ export abstract class DeckMapView implements IRenderView {
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
             };
             const valid = Object.values(fullWorldViewport).every(Number.isFinite);
-            this.recordViewportDebug("computeViewport:full-world", {
-                valid,
-                width: fullWorldViewport.width,
-                height: fullWorldViewport.height
-            });
             return valid ? fullWorldViewport : undefined;
         }
         const expandLon = sizeLon * 0.05;
@@ -748,11 +623,6 @@ export abstract class DeckMapView implements IRenderView {
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
             };
             const valid = Object.values(fullWorldViewport).every(Number.isFinite);
-            this.recordViewportDebug("computeViewport:expanded-full-world", {
-                valid,
-                width: fullWorldViewport.width,
-                height: fullWorldViewport.height
-            });
             return valid ? fullWorldViewport : undefined;
         }
         const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south - expandLat);
@@ -769,13 +639,6 @@ export abstract class DeckMapView implements IRenderView {
             orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
         };
         const valid = Object.values(nextViewport).every(Number.isFinite);
-        this.recordViewportDebug("computeViewport:result", {
-            valid,
-            width: nextViewport.width,
-            height: nextViewport.height,
-            west: nextViewport.west,
-            south: nextViewport.south
-        });
         return valid ? nextViewport : undefined;
     }
 
@@ -832,14 +695,10 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Pushes the currently visible viewport rectangle back into `MapDataService`. */
     protected updateViewport(): void {
-        this.recordViewportDebug("updateViewport:start");
         const viewport = this.computeViewport();
         if (!viewport) {
-            this.recordViewportDebug("updateViewport:skipped-no-viewport");
             return;
         }
-        this.lastViewport = viewport;
-        this.recordViewportDebug("updateViewport:set-viewport", {viewport});
         this.mapService.setViewport(this._viewIndex, viewport);
     }
 
@@ -1135,15 +994,6 @@ export abstract class DeckMapView implements IRenderView {
     private updateViewState(nextState: DeckCameraState, setDeckProps: boolean, updateViewport: boolean): void {
         const sanitized = this.sanitizeViewState(nextState);
         this.viewState = sanitized;
-        this.recordViewportDebug("updateViewState", {
-            setDeckProps,
-            updateViewport,
-            longitude: sanitized.longitude,
-            latitude: sanitized.latitude,
-            zoom: sanitized.zoom,
-            pitch: sanitized.pitch,
-            bearing: sanitized.bearing
-        });
         if (this.deck && setDeckProps) {
             this.suppressDeckViewStateEvent = true;
             this.deck.setProps({viewState: sanitized});
@@ -1218,18 +1068,8 @@ export abstract class DeckMapView implements IRenderView {
         const width = Math.max(1, Math.floor(rect.width));
         const height = Math.max(1, Math.floor(rect.height));
         if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
-            this.recordViewportDebug("createWebMercatorViewport:zero-rect", {
-                rectWidth: rect.width,
-                rectHeight: rect.height
-            });
             return undefined;
         }
-        this.recordViewportDebug("createWebMercatorViewport:ready", {
-            rectWidth: rect.width,
-            rectHeight: rect.height,
-            width,
-            height
-        });
         return new WebMercatorViewport({
             width,
             height,

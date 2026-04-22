@@ -31,7 +31,7 @@ interface ComparisonColumn {
     template: `
         <app-dialog #dialog class="inspection-comparison-dialog"
                   [modal]="false" [closable]="true" [(visible)]="visible"
-                  [persistLayout]="true" [layoutId]="layoutId"
+                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="layoutId"
                   (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()"
                   (onResizeEnd)="onDialogResizeEnd()">
             <ng-template #header>

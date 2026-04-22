@@ -81,15 +81,10 @@ export interface ErdblickStyleGroup extends Record<string, any> {
  */
 @Injectable({providedIn: 'root'})
 export class StyleService {
-
-    stylesDialogVisible: boolean = false;
-
     styleHashes: Map<string, StyleLifecycleState> = new Map();
     styleUrls: StyleConfigEntry[] = [];
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     erroredStyleIds: Map<string, string> = new Map<string, string>();
-
-    selectedStyleIdForEditing: string = "";
     styleEditedSaveTriggered: Subject<boolean> = new Subject<boolean>();
 
     builtinStylesCount = 0;

@@ -4,12 +4,14 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {
+    ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
     clampMapZoomStep,
     DEFAULT_MAP_ZOOM_STEP,
     MAX_MAP_ZOOM_STEP,
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
     MAX_DECK_STYLE_WORKERS,
+    PREFERENCES_DIALOG_LAYOUT_ID,
     MIN_MAP_ZOOM_STEP,
     AppStateService,
     DEFAULT_DECK_STYLE_WORKER_COUNT
@@ -17,13 +19,14 @@ import {
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.pool";
 import {AppDialogComponent} from "../shared/app-dialog.component";
+import {environment} from "../environments/environment";
 
 @Component({
     selector: 'preferences',
     template: `
-        <app-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
+        <app-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
-                  [persistLayout]="true" [layoutId]="'preferences-dialog'"
+                  [persistLayout]="true" [layoutId]="dialogLayoutId"
                   (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
@@ -219,6 +222,8 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
  * Hosts persisted viewer preferences and maps dialog controls to runtime state transitions.
  */
 export class PreferencesComponent implements OnInit, OnDestroy {
+    readonly dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
+    readonly advancedPreferencesDialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
 
     @ViewChild('pref') preferencesDialog?: AppDialogComponent;
 
@@ -286,6 +291,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.mapZoomStepInput = step;
         }));
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    }
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.dialogLayoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Restores the persisted dark-mode preference during component startup. */
@@ -359,7 +372,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Opens the separate advanced preferences dialog. */
     openAdvancedPreferences() {
-        this.stateService.advancedPreferencesDialogVisible = true;
+        if (environment.visualizationOnly) {
+            return;
+        }
+        this.stateService.openDialog(this.advancedPreferencesDialogLayoutId);
     }
 
     /** Toggles HTTP compression for `/tiles/next` pull responses. */

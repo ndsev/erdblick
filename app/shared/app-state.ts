@@ -18,6 +18,7 @@ export interface AppStateOptions<T> {
     urlParamName?: string;
     urlFormEncode?: boolean;
     urlIncludeInVisualizationOnly?: boolean;
+    snapshotPersist?: boolean;
 }
 
 /**
@@ -296,6 +297,7 @@ export class AppState<T> extends BehaviorSubject<T> {
     readonly urlParamName?: string;
     readonly urlFormEncode: boolean;
     readonly urlIncludeInVisualizationOnly?: boolean;
+    readonly snapshotPersist: boolean;
 
     protected readonly preprocess?: AppStateToStorageFun<T>;
     protected readonly postprocess?: AppStateFromStorageFun<T>;
@@ -314,6 +316,7 @@ export class AppState<T> extends BehaviorSubject<T> {
         this.urlParamName = options.urlParamName;
         this.urlFormEncode = options.urlFormEncode ?? false;
         this.urlIncludeInVisualizationOnly = options.urlIncludeInVisualizationOnly;
+        this.snapshotPersist = options.snapshotPersist ?? true;
 
         if (pool.has(options.name)) {
             console.warn(`[AppState] Duplicate state name detected: ${options.name}. Overwriting previous instance.`);
@@ -331,6 +334,11 @@ export class AppState<T> extends BehaviorSubject<T> {
         const value = this.getValue();
         const payload = this.preprocess ? this.preprocess(value) : value;
         return deepCopy(payload);
+    }
+
+    /** Returns whether this state slot participates in snapshot import/export. */
+    isSnapshotState(): boolean {
+        return this.snapshotPersist;
     }
 
     /** Validates a snapshot-import value against the state schema. */

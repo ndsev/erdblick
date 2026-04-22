@@ -607,7 +607,7 @@ export class MapPanelComponent {
 
     /** Closes the maps panel through shared app state. */
     protected closeMapsPanel() {
-        this.stateService.mapsDialogVisible = false;
+        this.stateService.mapsOpenState.next(false);
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

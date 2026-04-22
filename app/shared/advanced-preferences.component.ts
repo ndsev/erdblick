@@ -1,6 +1,6 @@
 import {Component, ElementRef, HostListener, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
-import {AppStateService} from './appstate.service';
+import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from './appstate.service';
 import {EditorService} from './editor.service';
 import {AppDialogComponent} from './app-dialog.component';
 import {DialogStackService} from './dialog-stack.service';
@@ -10,12 +10,12 @@ import {DialogStackService} from './dialog-stack.service';
     template: `
         <app-dialog header="Advanced Preferences"
                     class="editor-dialog advanced-preferences-dialog"
-                    [(visible)]="stateService.advancedPreferencesDialogVisible"
+                    [(visible)]="dialogVisible"
                     [modal]="false"
                     [closable]="false"
                     [closeOnEscape]="false"
                     [persistLayout]="true"
-                    [layoutId]="'advanced-preferences-dialog'"
+                    [layoutId]="dialogLayoutId"
                     #advancedPreferencesDialog
                     (onShow)="onDialogShow()"
                     (onHide)="onDialogHide()">
@@ -83,6 +83,7 @@ import {DialogStackService} from './dialog-stack.service';
     standalone: false
 })
 export class AdvancedPreferencesComponent {
+    readonly dialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesEditorSessionId = 'advanced-preferences-editor';
     dirty = false;
     discardWarningVisible = false;
@@ -99,6 +100,14 @@ export class AdvancedPreferencesComponent {
     constructor(public readonly stateService: AppStateService,
                 private readonly editorService: EditorService,
                 private readonly dialogStack: DialogStackService) {}
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.dialogLayoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+    }
 
     onDialogShow() {
         const snapshotText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
@@ -142,7 +151,7 @@ export class AdvancedPreferencesComponent {
             this.discardWarningVisible = true;
             return;
         }
-        this.stateService.advancedPreferencesDialogVisible = false;
+        this.dialogVisible = false;
     }
 
     saveSnapshot(closeAfterSave: boolean = false) {
@@ -168,7 +177,7 @@ export class AdvancedPreferencesComponent {
         this.dirty = false;
         this.discardWarningVisible = false;
         if (closeAfterSave) {
-            this.stateService.advancedPreferencesDialogVisible = false;
+            this.dialogVisible = false;
         }
     }
 
@@ -207,12 +216,12 @@ export class AdvancedPreferencesComponent {
     discardAndClose() {
         this.discardWarningVisible = false;
         this.validationError = '';
-        this.stateService.advancedPreferencesDialogVisible = false;
+        this.dialogVisible = false;
     }
 
     @HostListener('window:keydown', ['$event'])
     onWindowKeyDown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.stateService.advancedPreferencesDialogVisible) {
+        if (event.key !== 'Escape' || !this.dialogVisible) {
             return;
         }
         event.preventDefault();

@@ -1,5 +1,5 @@
 import {NgTemplateOutlet} from '@angular/common';
-import {Component, ContentChild, EventEmitter, Input, Output, TemplateRef, ViewChild} from '@angular/core';
+import {Component, ContentChild, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, TemplateRef, ViewChild} from '@angular/core';
 import {Dialog, DialogModule} from 'primeng/dialog';
 import {AppDialogLayout, AppStateService} from './appstate.service';
 
@@ -17,7 +17,7 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
                   [closable]="closable"
                   [draggable]="draggable"
                   [resizable]="resizable"
-                  [style]="style"
+                  [style]="effectiveStyle"
                   [position]="position"
                   [showHeader]="showHeader"
                   [appendTo]="appendTo"
@@ -57,7 +57,7 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
     standalone: true,
     imports: [DialogModule, NgTemplateOutlet]
 })
-export class AppDialogComponent {
+export class AppDialogComponent implements OnChanges, OnDestroy {
     @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
     @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
     @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
@@ -87,6 +87,7 @@ export class AppDialogComponent {
 
     @Input() layoutId?: string;
     @Input() persistLayout = false;
+    @Input() persistOpenState = true;
 
     @Output() onShow = new EventEmitter<any>();
     @Output() onHide = new EventEmitter<any>();
@@ -95,8 +96,22 @@ export class AppDialogComponent {
     @Output() onResizeEnd = new EventEmitter<any>();
 
     @ViewChild('dialog') private dialog?: Dialog;
+    protected effectiveStyle: {[key: string]: any} = {};
+    private revealPersistedLayoutFrame?: number;
 
-    constructor(private readonly stateService: AppStateService) {}
+    constructor(private readonly stateService: AppStateService) {
+        this.refreshEffectiveStyle();
+    }
+
+    ngOnChanges(changes: SimpleChanges): void {
+        if (changes['style'] || changes['layoutId'] || changes['persistLayout'] || changes['persistOpenState'] || changes['resizable'] || changes['visible']) {
+            this.refreshEffectiveStyle(this.visible);
+        }
+    }
+
+    ngOnDestroy(): void {
+        this.cancelRevealPersistedLayout();
+    }
 
     container(): HTMLElement | undefined {
         return this.dialog?.container() ?? undefined;
@@ -116,15 +131,21 @@ export class AppDialogComponent {
 
     protected handleVisibleChange(value: boolean): void {
         this.visible = value;
+        this.syncPersistedOpenState(value);
+        this.refreshEffectiveStyle(value);
         this.visibleChange.emit(value);
     }
 
     protected handleOnShow(event: any): void {
+        this.syncPersistedOpenState(true);
         this.applyOrCapturePersistedLayout();
         this.onShow.emit(event);
     }
 
     protected handleOnHide(event: any): void {
+        this.cancelRevealPersistedLayout();
+        this.syncPersistedOpenState(false);
+        this.refreshEffectiveStyle(false);
         this.onHide.emit(event);
     }
 
@@ -146,6 +167,7 @@ export class AppDialogComponent {
         if (!container) {
             return;
         }
+        container.style.visibility = 'hidden';
         window.requestAnimationFrame(() => {
             const updatedContainer = this.container();
             if (!updatedContainer) {
@@ -153,22 +175,41 @@ export class AppDialogComponent {
             }
             const existing = this.stateService.getDialogLayout(this.layoutId!);
             if (existing) {
-                const normalized = this.normalizeLayout(existing);
+                const normalized = {
+                    ...this.normalizeLayout(existing),
+                    open: this.persistOpenState ? true : false
+                };
                 if (this.resizable) {
                     this.applyLayout(updatedContainer, normalized);
                     this.stateService.upsertDialogLayout(this.layoutId!, normalized);
+                    this.refreshEffectiveStyle(false, normalized);
                 } else {
                     this.applyPosition(updatedContainer, normalized.position);
                     const current = this.readLayoutFromContainer(updatedContainer);
                     this.stateService.upsertDialogLayout(this.layoutId!, {
                         position: {...normalized.position},
-                        size: {...current.size}
+                        size: {...current.size},
+                        open: this.persistOpenState ? true : false
+                    });
+                    this.refreshEffectiveStyle(false, {
+                        position: {...normalized.position},
+                        size: {...current.size},
+                        open: this.persistOpenState ? true : false
                     });
                 }
+                this.scheduleRevealPersistedLayout(updatedContainer);
                 return;
             }
             const initialLayout = this.readLayoutFromContainer(updatedContainer);
-            this.stateService.ensureDialogLayout(this.layoutId!, () => initialLayout);
+            this.stateService.ensureDialogLayout(this.layoutId!, () => ({
+                ...initialLayout,
+                open: this.persistOpenState ? true : false
+            }));
+            this.refreshEffectiveStyle(false, {
+                ...initialLayout,
+                open: this.persistOpenState ? true : false
+            });
+            this.scheduleRevealPersistedLayout(updatedContainer);
         });
     }
 
@@ -180,7 +221,11 @@ export class AppDialogComponent {
         if (!container) {
             return;
         }
-        const layout = this.readLayoutFromContainer(container);
+        const layout = {
+            ...this.readLayoutFromContainer(container),
+            open: this.persistOpenState ? this.visible : false
+        };
+        this.refreshEffectiveStyle(false, layout);
         this.stateService.upsertDialogLayout(this.layoutId, layout);
     }
 
@@ -209,7 +254,8 @@ export class AppDialogComponent {
         const top = Math.min(Math.max(0, Math.round(layout.position.top)), maxTop);
         return {
             position: {left, top},
-            size: {width, height}
+            size: {width, height},
+            open: layout.open ?? false
         };
     }
 
@@ -224,5 +270,53 @@ export class AppDialogComponent {
         container.style.left = `${position.left}px`;
         container.style.top = `${position.top}px`;
         container.style.margin = '0';
+    }
+
+    private refreshEffectiveStyle(hideUntilApplied: boolean = false, layoutOverride?: AppDialogLayout): void {
+        const nextStyle = {...this.style};
+        const layout = layoutOverride ?? (this.persistLayout && this.layoutId
+            ? this.stateService.getDialogLayout(this.layoutId)
+            : undefined);
+        if (!layout) {
+            this.effectiveStyle = nextStyle;
+            return;
+        }
+
+        const normalized = this.normalizeLayout(layout);
+        nextStyle['position'] = 'fixed';
+        nextStyle['left'] = `${normalized.position.left}px`;
+        nextStyle['top'] = `${normalized.position.top}px`;
+        nextStyle['margin'] = '0';
+        if (this.resizable) {
+            nextStyle['width'] = `${normalized.size.width}px`;
+            nextStyle['height'] = `${normalized.size.height}px`;
+        }
+        if (hideUntilApplied) {
+            nextStyle['visibility'] = 'hidden';
+        }
+        this.effectiveStyle = nextStyle;
+    }
+
+    private scheduleRevealPersistedLayout(container: HTMLElement): void {
+        this.cancelRevealPersistedLayout();
+        this.revealPersistedLayoutFrame = window.requestAnimationFrame(() => {
+            this.revealPersistedLayoutFrame = undefined;
+            container.style.visibility = '';
+        });
+    }
+
+    private cancelRevealPersistedLayout(): void {
+        if (this.revealPersistedLayoutFrame === undefined) {
+            return;
+        }
+        window.cancelAnimationFrame(this.revealPersistedLayoutFrame);
+        this.revealPersistedLayoutFrame = undefined;
+    }
+
+    private syncPersistedOpenState(open: boolean): void {
+        if (!this.persistLayout || !this.layoutId || !this.persistOpenState) {
+            return;
+        }
+        this.stateService.setDialogLayoutOpen(this.layoutId, open);
     }
 }

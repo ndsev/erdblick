@@ -2,12 +2,13 @@ import {Component} from "@angular/core";
 import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
 import {MapDataService} from "../mapdata/map.service";
 import {Color} from "../integrations/geo";
+import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 
 @Component({
     selector: 'sourcedatadialog',
     template: `
-        <app-dialog header="Inspect Tile Source Data" class="tilesource-select-dialog" [(visible)]="menuService.tileSourceDataDialogVisible" [modal]="false"
-                  [persistLayout]="true" [layoutId]="'source-data-selection-dialog'"
+        <app-dialog header="Inspect Tile Source Data" class="tilesource-select-dialog" [(visible)]="dialogVisible" [modal]="false"
+                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="dialogLayoutId"
                   (onHide)="reset()">
             @if (loading) {
                 <div style="display:flex; justify-content: center">
@@ -79,6 +80,7 @@ import {Color} from "../integrations/geo";
 })
 /** Dialog for choosing which source-data layer should be inspected for a clicked tile. */
 export class SourceDataLayerSelectionDialogComponent {
+    readonly dialogLayoutId = SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID;
     selectedTileId: SourceDataDropdownOption | undefined;
     selectedMapId: SourceDataDropdownOption | undefined;
     selectedSourceDataLayer: SourceDataDropdownOption | undefined;
@@ -105,8 +107,20 @@ export class SourceDataLayerSelectionDialogComponent {
         });
         this.menuService.customTileAndMapId.subscribe(([tileId, mapId]: [string, string]) => {
             this.load(tileId, mapId);
-            this.menuService.tileSourceDataDialogVisible = true;
+            this.dialogVisible = true;
         });
+    }
+
+    get dialogVisible(): boolean {
+        return this.menuService.isSourceDataDialogOpen();
+    }
+
+    set dialogVisible(visible: boolean) {
+        if (visible) {
+            this.menuService.openTileSourceDataDialog();
+            return;
+        }
+        this.menuService.closeTileSourceDataDialog();
     }
 
     /** Initializes the dialog state from either a menu-provided tile list or an explicit tile/map pair. */
@@ -247,7 +261,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
     /** Closes the dialog through the shared right-click menu service. */
     close() {
-        this.menuService.tileSourceDataDialogVisible = false;
+        this.menuService.closeTileSourceDataDialog();
     }
 
     /** Clears all currently derived dropdown state. */

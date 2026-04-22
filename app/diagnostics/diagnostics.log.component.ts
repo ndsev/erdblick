@@ -3,14 +3,14 @@ import {BehaviorSubject, combineLatest, map, Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import type {DiagnosticsLogFilter} from './diagnostics.model';
 import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppStateService} from '../shared/appstate.service';
+import {AppStateService, DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'diagnostics-log-dialog',
     template: `
         <app-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
-                  [(visible)]="stateService.diagnosticsLogDialogVisible"
+                  [(visible)]="dialogVisible"
                   [modal]="false"
                   [persistLayout]="true" [layoutId]="layoutId"
                   [style]="dialogStyle"
@@ -102,7 +102,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
 })
 /** Dialog that filters, sorts, and exports captured diagnostics log entries. */
 export class DiagnosticsLogDialogComponent implements OnDestroy {
-    readonly layoutId = 'diagnostics-log';
+    readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
         height: '75vh'
@@ -140,6 +140,14 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
                 this.logFilter = {...filter};
             })
         );
+    }
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.layoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases dialog-local subscriptions. */

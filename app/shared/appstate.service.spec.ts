@@ -1033,6 +1033,72 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('omits transient dialog visibility flags from exported snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.openDialog('advanced-preferences-dialog');
+        const snapshot = service.exportSnapshot();
+
+        expect(snapshot).not.toHaveProperty('advancedPreferencesDialogVisible');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('restores dialog visibility from dialogLayouts snapshot state', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            dialogLayouts: {
+                "advanced-preferences-dialog": {
+                    position: {left: 10, top: 20},
+                    size: {width: 400, height: 300},
+                    open: true
+                }
+            }
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.isDialogOpen('advanced-preferences-dialog')).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('restores style dialog state from snapshot data', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            styleEditorTarget: 'generic',
+            dialogLayouts: {
+                "styles-dialog": {
+                    position: {left: 10, top: 20},
+                    size: {width: 500, height: 400},
+                    open: true
+                },
+                "style-editor-dialog": {
+                    position: {left: 30, top: 40},
+                    size: {width: 600, height: 500},
+                    open: true
+                }
+            }
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.isDialogOpen('styles-dialog')).toBe(true);
+        expect(service.isDialogOpen('style-editor-dialog')).toBe(true);
+        expect(service.styleEditorTargetId).toBe('generic');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('rejects snapshot imports with unknown top-level keys and applies nothing', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -1057,7 +1123,6 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         service.markerState.next(false);
-        service.preferencesDialogVisibleState.next(false);
 
         const errors = service.importSnapshot({
             marker: true
@@ -1065,7 +1130,7 @@ describe('AppStateService', () => {
 
         expect(errors).toEqual([]);
         expect(service.markerState.getValue()).toBe(true);
-        expect(service.preferencesDialogVisibleState.getValue()).toBe(false);
+        expect(service.isDialogOpen('preferences-dialog')).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();

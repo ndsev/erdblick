@@ -1,6 +1,5 @@
 import type {APIRequestContext, Locator, Page} from '@playwright/test';
 import { expect } from '@playwright/test';
-import {test} from '../fixtures/test';
 import {requireMapSource} from './backend-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS} from './test-params';
 
@@ -39,95 +38,6 @@ async function finishInitialNavigation(page: Page): Promise<void> {
     await waitForAppReady(page);
     await disableUiAnimations(page);
     await dismissSurveyIfPresent(page);
-}
-
-type ReadinessDiagnostics = {
-    label: string;
-    mapId: string;
-    layerId: string;
-    extra?: Record<string, unknown>;
-};
-
-async function waitForLayerRequestStartup(
-    page: Page,
-    mapId: string,
-    layerId: string,
-    timeoutMs: number
-): Promise<boolean> {
-    try {
-        await page.waitForFunction(({nextMapId, nextLayerId}) => {
-            const readiness = window.ebDebug?.debugReadiness?.(nextMapId, nextLayerId) as {
-                loadedTileCountTotal?: number;
-                tileStream?: { isOpen?: boolean } | null;
-                layer?: { requestedTileCountForLayer?: number } | null;
-            } | null;
-            if (!readiness) {
-                return false;
-            }
-            return (readiness.loadedTileCountTotal ?? 0) > 0
-                || !!readiness.tileStream?.isOpen
-                || (readiness.layer?.requestedTileCountForLayer ?? 0) > 0;
-        }, {
-            nextMapId: mapId,
-            nextLayerId: layerId
-        }, {
-            timeout: timeoutMs
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function logReadinessDiagnostics(page: Page, details: ReadinessDiagnostics): Promise<void> {
-    const snapshot = await page.evaluate(({label, mapId, layerId, extra}) => {
-        const ebDebug = window.ebDebug;
-        const mapLayerDialog = document.querySelector('[data-testid="map-layer-dialog"] .p-dialog-content');
-        const featureSearchPanel = document.querySelector('[data-testid="feature-search-panel"]');
-        const featureSearchBadge = featureSearchPanel?.querySelector('.p-badge')?.textContent?.trim() ?? null;
-        const featureSearchStatus = document.querySelector('[data-testid="feature-search-dialog"] .p-tree-empty-message')?.textContent?.trim() ?? null;
-        const layerNode = mapLayerDialog?.querySelector(`[data-id="${mapId}/${layerId}"]`);
-        const layerCheckbox = layerNode?.querySelector('input.p-checkbox-input[type="checkbox"]') as HTMLInputElement | null;
-        const visibleDialogs = Array.from(document.querySelectorAll('.p-dialog[aria-modal="true"]'))
-            .map(dialog => {
-                const title = dialog.querySelector('.p-dialog-title')?.textContent?.trim();
-                return title && title.length ? title : 'untitled-dialog';
-            });
-        return {
-            label,
-            userAgent: navigator.userAgent,
-            url: window.location.href,
-            timeMs: Date.now(),
-            dom: {
-                mapViewCount: document.querySelectorAll('[data-testid^="mapViewContainer-"]').length,
-                canvasCount: document.querySelectorAll('canvas').length,
-                visibleDialogs,
-                hasViewSyncSelect: !!document.querySelector('[data-testid="viewsync-select"]'),
-                featureSearchBadge,
-                featureSearchStatus,
-                layerCheckboxChecked: layerCheckbox?.checked ?? null
-            },
-            debugReadiness: typeof ebDebug?.debugReadiness === 'function'
-                ? ebDebug.debugReadiness(mapId, layerId)
-                : null,
-            debugDeckViews: typeof ebDebug?.debugDeckViews === 'function'
-                ? ebDebug.debugDeckViews()
-                : null,
-            extra: extra ?? null
-        };
-    }, details);
-    console.log(`[PlaywrightDiag] ${details.label} ${JSON.stringify(snapshot)}`);
-}
-
-/** Emits a compact browser/app readiness snapshot into the Playwright logs. */
-export async function emitReadinessDiagnostics(
-    page: Page,
-    label: string,
-    mapId: string,
-    layerId: string,
-    extra?: Record<string, unknown>
-): Promise<void> {
-    await logReadinessDiagnostics(page, {label, mapId, layerId, extra});
 }
 
 /**
@@ -265,20 +175,7 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
     const layerCheckboxInput = layerNode.locator('input.p-checkbox-input[type="checkbox"]').first();
     await expect(layerCheckboxInput).toBeVisible();
     await layerCheckboxInput.check();
-    await page.waitForFunction(({nextMapId, nextLayerId}) => {
-        const readiness = window.ebDebug?.debugReadiness?.(nextMapId, nextLayerId) as {
-            layer?: { layerVisibleByView?: boolean[] } | null;
-        } | null;
-        return !!readiness?.layer?.layerVisibleByView?.some(Boolean);
-    }, {
-        nextMapId: mapLabel,
-        nextLayerId: layerLabel
-    });
     await closeLayerDialog(page);
-    const requestStartupObserved = await waitForLayerRequestStartup(page, mapLabel, layerLabel, 2000);
-    if (!requestStartupObserved) {
-        await emitReadinessDiagnostics(page, 'enableMapLayer-no-request-startup', mapLabel, layerLabel);
-    }
 }
 
 /**
@@ -360,32 +257,18 @@ export async function runFeatureSearch(page: Page, query: string): Promise<void>
     await expect(featureSearch).toBeVisible();
 
     const resultsBadge = featureSearch.locator('.p-badge').first();
-    try {
-        // Wait until the badge reports at least one search result.
-        await expect.poll(async () => {
-            const text = await resultsBadge.innerText();
-            const value = parseInt(text || '0', 10);
-            return Number.isNaN(value) ? 0 : value;
-        }, {
-            timeout: 10000
-        }).toBeGreaterThan(0);
+    // Wait until the badge reports at least one search result.
+    await expect.poll(async () => {
+        const text = await resultsBadge.innerText();
+        const value = parseInt(text || '0', 10);
+        return Number.isNaN(value) ? 0 : value;
+    }, {
+        timeout: 10000
+    }).toBeGreaterThan(0);
 
-        const emptyMessage = featureSearch.locator('.p-tree-empty-message');
-        // When results are available, the "empty tree" message should disappear.
-        await expect(emptyMessage).toHaveCount(0);
-    } catch (error) {
-        await logReadinessDiagnostics(page, {
-            label: 'runFeatureSearch-timeout',
-            mapId: TEST_MAP_NAMES[0],
-            layerId: TEST_LAYER_NAMES[0],
-            extra: {
-                query,
-                resultPanelVisible: await featureSearch.isVisible().catch(() => false),
-                badgeText: await resultsBadge.textContent().catch(() => null)
-            }
-        });
-        throw error;
-    }
+    const emptyMessage = featureSearch.locator('.p-tree-empty-message');
+    // When results are available, the "empty tree" message should disappear.
+    await expect(emptyMessage).toHaveCount(0);
 }
 
 /**
@@ -425,20 +308,7 @@ export async function setupTwoViewsWithPositionSync(
     await addComparisonView(page);
 
     const syncGroup = page.getByTestId('viewsync-select');
-    try {
-        await expect(syncGroup).toBeVisible();
-    } catch (error) {
-        await logReadinessDiagnostics(page, {
-            label: 'setupTwoViewsWithPositionSync-missing-sync-group',
-            mapId: TEST_MAP_NAMES[mapIndex],
-            layerId: TEST_LAYER_NAMES[layerIndex],
-            extra: {
-                mapIndex,
-                layerIndex
-            }
-        });
-        throw error;
-    }
+    await expect(syncGroup).toBeVisible();
 
     // Enable position synchronisation between the two map views.
     const positionToggle = syncGroup.locator('.material-symbols-outlined', {
