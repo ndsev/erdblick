@@ -1,6 +1,7 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
+import {DeckMapView} from "./mapview/deck/deck-view";
 
 type DebugHighlightMode = "none" | "hover" | "selection";
 type DebugRenderer = "deck";
@@ -206,6 +207,11 @@ export class ErdblickDebugApi {
     /** Returns a compact readiness snapshot for one map/layer pair while debugging CI failures. */
     debugReadiness(mapId: string, layerId: string) {
         return this.mapService.getDebugReadinessSummary(mapId, layerId);
+    }
+
+    /** Returns deck-view-side viewport/debug state to correlate with map-service readiness logs. */
+    debugDeckViews() {
+        return DeckMapView.getDebugSummaries();
     }
 
     /** Builds a temporary deck visualization to inspect highlight rendering for specific features. */

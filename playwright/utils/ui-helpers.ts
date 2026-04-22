@@ -110,6 +110,9 @@ async function logReadinessDiagnostics(page: Page, details: ReadinessDiagnostics
             debugReadiness: typeof ebDebug?.debugReadiness === 'function'
                 ? ebDebug.debugReadiness(mapId, layerId)
                 : null,
+            debugDeckViews: typeof ebDebug?.debugDeckViews === 'function'
+                ? ebDebug.debugDeckViews()
+                : null,
             extra: extra ?? null
         };
     }, details);
