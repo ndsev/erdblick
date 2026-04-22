@@ -105,6 +105,8 @@ import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.p
 import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
+import {AppDialogComponent} from "./shared/app-dialog.component";
+import {AdvancedPreferencesComponent} from "./shared/advanced-preferences.component";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -197,7 +199,8 @@ export const initializeServices = () => {
         DiagnosticsProgressComponent,
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
-        DiagnosticsExportDialogComponent
+        DiagnosticsExportDialogComponent,
+        AdvancedPreferencesComponent
     ],
     bootstrap: [
         AppComponent
@@ -207,6 +210,7 @@ export const initializeServices = () => {
         BrowserAnimationsModule,
         AnimateOnScroll,
         AppRoutingModule,
+        AppDialogComponent,
         SpeedDialModule,
         DialogModule,
         DynamicDialogModule,

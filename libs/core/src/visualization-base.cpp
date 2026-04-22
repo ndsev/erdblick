@@ -108,6 +108,32 @@ std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bo
     return key;
 }
 
+/** Look up a feature across the primary and auxiliary tiles without assuming every tile knows the type id. */
+model_ptr<Feature> findFeatureAcrossTiles(
+    std::vector<mapget::TileFeatureLayer::Ptr> const& tiles,
+    std::string_view typeId,
+    KeyValueViewPairs const& featureId)
+{
+    for (auto const& tile : tiles) {
+        if (!tile || !tile->layerInfo() || !tile->layerInfo()->getTypeInfo(typeId, false)) {
+            continue;
+        }
+        if (auto feature = tile->find(typeId, featureId)) {
+            return feature;
+        }
+    }
+    return {};
+}
+
+/** Convenience overload for callers that currently hold owned id-part strings. */
+model_ptr<Feature> findFeatureAcrossTiles(
+    std::vector<mapget::TileFeatureLayer::Ptr> const& tiles,
+    std::string_view typeId,
+    KeyValuePairs const& featureId)
+{
+    return findFeatureAcrossTiles(tiles, typeId, castToKeyValueView(featureId));
+}
+
 }
 
 bool FeatureLayerVisualizationBase::RelationStyleState::RelationToVisualize::readyToRender() const
@@ -171,7 +197,10 @@ void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
     }
 
     auto targetFeature =
-        visualization_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
+        findFeatureAcrossTiles(
+            visualization_.allTiles_,
+            targetRef->typeId(),
+            targetRef->keyValuePairs());
 
     auto relationsForTargetIt = relationsBySourceFeatureId_.end();
     if (targetFeature) {
@@ -536,13 +565,7 @@ void FeatureLayerVisualizationBase::processResolvedExternalReferences(
         auto const featureId = JsValue(firstResolution["featureId"]).toKeyValuePairs();
         #endif
 
-        mapget::model_ptr<mapget::Feature> targetFeature;
-        for (auto const& tile : allTiles_) {
-            targetFeature = tile->find(typeId, featureId);
-            if (targetFeature) {
-                break;
-            }
-        }
+        auto targetFeature = findFeatureAcrossTiles(allTiles_, typeId, featureId);
         if (!targetFeature) {
             std::cout << "Resolved target feature was not found in aux tiles!" << std::endl;
             continue;

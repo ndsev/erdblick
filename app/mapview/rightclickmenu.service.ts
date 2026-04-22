@@ -34,13 +34,13 @@ export interface TileOutlinePayload {
 export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
-    tileSourceDataDialogVisible: boolean = false;
     preferredTileIdForSourceData: bigint | null = null;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
+    private sourceDataDialogVisible = false;
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService) {
@@ -48,7 +48,7 @@ export class RightClickMenuService {
             label: 'Inspect Source Data for Tile',
             icon: 'pi pi-database',
             command: () => {
-                this.tileSourceDataDialogVisible = true;
+                this.openTileSourceDataDialog();
             }
         }]);
 
@@ -72,6 +72,21 @@ export class RightClickMenuService {
                 this.menuItems.next(items);
             }
         });
+    }
+
+    /** Returns whether the source-data picker dialog is currently visible. */
+    isSourceDataDialogOpen(): boolean {
+        return this.sourceDataDialogVisible;
+    }
+
+    /** Opens the source-data picker dialog. */
+    openTileSourceDataDialog(): void {
+        this.sourceDataDialogVisible = true;
+    }
+
+    /** Closes the source-data picker dialog. */
+    closeTileSourceDataDialog(): void {
+        this.sourceDataDialogVisible = false;
     }
 
     /**

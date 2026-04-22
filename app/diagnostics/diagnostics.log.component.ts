@@ -2,16 +2,17 @@ import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {BehaviorSubject, combineLatest, map, Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import type {DiagnosticsLogFilter} from './diagnostics.model';
-import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppStateService} from '../shared/appstate.service';
+import {AppStateService, DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'diagnostics-log-dialog',
     template: `
-        <p-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
-                  [(visible)]="stateService.diagnosticsLogDialogVisible"
+        <app-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
+                  [(visible)]="dialogVisible"
                   [modal]="false"
+                  [persistLayout]="true" [layoutId]="layoutId"
                   [style]="dialogStyle"
                   (onShow)="onDialogShow()">
             <div class="diagnostics-log-controls">
@@ -94,14 +95,15 @@ import {AppStateService} from '../shared/appstate.service';
             <div class="diagnostics-log-footer">
                 <p-button size="small" label="Export" (click)="openExport()"/>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [``],
     standalone: false
 })
 /** Dialog that filters, sorts, and exports captured diagnostics log entries. */
 export class DiagnosticsLogDialogComponent implements OnDestroy {
-    @ViewChild('dialog') dialog?: Dialog;
+    readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
         height: '75vh'
     };
@@ -138,6 +140,14 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
                 this.logFilter = {...filter};
             })
         );
+    }
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.layoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases dialog-local subscriptions. */

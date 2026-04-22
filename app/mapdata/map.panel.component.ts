@@ -1,7 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapDataService} from "./map.service";
 import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
-import {Dialog} from "primeng/dialog";
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
@@ -11,12 +10,13 @@ import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.m
 import {Subscription} from "rxjs";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 
 @Component({
     selector: 'map-panel',
     template: `
-        <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
+        <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
                   [position]="'left'" [draggable]="false" [resizable]="false" 
                   (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
@@ -25,7 +25,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
                       (mousedown)="$event.stopPropagation()"/>
             <ng-container *ngFor="let index of viewIndices">
-                <p-fieldset class="map-tab" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
+                <p-fieldset class="map-tab" [attr.data-testid]="getMapTabTestId(index)" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
                     <ng-template #header>
                         <div>
                             @if (stateService.numViews > 1) {
@@ -81,6 +81,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                         <div class="osm-controls">
                             <span style="font-size: 0.9em">OSM Overlay:</span>
                             <p-button onEnterClick (click)="toggleOSMOverlay(index)"
+                                      [attr.data-testid]="getOsmToggleTestId(index)"
                                       [styleClass]="osmEnabled[index] ? 'osm-button p-button-success' : 'osm-button p-button-primary'"
                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                       icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -240,7 +241,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </ng-container>
                 </p-fieldset>
                 @if (viewIndices.length < 2) {
-                    <p-button onEnterClick class="add-view-button" (click)="addView()" icon="" label="Add View"
+                    <p-button onEnterClick class="add-view-button" data-testid="add-view-button" (click)="addView()" icon="" label="Add View"
                               pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
                         <span class="material-symbols-outlined" style="margin: 0 auto;">
                             add_column_right
@@ -248,7 +249,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-button>
                 }
             </ng-container>
-        </p-dialog>
+        </app-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
     `,
@@ -262,8 +263,8 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     standalone: false
 })
 /**
- * Sidebar dialog that exposes map/layer visibility, level, metadata, and OSM controls.
- * It mirrors `MapLayerTree` state into PrimeNG widgets and persists user actions back through `MapDataService`.
+ * Renders the maps-and-layers panel and translates its UI controls into map-service and
+ * app-state updates for the active views.
  */
 export class MapPanelComponent {
 
@@ -283,11 +284,11 @@ export class MapPanelComponent {
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
-    @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
+    @ViewChild('mapLayerDialog') mapLayerDialog: AppDialogComponent | undefined;
 
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
 
-    /** Wires UI subscriptions and keyboard shortcuts for the map/layer dialog. */
+    /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
     constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
@@ -383,12 +384,12 @@ export class MapPanelComponent {
         );
     }
 
-    /** Keeps the floating dialog on top when PrimeNG reports that it became visible. */
+    /** Brings the floating maps dialog to the top of the dialog stack when shown. */
     onMapLayerDialogShow() {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
-    /** Normalizes free-form opacity text input into the 0-100 slider range. */
+    /** Sanitizes the free-form OSM opacity input and applies it to the selected view. */
     onOsmOpacityInput(event: any, viewIndex: number) {
         const inputElement = event.target as HTMLInputElement;
         const value = inputElement.value;
@@ -415,7 +416,7 @@ export class MapPanelComponent {
         this.updateOSMOverlay(viewIndex);
     }
 
-    /** Opens the bulk layer toggle menu for the selected map, group, or layer node. */
+    /** Opens the bulk layer-toggle menu for one map or layer row. */
     showLayersToggleMenu(event: MouseEvent, viewIndex: number, mapId: string, layerId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
@@ -447,19 +448,19 @@ export class MapPanelComponent {
                 label: 'Toggle All On',
                 command: () => {
                     for (const layer of this.mapService.maps.allFeatureLayers()) {
-                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, true);
                     }
                 }
             }
         ];
     }
 
-    /** Toggles the overall visibility of the maps dialog. */
+    /** Toggles the visibility of the maps panel dialog. */
     toggleLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
     }
 
-    /** Focuses a view on the union of the selected coverage rectangles or tile ids. */
+    /** Moves the target view camera to the coverage bounds represented by one tree node. */
     focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
         event.stopPropagation();
         let tileIds = coverages.map(coverage => {
@@ -490,7 +491,7 @@ export class MapPanelComponent {
         );
     }
 
-    /** Flattens child layer coverages so a map node can reuse the same focus action as layers. */
+    /** Flattens one tree node's direct child coverage rectangles into a single array. */
     flatCoverage(node: any): (number | CoverageRectItem)[] {
         if (!node || !node.children) {
             return [];
@@ -504,30 +505,40 @@ export class MapPanelComponent {
         return coverage;
     }
 
-    /** Persists OSM visibility and opacity for one view and re-syncs derived view state. */
+    /** Writes the current OSM enable/opacity state for one view back into app state. */
     updateOSMOverlay(viewIndex: number) {
         this.stateService.setOsmState(viewIndex, this.osmEnabled[viewIndex], this.osmOpacityValue[viewIndex]);
         this.mapService.syncOsmSettings(viewIndex);
     }
 
-    /** Toggles the OSM overlay for one view while preserving the last opacity value. */
+    /** Toggles the OSM overlay on the selected view. */
     toggleOSMOverlay(viewIndex: number) {
         this.osmEnabled[viewIndex] = !this.osmEnabled[viewIndex];
         this.updateOSMOverlay(viewIndex);
     }
 
-    /** Toggles one layer, one map, or one group subtree via `MapDataService`. */
+    /** Sets the visibility of one map or layer entry for a specific view. */
     toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
         this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
-    /** Toggles diagnostic tile borders in the selected view. */
+    /** Returns the stable test id for one map tab. */
+    getMapTabTestId(viewIndex: number): string {
+        return `map-tab-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one OSM toggle button. */
+    getOsmToggleTestId(viewIndex: number): string {
+        return `osm-toggle-${viewIndex}`;
+    }
+
+    /** Toggles per-view tile-border visualization. */
     toggleViewTileBorders(viewIndex: number) {
         this.mapService.toggleViewTileBorderVisibility(viewIndex);
         this.tileBordersEnabled[viewIndex] = this.mapService.maps.getViewTileBorderState(viewIndex);
     }
 
-    /** Cycles the tile grid overlay between the supported coordinate modes. */
+    /** Switches the tile-grid overlay between NDS and XYZ labeling modes. */
     toggleViewTileGridMode(viewIndex: number) {
         const currentMode = this.tileGridModes[viewIndex] ?? "nds";
         const nextMode: TileGridMode = currentMode === "xyz" ? "nds" : "xyz";
@@ -535,7 +546,7 @@ export class MapPanelComponent {
         this.mapService.setViewTileGridMode(viewIndex, nextMode);
     }
 
-    /** Applies a manual layer level and disables auto-level first so the stepper has immediate effect. */
+    /** Applies a manually chosen layer level and disables auto-level for that layer. */
     onLayerLevelChanged(level: number | null, viewIndex: number, mapName: string, layerName: string) {
         if (level === null || !Number.isFinite(level)) {
             return;
@@ -546,13 +557,13 @@ export class MapPanelComponent {
         this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Math.max(0, Math.floor(level)));
     }
 
-    /** Toggles the auto-level heuristic for a single layer/view combination. */
+    /** Toggles automatic level selection for one layer in one view. */
     toggleLayerAutoLevel(viewIndex: number, mapName: string, layerName: string) {
         const nextState = !this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName);
         this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, nextState);
     }
 
-    /** Returns the effective level shown in the UI, substituting the current auto-level when enabled. */
+    /** Returns the effective display level, substituting the auto-level result when needed. */
     displayMapLayerLevel(viewIndex: number, mapName: string, layerName: string, fallbackLevel: number) {
         if (!this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
             return fallbackLevel;
@@ -566,7 +577,7 @@ export class MapPanelComponent {
         this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
     }
 
-    /** Adds the second comparison view; the UI currently caps this at two views. */
+    /** Adds another synchronized map view up to the current supported limit. */
     addView() {
         // Limit the increment for now since we do not yet support more than 2 views
         if (this.stateService.numViews < 2) {
@@ -574,7 +585,7 @@ export class MapPanelComponent {
         }
     }
 
-    /** Removes the secondary comparison view and keeps at least one view alive. */
+    /** Removes one view, keeping at least a single map view alive. */
     removeView(event: MouseEvent, index: number) {
         event.stopPropagation();
         // Right now we just decrement, but for more than 2 views we should consider the actual indices
@@ -585,7 +596,7 @@ export class MapPanelComponent {
         }
     }
 
-    /** Toggles cross-view synchronization for layer config and style options. */
+    /** Toggles option synchronization for the selected view. */
     syncOptionsForView(viewIndex: number) {
         const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
         this.mapService.setSyncOptionsForView(viewIndex, nextState);
@@ -594,9 +605,9 @@ export class MapPanelComponent {
             this.mapService.isSyncOptionsForViewEnabled(index));
     }
 
-    /** Closes the maps dialog through persisted app state. */
+    /** Closes the maps panel through shared app state. */
     protected closeMapsPanel() {
-        this.stateService.mapsDialogVisible = false;
+        this.stateService.mapsOpenState.next(false);
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

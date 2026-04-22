@@ -1,5 +1,4 @@
 import {Component, effect, input, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren} from '@angular/core';
-import {Dialog} from 'primeng/dialog';
 import {ContextMenu} from 'primeng/contextmenu';
 import {MenuItem} from 'primeng/api';
 import {Subscription} from 'rxjs';
@@ -16,6 +15,7 @@ import {
 import {FeatureWrapper} from '../mapdata/features.model';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {FeaturePanelComponent} from './feature.panel.component';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 /** View model for one comparison column in the side-by-side inspection dialog. */
 interface ComparisonColumn {
@@ -29,8 +29,9 @@ interface ComparisonColumn {
 @Component({
     selector: 'inspection-comparison-dialog',
     template: `
-        <p-dialog #dialog class="inspection-comparison-dialog"
+        <app-dialog #dialog class="inspection-comparison-dialog"
                   [modal]="false" [closable]="true" [(visible)]="visible"
+                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="layoutId"
                   (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()"
                   (onResizeEnd)="onDialogResizeEnd()">
             <ng-template #header>
@@ -110,7 +111,7 @@ interface ComparisonColumn {
                     </div>
                 </div>
             </ng-template>
-        </p-dialog>
+        </app-dialog>
         <p-contextMenu #columnMenu [model]="columnMenuItems" [baseZIndex]="30000" appendTo="body"
                        [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
@@ -120,6 +121,7 @@ interface ComparisonColumn {
 /** Floating dialog that renders multiple inspection panels side by side for manual comparison. */
 export class InspectionComparisonDialogComponent implements OnDestroy {
     comparison = input.required<InspectionComparisonModel>();
+    readonly layoutId = 'inspection-comparison';
     visible = true;
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
@@ -128,7 +130,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     heightEm = DEFAULT_EM_HEIGHT;
     comparisonFilter = '';
 
-    @ViewChild('dialog') dialog?: Dialog;
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('columnMenu') columnMenu!: ContextMenu;
     @ViewChildren(FeaturePanelComponent) featurePanels!: QueryList<FeaturePanelComponent>;
 

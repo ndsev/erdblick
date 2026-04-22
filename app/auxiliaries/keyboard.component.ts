@@ -1,13 +1,14 @@
 import {Component, ViewChild} from '@angular/core';
-import {AppStateService} from '../shared/appstate.service';
-import {Dialog} from 'primeng/dialog';
+import {AppStateService, KEYBOARD_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {DialogStackService} from '../shared/dialog-stack.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'keyboard-dialog',
     template: `
-        <p-dialog header="Keyboard Controls" [(visible)]="stateService.controlsDialogVisible" [position]="'center'"
+        <app-dialog header="Keyboard Controls" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="false" [draggable]="true" class="pref-dialog"
+                  [persistLayout]="true" [layoutId]="dialogLayoutId"
                   #keyboardDialog (onShow)="onDialogShow()">
             <div class="keyboard-dialog">
                 <ul class="keyboard-list">
@@ -88,7 +89,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
                 </ul>
             </div>
             <p-button (click)="close()" label="Close" icon="pi pi-times"></p-button>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [
         `
@@ -154,10 +155,20 @@ import {DialogStackService} from '../shared/dialog-stack.service';
 })
 /** Static keyboard shortcut reference dialog. */
 export class KeyboardComponent {
-    @ViewChild('keyboardDialog') keyboardDialog?: Dialog;
+    readonly dialogLayoutId = KEYBOARD_DIALOG_LAYOUT_ID;
+
+    @ViewChild('keyboardDialog') keyboardDialog?: AppDialogComponent;
 
     constructor(public stateService: AppStateService,
                 private dialogStack: DialogStackService) {}
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.dialogLayoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+    }
 
     /** Promotes the keyboard-help dialog above other overlays. */
     onDialogShow() {
@@ -166,6 +177,6 @@ export class KeyboardComponent {
 
     /** Closes the keyboard-help dialog. */
     close() {
-        this.stateService.controlsDialogVisible = false;
+        this.dialogVisible = false;
     }
 }

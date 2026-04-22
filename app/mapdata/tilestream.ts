@@ -75,6 +75,25 @@ export interface MapTileStreamTransportCompressionStats {
     knownCompressedCoveragePct: number;
 }
 
+export interface MapTileStreamDebugState {
+    isOpen: boolean;
+    awaitingCompletion: boolean;
+    latestRequestedRequestId: number | null;
+    incomingRequestId: number | null;
+    supportsRequestContextFrames: boolean;
+    pullClientId: number | null;
+    pendingFrameQueueSize: number;
+    frameProcessingPaused: boolean;
+    pullCompressionEnabled: boolean;
+    pullBatchMaxBytesBudget: number;
+    downstreamBytesPerSecondEwma: number;
+    totalPullResponses: number;
+    totalPullGzipResponses: number;
+    lastStatusPayload: Pick<MapTileStreamStatusPayload, 'requestId' | 'allDone' | 'message'> & {
+        requestCount: number;
+    } | null;
+}
+
 /**
  * WebSocket client for `/tiles` plus the optional `/tiles/next` pull loop.
  * It hides frame parsing, request chunking, status tracking, and adaptive pull budgeting
@@ -271,6 +290,33 @@ export class MapTileStreamClient {
             compressionRatioPct: ratioPct,
             compressionSavingsPct: savingsPct,
             knownCompressedCoveragePct: coveragePct,
+        };
+    }
+
+    /** Returns a compact snapshot of pull-loop and websocket state for CI diagnostics. */
+    getDebugState(): MapTileStreamDebugState {
+        return {
+            isOpen: this.isOpen(),
+            awaitingCompletion: this.awaitingCompletion,
+            latestRequestedRequestId: this.latestRequestedRequestId,
+            incomingRequestId: this.incomingRequestId,
+            supportsRequestContextFrames: this.supportsRequestContextFrames,
+            pullClientId: this.pullClientId,
+            pendingFrameQueueSize: this.frameQueue.length,
+            frameProcessingPaused: this.frameProcessingPaused,
+            pullCompressionEnabled: this.pullCompressionEnabled,
+            pullBatchMaxBytesBudget: this.pullBatchMaxBytesBudget,
+            downstreamBytesPerSecondEwma: this.downstreamBytesPerSecondEwma,
+            totalPullResponses: this.totalPullResponses,
+            totalPullGzipResponses: this.totalPullGzipResponses,
+            lastStatusPayload: this.lastStatusPayload
+                ? {
+                    requestId: this.lastStatusPayload.requestId,
+                    allDone: this.lastStatusPayload.allDone,
+                    message: this.lastStatusPayload.message,
+                    requestCount: this.lastStatusPayload.requests.length
+                }
+                : null
         };
     }
 

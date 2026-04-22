@@ -1,0 +1,181 @@
+{
+  "numberOfViews": 1,
+  "selected": [],
+  "focus": 0,
+  "viewSync": [
+    "pos"
+  ],
+  "cameraView": [
+    {
+      "lon": 42.5,
+      "lat": 11.615,
+      "alt": 500.0,
+      "h": 0.02,
+      "p": -0.75,
+      "r": 0
+    }
+  ],
+  "mode2d": [
+    false
+  ],
+  "deckStyleWorkersOverride": 0,
+  "deckThreadedRenderingEnabled": 1,
+  "pinLowFiToMaxLod": 0,
+  "deckStyleWorkersCount": 8,
+  "tilePullCompressionEnabled": 0,
+  "layerSyncOptions": [
+    false,
+    false
+  ],
+  "osm": [
+    "0~10"
+  ],
+  "layerNames": [
+    "TestMap/WayLayer"
+  ],
+  "visibility": [
+    [
+      true,
+      true,
+      true
+    ]
+  ],
+  "tileBorders": [
+    true
+  ],
+  "tileGridMode": [
+    "nds"
+  ],
+  "zoomLevel": [
+    [
+      13,
+      13,
+      13
+    ]
+  ],
+  "autoZoomLevel": [
+    [
+      true,
+      true,
+      true
+    ]
+  ],
+  "styleVisiblity": {
+    "DefaultStyle": 1
+  },
+  "tilesLoadLimit": 512,
+  "enabledCoordsTileIds": [
+    "WGS84"
+  ],
+  "legalInfoDialogVisible": 0,
+  "aboutDialogVisible": 0,
+  "preferencesDialogVisible": 0,
+  "controlsDialogVisible": 0,
+  "datasourcesEditorDialogVisible": 0,
+  "advancedPreferencesDialogVisible": 0,
+  "diagnosticsPerformanceDialogVisible": 0,
+  "diagnosticsLogDialogVisible": 0,
+  "diagnosticsExportDialogVisible": 0,
+  "diagnosticsLogFilter": {
+    "info": 1,
+    "warn": 1,
+    "error": 1
+  },
+  "diagnosticsExportOptions": {
+    "includeProgress": 1,
+    "includePerformance": 1,
+    "includeLogs": 1,
+    "logFilter": {
+      "info": 1,
+      "warn": 1,
+      "error": 1
+    }
+  },
+  "mapsOpenState": 0,
+  "dockOpenState": 0,
+  "dockAutoCollapse": 1,
+  "inspectionsLimitState": 24,
+  "inspectionComparisonState": null,
+  "dialogLayouts": {
+    "styles-dialog": {
+      "position": {
+        "left": 100,
+        "top": 415
+      },
+      "size": {
+        "width": 480,
+        "height": 134
+      }
+    },
+    "style-editor-dialog": {
+      "position": {
+        "left": 600,
+        "top": 100
+      },
+      "size": {
+        "width": 900,
+        "height": 760
+      }
+    },
+    "datasources-editor-dialog": {
+      "position": {
+        "left": 354,
+        "top": 222
+      },
+      "size": {
+        "width": 800,
+        "height": 163
+      }
+    },
+    "advanced-preferences-dialog": {
+      "position": {
+        "left": 374,
+        "top": 88
+      },
+      "size": {
+        "width": 796,
+        "height": 944
+      }
+    },
+    "diagnostics-performance": {
+      "position": {
+        "left": 987,
+        "top": 85
+      },
+      "size": {
+        "width": 958,
+        "height": 969
+      }
+    },
+    "diagnostics-log": {
+      "position": {
+        "left": 639,
+        "top": 145
+      },
+      "size": {
+        "width": 769,
+        "height": 847
+      }
+    },
+    "preferences-dialog": {
+      "position": {
+        "left": 742,
+        "top": 151
+      },
+      "size": {
+        "width": 498,
+        "height": 863
+      }
+    },
+    "diagnostics-export": {
+      "position": {
+        "left": 751,
+        "top": 477
+      },
+      "size": {
+        "width": 480,
+        "height": 211
+      }
+    }
+  }
+}

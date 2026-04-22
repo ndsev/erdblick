@@ -13,7 +13,7 @@ import * as http from 'http';
  * later terminate the process.
  *
  * The port and base URL can be overridden via `EB_APP_PORT` and `EB_APP_URL`,
- * and the `mapget` binary via `MAPGET_BIN`.
+ * the config via `EB_MAPGET_CONFIG`, and the `mapget` binary via `MAPGET_BIN`.
  */
 
 interface GlobalState {
@@ -93,8 +93,15 @@ async function globalSetup(config: FullConfig): Promise<void> {
     const port = process.env["EB_APP_PORT"] || '9000';
     const baseURL = process.env["EB_APP_URL"] || `http://localhost:${port}`;
 
-    // The mapget config must exist; it wires the Python example datasource.
-    const mapgetConfigPath = path.join(projectRoot, 'test', 'mapget-integration.yaml');
+    const defaultConfigPath = path.join(projectRoot, 'test', 'mapget-integration.yaml');
+    const overrideConfig = process.env["EB_MAPGET_CONFIG"];
+    const mapgetConfigPath = overrideConfig
+        ? (path.isAbsolute(overrideConfig)
+            ? overrideConfig
+            : path.resolve(projectRoot, overrideConfig))
+        : defaultConfigPath;
+
+    // The mapget config must exist; it wires the integration datasource(s).
     if (!fs.existsSync(mapgetConfigPath)) {
         throw new Error(`Expected mapget config at ${mapgetConfigPath}`);
     }
@@ -116,7 +123,11 @@ async function globalSetup(config: FullConfig): Promise<void> {
     // Start `mapget serve` in the repository root.
     const child = spawn(mapgetExecutable, args, {
         stdio: 'inherit',
-        cwd: projectRoot
+        cwd: projectRoot,
+        env: {
+            ...process.env,
+            HTTP_SETTINGS_FILE: process.env["HTTP_SETTINGS_FILE"] || mapgetConfigPath
+        }
     });
 
     if (!child.pid) {

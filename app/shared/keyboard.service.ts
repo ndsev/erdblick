@@ -1,5 +1,5 @@
 import {Directive, ElementRef, HostListener, Injectable, Renderer2, RendererFactory2} from "@angular/core";
-import {Dialog} from "primeng/dialog";
+import {DialogStackService} from "./dialog-stack.service";
 
 @Directive({
     selector: '[onEnterClick]',
@@ -22,11 +22,11 @@ export class OnEnterClickDirective {
 /** Global keyboard shortcut registry shared across dialogs and panels. */
 export class KeyboardService {
     private renderer: Renderer2;
-    private dialogStack: Array<Dialog> = [];
-    private shortcuts = new Map<string, (event: KeyboardEvent) => void>();
-    private preventOnInputShortcuts: Set<string> = new Set<string>();
+    private readonly shortcuts = new Map<string, (event: KeyboardEvent) => void>();
+    private readonly preventOnInputShortcuts = new Set<string>();
 
-    constructor(rendererFactory: RendererFactory2) {
+    constructor(rendererFactory: RendererFactory2,
+                private readonly dialogStack: DialogStackService) {
         this.renderer = rendererFactory.createRenderer(null, null);
         this.listenToKeyboardEvents();
     }
@@ -35,28 +35,34 @@ export class KeyboardService {
     private listenToKeyboardEvents() {
         this.renderer.listen('window', 'keydown', (event: KeyboardEvent) => {
             const target = event.target as HTMLElement;
-            const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+            const isTextEditingSurface = this.isTextEditingSurface(target);
             const key = this.getKeyCombination(event);
 
-            // TODO: Ensure that tab and escape, when pressed in a text area,
-            //  result in a tab character/autocomplete cancelation rather than
-            //  focusing another control/closing the enclosing dialog.
-            // NOTE: This affects UX when editing text - currently these keys may trigger
-            // unintended focus changes or dialog closures instead of normal text editing behavior.
+            // Let editors and text inputs keep Tab/Escape for indentation, completion,
+            // or local dialog logic instead of routing them through the global shortcut layer.
+            if (isTextEditingSurface && (event.key === 'Tab' || event.key === 'Escape')) {
+                return;
+            }
 
             // Let non-ctrl key events or text editing shortcuts do their default things.
-            if (isInput && this.preventOnInputShortcuts.has(key)) {
+            if (isTextEditingSurface && this.preventOnInputShortcuts.has(key)) {
                 return;
             }
 
             if (this.shortcuts.has(key)) {
                 event.preventDefault();
                 this.shortcuts.get(key)?.(event);
+                return;
             }
 
-            // TODO: Else-if Escape was hit, close the most recent dialog
-            //  in the stack. (JB: Can we get rid of this? Things seem
-            //  to work fine without the dialog stack).
+            if (event.key === 'Escape') {
+                window.setTimeout(() => {
+                    if (event.defaultPrevented) {
+                        return;
+                    }
+                    this.dialogStack.closeTopDialog(event);
+                }, 0);
+            }
         });
     }
 
@@ -68,6 +74,17 @@ export class KeyboardService {
         }
         key += event.key;
         return key;
+    }
+
+    /** Identifies DOM targets that should keep local text-editing keyboard semantics. */
+    private isTextEditingSurface(target: HTMLElement | null): boolean {
+        if (!target) {
+            return false;
+        }
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+            return true;
+        }
+        return target.closest('.cm-editor,[contenteditable=\"true\"]') !== null;
     }
 
     /** Registers a shortcut and optionally ignores it while the user edits text inputs. */

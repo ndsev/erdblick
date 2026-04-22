@@ -6,18 +6,19 @@ import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
-import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog #featureSearchDialog class="feature-search-dialog" header="Search Loaded Features"
+        <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
                   [closeOnEscape]="false"
                   [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
+                  [persistLayout]="true" [layoutId]="featureSearchLayoutId"
                   (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
@@ -29,11 +30,12 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-progressBar>
                 </div>
                 <p-button (click)="toggleSearchPaused()"
+                          data-testid="feature-search-pause-button"
                           [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
                           label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
                           [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
-                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
+                <p-button (click)="stopSearch()" data-testid="feature-search-stop-button" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
             <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">
@@ -42,7 +44,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                     [style]="{ width: '1em', height: '1em', margin: '0' }"/>
             </div>
 
-            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
+            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" data-testid="feature-search-panel" scrollable>
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results </span>
@@ -77,7 +79,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 
                         <!-- Results Tree -->
                         <div style="height: 100%">
-                            <p-tree #tree [value]="resultsTree"
+                            <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
                                     selectionMode="single"
                                     [metaKeySelection]="false"
                                     [lazy]="true"
@@ -147,7 +149,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
-        </p-dialog>
+        </app-dialog>
         <div #alert></div>
     `,
     styles: [``],
@@ -157,7 +159,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
  * Dialog that presents long-running feature-search progress, result grouping, diagnostics, and traces.
  */
 export class FeatureSearchComponent {
-    isPanelVisible: boolean = false;
+    readonly featureSearchLayoutId = FEATURE_SEARCH_DIALOG_LAYOUT_ID;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
@@ -185,7 +187,7 @@ export class FeatureSearchComponent {
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
-    @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
+    @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
 
     /**
      * Subscribes to search progress and keeps the dialog state synchronized with the active search.
@@ -220,6 +222,14 @@ export class FeatureSearchComponent {
             if (this.diagnostics.length > 0 && this.results.length === 0)
                 this.resultPanelIndex = 'diagnostics';
         })
+    }
+
+    get isPanelVisible(): boolean {
+        return this.stateService.isDialogOpen(this.featureSearchLayoutId);
+    }
+
+    set isPanelVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.featureSearchLayoutId, visible);
     }
 
     /**

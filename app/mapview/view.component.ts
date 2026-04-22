@@ -39,13 +39,16 @@ import {coreLib} from "../integrations/wasm";
         <div #viewer
              [ngClass]="{'border': outlined}"
              [id]="canvasId"
+             [attr.data-testid]="canvasId"
              class="mapviewer-renderlayer"
              style="z-index: 0"></div>
         @if (!environment.visualizationOnly && showSyncMenu) {
-            <p-buttonGroup class="viewsync-select">
-                @for (option of stateService.syncOptions; track $index) {
-                    <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
-                                    [(ngModel)]="option.value" (ngModelChange)="stateService.updateSelectedSyncOptions()"
+            <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
+                @for (option of stateService.syncOptions; track option.code) {
+                    <p-toggleButton onIcon="" offIcon=""
+                                    [ngModel]="isSyncOptionSelected(option.code)"
+                                    [ngClass]="{'green': isSyncOptionSelected(option.code)}"
+                                    (ngModelChange)="onSyncOptionToggle(option.code, $event)"
                                     onLabel="" offLabel="" pTooltip="{{option.tooltip}}" tooltipPosition="bottom">
                         <ng-template #icon>
                             <span class="material-symbols-outlined">{{ option.icon }}</span>
@@ -90,6 +93,7 @@ import {coreLib} from "../integrations/wasm";
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
+    protected readonly isSyncOptionSelected = (code: string) => this.stateService.viewSync.includes(code);
 
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
@@ -148,6 +152,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
             })
         );
+    }
+
+    /** Mirrors one sync toggle button back into the canonical view-sync selection. */
+    onSyncOptionToggle(code: string, enabled: boolean): void {
+        const nextSelection = enabled
+            ? [...this.stateService.viewSync, code]
+            : this.stateService.viewSync.filter(currentCode => currentCode !== code);
+        this.stateService.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
@@ -210,7 +222,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             return;
         }
         this.resetPreparedSourceData(false, false);
-        if (!this.menuService.tileSourceDataDialogVisible) {
+        if (!this.menuService.isSourceDataDialogOpen()) {
             this.menuService.tileOutline.next(null);
         }
     }
@@ -279,8 +291,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 return;
             }
             this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
-            const currentSyncState = new Set(this.stateService.viewSync);
-            this.stateService.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
             this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
                 this.featureIdsContent = [];
                 if (!result || !result.featureIds.length) {

@@ -1,15 +1,23 @@
 import {Injectable} from '@angular/core';
-import {Dialog} from 'primeng/dialog';
 
+/** Stores the DOM elements that participate in one floating-dialog stack entry. */
 interface StackEntry {
     container: HTMLElement;
     wrapper?: HTMLElement;
+    close?: (event?: Event) => void;
+}
+
+/** Minimal shape required to bring an app dialog to the top of the z-index stack. */
+interface DialogLike {
+    container: () => HTMLElement | undefined;
+    wrapper?: HTMLElement | null;
+    close?: (event?: Event) => void;
 }
 
 @Injectable({providedIn: 'root'})
 /**
- * Maintains deterministic z-ordering for PrimeNG dialogs created through
- * different code paths.
+ * Maintains a predictable z-index ordering for non-modal floating dialogs that would
+ * otherwise fight over stacking via PrimeNG defaults.
  */
 export class DialogStackService {
     private static readonly STACK_BASE_Z_INDEX = 200;
@@ -17,8 +25,8 @@ export class DialogStackService {
     private static readonly MAX_TRACKED_ELEMENTS = 100;
     private readonly stack: StackEntry[] = [];
 
-    /** Promotes the target dialog container to the top of the managed z-index stack. */
-    bringToFront(target: Dialog | HTMLElement | undefined | null) {
+    /** Moves the given dialog or element to the top of the managed z-index stack. */
+    bringToFront(target: DialogLike | HTMLElement | undefined | null) {
         const entry = this.resolveEntry(target);
         if (!entry) {
             return;
@@ -26,6 +34,10 @@ export class DialogStackService {
         this.pruneStack();
         const existingEntryIndex = this.stack.findIndex(stackEntry => stackEntry.container === entry.container);
         if (existingEntryIndex !== -1) {
+            const existingEntry = this.stack[existingEntryIndex];
+            if (!entry.close) {
+                entry.close = existingEntry.close;
+            }
             this.stack.splice(existingEntryIndex, 1);
         }
         this.stack.push(entry);
@@ -38,8 +50,8 @@ export class DialogStackService {
         this.applyStackZIndex();
     }
 
-    /** Resolves the dialog container and surrounding mask for the given target. */
-    private resolveEntry(target: Dialog | HTMLElement | undefined | null): StackEntry | undefined {
+    /** Normalizes supported dialog targets into a tracked stack entry. */
+    private resolveEntry(target: DialogLike | HTMLElement | undefined | null): StackEntry | undefined {
         if (!target) {
             return undefined;
         }
@@ -57,11 +69,30 @@ export class DialogStackService {
         }
         return {
             container,
-            wrapper: this.resolveMaskElement(target.wrapper ?? container.parentElement)
+            wrapper: this.resolveMaskElement(target.wrapper ?? container.parentElement),
+            close: typeof target.close === 'function' ? target.close.bind(target) : undefined
         };
     }
 
-    /** Applies the current stack order to both dialog containers and their masks. */
+    /** Closes the topmost tracked dialog when it exposes a close path or close button. */
+    closeTopDialog(event?: Event): boolean {
+        this.pruneStack();
+        for (let index = this.stack.length - 1; index >= 0; index--) {
+            const entry = this.stack[index];
+            if (entry.close) {
+                entry.close(event);
+                return true;
+            }
+            const closeButton = entry.container.querySelector<HTMLElement>('.p-dialog-header-close-button');
+            if (closeButton) {
+                closeButton.click();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Applies monotonically increasing z-indices to the retained stack entries. */
     private applyStackZIndex() {
         for (let index = 0; index < this.stack.length; index++) {
             const entry = this.stack[index];
@@ -79,7 +110,7 @@ export class DialogStackService {
         }
     }
 
-    /** Removes disconnected dialogs so stale overlays do not consume z-index slots. */
+    /** Drops entries whose DOM nodes are gone or no longer visible. */
     private pruneStack() {
         const retainedEntries: StackEntry[] = [];
         for (const entry of this.stack) {
@@ -93,7 +124,7 @@ export class DialogStackService {
         this.stack.push(...retainedEntries);
     }
 
-    /** Returns the PrimeNG mask element if the given node represents one. */
+    /** Returns the overlay mask wrapper for supported PrimeNG dialog containers. */
     private resolveMaskElement(element: HTMLElement | null | undefined): HTMLElement | undefined {
         if (!element) {
             return undefined;
@@ -104,7 +135,7 @@ export class DialogStackService {
         return undefined;
     }
 
-    /** Clears every z-index override associated with one tracked dialog entry. */
+    /** Clears stacking styles for one removed stack entry. */
     private clearEntryZIndex(entry: StackEntry) {
         this.clearZIndex(entry.container);
         if (entry.wrapper) {
@@ -112,7 +143,7 @@ export class DialogStackService {
         }
     }
 
-    /** Removes the temporary z-index override from one element. */
+    /** Removes the z-index override from one element. */
     private clearZIndex(element: HTMLElement) {
         element.style.removeProperty('z-index');
     }

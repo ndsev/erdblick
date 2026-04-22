@@ -2,7 +2,7 @@ import {Injectable, OnDestroy} from '@angular/core';
 import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
 import {FeatureTile} from '../mapdata/features.model';
-import {AppStateService} from '../shared/appstate.service';
+import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {
     DiagnosticsSnapshot,
     LogEntry,
@@ -89,7 +89,7 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Refreshes performance stats only when the performance dialog is visible. */
     refreshPerfStatsIfVisible() {
-        if (!this.appStateService.diagnosticsPerformanceDialogVisible) {
+        if (!this.appStateService.isDialogOpen(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID)) {
             return;
         }
         this.refreshPerfStats();

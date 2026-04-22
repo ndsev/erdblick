@@ -1,5 +1,10 @@
 import {Injectable, OnDestroy} from '@angular/core';
-import {AppStateService} from '../shared/appstate.service';
+import {
+    AppStateService,
+    DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
+} from '../shared/appstate.service';
 import {MapDataService} from '../mapdata/map.service';
 import {DiagnosticsDatasource} from './diagnostics.datasource';
 import {
@@ -37,13 +42,13 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     /** Opens the performance dialog after refreshing the current aggregated stats. */
     openPerformanceDialog() {
         this.refreshPerfStats();
-        this.stateService.diagnosticsPerformanceDialogVisible = true;
+        this.stateService.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the log dialog and optionally prefilters it to errors only. */
     openLogDialog(errorsOnly: boolean = false) {
         this.refreshLogs();
-        this.stateService.diagnosticsLogDialogVisible = true;
+        this.stateService.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
             this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
         }
@@ -59,7 +64,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             ...options,
             logFilter: {...(options?.logFilter ?? base.logFilter)}
         };
-        this.stateService.diagnosticsExportDialogVisible = true;
+        this.stateService.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
     }
 
     /** Builds the export bundle from the currently cached diagnostics data. */

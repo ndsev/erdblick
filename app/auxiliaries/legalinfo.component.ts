@@ -1,12 +1,13 @@
 import { Component } from "@angular/core";
 import { MapDataService } from "../mapdata/map.service";
-import { AppStateService } from "../shared/appstate.service";
+import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
 
 @Component({
     selector: 'legal-dialog',
     template: `
-        <p-dialog header="Copyright and Legal Information" [(visible)]="stateService.legalInfoDialogVisible" [modal]="false"
-                  [style]="{'min-height': '10em', 'min-width': '40em'}">
+        <app-dialog header="Copyright and Legal Information" [(visible)]="dialogVisible" [modal]="false"
+                  [style]="{'min-height': '10em', 'min-width': '40em'}"
+                  [persistLayout]="true" [layoutId]="dialogLayoutId">
             <div class="dialog-content">
                 <table class="stats-table">
                     <thead>
@@ -24,7 +25,7 @@ import { AppStateService } from "../shared/appstate.service";
                 </table>
                 <button pButton type="button" label="Close" icon="pi pi-cross" (click)="close()"></button>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [
         `
@@ -52,6 +53,7 @@ import { AppStateService } from "../shared/appstate.service";
 })
 /** Dialog that aggregates map-level legal and copyright notices. */
 export class LegalInfoDialogComponent {
+    readonly dialogLayoutId = LEGAL_INFO_DIALOG_LAYOUT_ID;
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
     constructor(private mapService: MapDataService,
@@ -69,8 +71,16 @@ export class LegalInfoDialogComponent {
         });
     }
 
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.dialogLayoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+    }
+
     /** Closes the legal-information dialog. */
     close() {
-        this.stateService.legalInfoDialogVisible = false;
+        this.dialogVisible = false;
     }
 }

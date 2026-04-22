@@ -1,7 +1,13 @@
 import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "./mapdata/map.service";
-import {AppStateService, Versions} from "./shared/appstate.service";
+import {
+    AppStateService,
+    DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
+    Versions
+} from "./shared/appstate.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
@@ -18,14 +24,15 @@ declare let window: DebugWindow;
         <dockable-layout></dockable-layout>
         @if (!environment.visualizationOnly) {
             <datasources></datasources>
+            <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
-            @if (stateService.diagnosticsPerformanceDialogVisible) {
+            @if (stateService.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
-            @if (stateService.diagnosticsLogDialogVisible) {
+            @if (stateService.isDialogOpen(diagnosticsLogDialogLayoutId)) {
                 <diagnostics-log-dialog></diagnostics-log-dialog>
             }
-            @if (stateService.diagnosticsExportDialogVisible) {
+            @if (stateService.isDialogOpen(diagnosticsExportDialogLayoutId)) {
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
@@ -61,6 +68,9 @@ declare let window: DebugWindow;
  * and startup version loading.
  */
 export class AppComponent implements OnDestroy {
+    protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
+    protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
+    protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
 
     title: string = "erdblick";
     private detachDialogFocusListener?: () => void;
@@ -244,7 +254,7 @@ export class AppComponent implements OnDestroy {
 
     /** Opens the diagnostics performance dialog from the global keyboard shortcut. */
     private openStatistics() {
-        this.stateService.diagnosticsPerformanceDialogVisible = true;
+        this.stateService.openDialog(this.diagnosticsPerformanceDialogLayoutId);
     }
 
     protected readonly environment = environment;

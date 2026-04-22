@@ -3,10 +3,9 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle, UpdatedModifiedStyleEntry} from "./style.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
-import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
@@ -21,13 +20,15 @@ import {EditorView} from "@codemirror/view";
 import {MergeView} from "@codemirror/merge";
 import {defaultHighlightStyle, syntaxHighlighting} from "@codemirror/language";
 import {oneDark} from "@codemirror/theme-one-dark";
+import {AppDialogComponent} from "../shared/app-dialog.component";
 
 
 @Component({
     selector: 'style-panel',
     template: `
-        <p-dialog class="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
+        <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="stylesDialogVisible"
                   [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
+                  [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
                   (onShow)="onStylesDialogShow()">
             @if (styleService.styleGroups | async; as styleGroups) {
                 <ng-container>
@@ -35,7 +36,7 @@ import {oneDark} from "@codemirror/theme-one-dark";
                         <div>No styles loaded.</div>
                     }
                     <div class="styles-container">
-                        <p-tree [value]="styleGroups">
+                        <p-tree [value]="styleGroups" data-testid="style-tree">
                             <!-- Group Node Template -->
                             <ng-template let-node pTemplate="Group">
                             <span>
@@ -50,14 +51,16 @@ import {oneDark} from "@codemirror/theme-one-dark";
                             </ng-template>
                             <!-- Style Node Template -->
                             <ng-template let-node pTemplate="Style">
-                                <div class="flex-container">
+                                <div class="flex-container" [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)">
                                     <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
                                     <span onEnterClick class="material-symbols-outlined menu-toggler"
+                                          [attr.data-testid]="'style-menu-button-' + styleTestIdSuffix(node.id)"
                                           (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                         more_vert
                                     </span>
                                         <span>
                                         <p-checkbox [(ngModel)]="node.visible"
+                                                    [attr.data-testid]="'style-visibility-' + styleTestIdSuffix(node.id)"
                                                     (click)="$event.stopPropagation()"
                                                     (ngModelChange)="applyStyleConfig(node.id)"
                                                     [binary]="true"
@@ -75,18 +78,21 @@ import {oneDark} from "@codemirror/theme-one-dark";
                                     <div class="tree-node-controls">
                                         @if (node.imported) {
                                             <p-button onEnterClick (click)="removeStyle(node.id)"
+                                                      [attr.data-testid]="'style-remove-button-' + styleTestIdSuffix(node.id)"
                                                       icon="pi pi-trash"
                                                       label="" pTooltip="Remove style"
                                                       tooltipPosition="bottom" tabindex="0">
                                             </p-button>
                                         } @else {
                                             <p-button onEnterClick (click)="resetStyle(node.id)"
+                                                      [attr.data-testid]="'style-reset-button-' + styleTestIdSuffix(node.id)"
                                                       icon="pi pi-refresh"
                                                       label="" pTooltip="Reset style to server version"
                                                       tooltipPosition="bottom" tabindex="0">
                                             </p-button>
                                         }
                                         <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                  [attr.data-testid]="'style-edit-button-' + styleTestIdSuffix(node.id)"
                                                   icon="pi pi-file-edit"
                                                   label="" pTooltip="Edit style"
                                                   tooltipPosition="bottom" tabindex="0">
@@ -120,24 +126,27 @@ import {oneDark} from "@codemirror/theme-one-dark";
                 </div>
             }
             <div class="dialog-controls">
-                <p-button (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
+                <p-button data-testid="styles-close-button" (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
                 <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
                               accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
                               customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
+                              data-testid="style-import-button"
                               class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
                               chooseLabel="Import Style" tabindex="0"/>
             </div>
-        </p-dialog>
+        </app-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
-        <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog" (onShow)="onEditorDialogShow()">
-            <editor></editor>
+        <app-dialog header="Style Editor" [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
+                  data-testid="style-editor-dialog" class="editor-dialog"
+                  [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
+                  (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
+            <editor [sessionId]="styleEditorSessionId"></editor>
             <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
+                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)"
+                    <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
@@ -146,14 +155,14 @@ import {oneDark} from "@codemirror/theme-one-dark";
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
-                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export">
+                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
+                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId" label="Export" icon="pi pi-file-export">
                     </p-button>
-                    <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
+                    <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
             </div>
-        </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
+        </app-dialog>
+        <app-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -161,8 +170,8 @@ import {oneDark} from "@codemirror/theme-one-dark";
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
-        </p-dialog>
-        <p-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
+        </app-dialog>
+        <app-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
                   (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
             @if (getUpdatedModifiedStyles().length > 0) {
                 <div class="updated-styles-container">
@@ -180,8 +189,8 @@ import {oneDark} from "@codemirror/theme-one-dark";
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
             </div>
-        </p-dialog>
-        <p-dialog header="Style Comparison" [(visible)]="styleCompareDialogVisible" [modal]="true"
+        </app-dialog>
+        <app-dialog header="Style Comparison" [(visible)]="styleCompareDialogVisible" [modal]="true"
                   class="style-compare-dialog" #styleCompareDialog (onShow)="onStyleCompareDialogShow()" 
                   (onHide)="onStyleCompareDialogHide()">
             @if (styleCompareStyleId) {
@@ -210,7 +219,7 @@ import {oneDark} from "@codemirror/theme-one-dark";
                           tooltipPosition="bottom"
                           (click)="resetComparedStyle()"/>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [`
         .disabled {
@@ -236,11 +245,15 @@ import {oneDark} from "@codemirror/theme-one-dark";
  * styles while delegating actual style parsing and lifecycle tracking to `StyleService`.
  */
 export class StyleComponent implements OnDestroy {
+    readonly stylesDialogLayoutId = STYLES_DIALOG_LAYOUT_ID;
+    readonly styleEditorDialogLayoutId = STYLE_EDITOR_DIALOG_LAYOUT_ID;
+    readonly styleEditorSessionId = 'style-editor';
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
-    editedStyleSourceSubscription: Subscription = new Subscription();
-    savedStyleSourceSubscription: Subscription = new Subscription();
+    styleEditorSourceSubscription: Subscription = new Subscription();
+    styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
+    private styleEditorOriginalSource: string = '';
     stylesCollapsed: boolean = false;
     styleCompareDialogVisible: boolean = false;
     styleCompareLeftModified: boolean = false;
@@ -258,10 +271,10 @@ export class StyleComponent implements OnDestroy {
     toggleMenuItems: MenuItem[] | undefined;
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
-    @ViewChild('styles') stylesDialog: Dialog | undefined;
-    @ViewChild('editorDialog') editorDialog: Dialog | undefined;
-    @ViewChild('warningDialog') warningDialog: Dialog | undefined;
-    @ViewChild('styleCompareDialog') styleCompareDialog: Dialog | undefined;
+    @ViewChild('styles') stylesDialog: AppDialogComponent | undefined;
+    @ViewChild('editorDialog') editorDialog: AppDialogComponent | undefined;
+    @ViewChild('warningDialog') warningDialog: AppDialogComponent | undefined;
+    @ViewChild('styleCompareDialog') styleCompareDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareHost') styleCompareHost?: ElementRef<HTMLDivElement>;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
@@ -273,18 +286,34 @@ export class StyleComponent implements OnDestroy {
                 public editorService: EditorService,
                 private dialogStack: DialogStackService,
                 private ngZone: NgZone) {
-
-        // Group visibility is computed in the service; no local map needed.
-        this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
         this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
         });
+    }
+
+    get stylesDialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.stylesDialogLayoutId);
+    }
+
+    set stylesDialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.stylesDialogLayoutId, visible);
+    }
+
+    get styleEditorVisible(): boolean {
+        return this.stateService.isDialogOpen(this.styleEditorDialogLayoutId);
+    }
+
+    set styleEditorVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.styleEditorDialogLayoutId, visible);
     }
 
     /** Releases the compare view and its theme observer. */
     ngOnDestroy() {
         this.compareModeObserver?.disconnect();
         this.styleCompareView?.destroy();
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.editorService.closeSession(this.styleEditorSessionId);
     }
 
     /** Promotes the styles dialog above other overlays. */
@@ -294,6 +323,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Promotes the style editor dialog above other overlays. */
     onEditorDialogShow() {
+        this.ensureStyleEditorSession();
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
@@ -417,24 +447,17 @@ export class StyleComponent implements OnDestroy {
 
     /** Opens the style editor for one style and tracks dirty-state changes. */
     showStyleEditor(styleId: string) {
-        this.styleService.selectedStyleIdForEditing = styleId;
-        this.editorService.datasourcesEditorVisible = false;
-        this.editorService.editableData = `${this.styleService.styles.get(styleId)?.source!}\n\n\n\n\n`
-        this.editorService.readOnly = false;
-        this.editorService.updateEditorState.next(true);
-        this.editorService.styleEditorVisible = true;
-        this.editedStyleSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
-            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == this.editorService.editableData.replace(/\n+$/, ''));
-        });
-        this.savedStyleSourceSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
-            this.applyEditedStyle();
-        });
+        if (!this.prepareStyleEditorSession(styleId)) {
+            this.messageService.showError(`Could not load style source for ${styleId}.`);
+            return;
+        }
+        this.styleEditorVisible = true;
     }
 
     /** Applies the current editor contents to the selected style. */
     applyEditedStyle() {
-        const styleId = this.styleService.selectedStyleIdForEditing;
-        const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
+        const styleId = this.stateService.styleEditorTargetId;
+        const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
             return;
@@ -450,9 +473,10 @@ export class StyleComponent implements OnDestroy {
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
         // If there is no style ID returned, then setStyleSource failed.
         if (newStyleId) {
-            this.styleService.selectedStyleIdForEditing = newStyleId;
+            this.stateService.styleEditorTargetId = newStyleId;
             this.sourceWasModified = false;
-            this.editorService.editableData = this.editorService.editedStateData.getValue();
+            this.styleEditorOriginalSource = styleData;
+            this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
             this.refreshUpdatedStylesDialogVisibility();
         }
     }
@@ -468,13 +492,11 @@ export class StyleComponent implements OnDestroy {
             this.warningDialogVisible = false;
             this.editorDialog.close(event);
         }
-        this.editedStyleSourceSubscription.unsubscribe();
-        this.savedStyleSourceSubscription.unsubscribe();
     }
 
     /** Discards pending edits in the style editor. */
     discardStyleEdits() {
-        this.editorService.updateEditorState.next(false);
+        this.editorService.updateSessionSource(this.styleEditorSessionId, this.styleEditorOriginalSource);
         this.sourceWasModified = false;
         this.warningDialogVisible = false;
     }
@@ -482,7 +504,7 @@ export class StyleComponent implements OnDestroy {
     /** Uses Escape to close the warning or editor dialog while the style editor is active. */
     @HostListener('window:keydown', ['$event'])
     onWindowKeydown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.editorService.styleEditorVisible) {
+        if (event.key !== 'Escape' || !this.styleEditorVisible) {
             return;
         }
         event.preventDefault();
@@ -492,6 +514,57 @@ export class StyleComponent implements OnDestroy {
             return;
         }
         this.closeEditorDialog(event);
+    }
+
+    onEditorDialogHide() {
+        this.styleEditorVisible = false;
+        this.warningDialogVisible = false;
+        this.sourceWasModified = false;
+        this.stateService.styleEditorTargetId = null;
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.editorService.closeSession(this.styleEditorSessionId);
+    }
+
+    /** Recreates the editor session when a persisted style-editor dialog is restored on startup/import. */
+    private ensureStyleEditorSession(): void {
+        const targetStyleId = this.stateService.styleEditorTargetId;
+        if (!targetStyleId || this.editorService.hasSession(this.styleEditorSessionId)) {
+            return;
+        }
+        if (!this.prepareStyleEditorSession(targetStyleId)) {
+            this.messageService.showError(`Could not restore style editor for ${targetStyleId}.`);
+            this.styleEditorVisible = false;
+            this.stateService.styleEditorTargetId = null;
+        }
+    }
+
+    /** Opens a fresh editor session for the given style and subscribes dirty/save handling to it. */
+    private prepareStyleEditorSession(styleId: string): boolean {
+        const source = this.styleService.styles.get(styleId)?.source;
+        if (source === undefined) {
+            return false;
+        }
+        this.stateService.styleEditorTargetId = styleId;
+        this.styleEditorOriginalSource = source.replace(/\n+$/, '');
+        this.editorService.createSession({
+            id: this.styleEditorSessionId,
+            source: `${source}\n\n\n\n\n`,
+            language: 'yaml',
+            readOnly: false
+        });
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
+            editedStyleSource => {
+                this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
+            }
+        );
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
+            this.applyEditedStyle();
+        }) ?? new Subscription();
+        this.sourceWasModified = false;
+        return true;
     }
 
     /** Opens the style-definition documentation in a new browser tab. */
@@ -644,6 +717,15 @@ export class StyleComponent implements OnDestroy {
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
+
+    styleTestIdSuffix(styleId: string): string {
+        return styleId
+            .trim()
+            .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'unknown';
+    }
 
     /** Promotes the editor discard-warning dialog above other overlays. */
     protected onWarningShow() {

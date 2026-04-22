@@ -606,7 +606,8 @@ export abstract class DeckMapView implements IRenderView {
                 camPosLat: this.viewState.latitude,
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
             };
-            return Object.values(fullWorldViewport).every(Number.isFinite) ? fullWorldViewport : undefined;
+            const valid = Object.values(fullWorldViewport).every(Number.isFinite);
+            return valid ? fullWorldViewport : undefined;
         }
         const expandLon = sizeLon * 0.05;
         const expandLat = sizeLat * 0.05;
@@ -621,7 +622,8 @@ export abstract class DeckMapView implements IRenderView {
                 camPosLat: this.viewState.latitude,
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
             };
-            return Object.values(fullWorldViewport).every(Number.isFinite) ? fullWorldViewport : undefined;
+            const valid = Object.values(fullWorldViewport).every(Number.isFinite);
+            return valid ? fullWorldViewport : undefined;
         }
         const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south - expandLat);
         const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north + expandLat);
@@ -636,7 +638,8 @@ export abstract class DeckMapView implements IRenderView {
             // Keep tile-priority orientation consistent with the legacy viewport contract.
             orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
         };
-        return Object.values(nextViewport).every(Number.isFinite) ? nextViewport : undefined;
+        const valid = Object.values(nextViewport).every(Number.isFinite);
+        return valid ? nextViewport : undefined;
     }
 
     /** Pans north in view-local space. */
@@ -1064,7 +1067,7 @@ export abstract class DeckMapView implements IRenderView {
         const rect = this.getCanvasClientRect();
         const width = Math.max(1, Math.floor(rect.width));
         const height = Math.max(1, Math.floor(rect.height));
-        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
             return undefined;
         }
         return new WebMercatorViewport({

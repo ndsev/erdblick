@@ -146,9 +146,9 @@ JsValue JsValue::operator[](std::string const& propertyName)
     return JsValue(value_[propertyName]);
 #else
     if (!value_.contains(propertyName)) {
-        value_["properties"][propertyName] = {};
+        value_[propertyName] = {};
     }
-    return JsValue(value_["properties"][propertyName]);
+    return JsValue(value_[propertyName]);
 #endif
 }
 
@@ -158,7 +158,7 @@ JsValue JsValue::operator[](std::string const& propertyName) const
     return JsValue(value_[propertyName]);
 #else
     if (value_.contains(propertyName))
-        return JsValue(value_["properties"][propertyName]);
+        return JsValue(value_[propertyName]);
     return JsValue();
 #endif
 }
