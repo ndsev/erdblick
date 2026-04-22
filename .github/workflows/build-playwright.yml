@@ -22,10 +22,10 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Install build dependencies (ninja, git-lfs, mesa software rendering)
+      - name: Install build dependencies (ninja, git-lfs, mesa software rendering, xvfb)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build git-lfs libgl1-mesa-dri mesa-vulkan-drivers
+          sudo apt-get install -y ninja-build git-lfs libgl1-mesa-dri mesa-vulkan-drivers xvfb
 
       - name: Initialize Git LFS
         run: git lfs install
@@ -73,7 +73,7 @@ jobs:
       - name: Run Playwright integration tests (with coverage)
         run: |
           source ./venv/bin/activate
-          $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
+          EB_FIREFOX_HEADED=1 xvfb-run -a $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
 
       - name: Upload Playwright test result artifact
         if: failure()

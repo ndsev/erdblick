@@ -63,6 +63,7 @@ const sharedUse = {
     timezoneId: 'UTC',
     locale: 'en-US',
 };
+const firefoxHeadless = process.env["EB_FIREFOX_HEADED"] === '1' ? false : sharedUse.headless;
 
 export default defineConfig({
     testDir: './playwright',
@@ -97,6 +98,7 @@ export default defineConfig({
             use: {
                 ...sharedUse,
                 browserName: 'firefox',
+                headless: firefoxHeadless,
                 launchOptions: {
                     env: {
                         LIBGL_ALWAYS_SOFTWARE: '1',
