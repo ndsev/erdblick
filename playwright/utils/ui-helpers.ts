@@ -337,9 +337,14 @@ export async function getCameraPosition(page: Page, viewIndex: number): Promise<
     }
 }
 
+export type DocsScreenshotLabelPlacement = 'auto' | 'top' | 'bottom' | 'left' | 'right';
+
 export type DocsScreenshotLabel = {
     locator: Locator;
     label: string;
+    color?: string;
+    placement?: DocsScreenshotLabelPlacement;
+    outlinePadding?: number;
 };
 
 export async function captureDocsScreenshotWithLabels(
@@ -347,7 +352,16 @@ export async function captureDocsScreenshotWithLabels(
     screenshotPath: string,
     labels: DocsScreenshotLabel[]
 ): Promise<void> {
-    const labelBoxes: Array<{ label: string; x: number; y: number; width: number; height: number }> = [];
+    const labelBoxes: Array<{
+        label: string;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        color?: string;
+        placement: DocsScreenshotLabelPlacement;
+        outlinePadding: number;
+    }> = [];
 
     for (const entry of labels) {
         await expect(entry.locator).toBeVisible();
@@ -360,7 +374,10 @@ export async function captureDocsScreenshotWithLabels(
             x: box.x,
             y: box.y,
             width: box.width,
-            height: box.height
+            height: box.height,
+            color: entry.color,
+            placement: entry.placement ?? 'auto',
+            outlinePadding: entry.outlinePadding ?? 3
         });
     }
 
@@ -375,83 +392,181 @@ export async function captureDocsScreenshotWithLabels(
         root.style.zIndex = '2147483647';
         document.body.appendChild(root);
 
-        const gap = 8;
-        const padding = 8;
+        const palette = ['#f97316', '#22c55e', '#06b6d4', '#eab308', '#a855f7', '#ef4444', '#14b8a6', '#3b82f6'];
+        const labelGap = 18;
+        const padding = 12;
+        const connectorThickness = 3;
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
+        const placedLabelRects: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+        const placedOutlineRects: Array<{ left: number; top: number; right: number; bottom: number }> = [];
 
-        const measuredEntries = entries.map((entry) => {
+        const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+        const inflateRect = (rect: { left: number; top: number; right: number; bottom: number }, amount: number) => ({
+            left: rect.left - amount,
+            top: rect.top - amount,
+            right: rect.right + amount,
+            bottom: rect.bottom + amount
+        });
+        const intersects = (
+            a: { left: number; top: number; right: number; bottom: number },
+            b: { left: number; top: number; right: number; bottom: number }
+        ) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        const overlapPenalty = (
+            rect: { left: number; top: number; right: number; bottom: number },
+            others: Array<{ left: number; top: number; right: number; bottom: number }>,
+            margin: number,
+            weight: number
+        ) => others.reduce((sum, other) => sum + (intersects(inflateRect(rect, margin), inflateRect(other, margin)) ? weight : 0), 0);
+        const overflowPenalty = (rect: { left: number; top: number; right: number; bottom: number }) => {
+            const left = Math.max(0, padding - rect.left);
+            const top = Math.max(0, padding - rect.top);
+            const right = Math.max(0, rect.right - (viewportWidth - padding));
+            const bottom = Math.max(0, rect.bottom - (viewportHeight - padding));
+            return left + top + right + bottom;
+        };
+
+        type Side = 'top' | 'bottom' | 'left' | 'right';
+        type Rect = { left: number; top: number; right: number; bottom: number };
+        type Candidate = { side: Side; rect: Rect; score: number; color: string; outlineRect: Rect; targetRect: Rect };
+
+        const buildCandidate = (
+            side: Side,
+            targetRect: Rect,
+            outlineRect: Rect,
+            labelWidth: number,
+            labelHeight: number,
+            color: string,
+            preferenceBias: number
+        ): Candidate => {
+            const [left, top] = side === 'top' || side === 'bottom'
+                ? [
+                    clamp((targetRect.left + targetRect.right - labelWidth) / 2, padding, viewportWidth - padding - labelWidth),
+                    side === 'top' ? outlineRect.top - labelGap - labelHeight : outlineRect.bottom + labelGap
+                ]
+                : [
+                    side === 'left' ? outlineRect.left - labelGap - labelWidth : outlineRect.right + labelGap,
+                    clamp((targetRect.top + targetRect.bottom - labelHeight) / 2, padding, viewportHeight - padding - labelHeight)
+                ];
+
+            const rect = {
+                left,
+                top,
+                right: left + labelWidth,
+                bottom: top + labelHeight
+            };
+
+            const axisOverlap = side === 'top' || side === 'bottom'
+                ? Math.min(rect.right, outlineRect.right) - Math.max(rect.left, outlineRect.left)
+                : Math.min(rect.bottom, outlineRect.bottom) - Math.max(rect.top, outlineRect.top);
+            const score =
+                overflowPenalty(rect) * 1000 +
+                (intersects(rect, inflateRect(outlineRect, 2)) ? 100000 : 0) +
+                (axisOverlap <= 0 ? 100000 : 0) +
+                overlapPenalty(rect, placedLabelRects, 12, 5000) +
+                overlapPenalty(rect, placedOutlineRects, 8, 2000) +
+                preferenceBias;
+
+            return { side, rect, score, color, outlineRect, targetRect };
+        };
+
+        const sortedEntries = entries.slice().sort((a, b) => {
+            if (a.y !== b.y) {
+                return a.y - b.y;
+            }
+            return a.x - b.x;
+        });
+
+        sortedEntries.forEach((entry, index) => {
             const label = document.createElement('div');
+            const color = entry.color || palette[index % palette.length];
             label.textContent = entry.label;
             label.style.position = 'fixed';
             label.style.pointerEvents = 'none';
             label.style.zIndex = '2147483647';
             label.style.padding = '4px 8px';
             label.style.borderRadius = '999px';
-            label.style.background = 'rgba(16, 24, 40, 0.92)';
+            label.style.background = 'rgba(15, 23, 42, 0.94)';
             label.style.color = '#f8fafc';
-            label.style.border = '1px solid rgba(148, 163, 184, 0.75)';
+            label.style.border = `2px solid ${color}`;
             label.style.font = '600 12px/1.2 sans-serif';
             label.style.whiteSpace = 'nowrap';
-            label.style.boxShadow = '0 6px 18px rgba(15, 23, 42, 0.28)';
+            label.style.boxShadow = '0 8px 22px rgba(15, 23, 42, 0.28)';
             label.style.left = '-9999px';
             label.style.top = '-9999px';
-
             root.appendChild(label);
 
-            const rect = label.getBoundingClientRect();
-            const maxLeft = Math.max(padding, viewportWidth - padding - rect.width);
-            const centeredLeft = entry.x + (entry.width / 2) - (rect.width / 2);
-            const left = Math.min(Math.max(centeredLeft, padding), maxLeft);
-
-            return {
-                entry,
-                label,
-                left,
-                right: left + rect.width,
-                labelHeight: rect.height,
-                placeBelow: true
+            const measuredRect = label.getBoundingClientRect();
+            const targetRect = {
+                left: entry.x,
+                top: entry.y,
+                right: entry.x + entry.width,
+                bottom: entry.y + entry.height
             };
-        });
+            const outlineRect = inflateRect(targetRect, entry.outlinePadding);
+            const candidateOrder: Side[] = entry.placement === 'auto'
+                ? ['bottom', 'top', 'right', 'left']
+                : [entry.placement];
+            const candidates = candidateOrder.map((side, candidateIndex) => buildCandidate(
+                side,
+                targetRect,
+                outlineRect,
+                measuredRect.width,
+                measuredRect.height,
+                color,
+                candidateIndex
+            ));
+            const chosen = candidates.reduce((best, current) => current.score < best.score ? current : best);
 
-        measuredEntries.sort((a, b) => {
-            if (a.entry.y !== b.entry.y) {
-                return a.entry.y - b.entry.y;
+            const outline = document.createElement('div');
+            outline.style.position = 'fixed';
+            outline.style.pointerEvents = 'none';
+            outline.style.zIndex = '2147483646';
+            outline.style.left = `${outlineRect.left}px`;
+            outline.style.top = `${outlineRect.top}px`;
+            outline.style.width = `${outlineRect.right - outlineRect.left}px`;
+            outline.style.height = `${outlineRect.bottom - outlineRect.top}px`;
+            outline.style.border = `2px solid ${color}`;
+            outline.style.borderRadius = '10px';
+            outline.style.boxShadow = `0 0 0 1px ${color}33`;
+            root.appendChild(outline);
+
+            label.style.left = `${chosen.rect.left}px`;
+            label.style.top = `${chosen.rect.top}px`;
+
+            const connector = document.createElement('div');
+            connector.style.position = 'fixed';
+            connector.style.pointerEvents = 'none';
+            connector.style.zIndex = '2147483645';
+            connector.style.background = color;
+            connector.style.borderRadius = `${connectorThickness}px`;
+
+            if (chosen.side === 'top' || chosen.side === 'bottom') {
+                const overlapLeft = Math.max(chosen.rect.left, outlineRect.left);
+                const overlapRight = Math.min(chosen.rect.right, outlineRect.right);
+                const x = Math.round((overlapLeft + overlapRight) / 2 - connectorThickness / 2);
+                const top = chosen.side === 'top' ? chosen.rect.bottom : outlineRect.bottom;
+                const bottom = chosen.side === 'top' ? outlineRect.top : chosen.rect.top;
+                connector.style.left = `${x}px`;
+                connector.style.top = `${top}px`;
+                connector.style.width = `${connectorThickness}px`;
+                connector.style.height = `${Math.max(0, bottom - top)}px`;
+            } else {
+                const overlapTop = Math.max(chosen.rect.top, outlineRect.top);
+                const overlapBottom = Math.min(chosen.rect.bottom, outlineRect.bottom);
+                const y = Math.round((overlapTop + overlapBottom) / 2 - connectorThickness / 2);
+                const left = chosen.side === 'left' ? chosen.rect.right : outlineRect.right;
+                const right = chosen.side === 'left' ? outlineRect.left : chosen.rect.left;
+                connector.style.left = `${left}px`;
+                connector.style.top = `${y}px`;
+                connector.style.width = `${Math.max(0, right - left)}px`;
+                connector.style.height = `${connectorThickness}px`;
             }
-            return a.entry.x - b.entry.x;
+            root.appendChild(connector);
+
+            placedLabelRects.push(chosen.rect);
+            placedOutlineRects.push(outlineRect);
         });
-
-        for (let i = 0; i < measuredEntries.length; i++) {
-            const current = measuredEntries[i];
-            const previous = i > 0 ? measuredEntries[i - 1] : null;
-
-            if (previous) {
-                const verticalDistance = Math.abs(current.entry.y - previous.entry.y);
-                const maxElementHeight = Math.max(current.entry.height, previous.entry.height);
-                const verticalThreshold = maxElementHeight + gap;
-                const labelsOverlapOrClose =
-                    current.left <= previous.right + gap &&
-                    current.right >= previous.left - gap;
-                const currentCenterX = current.entry.x + (current.entry.width / 2);
-                const previousCenterX = previous.entry.x + (previous.entry.width / 2);
-                const xDistance = Math.abs(currentCenterX - previousCenterX);
-                const xNear = xDistance <= maxElementHeight;
-                const sameCollisionBand =
-                    verticalDistance <= verticalThreshold &&
-                    (labelsOverlapOrClose || xNear);
-
-                current.placeBelow = sameCollisionBand ? !previous.placeBelow : true;
-            }
-
-            const preferredTop = current.placeBelow
-                ? current.entry.y + current.entry.height + gap
-                : current.entry.y - gap - current.labelHeight;
-            const maxTop = Math.max(padding, viewportHeight - padding - current.labelHeight);
-            const top = Math.min(Math.max(preferredTop, padding), maxTop);
-
-            current.label.style.left = `${current.left}px`;
-            current.label.style.top = `${top}px`;
-        }
     }, labelBoxes);
 
     const browserName = page.context().browser()?.browserType().name();
