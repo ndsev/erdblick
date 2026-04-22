@@ -46,6 +46,7 @@ loadEnvFile(path.resolve(__dirname, 'test', '.env'));
 
 const port = process.env["EB_APP_PORT"] || '9000';
 const baseURL = process.env["EB_APP_URL"] || `http://localhost:${port}`;
+const inheritedEnv = process.env as Record<string, string | undefined>;
 const sharedUse = {
     baseURL,
     headless: true,
@@ -86,7 +87,7 @@ export default defineConfig({
                     ],
                     env: {
                         LIBGL_ALWAYS_SOFTWARE: '1',
-                        ...(process.env as Record<string, string | undefined>)
+                        ...inheritedEnv
                     }
                 }
             }
@@ -95,7 +96,22 @@ export default defineConfig({
             name: 'firefox',
             use: {
                 ...sharedUse,
-                browserName: 'firefox'
+                browserName: 'firefox',
+                launchOptions: {
+                    env: {
+                        LIBGL_ALWAYS_SOFTWARE: '1',
+                        MESA_LOADER_DRIVER_OVERRIDE: 'llvmpipe',
+                        MOZ_WEBRENDER: '1',
+                        MOZ_WEBRENDER_SOFTWARE: '1',
+                        ...inheritedEnv
+                    }
+                },
+                firefoxUserPrefs: {
+                    'webgl.disabled': false,
+                    'webgl.force-enabled': true,
+                    'layers.acceleration.force-enabled': true,
+                    'gfx.webrender.all': true
+                }
             }
         },
         {

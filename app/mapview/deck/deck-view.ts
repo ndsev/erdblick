@@ -129,6 +129,7 @@ export interface DeckViewDebugSummary {
     canvasRectHeight: number | null;
     viewState: DeckCameraState;
     lastViewport: Viewport | null;
+    setupError: string | null;
     recentViewportTrace: DeckViewportAttemptDebugEntry[];
 }
 
@@ -220,6 +221,7 @@ export abstract class DeckMapView implements IRenderView {
     private jumpAreaHighlightTick: (() => void) | null = null;
     private isHoveringFeature = false;
     private lastViewport: Viewport | null = null;
+    private setupError: string | null = null;
     private readonly debugViewportTrace: DeckViewportAttemptDebugEntry[] = [];
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
@@ -266,57 +268,80 @@ export abstract class DeckMapView implements IRenderView {
         if (!container) {
             throw new Error(`Deck container #${this.canvasId} not found.`);
         }
-        this.recordViewportDebug("setup:start", {
-            containerClientWidth: container.clientWidth,
-            containerClientHeight: container.clientHeight
-        });
-        container.innerHTML = "";
-        const canvas = this.createDeckCanvas(container);
-        this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
-        const gl = canvas.getContext("webgl2");
-        if (!gl) {
-            throw new Error(`WebGL2 context for #${this.canvasId} could not be created.`);
+        try {
+            this.setupError = null;
+            this.recordViewportDebug("setup:start", {
+                containerClientWidth: container.clientWidth,
+                containerClientHeight: container.clientHeight
+            });
+            container.innerHTML = "";
+            const canvas = this.createDeckCanvas(container);
+            this.recordViewportDebug("setup:canvas-created", {
+                canvasClientWidth: canvas.clientWidth,
+                canvasClientHeight: canvas.clientHeight
+            });
+            this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
+            this.recordViewportDebug("setup:canvas-sized", {
+                drawingBufferWidth: canvas.width,
+                drawingBufferHeight: canvas.height
+            });
+            const gl = canvas.getContext("webgl2");
+            if (!gl) {
+                this.setupError = `WebGL2 context for #${this.canvasId} could not be created.`;
+                this.recordViewportDebug("setup:webgl2-context-missing", {
+                    webgl1Supported: !!document.createElement("canvas").getContext("webgl")
+                });
+                throw new Error(this.setupError);
+            }
+            this.recordViewportDebug("setup:webgl2-context-created");
+
+            this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
+
+            const deckProps: DeckProps<DeckMercatorView> = {
+                gl,
+                // Lowering device pixel ratio reduces redraw pressure during live resizes.
+                useDevicePixels: DeckMapView.CANVAS_USE_DEVICE_PIXELS,
+                views: new DeckMercatorView({
+                    id: `deck-view-${this._viewIndex}`,
+                    repeat: true,
+                    orthographic: this.useOrthographicProjection
+                }),
+                initialViewState: this.viewState,
+                viewState: this.viewState,
+                layers: [],
+                controller: this.createDeckControllerOptions(),
+                onDeviceInitialized: (device) => {
+                    this.deckDevice = device;
+                    this.recordViewportDebug("deck:onDeviceInitialized");
+                },
+                onResize: ({width, height}) => {
+                    this.recordViewportDebug("deck:onResize", {width, height});
+                    this.updateViewport();
+                    this.scheduleTileGridOverlayUpdate();
+                    this.scheduleSearchResultsOverlayUpdate();
+                    this.scheduleCanvasResize(width, height);
+                },
+                getCursor: this.deckCursor,
+                onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
+                onHover: (info) => this.onHover(info),
+                onClick: (info, event) => this.onClick(info, event)
+            };
+            this.deck = new DeckGlDeck(deckProps);
+            this.recordViewportDebug("setup:deck-created");
+            this.layerRegistry.setDeck(this.deck);
+
+            this.setupSubscriptions();
+            this.updateViewport();
+            this.mapService.refreshHighlightVisualizations();
+            this.requestRender();
+            this.updateDebugSummary();
+        } catch (error) {
+            this.setupError = error instanceof Error ? error.message : String(error);
+            this.recordViewportDebug("setup:error", {
+                error: this.setupError
+            });
+            throw error;
         }
-
-        this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
-
-        const deckProps: DeckProps<DeckMercatorView> = {
-            gl,
-            // Lowering device pixel ratio reduces redraw pressure during live resizes.
-            useDevicePixels: DeckMapView.CANVAS_USE_DEVICE_PIXELS,
-            views: new DeckMercatorView({
-                id: `deck-view-${this._viewIndex}`,
-                repeat: true,
-                orthographic: this.useOrthographicProjection
-            }),
-            initialViewState: this.viewState,
-            viewState: this.viewState,
-            layers: [],
-            controller: this.createDeckControllerOptions(),
-            onDeviceInitialized: (device) => {
-                this.deckDevice = device;
-                this.recordViewportDebug("deck:onDeviceInitialized");
-            },
-            onResize: ({width, height}) => {
-                this.recordViewportDebug("deck:onResize", {width, height});
-                this.updateViewport();
-                this.scheduleTileGridOverlayUpdate();
-                this.scheduleSearchResultsOverlayUpdate();
-                this.scheduleCanvasResize(width, height);
-            },
-            getCursor: this.deckCursor,
-            onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
-            onHover: (info) => this.onHover(info),
-            onClick: (info, event) => this.onClick(info, event)
-        };
-        this.deck = new DeckGlDeck(deckProps);
-        this.layerRegistry.setDeck(this.deck);
-
-        this.setupSubscriptions();
-        this.updateViewport();
-        this.mapService.refreshHighlightVisualizations();
-        this.requestRender();
-        this.updateDebugSummary();
     }
 
     /** Tears down deck, overlay state, and every subscription associated with this view. */
@@ -450,6 +475,7 @@ export abstract class DeckMapView implements IRenderView {
             canvasRectHeight: rect?.height ?? null,
             viewState: {...this.viewState},
             lastViewport: this.lastViewport ? {...this.lastViewport} : null,
+            setupError: this.setupError,
             recentViewportTrace: this.debugViewportTrace.slice(-24).map(entry => ({
                 ...entry,
                 details: {...entry.details}

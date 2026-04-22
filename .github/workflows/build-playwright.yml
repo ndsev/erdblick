@@ -22,10 +22,10 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Install build dependencies (ninja, git-lfs)
+      - name: Install build dependencies (ninja, git-lfs, mesa software rendering)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build git-lfs
+          sudo apt-get install -y ninja-build git-lfs libgl1-mesa-dri mesa-vulkan-drivers
 
       - name: Initialize Git LFS
         run: git lfs install
