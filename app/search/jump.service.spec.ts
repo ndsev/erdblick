@@ -1,15 +1,11 @@
 import {beforeAll, describe, expect, it, vi} from 'vitest';
-import {of, Subject} from 'rxjs';
+import {Subject} from 'rxjs';
 import {coreLib, initializeLibrary} from '../integrations/wasm';
 import {JumpTargetService} from './jump.service';
 
 beforeAll(async () => {
     await initializeLibrary();
 });
-
-class HttpClientStub {
-    get = vi.fn();
-}
 
 class MapDataServiceStub {
     maps = {maps: new Map<string, any>()};
@@ -39,31 +35,31 @@ class FeatureSearchServiceStub {
     run = vi.fn();
 }
 
+class AppConfigServiceStub {
+    getExtensionModuleId = vi.fn().mockReturnValue(null);
+}
+
 const createService = (config: any = {}) => {
-    const httpClient = new HttpClientStub();
     const mapService = new MapDataServiceStub();
     const infoService = new InfoMessageServiceStub();
     const menuService = new RightClickMenuServiceStub();
     const stateService = new AppStateServiceStub();
     const searchService = new FeatureSearchServiceStub();
-
-    httpClient.get.mockImplementation((url: string) => {
-        if (url === 'config.json') {
-            return of(config);
-        }
-        throw new Error(`Unexpected URL ${url}`);
-    });
+    const configService = new AppConfigServiceStub();
+    configService.getExtensionModuleId.mockImplementation((key: string) =>
+        key === 'jumpTargets' ? config?.extensionModules?.jumpTargets ?? null : null
+    );
 
     const service = new JumpTargetService(
-        httpClient as any,
         mapService as any,
         infoService as any,
         menuService as any,
         stateService as any,
         searchService as any,
+        configService as any,
     );
 
-    return {service, httpClient, mapService, infoService, menuService, stateService, searchService};
+    return {service, mapService, infoService, menuService, stateService, searchService, configService};
 };
 
 describe('JumpTargetService', () => {

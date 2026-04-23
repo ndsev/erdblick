@@ -25,12 +25,18 @@ class InfoMessageServiceStub {
     showSuccess = vi.fn();
 }
 
-const createService = () => {
+class AppConfigServiceStub {
+    snapshot: any = {styles: []};
+}
+
+const createService = (config: any = {styles: []}) => {
     const httpClient = new HttpClientStub();
     const stateService = new AppStateServiceStub();
     const infoService = new InfoMessageServiceStub();
-    const service = new StyleService(httpClient as any, stateService as any, infoService as any);
-    return {service, httpClient, stateService, infoService};
+    const configService = new AppConfigServiceStub();
+    configService.snapshot = config;
+    const service = new StyleService(httpClient as any, stateService as any, infoService as any, configService as any);
+    return {service, httpClient, stateService, infoService, configService};
 };
 
 describe('StyleService', () => {
@@ -43,19 +49,15 @@ describe('StyleService', () => {
         vi.restoreAllMocks();
     });
 
-    it('initializes builtin styles from config.json and YAML sources', async () => {
-        const {service, httpClient, stateService} = createService();
-
+    it('initializes builtin styles from config and YAML sources', async () => {
         const config = {
             styles: [
                 {id: 's1', url: 'base.yaml'},
             ],
         };
+        const {service, httpClient, stateService} = createService(config);
 
         httpClient.get.mockImplementation((url: string, options: any) => {
-            if (url === 'config.json') {
-                return of(config);
-            }
             if (url === 'bundle/styles/base.yaml') {
                 return of('name: TestStyle');
             }
@@ -72,7 +74,6 @@ describe('StyleService', () => {
 
         await service.initializeStyles();
 
-        expect(httpClient.get).toHaveBeenCalledWith('config.json', {responseType: 'json'});
         expect(parseSpy).toHaveBeenCalled();
         expect(service.styleUrls).toEqual([{id: 's1', url: 'bundle/styles/base.yaml'}]);
         expect(service.styles.size).toBe(1);
@@ -85,10 +86,9 @@ describe('StyleService', () => {
     });
 
     it('handles missing styles configuration without throwing and without populating styles', async () => {
-        const {service, httpClient} = createService();
+        const {service} = createService({});
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        httpClient.get.mockReturnValue(of({}));
 
         await service.initializeStyles();
 
@@ -375,7 +375,7 @@ describe('StyleService', () => {
     });
 
     it('keeps builtin baseline source when modified local override is loaded', async () => {
-        const {service, httpClient} = createService();
+        const {service, httpClient} = createService({styles: [{id: 'builtin', url: 'base.yaml'}]});
         localStorage.setItem('builtinStyleData', JSON.stringify([
             ['BuiltinStyle', {
                 id: 'BuiltinStyle',
@@ -385,9 +385,6 @@ describe('StyleService', () => {
             }],
         ]));
         httpClient.get.mockImplementation((url: string) => {
-            if (url === 'config.json') {
-                return of({styles: [{id: 'builtin', url: 'base.yaml'}]});
-            }
             if (url === 'bundle/styles/base.yaml') {
                 return of('name: BuiltinStyle\nrules:\n  - color: "#0000ff"');
             }

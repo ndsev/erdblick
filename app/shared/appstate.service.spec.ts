@@ -1,3 +1,4 @@
+import "@angular/compiler";
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
@@ -184,22 +185,22 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('hydrates OSM settings from combined query params', async () => {
-        const routerStub = createRouterStub({ n: '2', osm: '1~50,0~30' });
+    it('hydrates background-layer settings from combined query params', async () => {
+        const routerStub = createRouterStub({ n: '2', bg: 'osm~50,world-overview~30' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.getOsmState(0)).toEqual({ enabled: true, opacity: 50 });
-        expect(service.getOsmState(1)).toEqual({ enabled: false, opacity: 30 });
+        expect(service.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
+        expect(service.getBackgroundState(1)).toEqual({ layerId: 'world-overview', opacity: 30 });
 
         service.ngOnDestroy();
         routerStub.events.complete();
     });
 
-    it('serializes OSM settings into a single osm query param', async () => {
+    it('serializes background-layer settings into a single bg query param', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
@@ -210,18 +211,31 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.setOsmState(0, true, 50);
+        service.setBackgroundState(0, 'osm', 50);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
-                osm: '1~50',
+                bg: 'osm~50',
             }),
             queryParamsHandling: 'merge',
             replaceUrl: true,
         }));
-        const lastCall = (routerStub.navigate as any).mock.calls.at(-1)?.[1];
-        expect(lastCall?.queryParams?.osmOp).toBeUndefined();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('migrates legacy osm query params into the new background-layer state', async () => {
+        const routerStub = createRouterStub({ n: '2', osm: '1~50,0~30' });
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
+        expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 30 });
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -238,7 +252,7 @@ describe('AppStateService', () => {
         service.setView(0, destination, orientation);
         service.setProjectionMode(0, true);
         service.setLayerSyncOption(0, true);
-        service.setOsmState(0, false, 42);
+        service.setBackgroundState(0, null, 42);
         service.viewTileBordersState.next(0, false);
         service.viewTileGridModeState.next(0, 'xyz');
         service.mapLayerConfig('m1', 'layerA', false, 9);
@@ -251,7 +265,7 @@ describe('AppStateService', () => {
         expect(service.cameraViewDataState.getValue(1)).not.toBe(service.cameraViewDataState.getValue(0));
         expect(service.mode2dState.getValue(1)).toBe(true);
         expect(service.getLayerSyncOption(1)).toBe(true);
-        expect(service.getOsmState(1)).toEqual({ enabled: false, opacity: 42 });
+        expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 42 });
         expect(service.viewTileBordersState.getValue(1)).toBe(false);
         expect(service.viewTileGridModeState.getValue(1)).toBe('xyz');
         expect(service.layerVisibilityState.getValue(1)).toEqual([true]);
@@ -298,7 +312,7 @@ describe('AppStateService', () => {
         service.setView(1, destination, orientation);
         service.setProjectionMode(1, true);
         service.setLayerSyncOption(1, true);
-        service.setOsmState(1, false, 17);
+        service.setBackgroundState(1, null, 17);
         service.viewTileBordersState.next(1, false);
         service.viewTileGridModeState.next(1, 'xyz');
         service.setMapLayerConfig('m1', 'layerA', [
@@ -314,7 +328,7 @@ describe('AppStateService', () => {
         expect(service.cameraViewDataState.getValue(2)).not.toBe(service.cameraViewDataState.getValue(1));
         expect(service.mode2dState.getValue(2)).toBe(true);
         expect(service.getLayerSyncOption(2)).toBe(true);
-        expect(service.getOsmState(2)).toEqual({ enabled: false, opacity: 17 });
+        expect(service.getBackgroundState(2)).toEqual({ layerId: null, opacity: 17 });
         expect(service.viewTileBordersState.getValue(2)).toBe(false);
         expect(service.viewTileGridModeState.getValue(2)).toBe('xyz');
         expect(service.layerVisibilityState.getValue(2)).toEqual([false]);

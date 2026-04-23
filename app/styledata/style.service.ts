@@ -15,11 +15,7 @@ import {AppStateService} from "../shared/appstate.service";
 import {filter} from "rxjs/operators";
 import {shortId4, sipHash64Hex} from "./hash";
 import {InfoMessageService} from "../shared/info.service";
-
-interface StyleConfigEntry {
-    id: string,
-    url: string
-}
+import {AppConfigService, StyleConfigEntry} from "../shared/app-config.service";
 
 /** Original server-provided builtin style source kept for resets and comparisons. */
 interface BuiltinStyleBaseline {
@@ -99,7 +95,8 @@ export class StyleService {
 
     constructor(private httpClient: HttpClient,
                 private stateService: AppStateService,
-                private infoMessageService: InfoMessageService) {
+                private infoMessageService: InfoMessageService,
+                private configService: AppConfigService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -108,8 +105,9 @@ export class StyleService {
     /** Loads builtin styles from config, restores local modifications, and reapplies visible styles. */
     async initializeStyles(): Promise<void> {
         try {
-            const data: any = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
-            const configuredStyles = Array.isArray(data?.styles) ? [...data.styles] as StyleConfigEntry[] : [];
+            const configuredStyles = Array.isArray(this.configService.snapshot.styles)
+                ? [...this.configService.snapshot.styles] as StyleConfigEntry[]
+                : [];
             this.styleUrls = [];
 
             if (!configuredStyles.length) {

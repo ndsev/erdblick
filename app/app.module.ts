@@ -107,6 +107,7 @@ import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export
 import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
 import {AdvancedPreferencesComponent} from "./shared/advanced-preferences.component";
+import {AppConfigService} from "./shared/app-config.service";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -142,14 +143,17 @@ const updateGlobalSpinner = (message: string) => {
     }
 };
 
-/** App initializer that brings up the WASM core, styles, map data, and search workers in order. */
+/** App initializer that loads config and then brings up the WASM core, styles, map data, and search workers in order. */
 export const initializeServices = () => {
+    const configService = inject(AppConfigService);
     const styleService = inject(StyleService);
     const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
     const searchService = inject(FeatureSearchService);
 
     return (async () => {
+        updateGlobalSpinner('Loading app config');
+        await configService.load();
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
         updateGlobalSpinner('Initializing coordinates');

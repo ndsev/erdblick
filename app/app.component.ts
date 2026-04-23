@@ -14,6 +14,7 @@ import {environment} from "./environments/environment";
 import {DialogStackService} from "./shared/dialog-stack.service";
 import {Title} from "@angular/platform-browser";
 import {KeyboardService} from "./shared/keyboard.service";
+import {AppConfigService} from "./shared/app-config.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -85,6 +86,7 @@ export class AppComponent implements OnDestroy {
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
+                private configService: AppConfigService,
                 private titleService: Title) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
@@ -96,45 +98,7 @@ export class AppComponent implements OnDestroy {
             this.stateService
         );
 
-        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
-            next: (data: any) => {
-                try {
-                    if (data && data["extensionModules"] && data["extensionModules"]["distribVersions"]) {
-                        let distribVersions = data["extensionModules"]["distribVersions"];
-                        if (distribVersions !== undefined) {
-                            const distribVersionsPath = `/config/${distribVersions}.js`;
-                            // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
-                            import(/* @vite-ignore */ distribVersionsPath)
-                                .then((plugin) => plugin.default() as Array<Versions>)
-                                .then((versions: Array<Versions>) => {
-                                    this.stateService.distributionVersions.next(versions);
-                                    if (versions[0].name.trim()) {
-                                        this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
-                                    } else {
-                                        this.titleService.setTitle(this.capitalizeTitle(this.title));
-                                    }
-                                })
-                                .catch((error) => {
-                                    console.error(error);
-                                    this.getBasicVersion();
-                                });
-                            return;
-                        } else {
-                            this.getBasicVersion();
-                        }
-                    } else {
-                        this.getBasicVersion();
-                    }
-                } catch (error) {
-                    console.error(error);
-                    this.getBasicVersion();
-                }
-            },
-            error: error => {
-                console.error(error);
-                this.getBasicVersion();
-            }
-        });
+        this.loadDistributionVersions();
 
         this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
     }
@@ -181,6 +145,31 @@ export class AppComponent implements OnDestroy {
         this.detachDialogFocusListener = () => {
             document.removeEventListener('mousedown', handler, true);
         };
+    }
+
+    /** Loads optional distribution-version metadata from the config-driven extension module. */
+    private loadDistributionVersions() {
+        const distribVersions = this.configService.getExtensionModuleId("distribVersions");
+        if (!distribVersions) {
+            this.getBasicVersion();
+            return;
+        }
+
+        const distribVersionsPath = `/config/${distribVersions}.js`;
+        import(/* @vite-ignore */ distribVersionsPath)
+            .then((plugin) => plugin.default() as Array<Versions>)
+            .then((versions: Array<Versions>) => {
+                this.stateService.distributionVersions.next(versions);
+                if (versions[0]?.name.trim()) {
+                    this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
+                } else {
+                    this.titleService.setTitle(this.capitalizeTitle(this.title));
+                }
+            })
+            .catch((error) => {
+                console.error(error);
+                this.getBasicVersion();
+            });
     }
 
     /** Prevents accidental text selection while PrimeNG dialogs are dragged or resized. */

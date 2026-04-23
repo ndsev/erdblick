@@ -4,6 +4,7 @@ import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appst
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
+import {Popover} from "primeng/popover";
 import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
@@ -11,6 +12,19 @@ import {Subscription} from "rxjs";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
+import {
+    AppConfigService,
+    BackgroundLayerConfig,
+    WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP
+} from "../shared/app-config.service";
+
+/** One rendered select option in the per-view background-layer dropdown. */
+interface BackgroundLayerOption {
+    label: string;
+    value: string | null;
+    disabled: boolean;
+    experimental: boolean;
+}
 
 
 @Component({
@@ -78,25 +92,68 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                                   tooltipPosition="bottom" tabindex="0">
                         </p-button>
                         <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
-                        <div class="osm-controls">
-                            <span style="font-size: 0.9em">OSM Overlay:</span>
-                            <p-button onEnterClick (click)="toggleOSMOverlay(index)"
-                                      [attr.data-testid]="getOsmToggleTestId(index)"
-                                      [styleClass]="osmEnabled[index] ? 'osm-button p-button-success' : 'osm-button p-button-primary'"
+                        <div class="background-controls">
+                            <p-select class="background-layer-select"
+                                      [attr.data-testid]="getBackgroundSelectTestId(index)"
+                                      [options]="backgroundOptions[index]"
+                                      [(ngModel)]="backgroundLayerIds[index]"
+                                      (ngModelChange)="updateBackgroundLayer(index)"
+                                      optionLabel="label"
+                                      optionValue="value"
+                                      optionDisabled="disabled"
+                                      appendTo="body"
+                                      tabindex="0">
+                                <ng-template let-option pTemplate="selectedItem">
+                                    <div class="background-option">
+                                        <span class="background-option-label">{{ option?.label ?? 'No Background' }}</span>
+                                        @if (option?.experimental) {
+                                            <span class="background-badges">
+                                                <p-tag severity="warn" value="EXPERIMENTAL" />
+                                            </span>
+                                        }
+                                    </div>
+                                </ng-template>
+                                <ng-template let-option pTemplate="item">
+                                    <div class="background-option">
+                                        <span class="background-option-label">{{ option.label }}</span>
+                                        @if (option.experimental) {
+                                            <span class="background-badges">
+                                                <p-tag severity="warn" value="EXPERIMENTAL" />
+                                                <span class="material-symbols-outlined background-info"
+                                                      [pTooltip]="wmsExperimentalTooltip"
+                                                      tooltipPosition="bottom">info</span>
+                                            </span>
+                                        }
+                                    </div>
+                                </ng-template>
+                            </p-select>
+                            <p-button onEnterClick (click)="toggleBackgroundOpacityPopover($event, backgroundOpacityPopover)"
+                                      class="background-opacity-button"
+                                      [styleClass]="backgroundLayerIds[index] !== null ? 'map-controls-button p-button-primary' : 'map-controls-button p-button-secondary'"
                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                      icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                      label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
+                                      [disabled]="backgroundLayerIds[index] === null"
+                                      icon="" label="" pTooltip="Adjust background opacity"
+                                      tooltipPosition="bottom" tabindex="0">
+                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                    opacity
+                                </span>
                             </p-button>
-                            <div *ngIf="osmEnabled[index]" style="display: inline-block">
-                                <input type="text" pInputText [(ngModel)]="osmOpacityValue[index]"
-                                       (input)="onOsmOpacityInput($event, index)"
-                                       (keydown.enter)="updateOSMOverlay(index)"
-                                       (blur)="updateOSMOverlay(index)"
-                                       class="w-full slider-input" tabindex="0"/>
-                                <p-slider [(ngModel)]="osmOpacityValue[index]" (ngModelChange)="updateOSMOverlay(index)"
-                                          class="w-full" tabindex="-1">
-                                </p-slider>
-                            </div>
+                            @if (backgroundDetails[index]) {
+                                <span class="material-symbols-outlined background-details-info"
+                                      [pTooltip]="backgroundDetails[index]"
+                                      tooltipPosition="bottom">info</span>
+                            }
+                            <p-popover #backgroundOpacityPopover [baseZIndex]="30000" appendTo="body">
+                                <div class="background-opacity-popover">
+                                    <span class="background-opacity-value">{{ backgroundOpacityValue[index] }}%</span>
+                                    <p-slider [(ngModel)]="backgroundOpacityValue[index]"
+                                              (ngModelChange)="updateBackgroundLayer(index)"
+                                              orientation="vertical"
+                                              class="background-opacity-slider"
+                                              tabindex="-1">
+                                    </p-slider>
+                                </div>
+                            </p-popover>
                         </div>
                     </div>
 
@@ -264,17 +321,20 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 })
 /**
  * Renders the maps-and-layers panel and translates its UI controls into map-service and
- * app-state updates for the active views.
+ * app-state updates for the active views, including tile-grid and background-layer controls.
  */
 export class MapPanelComponent {
+    protected readonly wmsExperimentalTooltip = WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP;
 
     subscriptions: Subscription[] = [];
     viewIndices: number[] = [];
 
     mapsCollapsed: boolean[] = [];
 
-    osmEnabled: boolean[] = [true];
-    osmOpacityValue: number[] = [30];
+    backgroundLayerIds: Array<string | null> = [null];
+    backgroundOpacityValue: number[] = [100];
+    backgroundOptions: BackgroundLayerOption[][] = [[]];
+    backgroundDetails: string[] = [""];
     tileBordersEnabled: boolean[] = [];
     tileGridModes: TileGridMode[] = [];
 
@@ -293,6 +353,7 @@ export class MapPanelComponent {
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
+                private readonly configService: AppConfigService,
                 private readonly dialogStack: DialogStackService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
@@ -325,16 +386,13 @@ export class MapPanelComponent {
         this.subscriptions.push(
             this.stateService.numViewsState.subscribe(numViews => {
                 this.viewIndices = Array.from({length: numViews}, (_, i) => i);
-                this.osmEnabled = [];
-                this.osmOpacityValue = [];
                 this.tileBordersEnabled = [];
                 this.tileGridModes = [];
                 this.viewIndices.forEach(viewIndex => {
-                    this.osmEnabled.push(this.stateService.getOsmEnabled(viewIndex));
-                    this.osmOpacityValue.push(this.stateService.getOsmOpacity(viewIndex));
                     this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
                     this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
+                this.refreshBackgroundControls();
                 while (this.mapsCollapsed.length < this.viewIndices.length) {
                     this.mapsCollapsed.push(false);
                 }
@@ -354,13 +412,15 @@ export class MapPanelComponent {
         );
 
         this.subscriptions.push(
-            this.stateService.osmState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
-                this.osmEnabled = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.getOsmEnabled(index));
-                this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.getOsmOpacity(index));
-            })
+            this.stateService.backgroundState.appState.subscribe(_ => this.refreshBackgroundControls())
+        );
+
+        this.subscriptions.push(
+            this.stateService.mode2dState.appState.subscribe(_ => this.refreshBackgroundControls())
+        );
+
+        this.subscriptions.push(
+            this.configService.config$.subscribe(_ => this.refreshBackgroundControls())
         );
 
         this.subscriptions.push(
@@ -389,31 +449,55 @@ export class MapPanelComponent {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
-    /** Sanitizes the free-form OSM opacity input and applies it to the selected view. */
-    onOsmOpacityInput(event: any, viewIndex: number) {
-        const inputElement = event.target as HTMLInputElement;
-        const value = inputElement.value;
+    /** Rebuilds the background dropdown contents and resolved per-view selection state. */
+    private refreshBackgroundControls() {
+        const numViews = this.stateService.numViews;
+        const backgroundLayers = this.configService.getBackgroundLayers();
+        const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
 
-        // Extract only numerical characters and decimal points
-        const numericalOnly = value.replace(/[^0-9.]/g, '');
-        let numValue = parseInt(numericalOnly);
+        this.backgroundLayerIds = Array.from({length: numViews}, (_, index) =>
+            this.stateService.resolveBackgroundState(index, backgroundLayers, defaultBackgroundLayerId).layerId);
+        this.backgroundOpacityValue = Array.from({length: numViews}, (_, index) =>
+            this.stateService.getBackgroundOpacity(index));
+        this.backgroundOptions = Array.from({length: numViews}, (_, index) =>
+            this.createBackgroundOptions(index, backgroundLayers));
+        this.backgroundDetails = Array.from({length: numViews}, (_, index) =>
+            this.backgroundDetailText(index, backgroundLayers));
+    }
 
-        // Validate and clamp the value
-        if (isNaN(numValue) || numValue < 0) {
-            numValue = 0;
-        } else if (numValue > 100) {
-            numValue = 100;
+    /** Builds the background-layer dropdown options for one view, including 3D WMS gating. */
+    private createBackgroundOptions(viewIndex: number, backgroundLayers: readonly BackgroundLayerConfig[]): BackgroundLayerOption[] {
+        const is2d = this.stateService.mode2dState.getValue(viewIndex);
+        return [{
+            label: "No Background",
+            value: null,
+            disabled: false,
+            experimental: false
+        }, ...backgroundLayers.map(layer => ({
+            label: layer.name,
+            value: layer.id,
+            disabled: !is2d && layer.type === "wms",
+            experimental: layer.type === "wms"
+        }))];
+    }
+
+    /** Summarizes attribution and capability notes for the currently selected background layer. */
+    private backgroundDetailText(viewIndex: number, backgroundLayers: readonly BackgroundLayerConfig[]): string {
+        const selectedLayer = backgroundLayers.find(layer => layer.id === this.backgroundLayerIds[viewIndex]);
+        if (!selectedLayer) {
+            return "";
         }
-
-        this.osmOpacityValue[viewIndex] = numValue;
-        // Always show "Opacity: X"
-        const formattedValue = 'Opacity: ' + numValue;
-        if (inputElement.value !== formattedValue) {
-            inputElement.value = formattedValue;
-            inputElement.dispatchEvent(new Event('input'));
+        const details: string[] = [];
+        if (selectedLayer.type === "wms") {
+            details.push(WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP);
         }
-
-        this.updateOSMOverlay(viewIndex);
+        if (selectedLayer?.type === "wms" && !this.stateService.mode2dState.getValue(viewIndex)) {
+            details.push("WMS backgrounds are currently limited to 2D views.");
+        }
+        if (selectedLayer.attribution) {
+            details.push(selectedLayer.attribution);
+        }
+        return details.join(' • ');
     }
 
     /** Opens the bulk layer-toggle menu for one map or layer row. */
@@ -505,16 +589,15 @@ export class MapPanelComponent {
         return coverage;
     }
 
-    /** Writes the current OSM enable/opacity state for one view back into app state. */
-    updateOSMOverlay(viewIndex: number) {
-        this.stateService.setOsmState(viewIndex, this.osmEnabled[viewIndex], this.osmOpacityValue[viewIndex]);
-        this.mapService.syncOsmSettings(viewIndex);
+    /** Writes the current background-layer selection and opacity for one view back into app state. */
+    updateBackgroundLayer(viewIndex: number) {
+        this.stateService.setBackgroundState(viewIndex, this.backgroundLayerIds[viewIndex], this.backgroundOpacityValue[viewIndex]);
+        this.mapService.syncBackgroundSettings(viewIndex);
     }
 
-    /** Toggles the OSM overlay on the selected view. */
-    toggleOSMOverlay(viewIndex: number) {
-        this.osmEnabled[viewIndex] = !this.osmEnabled[viewIndex];
-        this.updateOSMOverlay(viewIndex);
+    /** Opens or closes the popup opacity slider for the selected view's background layer. */
+    toggleBackgroundOpacityPopover(event: MouseEvent, popover: Popover) {
+        popover.toggle(event);
     }
 
     /** Sets the visibility of one map or layer entry for a specific view. */
@@ -527,9 +610,9 @@ export class MapPanelComponent {
         return `map-tab-${viewIndex}`;
     }
 
-    /** Returns the stable test id for one OSM toggle button. */
-    getOsmToggleTestId(viewIndex: number): string {
-        return `osm-toggle-${viewIndex}`;
+    /** Returns the stable test id for one background-layer selector. */
+    getBackgroundSelectTestId(viewIndex: number): string {
+        return `background-select-${viewIndex}`;
     }
 
     /** Toggles per-view tile-border visualization. */

@@ -1,10 +1,8 @@
 import {describe, it, expect, vi} from 'vitest';
-import {of} from 'rxjs';
-
 import {CoordinatesService} from './coordinates.service';
 
-class HttpClientStub {
-    get = vi.fn();
+class AppConfigServiceStub {
+    getExtensionModuleId = vi.fn().mockReturnValue(null);
 }
 
 class AppStateServiceStub {
@@ -12,10 +10,10 @@ class AppStateServiceStub {
 }
 
 const createService = () => {
-    const httpClient = new HttpClientStub();
     const stateService = new AppStateServiceStub();
-    const service = new CoordinatesService(httpClient as any, stateService as any);
-    return {service, httpClient, stateService};
+    const configService = new AppConfigServiceStub();
+    const service = new CoordinatesService(stateService as any, configService as any);
+    return {service, stateService, configService};
 };
 
 describe('CoordinatesService', () => {
@@ -31,35 +29,23 @@ describe('CoordinatesService', () => {
         expect(stateService.setMarkerPosition).toHaveBeenCalledWith(position);
     });
 
-    it('calls config.json during initialization when auxiliary plugin is configured', async () => {
-        const {service, httpClient} = createService();
-        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('loads the auxiliary plugin when a jump-target extension module is configured', async () => {
+        const {service, configService} = createService();
         const loaderSpy = vi.spyOn(CoordinatesService.prototype as any, 'loadJumpTargetsModule').mockResolvedValue({
             getAuxCoordinates: () => null,
             getAuxTileIds: () => null,
         });
 
         try {
-            httpClient.get.mockImplementation((url: string) => {
-                if (url === 'config.json') {
-                    return of({
-                        extensionModules: {
-                            jumpTargets: 'jump_plugin',
-                        },
-                    });
-                }
-                throw new Error(`Unexpected URL ${url}`);
-            });
+            configService.getExtensionModuleId.mockReturnValue('jump_plugin');
 
             service.initialize();
 
             await new Promise(resolve => setTimeout(resolve, 0));
 
-            expect(httpClient.get).toHaveBeenCalledWith('config.json', {responseType: 'json'});
             expect(loaderSpy).toHaveBeenCalledWith('/config/jump_plugin.js');
         } finally {
             loaderSpy.mockRestore();
-            consoleErrorSpy.mockRestore();
         }
     });
 }
