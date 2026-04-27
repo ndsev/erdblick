@@ -10,7 +10,9 @@ import {SceneMode} from "../../integrations/geo";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
 import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
+import {ScenegraphLayer} from "@deck.gl/mesh-layers";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
+import type {Device} from "@luma.gl/core";
 import {Matrix4} from "@math.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, type ErdblickCore_} from "../../integrations/wasm";
@@ -22,6 +24,7 @@ import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
+    DeckGltfBucketBuffers,
     DeckGeometryBucketBuffers,
     DeckLabelDatum,
     DeckGeometryOutputMode,
@@ -34,6 +37,13 @@ import {
 } from "./deck-render.worker.protocol";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
+import {
+    cloneProcessedGltfForScenegraph,
+    DeckGltfNodeLayer,
+    type DeckTileGltfAsset,
+    retainDeckTileGltfAsset,
+    releaseDeckTileGltfAsset
+} from "./deck-gltf-node.layer";
 
 /** Style wrapper for wasm styles that expose erdblick-specific lifecycle and fidelity helpers. */
 interface StyleWithIsDeleted extends FeatureLayerStyle {
@@ -47,6 +57,7 @@ interface DeckSceneHandle {
     deck?: unknown;
     layerRegistry?: DeckLayerRegistry;
     sceneMode?: SceneMode;
+    device?: Device | null;
 }
 
 /** Callback surface used to query how many points are already merged at a location. */
@@ -122,6 +133,21 @@ interface DeckSurfaceLayerData {
     };
 }
 
+/** GLTF-node layer payload grouped by depth-test state and resolved against one cached tile asset. */
+interface DeckGltfLayerData {
+    length: number;
+    depthTest: boolean;
+    data: Array<{
+        nodeIndex: number;
+        featureAddress: number;
+        color: [number, number, number, number];
+    }>;
+    asset: DeckTileGltfAsset | null;
+}
+
+export const DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID = "$debugRenderFullGltfAttachment";
+export const DEBUG_GLTF_LOGGING_OPTION_ID = "$debugGltfLogging";
+
 /** Label-layer payload grouped by billboard and depth-test mode. */
 interface DeckLabelLayerData {
     length: number;
@@ -168,6 +194,14 @@ interface DeckSurfaceRawBuffers {
     featureAddresses: Uint32Array;
 }
 
+/** Raw GLTF-node buffers read back from wasm before they are regrouped for deck consumption. */
+interface DeckGltfRawBuffers {
+    nodeIndices: Uint32Array;
+    colors: Uint8Array;
+    depthTests?: Uint8Array;
+    featureAddresses: Uint32Array;
+}
+
 /** Complete geometry output of one wasm render pass, before deck-layer regrouping. */
 interface DeckWasmRenderOutput {
     surfaceLayerData: DeckSurfaceLayerData[];
@@ -175,6 +209,7 @@ interface DeckWasmRenderOutput {
     pointLayerData: DeckPointLayerData[];
     labelLayerData: DeckLabelLayerData[];
     arrowLayerData: DeckPathLayerData[];
+    gltfLayerData: DeckGltfLayerData[];
     lowFiBundles: DeckLowFiBundleData[];
     mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
     vertexCount: number;
@@ -189,6 +224,7 @@ interface DeckLowFiBundleData {
     pointLayerData: DeckPointLayerData[];
     labelLayerData: DeckLabelLayerData[];
     arrowLayerData: DeckPathLayerData[];
+    gltfLayerData: DeckGltfLayerData[];
 }
 
 const MAX_DECK_PATH_COUNT = 1_000_000;
@@ -209,7 +245,8 @@ const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
 const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 const DECK_NO_DEPTH_TEST_PARAMETERS = {
-    depthTest: false
+    depthTest: false,
+    depthMask: false
 } as any;
 const DECK_ARROW_ICON_ATLAS =
     "data:image/svg+xml;charset=utf-8," +
@@ -260,6 +297,7 @@ interface DeckLayerKeys {
     pointLayerKey: string;
     labelLayerKey: string;
     arrowLayerKey: string;
+    gltfLayerKey: string;
 }
 
 /** One logical render variant applied to the registry, e.g. base geometry or a low-fi LOD bundle. */
@@ -271,6 +309,7 @@ interface DeckLayerRenderEntry {
     pointLayerData: DeckPointLayerData[];
     labelLayerData: DeckLabelLayerData[];
     arrowLayerData: DeckPathLayerData[];
+    gltfLayerData: DeckGltfLayerData[];
 }
 
 /**
@@ -304,6 +343,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private readonly pathLayerKeys = new Set<string>();
     private readonly labelLayerKeys = new Set<string>();
     private readonly arrowLayerKeys = new Set<string>();
+    private readonly gltfLayerKeys = new Set<string>();
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
@@ -313,11 +353,16 @@ export class DeckTileVisualization implements ITileVisualization {
     private latestPointLayerData: DeckPointLayerData[] = [];
     private latestLabelLayerData: DeckLabelLayerData[] = [];
     private latestArrowLayerData: DeckPathLayerData[] = [];
+    private latestGltfLayerData: DeckGltfLayerData[] = [];
     private latestLowFiBundleData: DeckLowFiBundleData[] = [];
     private lowFiBundleByLod = new Map<number, DeckLowFiBundleData>();
     private activeRenderedFidelity: "low" | "high" | "any" | null = null;
     private activeRenderedLowFiLods: number[] = [];
     private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
+    private readonly seenGltfDebugMessages = new Set<string>();
+    private activeGltfAsset: DeckTileGltfAsset | null = null;
+    private activeGltfAssetDevice: Device | null = null;
+    private activeGltfAssetVersion = -1;
 
 
     /** Captures every render input needed to keep one tile/style visualization alive across rerenders. */
@@ -368,7 +413,7 @@ export class DeckTileVisualization implements ITileVisualization {
         const startTime = performance.now();
         try {
             const fidelity = this.currentFidelity();
-            if (this.tryApplyCachedLowFiSwitch(sceneHandle, registry, fidelity)) {
+            if (await this.tryApplyCachedLowFiSwitch(sceneHandle, registry, fidelity)) {
                 return true;
             }
 
@@ -376,6 +421,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestPointLayerData = [];
             this.latestLabelLayerData = [];
             this.latestArrowLayerData = [];
+            this.latestGltfLayerData = [];
             this.latestLowFiBundleData = [];
             this.latestMergedPointFeatures = null;
 
@@ -384,6 +430,7 @@ export class DeckTileVisualization implements ITileVisualization {
             let pointLayerData = this.latestPointLayerData;
             let labelLayerData = this.latestLabelLayerData;
             let arrowLayerData = this.latestArrowLayerData;
+            let gltfLayerData = this.latestGltfLayerData;
             let activeLowFiLods: number[] = [];
             let selectedLowFiBundles: DeckLowFiBundleData[] = [];
             const mergedPointFeatures = this.latestMergedPointFeatures as
@@ -402,6 +449,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     pointLayerData = [];
                     labelLayerData = [];
                     arrowLayerData = [];
+                    gltfLayerData = [];
                     activeLowFiLods = selectedLowFiBundles.map((bundle) => bundle.lod);
                 }
             }
@@ -413,26 +461,28 @@ export class DeckTileVisualization implements ITileVisualization {
                 pointLayerData,
                 labelLayerData,
                 arrowLayerData,
+                gltfLayerData,
                 mergedPointFeatures
             )) {
                 this.completeRender(fidelity, activeLowFiLods);
                 return true;
             }
 
-            this.clearMergedPointVisualizations(sceneHandle);
-            if (fidelity === "low" && selectedLowFiBundles.length > 0) {
-                this.applyLowFiBundleDataToRegistry(sceneHandle, registry, selectedLowFiBundles);
-            } else {
-                this.applyLayerDataToRegistry(
-                    sceneHandle,
-                    registry,
+            const layerEntries = fidelity === "low" && selectedLowFiBundles.length > 0
+                ? this.buildLowFiLayerEntries(selectedLowFiBundles)
+                : this.buildDefaultLayerEntries(
                     surfaceLayerData,
                     pathLayerData,
                     pointLayerData,
                     labelLayerData,
-                    arrowLayerData
+                    arrowLayerData,
+                    gltfLayerData
                 );
-            }
+            await this.attachGltfAssetsToEntries(sceneHandle, layerEntries);
+            this.logGltfRenderSummary(fidelity, layerEntries);
+
+            this.clearMergedPointVisualizations(sceneHandle);
+            this.applyLayerEntriesToRegistry(sceneHandle, registry, layerEntries);
 
             if (mergedPointFeatures) {
                 for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(mergedPointFeatures)) {
@@ -495,6 +545,13 @@ export class DeckTileVisualization implements ITileVisualization {
                 hoverMode: this.highlightModeLabel(),
                 kind: "arrow",
                 variant
+            }),
+            gltfLayerKey: makeDeckLayerKey({
+                tileKey: this.tile.mapTileKey,
+                styleId: this.styleId,
+                hoverMode: this.highlightModeLabel(),
+                kind: "gltf",
+                variant
             })
         };
     }
@@ -528,6 +585,41 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
+    /** Builds the default render entry used when the visualization emits one direct geometry set. */
+    private buildDefaultLayerEntries(
+        surfaceLayerData: DeckSurfaceLayerData[],
+        pathLayerData: DeckPathLayerData[],
+        pointLayerData: DeckPointLayerData[],
+        labelLayerData: DeckLabelLayerData[],
+        arrowLayerData: DeckPathLayerData[],
+        gltfLayerData: DeckGltfLayerData[]
+    ): DeckLayerRenderEntry[] {
+        return [{
+            variantSuffix: "",
+            orderOffset: 0,
+            surfaceLayerData,
+            pathLayerData,
+            pointLayerData,
+            labelLayerData,
+            arrowLayerData,
+            gltfLayerData
+        }];
+    }
+
+    /** Builds the render entries used when low-fi cached bundles replace the default geometry. */
+    private buildLowFiLayerEntries(lowFiBundles: DeckLowFiBundleData[]): DeckLayerRenderEntry[] {
+        return lowFiBundles.map((bundle) => ({
+            variantSuffix: `lowfi-lod-${bundle.lod}`,
+            orderOffset: bundle.lod,
+            surfaceLayerData: bundle.surfaceLayerData,
+            pathLayerData: bundle.pathLayerData,
+            pointLayerData: bundle.pointLayerData,
+            labelLayerData: bundle.labelLayerData,
+            arrowLayerData: bundle.arrowLayerData,
+            gltfLayerData: bundle.gltfLayerData
+        }));
+    }
+
     /** Applies one geometry result directly to the deck registry as the default variant. */
     private applyLayerDataToRegistry(
         sceneHandle: IRenderSceneHandle,
@@ -536,17 +628,21 @@ export class DeckTileVisualization implements ITileVisualization {
         pathLayerData: DeckPathLayerData[],
         pointLayerData: DeckPointLayerData[],
         labelLayerData: DeckLabelLayerData[],
-        arrowLayerData: DeckPathLayerData[]
+        arrowLayerData: DeckPathLayerData[],
+        gltfLayerData: DeckGltfLayerData[]
     ): void {
-        this.applyLayerEntriesToRegistry(sceneHandle, registry, [{
-            variantSuffix: "",
-            orderOffset: 0,
-            surfaceLayerData,
-            pathLayerData,
-            pointLayerData,
-            labelLayerData,
-            arrowLayerData
-        }]);
+        this.applyLayerEntriesToRegistry(
+            sceneHandle,
+            registry,
+            this.buildDefaultLayerEntries(
+                surfaceLayerData,
+                pathLayerData,
+                pointLayerData,
+                labelLayerData,
+                arrowLayerData,
+                gltfLayerData
+            )
+        );
     }
 
     /** Applies one or more cached low-fi bundles to the deck registry as separate variants. */
@@ -555,15 +651,76 @@ export class DeckTileVisualization implements ITileVisualization {
         registry: DeckLayerRegistry,
         lowFiBundles: DeckLowFiBundleData[]
     ): void {
-        this.applyLayerEntriesToRegistry(sceneHandle, registry, lowFiBundles.map((bundle) => ({
-            variantSuffix: `lowfi-lod-${bundle.lod}`,
-            orderOffset: bundle.lod,
-            surfaceLayerData: bundle.surfaceLayerData,
-            pathLayerData: bundle.pathLayerData,
-            pointLayerData: bundle.pointLayerData,
-            labelLayerData: bundle.labelLayerData,
-            arrowLayerData: bundle.arrowLayerData
-        })));
+        this.applyLayerEntriesToRegistry(sceneHandle, registry, this.buildLowFiLayerEntries(lowFiBundles));
+    }
+
+    /** Returns the deck device used for tile-local GLTF asset caching, or `null` outside deck rendering. */
+    private resolveDeckDevice(sceneHandle: IRenderSceneHandle): Device | null {
+        if (sceneHandle.renderer !== "deck") {
+            return null;
+        }
+        const deckScene = sceneHandle.scene as DeckSceneHandle | undefined;
+        return deckScene?.device ?? null;
+    }
+
+    /** Releases the currently retained GLTF asset reference, if any. */
+    private releaseActiveGltfAsset(): void {
+        if (!this.activeGltfAssetDevice || this.activeGltfAssetVersion < 0) {
+            this.activeGltfAsset = null;
+            this.activeGltfAssetDevice = null;
+            this.activeGltfAssetVersion = -1;
+            return;
+        }
+        releaseDeckTileGltfAsset(this.tile, this.activeGltfAssetDevice);
+        this.activeGltfAsset = null;
+        this.activeGltfAssetDevice = null;
+        this.activeGltfAssetVersion = -1;
+    }
+
+    /** Retains the current tile's parsed GLTF asset for the active deck device and tile data version. */
+    private async ensureActiveGltfAsset(sceneHandle: IRenderSceneHandle): Promise<DeckTileGltfAsset | null> {
+        const device = this.resolveDeckDevice(sceneHandle);
+        if (!device) {
+            this.releaseActiveGltfAsset();
+            return null;
+        }
+        if (this.activeGltfAssetDevice === device && this.activeGltfAssetVersion === this.tile.dataVersion) {
+            return this.activeGltfAsset;
+        }
+        this.releaseActiveGltfAsset();
+        this.activeGltfAsset = await retainDeckTileGltfAsset(this.tile, device);
+        this.activeGltfAssetDevice = device;
+        this.activeGltfAssetVersion = this.tile.dataVersion;
+        return this.activeGltfAsset;
+    }
+
+    /** Assigns one cached GLTF asset to every GLTF layer entry that will be applied this frame. */
+    private async attachGltfAssetsToEntries(
+        sceneHandle: IRenderSceneHandle,
+        entries: DeckLayerRenderEntry[]
+    ): Promise<void> {
+        const gltfLayerData = entries.flatMap((entry) => entry.gltfLayerData);
+        const needsAssetForDebug = this.shouldRenderFullGltfAttachmentDebug();
+        if (!needsAssetForDebug && !gltfLayerData.some((entry) => entry.length > 0)) {
+            this.releaseActiveGltfAsset();
+            return;
+        }
+        const asset = await this.ensureActiveGltfAsset(sceneHandle);
+        for (const gltfEntry of gltfLayerData) {
+            gltfEntry.asset = asset;
+        }
+        if (asset) {
+            this.logGltfDebug("Retained tile GLTF asset", {
+                attachmentName: asset.attachmentName,
+                byteLength: asset.byteLength,
+                sceneCount: asset.sceneCount,
+                modelNodeCount: asset.modelNodeCount,
+                nodeRootCount: asset.nodeRootCount,
+                tilePosition: asset.tilePosition
+            });
+        } else {
+            this.logGltfDebug("No GLTF attachment is available for this tile.");
+        }
     }
 
     /**
@@ -575,12 +732,43 @@ export class DeckTileVisualization implements ITileVisualization {
         registry: DeckLayerRegistry,
         entries: DeckLayerRenderEntry[]
     ): void {
+        const layerOrderBias = this.highlightMode.value === coreLib.HighlightMode.NO_HIGHLIGHT.value ? 0 : 1000;
         const desiredSurfaceLayerKeys = new Set<string>();
         const desiredPointLayerKeys = new Set<string>();
         const desiredPathLayerKeys = new Set<string>();
         const desiredLabelLayerKeys = new Set<string>();
         const desiredArrowLayerKeys = new Set<string>();
+        const desiredGltfLayerKeys = new Set<string>();
         const modelMatrix = this.modelMatrixForScene(sceneHandle);
+        const debugRenderFullAsset = this.shouldRenderFullGltfAttachmentDebug();
+        const debugAsset = this.activeGltfAsset;
+
+        if (debugRenderFullAsset && debugAsset) {
+            const layerKeys = this.resolveLayerKeys(this.composeGeometryVariant("", "gltf-debug-full"));
+            const gltfLayer = new ScenegraphLayer({
+                id: layerKeys.gltfLayerKey,
+                data: [{position: debugAsset.tilePosition, color: [255, 255, 255, 255]}],
+                scenegraph: cloneProcessedGltfForScenegraph(debugAsset.processedGltf),
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                modelMatrix,
+                parameters: {
+                    ...this.layerParametersForDepthTest(true),
+                    cullMode: "none"
+                },
+                pickable: false,
+                _lighting: "flat",
+                getPosition: (datum: {position: [number, number, number]}) => datum.position,
+                getColor: (datum: {color: [number, number, number, number]}) => datum.color
+            });
+            registry.upsert(layerKeys.gltfLayerKey, gltfLayer, 375 + layerOrderBias);
+            desiredGltfLayerKeys.add(layerKeys.gltfLayerKey);
+            this.logGltfDebug("Rendering full GLTF attachment in debug bypass mode.", {
+                attachmentName: debugAsset.attachmentName,
+                sceneCount: debugAsset.sceneCount,
+                modelNodeCount: debugAsset.modelNodeCount,
+                tilePosition: debugAsset.tilePosition
+            });
+        }
 
         for (const entry of entries) {
             for (const surfaceLayerData of entry.surfaceLayerData) {
@@ -608,7 +796,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     tileKey: this.tile.mapTileKey,
                     featureAddresses: surfaceLayerData.featureAddresses
                 });
-                registry.upsert(layerKeys.surfaceLayerKey, surfaceLayer, 350 + entry.orderOffset);
+                registry.upsert(layerKeys.surfaceLayerKey, surfaceLayer, 350 + entry.orderOffset + layerOrderBias);
                 desiredSurfaceLayerKeys.add(layerKeys.surfaceLayerKey);
             }
 
@@ -639,7 +827,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     tileKey: this.tile.mapTileKey,
                     featureAddresses: pointLayerData.featureAddresses
                 });
-                registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset);
+                registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset + layerOrderBias);
                 desiredPointLayerKeys.add(layerKeys.pointLayerKey);
             }
 
@@ -674,7 +862,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     pickable: true,
                     tileKey: this.tile.mapTileKey
                 } as any) as any;
-                registry.upsert(layerKeys.labelLayerKey, labelLayer, 475 + entry.orderOffset);
+                registry.upsert(layerKeys.labelLayerKey, labelLayer, 475 + entry.orderOffset + layerOrderBias);
                 desiredLabelLayerKeys.add(layerKeys.labelLayerKey);
             }
 
@@ -708,7 +896,7 @@ export class DeckTileVisualization implements ITileVisualization {
                     tileKey: this.tile.mapTileKey,
                     featureAddressesByPath: pathLayerData.featureAddressesByPath
                 });
-                registry.upsert(layerKeys.pathLayerKey, pathLayer, 400 + entry.orderOffset);
+                registry.upsert(layerKeys.pathLayerKey, pathLayer, 400 + entry.orderOffset + layerOrderBias);
                 desiredPathLayerKeys.add(layerKeys.pathLayerKey);
             }
 
@@ -745,8 +933,51 @@ export class DeckTileVisualization implements ITileVisualization {
                     tileKey: this.tile.mapTileKey,
                     alphaCutoff: 0.05,
                 });
-                registry.upsert(layerKeys.arrowLayerKey, arrowLayer, 450 + entry.orderOffset);
+                registry.upsert(layerKeys.arrowLayerKey, arrowLayer, 450 + entry.orderOffset + layerOrderBias);
                 desiredArrowLayerKeys.add(layerKeys.arrowLayerKey);
+            }
+
+            if (debugRenderFullAsset) {
+                continue;
+            }
+
+            for (const gltfLayerData of entry.gltfLayerData) {
+                if (gltfLayerData.length <= 0 || !gltfLayerData.asset) {
+                    continue;
+                }
+                const gltfAsset = gltfLayerData.asset;
+                this.logGltfDebug("Preparing filtered GLTF layer.", {
+                    variantSuffix: entry.variantSuffix,
+                    depthTest: gltfLayerData.depthTest,
+                    renderedNodeCount: gltfLayerData.length,
+                    uniqueNodeCount: new Set(gltfLayerData.data.map((datum) => datum.nodeIndex)).size,
+                    assetNodeRootCount: gltfAsset.nodeRootCount
+                });
+                // Highlight GLTF layers reuse the exact same node geometry as the base pass.
+                // Rendering those copies with depth testing leaves them fully hidden on
+                // coplanar fragments, so treat highlight-mode GLTF layers as overlays.
+                const gltfDepthTest = this.highlightMode.value === coreLib.HighlightMode.NO_HIGHLIGHT.value
+                    && gltfLayerData.depthTest;
+                const layerKeys = this.resolveLayerKeys(
+                    this.composeGeometryVariant(
+                        entry.variantSuffix,
+                        "gltf",
+                        undefined,
+                        gltfDepthTest
+                    )
+                );
+                const gltfLayer = new DeckGltfNodeLayer({
+                    id: layerKeys.gltfLayerKey,
+                    data: gltfLayerData.data,
+                    asset: gltfAsset,
+                    pickable: this.highlightMode.value === coreLib.HighlightMode.NO_HIGHLIGHT.value,
+                    flatTint: this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value,
+                    tileKey: this.tile.mapTileKey,
+                    modelMatrix,
+                    parameters: this.layerParametersForDepthTest(gltfDepthTest)
+                });
+                registry.upsert(layerKeys.gltfLayerKey, gltfLayer, 375 + entry.orderOffset + layerOrderBias);
+                desiredGltfLayerKeys.add(layerKeys.gltfLayerKey);
             }
         }
 
@@ -755,6 +986,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.reconcileLayerKeys(registry, this.pathLayerKeys, desiredPathLayerKeys);
         this.reconcileLayerKeys(registry, this.labelLayerKeys, desiredLabelLayerKeys);
         this.reconcileLayerKeys(registry, this.arrowLayerKeys, desiredArrowLayerKeys);
+        this.reconcileLayerKeys(registry, this.gltfLayerKeys, desiredGltfLayerKeys);
     }
 
     /** Returns the 2D flattening matrix when the target scene is orthographic deck 2D. */
@@ -786,6 +1018,68 @@ export class DeckTileVisualization implements ITileVisualization {
             parts.push("overlay");
         }
         return parts.join("::");
+    }
+
+    /** Returns whether the viewer-wide GLTF debug toggle should bypass filtered node rendering for base tiles. */
+    private shouldRenderFullGltfAttachmentDebug(): boolean {
+        return this.highlightMode.value === coreLib.HighlightMode.NO_HIGHLIGHT.value
+            && this.options[DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID] === true;
+    }
+
+    /** Returns whether verbose GLTF diagnostics are enabled for this visualization. */
+    private shouldLogGltfDebug(): boolean {
+        return this.options[DEBUG_GLTF_LOGGING_OPTION_ID] === true;
+    }
+
+    /** Emits one deduplicated GLTF diagnostics message into the console-backed diagnostics log. */
+    private logGltfDebug(message: string, data?: Record<string, unknown>): void {
+        if (!this.shouldLogGltfDebug()) {
+            return;
+        }
+        const payload = {
+            view: this.viewIndex,
+            tileKey: this.tile.mapTileKey,
+            styleId: this.styleId,
+            highlightMode: this.highlightModeLabel(),
+            ...data
+        };
+        const signature = `${message}:${JSON.stringify(payload)}`;
+        if (this.seenGltfDebugMessages.has(signature)) {
+            return;
+        }
+        this.seenGltfDebugMessages.add(signature);
+        console.info(`[GLTF] ${message}`, payload);
+    }
+
+    /** Logs a compact summary of the GLTF render data emitted by wasm for this tile/style render pass. */
+    private logGltfRenderSummary(
+        fidelity: "low" | "high" | "any" | null,
+        entries: DeckLayerRenderEntry[]
+    ): void {
+        if (!this.shouldLogGltfDebug()) {
+            return;
+        }
+        const gltfEntries = entries.flatMap((entry) => entry.gltfLayerData);
+        const totalRenderedNodes = gltfEntries.reduce((sum, entry) => sum + entry.length, 0);
+        const uniqueNodeCount = new Set(
+            gltfEntries.flatMap((entry) => entry.data.map((datum) => datum.nodeIndex))
+        ).size;
+        const featureCount = new Set(
+            gltfEntries.flatMap((entry) => entry.data.map((datum) => datum.featureAddress))
+        ).size;
+        this.logGltfDebug("Wasm GLTF render output summary", {
+            fidelity,
+            highFidelityStage: this.highFidelityStage,
+            maxLowFiLod: this.maxLowFiLod,
+            debugFullAttachment: this.shouldRenderFullGltfAttachmentDebug(),
+            emittedLayerCount: gltfEntries.length,
+            renderedNodeCount: totalRenderedNodes,
+            uniqueNodeCount,
+            featureCount
+        });
+        if (totalRenderedNodes === 0) {
+            this.logGltfDebug("Wasm emitted no GLTF node references for this render pass.");
+        }
     }
 
     /** Chooses deck layer parameters that either honor or bypass depth testing. */
@@ -832,13 +1126,15 @@ export class DeckTileVisualization implements ITileVisualization {
         pathLayerData: DeckPathLayerData[],
         pointLayerData: DeckPointLayerData[],
         labelLayerData: DeckLabelLayerData[],
-        arrowLayerData: DeckPathLayerData[]
+        arrowLayerData: DeckPathLayerData[],
+        gltfLayerData: DeckGltfLayerData[]
     ): boolean {
         return surfaceLayerData.some((data) => data.length > 0)
             || pathLayerData.some((data) => data.length > 0)
             || pointLayerData.some((data) => data.length > 0)
             || labelLayerData.some((data) => data.length > 0)
-            || arrowLayerData.some((data) => data.length > 0);
+            || arrowLayerData.some((data) => data.length > 0)
+            || gltfLayerData.some((data) => data.length > 0);
     }
 
     /** Returns true when merged-point output contains any features. */
@@ -859,6 +1155,7 @@ export class DeckTileVisualization implements ITileVisualization {
         pointLayerData: DeckPointLayerData[],
         labelLayerData: DeckLabelLayerData[],
         arrowLayerData: DeckPathLayerData[],
+        gltfLayerData: DeckGltfLayerData[],
         mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
     ): boolean {
         if (fidelity !== "high"
@@ -866,7 +1163,14 @@ export class DeckTileVisualization implements ITileVisualization {
             || this.activeRenderedLowFiLods.length === 0) {
             return false;
         }
-        return !this.hasRenderableLayerData(surfaceLayerData, pathLayerData, pointLayerData, labelLayerData, arrowLayerData)
+        return !this.hasRenderableLayerData(
+            surfaceLayerData,
+            pathLayerData,
+            pointLayerData,
+            labelLayerData,
+            arrowLayerData,
+            gltfLayerData
+        )
             && !this.hasRenderableMergedPointFeatures(mergedPointFeatures);
     }
 
@@ -917,11 +1221,11 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     /** Fast-path that swaps cached low-fi bundles into the registry without rerunning wasm. */
-    private tryApplyCachedLowFiSwitch(
+    private async tryApplyCachedLowFiSwitch(
         sceneHandle: IRenderSceneHandle,
         registry: DeckLayerRegistry,
         fidelity: "low" | "high" | "any" | null
-    ): boolean {
+    ): Promise<boolean> {
         if (fidelity !== "low" || !this.rendered) {
             return false;
         }
@@ -941,9 +1245,12 @@ export class DeckTileVisualization implements ITileVisualization {
         this.clearMergedPointVisualizations(sceneHandle);
         this.latestPointLayerData = [];
         this.latestArrowLayerData = [];
+        this.latestGltfLayerData = [];
         this.latestMergedPointFeatures = null;
         this.latestWorkerTimings = null;
-        this.applyLowFiBundleDataToRegistry(sceneHandle, registry, selectedLowFiBundles);
+        const layerEntries = this.buildLowFiLayerEntries(selectedLowFiBundles);
+        await this.attachGltfAssetsToEntries(sceneHandle, layerEntries);
+        this.applyLayerEntriesToRegistry(sceneHandle, registry, layerEntries);
         this.completeRender("low", selectedLowFiLods);
         return true;
     }
@@ -999,12 +1306,17 @@ export class DeckTileVisualization implements ITileVisualization {
         for (const arrowLayerKey of this.arrowLayerKeys) {
             registry.remove(arrowLayerKey);
         }
+        for (const gltfLayerKey of this.gltfLayerKeys) {
+            registry.remove(gltfLayerKey);
+        }
         this.surfaceLayerKeys.clear();
         this.pointLayerKeys.clear();
         this.pathLayerKeys.clear();
         this.labelLayerKeys.clear();
         this.arrowLayerKeys.clear();
+        this.gltfLayerKeys.clear();
         this.latestLabelLayerData = [];
+        this.latestGltfLayerData = [];
         this.latestLowFiBundleData = [];
         this.lowFiBundleByLod.clear();
         this.activeRenderedFidelity = null;
@@ -1013,6 +1325,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
         this.tileDataVersionAtLastRender = -1;
+        this.releaseActiveGltfAsset();
     }
 
     /** Returns whether any relevant tile/style/fidelity input changed since the last successful render. */
@@ -1053,6 +1366,9 @@ export class DeckTileVisualization implements ITileVisualization {
 
     /** Applies a style option change locally; deck renderers currently treat every option update as dirty. */
     setStyleOption(optionId: string, value: string | number | boolean): boolean {
+        if (this.options[optionId] === value) {
+            return false;
+        }
         this.options[optionId] = value;
         return true;
     }
@@ -1101,6 +1417,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestPointLayerData = fullMainThread.pointLayerData;
             this.latestLabelLayerData = fullMainThread.labelLayerData;
             this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestGltfLayerData = fullMainThread.gltfLayerData;
             this.latestLowFiBundleData = fullMainThread.lowFiBundles;
             this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
             return fullMainThread.pathLayerData;
@@ -1114,6 +1431,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestPointLayerData = fullMainThread.pointLayerData;
             this.latestLabelLayerData = fullMainThread.labelLayerData;
             this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestGltfLayerData = fullMainThread.gltfLayerData;
             this.latestLowFiBundleData = fullMainThread.lowFiBundles;
             this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
             return fullMainThread.pathLayerData;
@@ -1127,6 +1445,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestPointLayerData = workerOutput.pointLayerData;
             this.latestLabelLayerData = workerOutput.labelLayerData;
             this.latestArrowLayerData = workerOutput.arrowLayerData;
+            this.latestGltfLayerData = workerOutput.gltfLayerData;
             this.latestLowFiBundleData = workerOutput.lowFiBundles;
             this.latestMergedPointFeatures = workerOutput.mergedPointFeatures;
             return workerOutput.pathLayerData;
@@ -1139,6 +1458,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestPointLayerData = fullMainThread.pointLayerData;
             this.latestLabelLayerData = fullMainThread.labelLayerData;
             this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestGltfLayerData = fullMainThread.gltfLayerData;
             this.latestLowFiBundleData = fullMainThread.lowFiBundles;
             this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
             return fullMainThread.pathLayerData;
@@ -1310,9 +1630,16 @@ export class DeckTileVisualization implements ITileVisualization {
                 ? Math.max(0, Math.min(7, Math.floor(rawBundle.lod)))
                 : 0;
             const geometryLayerData = this.buildGeometryLayerData(coordinateOrigin, rawBundle);
-            const {surfaceLayerData, pathLayerData, pointLayerData, labelLayerData, arrowLayerData} = geometryLayerData;
+            const {
+                surfaceLayerData,
+                pathLayerData,
+                pointLayerData,
+                labelLayerData,
+                arrowLayerData,
+                gltfLayerData
+            } = geometryLayerData;
             if (!surfaceLayerData.length && !pathLayerData.length && !pointLayerData.length
-                && !labelLayerData.length && !arrowLayerData.length) {
+                && !labelLayerData.length && !arrowLayerData.length && !gltfLayerData.length) {
                 continue;
             }
             bundlesByLod.set(lod, {
@@ -1321,7 +1648,8 @@ export class DeckTileVisualization implements ITileVisualization {
                 pathLayerData,
                 pointLayerData,
                 labelLayerData,
-                arrowLayerData
+                arrowLayerData,
+                gltfLayerData
             });
         }
         return [...bundlesByLod.values()].sort((lhs, rhs) => lhs.lod - rhs.lod);
@@ -1331,7 +1659,10 @@ export class DeckTileVisualization implements ITileVisualization {
     private buildGeometryLayerData(
         coordinateOrigin: Float64Array,
         geometry: DeckGeometryBucketBuffers
-    ): Pick<DeckWasmRenderOutput, "surfaceLayerData" | "pathLayerData" | "pointLayerData" | "labelLayerData" | "arrowLayerData"> {
+    ): Pick<
+        DeckWasmRenderOutput,
+        "surfaceLayerData" | "pathLayerData" | "pointLayerData" | "labelLayerData" | "arrowLayerData" | "gltfLayerData"
+    > {
         return {
             surfaceLayerData: this.buildSurfaceLayerData({
                 coordinateOrigin,
@@ -1356,8 +1687,54 @@ export class DeckTileVisualization implements ITileVisualization {
                 coordinateOrigin,
                 geometry.arrowWorld,
                 geometry.arrowBillboard
-            )
+            ),
+            gltfLayerData: this.buildGltfLayerData(geometry.gltfNodes)
         };
+    }
+
+    /** Regroups raw GLTF-node buffers by depth-test state into tile-local scenegraph layer payloads. */
+    private buildGltfLayerData(raw: DeckGltfBucketBuffers): DeckGltfLayerData[] {
+        if (!raw.nodeIndices.length) {
+            return [];
+        }
+        const itemCount = raw.nodeIndices.length;
+        if (raw.colors.length < itemCount * 4 || raw.featureAddresses.length < itemCount) {
+            return [];
+        }
+        if (raw.depthTests && raw.depthTests.length < itemCount) {
+            return [];
+        }
+
+        const groups = new Map<boolean, DeckGltfLayerData["data"]>();
+        for (let itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+            const depthTest = !raw.depthTests || raw.depthTests[itemIndex] !== 0;
+            const group = groups.get(depthTest) ?? [];
+            const colorOffset = itemIndex * 4;
+            group.push({
+                nodeIndex: raw.nodeIndices[itemIndex],
+                featureAddress: raw.featureAddresses[itemIndex],
+                color: [
+                    raw.colors[colorOffset],
+                    raw.colors[colorOffset + 1],
+                    raw.colors[colorOffset + 2],
+                    raw.colors[colorOffset + 3]
+                ]
+            });
+            groups.set(depthTest, group);
+        }
+
+        return [true, false].flatMap((depthTest) => {
+            const data = groups.get(depthTest);
+            if (!data || data.length <= 0) {
+                return [];
+            }
+            return [{
+                length: data.length,
+                depthTest,
+                data,
+                asset: null
+            }];
+        });
     }
 
     /** Reads the binary render result from the wasm visualization wrapper. */

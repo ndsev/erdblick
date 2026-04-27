@@ -76,6 +76,14 @@ export interface DeckPathBucketBuffers {
     dashArrays?: Float32Array;
 }
 
+/** Packed deck GLTF-node buffers emitted by wasm rendering. */
+export interface DeckGltfBucketBuffers {
+    nodeIndices: Uint32Array;
+    colors: Uint8Array;
+    depthTests: Uint8Array;
+    featureAddresses: Uint32Array;
+}
+
 /** Expanded label datum used because deck text layers consume object arrays rather than packed buffers. */
 export interface DeckLabelDatum {
     featureAddress: number;
@@ -101,6 +109,7 @@ export interface DeckGeometryBucketBuffers {
     pathBillboard: DeckPathBucketBuffers;
     arrowWorld: DeckPathBucketBuffers;
     arrowBillboard: DeckPathBucketBuffers;
+    gltfNodes: DeckGltfBucketBuffers;
 }
 
 /** One low-fidelity bundle emitted in addition to the high-fidelity/default geometry buffers. */

@@ -41,6 +41,12 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "polygon") {
         return mapget::GeomType::Polygon;
     }
+    if (enumStr == "aabb") {
+        return mapget::GeomType::AABB;
+    }
+    if (enumStr == "gltf") {
+        return mapget::GeomType::GltfNodeIndex;
+    }
 
     std::cout << "Unsupported geometry type: " << enumStr << std::endl;
     return {};
@@ -165,14 +171,17 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse a CSS color
         auto colorStr = yaml["color"].as<std::string>();
         color_ = Color(colorStr).toFVec4();
+        hasExplicitColor_ = true;
     }
     if (yaml["color-expression"].IsDefined()) {
         // Set a simfil expression which returns an RGBA integer, or a parsable color.
         colorExpression_ = yaml["color-expression"].as<std::string>();
+        hasExplicitColor_ = true;
     }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
         color_.a = yaml["opacity"].as<float>();
+        hasExplicitOpacity_ = true;
     }
     if (yaml["width"].IsDefined()) {
         // Parse a line width, defaults to pixels
@@ -501,6 +510,16 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
                       << ": " << colorVal.toString() << std::endl;
     }
     return color_;
+}
+
+bool FeatureStyleRule::hasExplicitColor() const
+{
+    return hasExplicitColor_;
+}
+
+bool FeatureStyleRule::hasExplicitOpacity() const
+{
+    return hasExplicitOpacity_;
 }
 
 float FeatureStyleRule::width() const

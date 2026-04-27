@@ -454,6 +454,18 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly debugRenderFullGltfAttachmentState = this.createState<boolean>({
+        name: 'debugRenderFullGltfAttachment',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly debugGltfLoggingEnabledState = this.createState<boolean>({
+        name: 'debugGltfLoggingEnabled',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly deckStyleWorkersCountState = this.createState<number>({
         name: 'deckStyleWorkersCount',
         defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
@@ -1267,6 +1279,10 @@ export class AppStateService implements OnDestroy {
             logFilter: {...val.logFilter}
         });
     };
+    get debugRenderFullGltfAttachment() {return this.debugRenderFullGltfAttachmentState.getValue();}
+    set debugRenderFullGltfAttachment(val: boolean) {this.debugRenderFullGltfAttachmentState.next(val);}
+    get debugGltfLoggingEnabled() {return this.debugGltfLoggingEnabledState.getValue();}
+    set debugGltfLoggingEnabled(val: boolean) {this.debugGltfLoggingEnabledState.next(val);}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}

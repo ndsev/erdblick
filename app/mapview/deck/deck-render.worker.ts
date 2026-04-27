@@ -154,6 +154,16 @@ function transferPathBucket(bucket: DeckGeometryBucketBuffers["pathWorld"]): Arr
     ];
 }
 
+/** Collects transferable buffers for one packed GLTF-node bucket. */
+function transferGltfBucket(bucket: DeckGeometryBucketBuffers["gltfNodes"]): ArrayBuffer[] {
+    return [
+        bucket.nodeIndices.buffer,
+        bucket.colors.buffer,
+        bucket.depthTests.buffer,
+        bucket.featureAddresses.buffer
+    ];
+}
+
 /** Flattens every transferable array buffer from one geometry result. */
 function transferGeometryBuffers(buffers: DeckGeometryBucketBuffers): ArrayBuffer[] {
     return [
@@ -163,7 +173,8 @@ function transferGeometryBuffers(buffers: DeckGeometryBucketBuffers): ArrayBuffe
         ...transferPathBucket(buffers.pathWorld),
         ...transferPathBucket(buffers.pathBillboard),
         ...transferPathBucket(buffers.arrowWorld),
-        ...transferPathBucket(buffers.arrowBillboard)
+        ...transferPathBucket(buffers.arrowBillboard),
+        ...transferGltfBucket(buffers.gltfNodes)
     ];
 }
 
@@ -298,6 +309,12 @@ function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
             startIndices: new Uint32Array(),
             colors: new Uint8Array(),
             widths: new Float32Array(),
+            featureAddresses: new Uint32Array()
+        },
+        gltfNodes: {
+            nodeIndices: new Uint32Array(),
+            colors: new Uint8Array(),
+            depthTests: new Uint8Array(),
             featureAddresses: new Uint32Array()
         }
     };

@@ -5,7 +5,11 @@ import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from 
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
+import {
+    DeckTileVisualization,
+    DEBUG_GLTF_LOGGING_OPTION_ID,
+    DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID
+} from "../mapview/deck/deck-tile.visualization.model";
 import {
     configureDeckRenderWorkerSettings,
     getDeckRenderWorkerConcurrency,
@@ -206,6 +210,12 @@ export class MapDataService {
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
         this.stateService.pinLowFiToMaxLodState.subscribe(() => {
+            this.scheduleUpdate();
+        });
+        this.stateService.debugRenderFullGltfAttachmentState.subscribe(() => {
+            this.scheduleUpdate();
+        });
+        this.stateService.debugGltfLoggingEnabledState.subscribe(() => {
             this.scheduleUpdate();
         });
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -2155,9 +2165,32 @@ export class MapDataService {
             featureIdSubset,
             layerKeySuffix,
             boxGrid,
-            options,
+            this.withViewerDebugOptions(options),
             (requests) => this.resolveRelationExternalTiles(requests)
         );
+    }
+
+    /** Injects global viewer debug options into one visualization option bag without mutating the caller input. */
+    private withViewerDebugOptions(options: Record<string, boolean | number | string>): Record<string, boolean | number | string> {
+        return {
+            ...options,
+            [DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID]: this.stateService.debugRenderFullGltfAttachment,
+            [DEBUG_GLTF_LOGGING_OPTION_ID]: this.stateService.debugGltfLoggingEnabled
+        };
+    }
+
+    /** Reapplies the global viewer debug toggles to one existing visualization and reports whether it changed. */
+    private applyViewerDebugOptionsToVisualization(visualization: ITileVisualization): boolean {
+        let changed = false;
+        changed = visualization.setStyleOption(
+            DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID,
+            this.stateService.debugRenderFullGltfAttachment
+        ) || changed;
+        changed = visualization.setStyleOption(
+            DEBUG_GLTF_LOGGING_OPTION_ID,
+            this.stateService.debugGltfLoggingEnabled
+        ) || changed;
+        return changed;
     }
 
     /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
@@ -2255,11 +2288,12 @@ export class MapDataService {
             existing.highFidelityStage = highFidelityStage;
             existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
             existing.maxLowFiLod = renderPolicy.maxLowFiLod;
+            const debugChanged = this.applyViewerDebugOptionsToVisualization(existing);
             if (!stageReady) {
                 existing.updateStatus(false);
                 return;
             }
-            if (existing.isDirty()) {
+            if (debugChanged || existing.isDirty()) {
                 existing.updateStatus(true);
                 this.queueVisualization(viewState, existing);
             }
@@ -2584,8 +2618,7 @@ export class MapDataService {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
         }
-        const position = features[0].peek((parsedFeature: Feature) => parsedFeature.center());
-        this.moveToWgs84PositionTopic.next({targetView: viewIndex, x: position.x, y: position.y});
+        this.zoomToFeature(viewIndex, features[0]);
     }
 
     /**

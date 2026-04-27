@@ -54,6 +54,21 @@ JsValue rgbaBytesFromColor(glm::fvec4 const& color)
     });
 }
 
+/** Resolve the GLTF tint color without forcing untinted base rendering to black. */
+glm::fvec4 resolvedGltfTintColor(
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun)
+{
+    if (rule.hasExplicitColor()) {
+        return rule.color(evalFun);
+    }
+    if (rule.hasExplicitOpacity()) {
+        auto const alpha = std::clamp(rule.color(evalFun).a, 0.0f, 1.0f);
+        return {1.0f, 1.0f, 1.0f, alpha};
+    }
+    return {1.0f, 1.0f, 1.0f, 1.0f};
+}
+
 /** Convert longitude to deck/math.gl world X units at the canonical 512-tile scale. */
 double mercatorWorldX(double longitudeDeg)
 {
@@ -208,6 +223,16 @@ JsValue DeckFeatureLayerVisualization::pathBuffersToJs(PathBuffers const& buffer
     return result;
 }
 
+JsValue DeckFeatureLayerVisualization::gltfBuffersToJs(GltfBuffers const& buffers)
+{
+    return JsValue::Dict({
+        {"nodeIndices", JsValue::Uint32Array(buffers.nodeIndices)},
+        {"colors", JsValue::Uint8Array(buffers.colors)},
+        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
+        {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
+    });
+}
+
 JsValue DeckFeatureLayerVisualization::geometryBuffersToJs(GeometryBuffers const& buffers)
 {
     auto labelWorld = JsValue::List();
@@ -228,6 +253,7 @@ JsValue DeckFeatureLayerVisualization::geometryBuffersToJs(GeometryBuffers const
         {"pathBillboard", pathBuffersToJs(buffers.pathBillboard, true)},
         {"arrowWorld", pathBuffersToJs(buffers.arrowWorld, false)},
         {"arrowBillboard", pathBuffersToJs(buffers.arrowBillboard, false)},
+        {"gltfNodes", gltfBuffersToJs(buffers.gltfNodes)},
     });
 }
 
@@ -355,6 +381,11 @@ bool DeckFeatureLayerVisualization::hasGeometry(PathBuffers const& buffers)
     return buffers.startIndices.size() > 1;
 }
 
+bool DeckFeatureLayerVisualization::hasGeometry(GltfBuffers const& buffers)
+{
+    return !buffers.nodeIndices.empty();
+}
+
 bool DeckFeatureLayerVisualization::hasGeometry(GeometryBuffers const& buffers)
 {
     return hasGeometry(buffers.pointWorld)
@@ -365,7 +396,8 @@ bool DeckFeatureLayerVisualization::hasGeometry(GeometryBuffers const& buffers)
         || hasGeometry(buffers.pathWorld)
         || hasGeometry(buffers.pathBillboard)
         || hasGeometry(buffers.arrowWorld)
-        || hasGeometry(buffers.arrowBillboard);
+        || hasGeometry(buffers.arrowBillboard)
+        || hasGeometry(buffers.gltfNodes);
 }
 
 bool DeckFeatureLayerVisualization::hasLowFiGeometryForLod(size_t lod) const
@@ -484,6 +516,40 @@ void DeckFeatureLayerVisualization::emitMesh(
             tileFeatureId,
             evalFun);
     }
+}
+
+void DeckFeatureLayerVisualization::emitGltfNode(
+    uint32_t nodeIndex,
+    mapget::Point const& aabbOriginWgs,
+    mapget::Point const& aabbSizeWgs,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    (void) aabbOriginWgs;
+    (void) aabbSizeWgs;
+    auto const color = resolvedGltfTintColor(rule, evalFun);
+    auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
+
+    auto appendToBuffers = [&](GltfBuffers& buffers)
+    {
+        buffers.nodeIndices.push_back(nodeIndex);
+        buffers.colors.push_back(toColorByte(color.r));
+        buffers.colors.push_back(toColorByte(color.g));
+        buffers.colors.push_back(toColorByte(color.b));
+        buffers.colors.push_back(toColorByte(color.a));
+        buffers.depthTests.push_back(rule.depthTest() ? 1 : 0);
+        buffers.featureAddresses.push_back(selectableFeatureId);
+    };
+
+    if (emitToAggregateForCurrentFeatureLod()) {
+        appendToBuffers(aggregateBuffers_.gltfNodes);
+    }
+    if (lowFiBundleModeEnabled()) {
+        auto const featureLod = static_cast<size_t>(activeLodBucket());
+        appendToBuffers(lowFiBuffersForLod(featureLod).gltfNodes);
+    }
+    featuresAdded_ = true;
 }
 
 void DeckFeatureLayerVisualization::emitIcon(

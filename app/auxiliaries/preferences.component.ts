@@ -130,6 +130,22 @@ import {environment} from "../environments/environment";
                                 (ngModelChange)="setPinLowFiToMaxLod($event)"></p-selectButton>
             </div>
             <div class="button-container">
+                <label>GLTF debug: render full attachment</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="debugRenderFullGltfAttachmentSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDebugRenderFullGltfAttachment($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>GLTF debug logging</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="debugGltfLoggingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDebugGltfLoggingEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
                 <label>Render worker count override 
                     <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues" tooltipPosition="top"></i>
                 </label>
@@ -232,6 +248,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
     pinLowFiToMaxLodSetting: boolean = false;
+    debugRenderFullGltfAttachmentSetting: boolean = false;
+    debugGltfLoggingEnabledSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
@@ -280,6 +298,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
             this.pinLowFiToMaxLodSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.debugRenderFullGltfAttachmentState.subscribe(enabled => {
+            this.debugRenderFullGltfAttachmentSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.debugGltfLoggingEnabledState.subscribe(enabled => {
+            this.debugGltfLoggingEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -395,6 +419,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setPinLowFiToMaxLod(enabled: boolean) {
         this.pinLowFiToMaxLodSetting = enabled;
         this.stateService.pinLowFiToMaxLod = enabled;
+    }
+
+    /** Enables or disables the GLTF full-attachment debug render path. */
+    setDebugRenderFullGltfAttachment(enabled: boolean) {
+        this.debugRenderFullGltfAttachmentSetting = enabled;
+        this.stateService.debugRenderFullGltfAttachment = enabled;
+    }
+
+    /** Enables or disables verbose GLTF console diagnostics. */
+    setDebugGltfLoggingEnabled(enabled: boolean) {
+        this.debugGltfLoggingEnabledSetting = enabled;
+        this.stateService.debugGltfLoggingEnabled = enabled;
     }
 
     /** Enables or disables the explicit Deck render-worker count override. */

@@ -79,6 +79,14 @@ private:
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun) override;
+    /** Append one GLTF-backed node reference to the deck GLTF buffers. */
+    void emitGltfNode(
+        uint32_t nodeIndex,
+        mapget::Point const& aabbOriginWgs,
+        mapget::Point const& aabbSizeWgs,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun) override;
     /** Append one icon descriptor to the point/icon buffers. */
     void emitIcon(
         JsValue const& xyzPos,
@@ -199,6 +207,13 @@ public:
         std::vector<uint32_t> featureAddresses;
         std::vector<float> dashArray;
     };
+    /** Raw deck buffers for GLTF-backed node references. */
+    struct GltfBuffers {
+        std::vector<uint32_t> nodeIndices;
+        std::vector<uint8_t> colors;
+        std::vector<uint8_t> depthTests;
+        std::vector<uint32_t> featureAddresses;
+    };
     /** Complete geometry buffer set for one render bucket. */
     struct GeometryBuffers {
         PointBuffers pointWorld;
@@ -210,6 +225,7 @@ public:
         PathBuffers pathBillboard;
         PathBuffers arrowWorld;
         PathBuffers arrowBillboard;
+        GltfBuffers gltfNodes;
     };
 private:
     /** Check whether any point geometry has been appended. */
@@ -218,6 +234,8 @@ private:
     [[nodiscard]] static bool hasGeometry(SurfaceBuffers const& buffers);
     /** Check whether any path geometry has been appended. */
     [[nodiscard]] static bool hasGeometry(PathBuffers const& buffers);
+    /** Check whether any GLTF node references have been appended. */
+    [[nodiscard]] static bool hasGeometry(GltfBuffers const& buffers);
     /** Check whether any geometry of any kind has been appended. */
     [[nodiscard]] static bool hasGeometry(GeometryBuffers const& buffers);
     /** Check whether a specific low-fi LOD bucket contains any geometry. */
@@ -230,6 +248,8 @@ private:
     [[nodiscard]] static JsValue surfaceBuffersToJs(SurfaceBuffers const& buffers);
     /** Convert path buffers into the JS object expected by the deck worker. */
     [[nodiscard]] static JsValue pathBuffersToJs(PathBuffers const& buffers, bool withDashArrays);
+    /** Convert GLTF node buffers into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue gltfBuffersToJs(GltfBuffers const& buffers);
     /** Convert a full geometry buffer set into the JS object expected by the deck worker. */
     [[nodiscard]] static JsValue geometryBuffersToJs(GeometryBuffers const& buffers);
     /** Return the coordinate origin used for path precision-preserving deck buffers. */

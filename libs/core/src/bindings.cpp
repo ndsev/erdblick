@@ -122,6 +122,24 @@ int deckGeometryOutputNonPointsOnly()
     return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::NonPointsOnly);
 }
 
+/** Report whether the parsed tile exposes a tile-level GLB attachment. */
+bool tileFeatureLayerHasGlbAttachment(TileFeatureLayer const& tile)
+{
+    return tile.hasGlbAttachment();
+}
+
+/** Return the attachment name for a tile-level GLB, or an empty string when absent. */
+std::string tileFeatureLayerGlbAttachmentName(TileFeatureLayer const& tile)
+{
+    return tile.glbAttachmentName();
+}
+
+/** Copy the tile-level GLB attachment into a SharedUint8Array for JS-side consumption. */
+bool copyTileFeatureLayerGlbAttachment(TileFeatureLayer const& tile, SharedUint8Array& output)
+{
+    return tile.copyGlbAttachment(output);
+}
+
 /**
  * WGS84 Viewport Descriptor, which may be used with the
  * `getTileIds` function below.
@@ -335,6 +353,78 @@ em::val getCornerTileBox(uint64_t tileIdValue) {
         JsValue(ne.x),
         JsValue(ne.y)
     });
+}
+
+/** Resolve the geometry feature focus helpers should use for one feature. */
+mapget::model_ptr<mapget::Geometry> preferredFeatureGeometry(mapget::model_ptr<mapget::Feature>& feature)
+{
+    mapget::model_ptr<mapget::Geometry> result;
+    if (auto geometryCollection = feature->geomOrNull()) {
+        geometryCollection->forEachGeometryAtPreferredStage(
+            std::nullopt,
+            [&result](auto&& geometry)
+            {
+                result = geometry;
+                return false;
+            });
+        if (!result) {
+            geometryCollection->forEachGeometry(
+                [&result](auto&& geometry)
+                {
+                    result = geometry;
+                    return false;
+                });
+        }
+    }
+    return result;
+}
+
+/** Compute the WGS84 center of one feature, including AABB/GLTF bounds geometries. */
+mapget::Point preferredFeatureCenter(mapget::model_ptr<mapget::Feature>& feature)
+{
+    auto geometry = preferredFeatureGeometry(feature);
+    if (!geometry) {
+        return {};
+    }
+
+    switch (geometry->geomType()) {
+    case mapget::GeomType::AABB: {
+        auto const origin = geometry->aabbOrigin();
+        auto const size = geometry->aabbSize();
+        return {origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
+    }
+    case mapget::GeomType::GltfNodeIndex: {
+        auto const origin = geometry->gltfNodeAabbOrigin();
+        auto const size = geometry->gltfNodeAabbSize();
+        return {origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
+    }
+    default:
+        return geometryCenter(geometry->toSelfContained());
+    }
+}
+
+/** Return one corner of the feature bounds for bounding-sphere style camera framing. */
+mapget::Point preferredFeatureBoundingRadiusEndPoint(mapget::model_ptr<mapget::Feature>& feature)
+{
+    auto geometry = preferredFeatureGeometry(feature);
+    if (!geometry) {
+        return {};
+    }
+
+    switch (geometry->geomType()) {
+    case mapget::GeomType::AABB: {
+        auto const origin = geometry->aabbOrigin();
+        auto const size = geometry->aabbSize();
+        return {origin.x + size.x, origin.y + size.y, origin.z + size.z};
+    }
+    case mapget::GeomType::GltfNodeIndex: {
+        auto const origin = geometry->gltfNodeAabbOrigin();
+        auto const size = geometry->gltfNodeAabbSize();
+        return {origin.x + size.x, origin.y + size.y, origin.z + size.z};
+    }
+    default:
+        return boundingRadiusEndPoint(geometry->toSelfContained());
+    }
 }
 
 /**
@@ -578,13 +668,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "center",
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return geometryCenter(self->preferredGeometry());
+                    return preferredFeatureCenter(self);
                 }))
         .function(
             "boundingRadiusEndPoint",
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return boundingRadiusEndPoint(self->preferredGeometry());
+                    return preferredFeatureBoundingRadiusEndPoint(self);
                 }))
         .function(
             "getGeometryType",
@@ -598,7 +688,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("Points", mapget::GeomType::Points)
         .value("Line", mapget::GeomType::Line)
         .value("Polygon", mapget::GeomType::Polygon)
-        .value("Mesh", mapget::GeomType::Mesh);
+        .value("Mesh", mapget::GeomType::Mesh)
+        .value("AABB", mapget::GeomType::AABB)
+        .value("GltfNodeIndex", mapget::GeomType::GltfNodeIndex);
 
     ////////// TileFeatureLayer
     em::class_<TileFeatureLayer>("TileFeatureLayer")
@@ -610,6 +702,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("center", &TileFeatureLayer::center)
         .function("find", &TileFeatureLayer::find)
         .function("attachOverlay", &TileFeatureLayer::attachOverlay)
+        .function("hasGlbAttachment", &tileFeatureLayerHasGlbAttachment)
+        .function("glbAttachmentName", &tileFeatureLayerGlbAttachmentName)
+        .function("copyGlbAttachment", &copyTileFeatureLayerGlbAttachment)
         .function("featureIdByAddress", &TileFeatureLayer::featureIdByAddress)
         .function("featureByAddress", &TileFeatureLayer::featureByAddress)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
