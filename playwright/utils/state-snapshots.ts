@@ -3,6 +3,17 @@ import * as path from 'node:path';
 
 const SNAPSHOT_FILE_PATTERN = /\.json$/i;
 
+function isStyleOptionStorageKey(key: string): boolean {
+    if (!key) {
+        return false;
+    }
+    const parts = key.split('~');
+    if (parts.length < 3) {
+        return false;
+    }
+    return /^\d+(?:-\d+)*$/.test(parts[1]);
+}
+
 function snapshotsDir(): string {
     const configuredDir = process.env["EB_TEST_STATES_DIR"]?.trim();
     if (configuredDir) {
@@ -49,7 +60,14 @@ export function loadStateSnapshotLocalStorageEntries(selectedSnapshot: string | 
 
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        entries[key] = JSON.stringify(value);
+        if (isStyleOptionStorageKey(key)) {
+            if (typeof value !== 'string') {
+                throw new Error(`State snapshot '${selectedFileName}' style option '${key}' must be a string.`);
+            }
+            entries[key] = value;
+        } else {
+            entries[key] = JSON.stringify(value);
+        }
     }
     return entries;
 }

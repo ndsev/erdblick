@@ -906,6 +906,10 @@ export class AppStateService implements OnDestroy {
                 if (serialized === undefined) {
                     continue;
                 }
+                if (state === this.stylesState) {
+                    localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
+                    this.clearStyleOptionStorageEntries();
+                }
                 for (const [k, v] of Object.entries(serialized)) {
                     localStorage.setItem(k, v);
                 }
@@ -994,10 +998,17 @@ export class AppStateService implements OnDestroy {
     private hydrateFromStorage(): void {
         this.withHydration(() => {
             for (const state of this.statePool.values()) {
+                if (state === this.stylesState) {
+                    continue;
+                }
                 const raw = localStorage.getItem(state.name);
                 if (raw) {
                     state.deserialize(raw);
                 }
+            }
+            const styleOptionEntries = this.collectStyleOptionStorageEntries();
+            if (Object.keys(styleOptionEntries).length) {
+                this.stylesState.deserialize(styleOptionEntries);
             }
         });
     }
@@ -1029,15 +1040,16 @@ export class AppStateService implements OnDestroy {
     /** Returns the current limits applied when importing a snapshot. */
     getSnapshotImportLimits(): SnapshotImportLimits {
         const stateCount = this.statePool.size;
+        const maxCollectionEntries = Math.max(1024, stateCount * 512);
         return {
             // Keep an upper bound aligned with practical browser localStorage budgets.
             maxFileSizeBytes: 5 * 1024 * 1024,
-            // Snapshot top-level keys are strictly AppState names.
-            maxTopLevelEntries: stateCount,
+            // Snapshot top-level keys are AppState names plus compact style-option storage keys.
+            maxTopLevelEntries: maxCollectionEntries,
             // AppState payloads are shallow-to-moderately nested; reject pathological depth.
             maxNestingDepth: 16,
             // Derive broad collection limits from the number of registered states.
-            maxCollectionEntries: Math.max(1024, stateCount * 512),
+            maxCollectionEntries,
             maxStringLength: 1024 * 1024
         };
     }
@@ -1050,6 +1062,9 @@ export class AppStateService implements OnDestroy {
                 continue;
             }
             snapshot[name] = state.toSnapshotValue();
+        }
+        for (const [name, value] of Object.entries(this.stylesState.serialize(false) ?? {})) {
+            snapshot[name] = value;
         }
         return snapshot;
     }
@@ -1072,6 +1087,9 @@ export class AppStateService implements OnDestroy {
         for (const key of keys) {
             const state = this.statePool.get(key);
             if (!state) {
+                if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
+                    continue;
+                }
                 errors.push(`Unknown snapshot state '${key}'.`);
                 continue;
             }
@@ -1089,11 +1107,19 @@ export class AppStateService implements OnDestroy {
         }
 
         for (const key of keys) {
-            const state = this.statePool.get(key)!;
+            const state = this.statePool.get(key);
+            if (!state) {
+                continue;
+            }
             if (!state.isSnapshotState()) {
                 continue;
             }
             state.applySnapshotValue(normalized[key]);
+        }
+        const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        if (Object.keys(styleOptionEntries).length) {
+            this.stylesState.deserialize(styleOptionEntries);
+            this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.pendingOpenDialogs.clear();
         return [];
@@ -1129,6 +1155,9 @@ export class AppStateService implements OnDestroy {
         for (const key of keys) {
             const state = this.statePool.get(key);
             if (!state) {
+                if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
+                    continue;
+                }
                 errors.push(`Unknown snapshot state '${key}'.`);
                 continue;
             }
@@ -1141,8 +1170,11 @@ export class AppStateService implements OnDestroy {
         }
 
         // Validate all present entries before import to keep mutation transactional.
-        for (const key of keys) {
-            const state = this.statePool.get(key)!;
+        for (const key of Object.keys(normalized)) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                continue;
+            }
             if (!state.isSnapshotState()) {
                 continue;
             }
@@ -1153,6 +1185,58 @@ export class AppStateService implements OnDestroy {
             }
         }
         return errors.length ? {errors} : {normalized, errors: []};
+    }
+
+    /** Returns whether a snapshot key is a compact style-option storage key. */
+    private validateStyleOptionSnapshotEntry(key: string, value: unknown, errors: string[]): boolean {
+        if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+            return false;
+        }
+        if (typeof value !== 'string') {
+            errors.push(`Invalid value for '${key}': expected string style option payload.`);
+        }
+        return true;
+    }
+
+    /** Extracts compact style-option entries from a normalized snapshot. */
+    private extractStyleOptionSnapshotEntries(snapshot: Record<string, unknown>): Record<string, string> {
+        const entries: Record<string, string> = Object.create(null);
+        for (const [key, value] of Object.entries(snapshot)) {
+            if (this.stylesState.isStyleOptionUrlParamKey(key) && typeof value === 'string') {
+                entries[key] = value;
+            }
+        }
+        return entries;
+    }
+
+    /** Reads compact style-option entries from browser local storage. */
+    private collectStyleOptionStorageEntries(): Record<string, string> {
+        const entries: Record<string, string> = Object.create(null);
+        for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (!key || !this.stylesState.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            const value = localStorage.getItem(key);
+            if (value !== null) {
+                entries[key] = value;
+            }
+        }
+        return entries;
+    }
+
+    /** Removes compact style-option entries from browser local storage. */
+    private clearStyleOptionStorageEntries(): void {
+        const keys: string[] = [];
+        for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (key && this.stylesState.isStyleOptionUrlParamKey(key)) {
+                keys.push(key);
+            }
+        }
+        for (const key of keys) {
+            localStorage.removeItem(key);
+        }
     }
 
     /** Recursively normalizes one snapshot subtree while collecting validation issues. */
@@ -2127,6 +2211,7 @@ export class AppStateService implements OnDestroy {
             state.resetToDefault();
             localStorage.removeItem(state.name);
         }
+        this.clearStyleOptionStorageEntries();
         localStorage.removeItem('searchHistory');
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
         const {origin, pathname} = window.location;

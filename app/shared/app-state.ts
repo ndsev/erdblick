@@ -693,7 +693,8 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         super(pool, {
             name: "styleOptions",
             schema: z.record(z.string(), z.string()),
-            defaultValue: new Map<string, (string|number|boolean)[]>()
+            defaultValue: new Map<string, (string|number|boolean)[]>(),
+            snapshotPersist: false
         });
         const layerNamesState = pool.get("layerNames");
         if (layerNamesState === undefined) {

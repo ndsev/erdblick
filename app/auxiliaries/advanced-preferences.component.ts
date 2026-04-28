@@ -1,9 +1,9 @@
 import {Component, ElementRef, HostListener, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
-import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from './appstate.service';
-import {EditorService} from './editor.service';
-import {AppDialogComponent} from './app-dialog.component';
-import {DialogStackService} from './dialog-stack.service';
+import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
+import {EditorService} from '../shared/editor.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
+import {DialogStackService} from '../shared/dialog-stack.service';
 
 @Component({
     selector: 'advanced-preferences',

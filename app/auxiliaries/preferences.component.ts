@@ -25,9 +25,9 @@ import {environment} from "../environments/environment";
     selector: 'preferences',
     template: `
         <app-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
-                  [persistLayout]="true" [layoutId]="dialogLayoutId"
-                  (onShow)="onDialogShow()">
+                    [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
+                    [persistLayout]="true" [layoutId]="dialogLayoutId"
+                    (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load</label>
@@ -104,7 +104,7 @@ import {environment} from "../environments/environment";
             </div>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Tile pull compression 
+                <label>Tile pull compression
                     <i class="pi pi-info-circle" pTooltip="Use only when the bandwith is low" tooltipPosition="top"></i>
                 </label>
                 <p-selectButton [options]="toggleOptions"
@@ -146,12 +146,13 @@ import {environment} from "../environments/environment";
                                 (ngModelChange)="setDebugGltfLoggingEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Render worker count override 
-                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues" tooltipPosition="top"></i>
+                <label>Render worker count override
+                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues"
+                       tooltipPosition="top"></i>
                 </label>
                 <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
                                 [disabled]="!deckThreadedRenderingEnabledSetting"
-                                (ngModelChange)="setDeckStyleWorkersOverride($event)" />
+                                (ngModelChange)="setDeckStyleWorkersOverride($event)"/>
             </div>
             <div class="slider-container">
                 <label [for]="deckStyleWorkersCountInput">Worker count</label>
@@ -181,11 +182,12 @@ import {environment} from "../environments/environment";
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Dark Mode</label>
-                <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
+                <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label"
+                                optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
             <div class="button-container">
                 <label>Collapse Dock automatically</label>
-                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"/>
+                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"></p-toggleswitch>
             </div>
             <p-divider></p-divider>
             <div class="button-container">

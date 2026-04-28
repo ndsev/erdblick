@@ -467,6 +467,8 @@ describe('AppStateService', () => {
         const stylesMap = service.stylesState.getValue();
         expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5]);
         expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([false]);
+        expect(localStorage.getItem('overlay~0~opacity~debug')).toBe('0.5~0');
+        expect(localStorage.getItem('styleOptions')).toBeNull();
 
         // Expect URL sync to use compact style option encoding
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
@@ -476,6 +478,23 @@ describe('AppStateService', () => {
             queryParamsHandling: 'merge',
             replaceUrl: true,
         }));
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates compact style option entries from localStorage', async () => {
+        localStorage.setItem('layerNames', JSON.stringify(['m1/layerA']));
+        localStorage.setItem('overlay~0~opacity', '0.5');
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1031,17 +1050,20 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('exports app state entries as a single snapshot object', () => {
+    it('exports app state entries with compact style option storage keys', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         service.markerState.next(true);
+        service.layerNamesState.next(['m1/layerA']);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
         const snapshot = service.exportSnapshot();
 
         expect(snapshot).toHaveProperty('marker');
         expect(snapshot).toHaveProperty('numberOfViews');
-        expect(snapshot).toHaveProperty('styleOptions');
+        expect(snapshot).not.toHaveProperty('styleOptions');
+        expect(snapshot).toHaveProperty('overlay~0~opacity', '0.5');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1145,6 +1167,42 @@ describe('AppStateService', () => {
         expect(errors).toEqual([]);
         expect(service.markerState.getValue()).toBe(true);
         expect(service.isDialogOpen('preferences-dialog')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('imports compact style option entries after applying layer state', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            layerNames: ['m1/layerA'],
+            'overlay~0~opacity~debug': '0.5~1'
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/debug')).toEqual(['1']);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects non-string compact style option snapshot values before mutation', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            marker: true,
+            'overlay~0~opacity': [0.5]
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(service.stylesState.getValue().size).toBe(0);
 
         service.ngOnDestroy();
         routerStub.events.complete();
