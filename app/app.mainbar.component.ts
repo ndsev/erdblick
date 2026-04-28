@@ -100,18 +100,7 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
             </p-menubar>
         }
     `,
-    styles: [
-        `
-            .copyright-info {
-                width: 6.5em;
-                font-size: 0.8em;
-                word-wrap: break-word;
-                text-align: end;
-                cursor: pointer;
-                margin-right: 0.5em;
-            }
-        `
-    ],
+    styles: [``],
     standalone: false
 })
 /**
@@ -443,7 +432,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         command: () => { this.openDatasources(); }
                     },
                     {
-                        name: 'Settings',
+                        name: 'Preferences',
                         icon: 'settings',
                         command: () => { this.showPreferencesDialog(); },
                     }
