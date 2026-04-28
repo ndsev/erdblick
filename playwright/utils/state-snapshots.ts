@@ -2,13 +2,23 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const SNAPSHOT_FILE_PATTERN = /\.json$/i;
-const SNAPSHOTS_DIR = path.join(process.cwd(), 'test', 'states');
+
+function snapshotsDir(): string {
+    const configuredDir = process.env["EB_TEST_STATES_DIR"]?.trim();
+    if (configuredDir) {
+        return path.isAbsolute(configuredDir)
+            ? configuredDir
+            : path.resolve(process.cwd(), configuredDir);
+    }
+    return path.join(process.cwd(), 'test', 'states');
+}
 
 export function listStateSnapshots(): string[] {
-    if (!fs.existsSync(SNAPSHOTS_DIR)) {
+    const dir = snapshotsDir();
+    if (!fs.existsSync(dir)) {
         return [];
     }
-    return fs.readdirSync(SNAPSHOTS_DIR)
+    return fs.readdirSync(dir)
         .filter(fileName => SNAPSHOT_FILE_PATTERN.test(fileName))
         .sort((a, b) => a.localeCompare(b));
 }
@@ -29,7 +39,7 @@ export function loadStateSnapshotLocalStorageEntries(selectedSnapshot: string | 
         );
     }
 
-    const snapshotPath = path.join(SNAPSHOTS_DIR, selectedFileName);
+    const snapshotPath = path.join(snapshotsDir(), selectedFileName);
     const raw = fs.readFileSync(snapshotPath, {encoding: 'utf8'});
     const parsed = JSON.parse(raw);
 

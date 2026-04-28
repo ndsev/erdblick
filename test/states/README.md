@@ -1,6 +1,6 @@
-# State Snapshots For Playwright
+# State JSONs For Playwright
 
-Put optional Playwright fixture snapshot files in this directory.
+Put optional Playwright fixture state JSON files in this directory.
 
 - File format: JSON object keyed by AppStateService state names.
 - File extension: `.json`.
