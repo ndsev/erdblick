@@ -9,7 +9,7 @@ import {
 } from "@deck.gl/core";
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
-import {createImageSource} from "@loaders.gl/wms";
+import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
@@ -1199,9 +1199,7 @@ export abstract class DeckMapView implements IRenderView {
      * stale internal state when the selected background changes.
      */
     private createWmsBackgroundLayer(layerConfig: WmsBackgroundLayerConfig, opacity: number): WMSLayer {
-        const imageSource = createImageSource({
-            url: layerConfig.url,
-            type: "wms",
+        const imageSource = new WMSImageSource(layerConfig.url, {
             wms: {
                 wmsParameters: {
                     layers: layerConfig.layers,

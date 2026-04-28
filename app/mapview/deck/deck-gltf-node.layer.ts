@@ -4,6 +4,7 @@ import {
     Layer,
     picking,
     project32,
+    type CoordinateSystem,
     type LayerProps,
     type UpdateParameters
 } from "@deck.gl/core";
@@ -274,7 +275,7 @@ function tilePosition64Low(position: [number, number, number]): [number, number,
     ];
 }
 
-function shouldComposeModelMatrix(coordinateSystem: number, isGeospatial: boolean): boolean {
+function shouldComposeModelMatrix(coordinateSystem: CoordinateSystem, isGeospatial: boolean): boolean {
     return coordinateSystem === COORDINATE_SYSTEM.CARTESIAN
         || coordinateSystem === COORDINATE_SYSTEM.METER_OFFSETS
         || (coordinateSystem === COORDINATE_SYSTEM.DEFAULT && !isGeospatial);
@@ -576,7 +577,7 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
         const tilePosition = asset.tilePosition;
         const tilePositionLow = tilePosition64Low(tilePosition);
         const composeTransforms = shouldComposeModelMatrix(
-            Number(coordinateSystem),
+            coordinateSystem,
             Boolean(this.context.viewport?.isGeospatial)
         );
         const pbrProjectionProps = {
