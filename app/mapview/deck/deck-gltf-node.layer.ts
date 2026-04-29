@@ -327,6 +327,7 @@ export type DeckGltfNodeLayerProps = LayerProps & {
 export type DeckGltfPickProxyLayerProps = LayerProps & {
     contributions: DeckGltfPickProxyStyleContribution[];
     coordinateOrigin: [number, number, number];
+    tileKey: string;
 };
 
 const gltfAssetCacheByDevice = new WeakMap<Device, Map<string, DeckTileGltfAssetCacheEntry>>();

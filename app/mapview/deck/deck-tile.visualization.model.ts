@@ -1298,7 +1298,8 @@ export class DeckTileVisualization implements ITileVisualization {
                     data: contribution.data
                 })),
                 coordinateOrigin,
-                pickable: true
+                pickable: true,
+                tileKey: this.tile.mapTileKey
             })
         };
     }

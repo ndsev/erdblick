@@ -212,9 +212,13 @@ export abstract class DeckMapView implements IRenderView {
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
     private readonly deckLayerFilter: DeckProps<DeckMercatorView>["layerFilter"] = ({layer, isPicking}) => {
         const layerId = String(layer.id ?? "");
+        const layerPickable = Boolean((layer.props as {pickable?: boolean} | undefined)?.pickable);
         const isGltfPickProxyLayer = layerId.includes("/gltf-pick-proxy");
         const isVisibleGltfLayer = layerId.includes("/gltf") && !isGltfPickProxyLayer;
         if (isPicking) {
+            if (!layerPickable) {
+                return false;
+            }
             if (isGltfPickProxyLayer) {
                 return true;
             }
