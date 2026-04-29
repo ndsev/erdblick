@@ -25,6 +25,16 @@ interface LayerEntry {
     order: number;
 }
 
+interface SharedLayerEntry {
+    buildLayer: (
+        key: string,
+        contributions: ReadonlyMap<string, unknown>
+    ) => {layer: DeckLayerLike | null; order: number};
+    contributions: Map<string, unknown>;
+}
+
+type RegistryEntry = LayerEntry | SharedLayerEntry;
+
 export interface DeckLayerKeyParts {
     tileKey: string;
     styleId: string;
@@ -50,7 +60,7 @@ export function makeDeckLayerTilePrefix(tileKey: string): string {
  */
 export class DeckLayerRegistry {
     private deck: DeckLike | null;
-    private readonly entries = new Map<string, LayerEntry>();
+    private readonly entries = new Map<string, RegistryEntry>();
     private readonly scheduleFn: ScheduleFn;
     private readonly cancelFn: CancelFn;
     private pendingFlushHandle: number | null = null;
@@ -79,6 +89,32 @@ export class DeckLayerRegistry {
         this.markDirty();
     }
 
+    /**
+     * Adds or updates one contributor of a shared keyed layer. The final deck layer is synthesized
+     * from all contributions during `flush()`.
+     */
+    upsertShared(
+        key: string,
+        sourceId: string,
+        contribution: unknown,
+        buildLayer: (
+            key: string,
+            contributions: ReadonlyMap<string, unknown>
+        ) => {layer: DeckLayerLike | null; order: number}
+    ): void {
+        const existing = this.entries.get(key);
+        if (existing && "buildLayer" in existing) {
+            existing.contributions.set(sourceId, contribution);
+            existing.buildLayer = buildLayer;
+        } else {
+            this.entries.set(key, {
+                buildLayer,
+                contributions: new Map([[sourceId, contribution]])
+            });
+        }
+        this.markDirty();
+    }
+
     /** Removes one keyed layer and schedules a flush when something changed. */
     remove(key: string): boolean {
         const removed = this.entries.delete(key);
@@ -86,6 +122,23 @@ export class DeckLayerRegistry {
             this.markDirty();
         }
         return removed;
+    }
+
+    /** Removes one contributor from a shared keyed layer and drops the layer once empty. */
+    removeShared(key: string, sourceId: string): boolean {
+        const entry = this.entries.get(key);
+        if (!entry || !("buildLayer" in entry)) {
+            return false;
+        }
+        const removed = entry.contributions.delete(sourceId);
+        if (!removed) {
+            return false;
+        }
+        if (entry.contributions.size === 0) {
+            this.entries.delete(key);
+        }
+        this.markDirty();
+        return true;
     }
 
     /** Removes every keyed layer below a prefix, typically for one tile or overlay family. */
@@ -120,14 +173,21 @@ export class DeckLayerRegistry {
         }
 
         const layers = [...this.entries.entries()]
+            .flatMap(([key, entry]) => {
+                if ("buildLayer" in entry) {
+                    const {layer, order} = entry.buildLayer(key, entry.contributions);
+                    return layer ? [{key, layer, order}] : [];
+                }
+                return [{key, layer: entry.layer, order: entry.order}];
+            })
             .sort((a, b) => {
-                const orderDiff = a[1].order - b[1].order;
+                const orderDiff = a.order - b.order;
                 if (orderDiff !== 0) {
                     return orderDiff;
                 }
-                return a[0].localeCompare(b[0]);
+                return a.key.localeCompare(b.key);
             })
-            .map(([, entry]) => entry.layer);
+            .map((entry) => entry.layer);
 
         this.deck.setProps({layers: layers as never[]});
         this.dirty = false;

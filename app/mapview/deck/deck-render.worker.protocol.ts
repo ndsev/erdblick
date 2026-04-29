@@ -84,6 +84,14 @@ export interface DeckGltfBucketBuffers {
     featureAddresses: Uint32Array;
 }
 
+/** Packed simplified GLTF picking-proxy buffers emitted by wasm rendering. */
+export interface DeckGltfPickProxyBucketBuffers {
+    positions: Float32Array;
+    startIndices: Uint32Array;
+    nodeIndices: Uint32Array;
+    featureAddresses: Uint32Array;
+}
+
 /** Expanded label datum used because deck text layers consume object arrays rather than packed buffers. */
 export interface DeckLabelDatum {
     featureAddress: number;
@@ -110,6 +118,7 @@ export interface DeckGeometryBucketBuffers {
     arrowWorld: DeckPathBucketBuffers;
     arrowBillboard: DeckPathBucketBuffers;
     gltfNodes: DeckGltfBucketBuffers;
+    gltfPickProxies: DeckGltfPickProxyBucketBuffers;
 }
 
 /** One low-fidelity bundle emitted in addition to the high-fidelity/default geometry buffers. */

@@ -5,12 +5,13 @@ import {
     picking,
     project32,
     type CoordinateSystem,
+    type PickingInfo,
     type LayerProps,
     type UpdateParameters
 } from "@deck.gl/core";
 import type {Device} from "@luma.gl/core";
 import {createScenegraphsFromGLTF} from "@luma.gl/gltf";
-import {GroupNode, ModelNode, type Model} from "@luma.gl/engine";
+import {Geometry, GroupNode, Model, ModelNode} from "@luma.gl/engine";
 import {type ShaderModule, pbrMaterial} from "@luma.gl/shadertools";
 import {parse} from "@loaders.gl/core";
 import {GLTFLoader, postProcessGLTF, type GLTFPostprocessed, type GLTFWithBuffers} from "@loaders.gl/gltf";
@@ -157,6 +158,52 @@ void main(void) {
 }
 `;
 
+const GLTF_PICK_PROXY_UNIFORM_BLOCK = `\
+uniform gltfPickProxyUniforms {
+  vec3 coordinateOrigin;
+  vec3 coordinateOrigin64Low;
+} gltfPickProxy;
+`;
+
+const GLTF_PICK_PROXY_VERTEX_SHADER = `\
+#version 300 es
+
+#define SHADER_NAME deck-gltf-pick-proxy-layer-vertex-shader
+
+in vec3 positions;
+in vec3 pickingColors;
+
+void main(void) {
+  vec3 offset = project_size(positions);
+  geometry.worldPosition = gltfPickProxy.coordinateOrigin;
+  geometry.pickingColor = pickingColors;
+  gl_Position = project_position_to_clipspace(
+    gltfPickProxy.coordinateOrigin,
+    gltfPickProxy.coordinateOrigin64Low,
+    offset,
+    geometry.position
+  );
+  vec4 color = vec4(1.0);
+  DECKGL_FILTER_COLOR(color, geometry);
+  DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
+}
+`;
+
+const GLTF_PICK_PROXY_FRAGMENT_SHADER = `\
+#version 300 es
+
+#define SHADER_NAME deck-gltf-pick-proxy-layer-fragment-shader
+
+out vec4 fragColor;
+
+void main(void) {
+  if (picking.isActive < 0.5) {
+    discard;
+  }
+  fragColor = picking_filterPickingColor(vec4(1.0));
+}
+`;
+
 type GltfNodeUniformProps = {
     tilePosition: [number, number, number];
     tilePosition64Low: [number, number, number];
@@ -199,6 +246,21 @@ const scenegraphUniforms = {
     }
 } as const satisfies ShaderModule<ScenegraphUniformProps>;
 
+type GltfPickProxyUniformProps = {
+    coordinateOrigin: [number, number, number];
+    coordinateOrigin64Low: [number, number, number];
+};
+
+const gltfPickProxyUniforms = {
+    name: "gltfPickProxy",
+    vs: GLTF_PICK_PROXY_UNIFORM_BLOCK,
+    fs: GLTF_PICK_PROXY_UNIFORM_BLOCK,
+    uniformTypes: {
+        coordinateOrigin: "vec3<f32>",
+        coordinateOrigin64Low: "vec3<f32>"
+    }
+} as const satisfies ShaderModule<GltfPickProxyUniformProps>;
+
 type ParsedTileGltf = GLTFPostprocessed & {
     nodes?: Array<{_node?: GroupNode}>;
 };
@@ -234,16 +296,42 @@ export interface DeckGltfNodeDatum {
     nodeIndex: number;
     featureAddress: number;
     color: [number, number, number, number];
+    depthTest: boolean;
+    flatTint: boolean;
+    renderPriority: number;
+}
+
+export interface DeckGltfNodeStyleContribution {
+    sourceId: string;
+    priority: number;
+    styleOrder: number;
+    data: DeckGltfNodeDatum[];
+}
+
+export interface DeckGltfPickProxyDatum {
+    nodeIndex: number;
+    featureAddress: number;
+    positions: Float32Array;
+}
+
+export interface DeckGltfPickProxyStyleContribution {
+    sourceId: string;
+    data: DeckGltfPickProxyDatum[];
 }
 
 export type DeckGltfNodeLayerProps = LayerProps & {
-    data: DeckGltfNodeDatum[];
+    contributions: DeckGltfNodeStyleContribution[];
     asset: DeckTileGltfAsset;
-    tileKey: string;
-    flatTint?: boolean;
+};
+
+export type DeckGltfPickProxyLayerProps = LayerProps & {
+    contributions: DeckGltfPickProxyStyleContribution[];
+    coordinateOrigin: [number, number, number];
 };
 
 const gltfAssetCacheByDevice = new WeakMap<Device, Map<string, DeckTileGltfAssetCacheEntry>>();
+const gltfModelParametersRef = new WeakMap<Model, unknown>();
+const ZERO_PICKING_COLOR: [number, number, number] = [0, 0, 0];
 
 function gltfAssetCacheKey(tile: FeatureTile): string {
     return `${tile.mapTileKey}:${tile.dataVersion}`;
@@ -364,19 +452,58 @@ function mapNodeRoots(
 type LayerScenegraphState = {
     assetCacheKey: string | null;
     scenes: GroupNode[];
-    nodeRoots: Map<number, GroupNode>;
-    nodeRootWorldMatrices: Map<number, Matrix4>;
+    nodeDrawRecords: Map<number, Array<{model: Model; worldMatrix: Matrix4}>>;
     models: Model[];
+    resolvedData: DeckGltfNodeDatum[];
 };
 
 function createEmptyLayerScenegraphState(): LayerScenegraphState {
     return {
         assetCacheKey: null,
         scenes: [],
-        nodeRoots: new Map(),
-        nodeRootWorldMatrices: new Map(),
-        models: []
+        nodeDrawRecords: new Map(),
+        models: [],
+        resolvedData: []
     };
+}
+
+function sortContributions(
+    left: DeckGltfNodeStyleContribution,
+    right: DeckGltfNodeStyleContribution
+): number {
+    const priorityDiff = left.priority - right.priority;
+    if (priorityDiff !== 0) {
+        return priorityDiff;
+    }
+    const styleOrderDiff = left.styleOrder - right.styleOrder;
+    if (styleOrderDiff !== 0) {
+        return styleOrderDiff;
+    }
+    return left.sourceId.localeCompare(right.sourceId);
+}
+
+function makeResolvedDatumKey(datum: Pick<DeckGltfNodeDatum, "featureAddress" | "nodeIndex">): string {
+    return `${datum.featureAddress}:${datum.nodeIndex}`;
+}
+
+function resolveContributionData(contributions: DeckGltfNodeStyleContribution[]): DeckGltfNodeDatum[] {
+    const resolved = new Map<string, DeckGltfNodeDatum>();
+    for (const contribution of [...contributions].sort(sortContributions)) {
+        for (const datum of contribution.data) {
+            resolved.set(makeResolvedDatumKey(datum), datum);
+        }
+    }
+    return [...resolved.values()].sort((left, right) => {
+        const priorityDiff = left.renderPriority - right.renderPriority;
+        if (priorityDiff !== 0) {
+            return priorityDiff;
+        }
+        const featureAddressDiff = left.featureAddress - right.featureAddress;
+        if (featureAddressDiff !== 0) {
+            return featureAddressDiff;
+        }
+        return left.nodeIndex - right.nodeIndex;
+    });
 }
 
 export function cloneProcessedGltfForScenegraph(processedGltf: ParsedTileGltf): ParsedTileGltf {
@@ -416,7 +543,7 @@ function buildLayerScenegraphState(
     device: Device,
     asset: DeckTileGltfAsset,
     layerId: string
-): Omit<LayerScenegraphState, "models"> {
+): Omit<LayerScenegraphState, "models" | "resolvedData"> {
     const processed = cloneProcessedGltfForScenegraph(asset.processedGltf);
     const {scenes} = createScenegraphsFromGLTF(device, processed, buildModelOptions(`deck-gltf:${layerId}:${asset.cacheKey}`));
     const nodeRoots = new Map<number, GroupNode>();
@@ -445,11 +572,26 @@ function buildLayerScenegraphState(
         }
     }
 
+    const nodeDrawRecords = new Map<number, Array<{model: Model; worldMatrix: Matrix4}>>();
+    for (const [nodeIndex, nodeRoot] of nodeRoots) {
+        const rootWorldMatrix = nodeRootWorldMatrices.get(nodeIndex) ?? new Matrix4();
+        const drawRecords: Array<{model: Model; worldMatrix: Matrix4}> = [];
+        nodeRoot.traverse((node, {worldMatrix}) => {
+            if (!(node instanceof ModelNode)) {
+                return;
+            }
+            drawRecords.push({
+                model: node.model,
+                worldMatrix: new Matrix4(worldMatrix)
+            });
+        }, {worldMatrix: new Matrix4(rootWorldMatrix)});
+        nodeDrawRecords.set(nodeIndex, drawRecords);
+    }
+
     return {
         assetCacheKey: asset.cacheKey,
         scenes,
-        nodeRoots,
-        nodeRootWorldMatrices
+        nodeDrawRecords
     };
 }
 
@@ -543,36 +685,40 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
             destroyLayerScenegraphState(currentState);
             nextState = {
                 ...buildLayerScenegraphState(device, props.asset, String(this.props.id)),
-                models: []
+                models: [],
+                resolvedData: []
             };
         }
 
+        const resolvedData = resolveContributionData(props.contributions);
         const models: Model[] = [];
         const seen = new Set<Model>();
-        for (const datum of props.data) {
-            const nodeRoot = nextState.nodeRoots.get(datum.nodeIndex);
-            if (!nodeRoot) {
+        for (const datum of resolvedData) {
+            const drawRecords = nextState.nodeDrawRecords.get(datum.nodeIndex);
+            if (!drawRecords) {
                 continue;
             }
-            nodeRoot.traverse((node) => {
-                if (node instanceof ModelNode && !seen.has(node.model)) {
-                    seen.add(node.model);
-                    models.push(node.model);
+            for (const drawRecord of drawRecords) {
+                if (seen.has(drawRecord.model)) {
+                    continue;
                 }
-            }, {worldMatrix: new Matrix4()});
+                seen.add(drawRecord.model);
+                models.push(drawRecord.model);
+            }
         }
         this.setState({
             ...nextState,
-            models
+            models,
+            resolvedData
         });
     }
 
     override draw({renderPass}: {renderPass: unknown}): void {
-        const {asset, data, coordinateSystem = COORDINATE_SYSTEM.DEFAULT, modelMatrix} = this.props;
-        if (!asset || !data.length) {
+        const {asset, coordinateSystem = COORDINATE_SYSTEM.DEFAULT, modelMatrix} = this.props;
+        const {nodeDrawRecords, resolvedData} = this.state as LayerScenegraphState;
+        if (!resolvedData.length) {
             return;
         }
-        const {nodeRoots, nodeRootWorldMatrices} = this.state as LayerScenegraphState;
 
         const tilePosition = asset.tilePosition;
         const tilePositionLow = tilePosition64Low(tilePosition);
@@ -585,28 +731,22 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
         };
         const layerOpacity = Math.max(0, Math.min(1, Number(this.props.opacity ?? 1)));
 
-        for (let itemIndex = 0; itemIndex < data.length; itemIndex++) {
-            const item = data[itemIndex];
-            const nodeRoot = nodeRoots.get(item.nodeIndex);
-            const nodeRootWorldMatrix = nodeRootWorldMatrices.get(item.nodeIndex);
-            if (!nodeRoot) {
+        for (let itemIndex = 0; itemIndex < resolvedData.length; itemIndex++) {
+            const item = resolvedData[itemIndex];
+            const drawRecords = nodeDrawRecords.get(item.nodeIndex);
+            if (!drawRecords || drawRecords.length === 0) {
                 continue;
             }
-
-            const rootWorldMatrix = nodeRootWorldMatrix ? new Matrix4(nodeRootWorldMatrix) : new Matrix4();
             const tintColor = normalizeColor(item.color);
-            const pickingColor = this.encodePickingColor(itemIndex);
 
-            nodeRoot.traverse((node, {worldMatrix}) => {
-                if (!(node instanceof ModelNode)) {
-                    return;
-                }
-
+            for (const drawRecord of drawRecords) {
+                const node = drawRecord.model;
+                const worldMatrix = drawRecord.worldMatrix;
                 const sceneModelMatrix = modelMatrix
                     ? new Matrix4(modelMatrix).multiplyRight(worldMatrix)
                     : worldMatrix;
 
-                node.model.shaderInputs.setProps({
+                node.shaderInputs.setProps({
                     pbrProjection: pbrProjectionProps,
                     scenegraph: {
                         sizeScale: 1,
@@ -619,19 +759,170 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
                         tilePosition,
                         tilePosition64Low: tilePositionLow,
                         tintColor: [tintColor[0], tintColor[1], tintColor[2], tintColor[3] * layerOpacity],
-                        pickingColor,
-                        flatTint: this.props.flatTint ? 1 : 0
+                        pickingColor: ZERO_PICKING_COLOR,
+                        flatTint: item.flatTint ? 1 : 0
                     }
                 });
-                node.model.setParameters({
-                    ...node.model.parameters,
-                    ...(this.props.parameters ?? {}),
-                    cullMode: "none"
-                });
-                if (!node.model.draw(renderPass as never)) {
+                const currentParameters = node.parameters as Record<string, unknown>;
+                const nextDepthTest = item.depthTest;
+                const nextDepthMask = item.depthTest;
+                const nextParametersRef = this.props.parameters ?? null;
+                const currentParametersRef = gltfModelParametersRef.get(node) ?? null;
+                if (currentParameters["depthTest"] !== nextDepthTest
+                    || currentParameters["depthMask"] !== nextDepthMask
+                    || currentParameters["cullMode"] !== "none"
+                    || currentParametersRef !== nextParametersRef) {
+                    node.setParameters({
+                        ...currentParameters,
+                        ...(this.props.parameters ?? {}),
+                        depthTest: nextDepthTest,
+                        depthMask: nextDepthMask,
+                        cullMode: "none"
+                    } as any);
+                    gltfModelParametersRef.set(node, nextParametersRef);
+                }
+                if (!node.draw(renderPass as never)) {
                     this.setNeedsRedraw();
                 }
-            }, {worldMatrix: rootWorldMatrix});
+            }
+        }
+    }
+}
+
+type GltfPickProxyState = {
+    model: Model | null;
+    resolvedData: DeckGltfPickProxyDatum[];
+};
+
+function createEmptyGltfPickProxyState(): GltfPickProxyState {
+    return {
+        model: null,
+        resolvedData: []
+    };
+}
+
+function resolvePickProxyData(contributions: DeckGltfPickProxyStyleContribution[]): DeckGltfPickProxyDatum[] {
+    const resolved = new Map<string, DeckGltfPickProxyDatum>();
+    for (const contribution of [...contributions].sort((left, right) => left.sourceId.localeCompare(right.sourceId))) {
+        for (const datum of contribution.data) {
+            resolved.set(makeResolvedDatumKey(datum), datum);
+        }
+    }
+    return [...resolved.values()].sort((left, right) => {
+        const featureAddressDiff = left.featureAddress - right.featureAddress;
+        if (featureAddressDiff !== 0) {
+            return featureAddressDiff;
+        }
+        return left.nodeIndex - right.nodeIndex;
+    });
+}
+
+function buildGltfPickProxyModel(
+    layer: DeckGltfPickProxyLayer,
+    resolvedData: DeckGltfPickProxyDatum[]
+): Model | null {
+    if (!resolvedData.length) {
+        return null;
+    }
+
+    let vertexCount = 0;
+    for (const datum of resolvedData) {
+        vertexCount += Math.floor(datum.positions.length / 3);
+    }
+    if (vertexCount <= 0) {
+        return null;
+    }
+
+    const positions = new Float32Array(vertexCount * 3);
+    const pickingColors = new Float32Array(vertexCount * 3);
+    let vertexOffset = 0;
+    for (let itemIndex = 0; itemIndex < resolvedData.length; itemIndex++) {
+        const datum = resolvedData[itemIndex];
+        const pickingColorBytes = layer.encodePickingColor(itemIndex);
+        const vertexBase = vertexOffset * 3;
+        positions.set(datum.positions, vertexBase);
+        const datumVertexCount = Math.floor(datum.positions.length / 3);
+        for (let vertexIndex = 0; vertexIndex < datumVertexCount; vertexIndex++) {
+            const colorOffset = vertexBase + vertexIndex * 3;
+            pickingColors[colorOffset] = pickingColorBytes[0];
+            pickingColors[colorOffset + 1] = pickingColorBytes[1];
+            pickingColors[colorOffset + 2] = pickingColorBytes[2];
+        }
+        vertexOffset += datumVertexCount;
+    }
+
+    return new Model(layer.context.device, {
+        id: String(layer.props.id),
+        vs: GLTF_PICK_PROXY_VERTEX_SHADER,
+        fs: GLTF_PICK_PROXY_FRAGMENT_SHADER,
+        modules: [project32, picking, gltfPickProxyUniforms],
+        geometry: new Geometry({
+            topology: "triangle-list",
+            attributes: {
+                positions: {value: positions, size: 3},
+                pickingColors: {value: pickingColors, size: 3}
+            }
+        })
+    });
+}
+
+export class DeckGltfPickProxyLayer extends Layer<Required<DeckGltfPickProxyLayerProps>> {
+    static override layerName = "DeckGltfPickProxyLayer";
+
+    override initializeState(): void {
+        this.setState(createEmptyGltfPickProxyState());
+    }
+
+    override finalizeState(): void {
+        const state = this.state as GltfPickProxyState;
+        state.model?.destroy();
+    }
+
+    override getModels(): Model[] {
+        const model = (this.state as GltfPickProxyState).model;
+        return model ? [model] : [];
+    }
+
+    override updateState({props}: UpdateParameters<this>): void {
+        const state = this.state as GltfPickProxyState;
+        const resolvedData = resolvePickProxyData(props.contributions);
+        const nextModel = buildGltfPickProxyModel(this, resolvedData);
+        state.model?.destroy();
+        this.setState({
+            model: nextModel,
+            resolvedData
+        });
+    }
+
+    override getPickingInfo({info}: {
+        info: PickingInfo<DeckGltfPickProxyDatum>;
+        mode: string;
+    }): PickingInfo<DeckGltfPickProxyDatum> {
+        const resolvedData = (this.state as GltfPickProxyState).resolvedData;
+        const pickedDatum = info.index >= 0 ? resolvedData[info.index] : undefined;
+        return {
+            ...info,
+            object: pickedDatum,
+            sourceLayer: this
+        };
+    }
+
+    override draw({renderPass}: {renderPass: unknown}): void {
+        const state = this.state as GltfPickProxyState;
+        const model = state.model;
+        if (!model || !state.resolvedData.length) {
+            return;
+        }
+
+        const coordinateOrigin = this.props.coordinateOrigin;
+        model.shaderInputs.setProps({
+            gltfPickProxy: {
+                coordinateOrigin,
+                coordinateOrigin64Low: tilePosition64Low(coordinateOrigin)
+            }
+        });
+        if (!model.draw(renderPass as never)) {
+            this.setNeedsRedraw();
         }
     }
 }

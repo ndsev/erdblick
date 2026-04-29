@@ -134,6 +134,7 @@ export class MapDataService {
     private dataSourceInfoJson: string | null = null;
     private selectionConversionRevision = 0;
     private hoverConversionRevision = 0;
+    private lastHoverRequestSignature = "";
     private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
     private viewportLoadStartedAtMs: number | null = null;
     private viewportRenderCompletedAtMs: number | null = null;
@@ -1331,6 +1332,7 @@ export class MapDataService {
             tileId: tileId,
         });
         this.loadedTileLayers.set(tileKey, placeholder);
+        this.lastHoverRequestSignature = "";
         this.tileDataChanged.next({tileKey, tile: placeholder, reason: "placeholder"});
 
         return true;
@@ -1502,6 +1504,7 @@ export class MapDataService {
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (evictTileLayer(tileLayer)) {
                 tileLayer.dispose();
+                this.lastHoverRequestSignature = "";
                 this.tileDataChanged.next({
                     tileKey: tileLayer.mapTileKey,
                     tile: tileLayer,
@@ -2038,6 +2041,7 @@ export class MapDataService {
             return true;
         });
 
+        this.lastHoverRequestSignature = "";
         this.tileDataChanged.next({
             tileKey: tileLayer.mapTileKey,
             tile: tileLayer,
@@ -2137,6 +2141,18 @@ export class MapDataService {
         }
     }
 
+    /** Returns the stable current ordering index of one visible style contribution. */
+    private styleOrder(styleId: string): number {
+        let index = 0;
+        for (const [id] of this.styleService.styles) {
+            if (id === styleId) {
+                return index;
+            }
+            index += 1;
+        }
+        return 0;
+    }
+
     /** Constructs the concrete deck-backed visualization object for one tile/style/highlight combination. */
     private createTileVisualization(
         viewIndex: number,
@@ -2150,7 +2166,8 @@ export class MapDataService {
         featureIdSubset: string[] = [],
         layerKeySuffix = "",
         boxGrid = false,
-        options: Record<string, boolean | number | string> = {}
+        options: Record<string, boolean | number | string> = {},
+        styleOrder: number = 0
     ): ITileVisualization {
         return new DeckTileVisualization(
             viewIndex,
@@ -2166,6 +2183,7 @@ export class MapDataService {
             layerKeySuffix,
             boxGrid,
             this.withViewerDebugOptions(options),
+            styleOrder,
             (requests) => this.resolveRelationExternalTiles(requests)
         );
     }
@@ -2273,6 +2291,7 @@ export class MapDataService {
         const renderPolicy = this.tileRenderPolicyForView(viewIndex, tileLayer);
         const highFidelityStage = this.getLayerHighFidelityStage(mapName, layerName);
         const requestedStageDiagnostic = Math.max(0, this.getLayerStageCount(mapName, layerName) - 1);
+        const styleOrder = this.styleOrder(styleId);
         tileLayer.stats.set(
             `Rendering/Policy/View-${viewIndex}/RequestedMaxStage#value`,
             [requestedStageDiagnostic]);
@@ -2288,6 +2307,7 @@ export class MapDataService {
             existing.highFidelityStage = highFidelityStage;
             existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
             existing.maxLowFiLod = renderPolicy.maxLowFiLod;
+            existing.styleOrder = styleOrder;
             const debugChanged = this.applyViewerDebugOptionsToVisualization(existing);
             if (!stageReady) {
                 existing.updateStatus(false);
@@ -2311,7 +2331,8 @@ export class MapDataService {
             [],
             "",
             this.maps.getViewTileBorderState(viewIndex),
-            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId)
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId),
+            styleOrder
         );
         viewState.putVisualization(styleId, tileKey, visu);
         if (!stageReady) {
@@ -2586,6 +2607,15 @@ export class MapDataService {
 
     /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */
     async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
+        const requestSignature = tileFeatureIds
+            .filter((id): id is TileFeatureId => !!id)
+            .map((id) => `${id.mapTileKey}/${id.featureId}`)
+            .sort()
+            .join("|");
+        if (requestSignature === this.lastHoverRequestSignature) {
+            return;
+        }
+        this.lastHoverRequestSignature = requestSignature;
         const revision = ++this.hoverConversionRevision;
         const features = await this.loadFeatures(tileFeatureIds);
         if (revision !== this.hoverConversionRevision) {
@@ -2768,7 +2798,8 @@ export class MapDataService {
                                 featureIds,
                                 groupKey,
                                 false,
-                                styleOptions
+                                styleOptions,
+                                this.styleOrder(style.id)
                             );
                             this.tileVisualizationTopic.next({visualization});
                             visualizationCollection.push(visualization);

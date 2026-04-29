@@ -82,4 +82,42 @@ describe("DeckLayerRegistry", () => {
         expect(deck.commits[0].map(layer => layer.id)).toEqual(["l2"]);
         registry.destroy();
     });
+
+    it("merges shared layer contributions and drops the layer when the last contributor is removed", () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+
+        registry.upsertShared(
+            "tile-1/gltf",
+            "base-style",
+            {id: "base"},
+            (_key, contributions) => ({
+                order: 10,
+                layer: {id: `shared:${[...contributions.keys()].sort().join("+")}`}
+            })
+        );
+        registry.upsertShared(
+            "tile-1/gltf",
+            "hover-style",
+            {id: "hover"},
+            (_key, contributions) => ({
+                order: 10,
+                layer: {id: `shared:${[...contributions.keys()].sort().join("+")}`}
+            })
+        );
+        registry.flush();
+        expect(deck.commits.at(-1)?.map((layer) => layer.id)).toEqual([
+            "shared:base-style+hover-style"
+        ]);
+
+        registry.removeShared("tile-1/gltf", "hover-style");
+        registry.flush();
+        expect(deck.commits.at(-1)?.map((layer) => layer.id)).toEqual([
+            "shared:base-style"
+        ]);
+
+        registry.removeShared("tile-1/gltf", "base-style");
+        registry.flush();
+        expect(deck.commits.at(-1)).toEqual([]);
+    });
 });

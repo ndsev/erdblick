@@ -191,6 +191,7 @@ export class DeckRenderWorkerPool {
             arrowWorld: result.arrowWorld,
             arrowBillboard: result.arrowBillboard,
             gltfNodes: result.gltfNodes,
+            gltfPickProxies: result.gltfPickProxies,
             coordinateOrigin: result.coordinateOrigin,
             lowFiBundles: (result.lowFiBundles ?? []).map((bundle): DeckLowFiBundleBuffers => ({
                 lod: Number.isFinite(bundle.lod) ? Math.max(0, Math.min(7, Math.floor(bundle.lod))) : 0,
@@ -203,7 +204,8 @@ export class DeckRenderWorkerPool {
                 pathBillboard: bundle.pathBillboard,
                 arrowWorld: bundle.arrowWorld,
                 arrowBillboard: bundle.arrowBillboard,
-                gltfNodes: bundle.gltfNodes
+                gltfNodes: bundle.gltfNodes,
+                gltfPickProxies: bundle.gltfPickProxies
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
             workerTimings: result.timings
