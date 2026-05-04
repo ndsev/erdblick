@@ -14,6 +14,8 @@ The tiles are intended as a lightweight built-in fallback background for offline
 
 The historical `world-overview` directory name is retained intentionally so existing bundled URLs and persisted background ids remain valid.
 
+Authenticated HTTP backgrounds can add a `headers` object per background entry in `config.json`. Erdblick forwards those headers to XYZ tile requests as well as WMS metadata and image requests, so bearer tokens or similar credentials can stay in the deployment config instead of being hardcoded into URLs.
+
 To regenerate the bundled tiles after refreshing the Blue Marble source image, run:
 
 ```bash

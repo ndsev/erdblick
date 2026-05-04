@@ -37,6 +37,7 @@ export interface DeckRenderWorkerSettings {
     workerCountOverride: number | null;
 }
 
+/** Promise bookkeeping kept until one worker finishes rendering a specific tile task. */
 type PendingTask = {
     task: DeckTileRenderTask;
     resolve: (value: DeckTileRenderBuffers) => void;
@@ -98,6 +99,7 @@ export class DeckRenderWorkerPool {
         this.registerWorker(firstWorker, 0);
 
         if (this.maxWorkers <= 1) {
+            // Single-worker mode skips the blob fan-out path entirely to avoid unnecessary fetch/blob work.
             return;
         }
 
@@ -163,6 +165,7 @@ export class DeckRenderWorkerPool {
                 this.inFlightByTaskId.delete(runningTaskId);
                 inFlight!.reject(new Error(event.message || "Deck worker execution failed."));
             }
+            // The slot is still reusable after one task failure; the pool only tears down on reconfiguration.
             this.releaseWorkerSlot(index);
         };
     }
@@ -293,6 +296,8 @@ function resolveAutoWorkerCount(): number {
             ? Math.floor(rawCpuCount)
             : AUTO_WORKER_FALLBACK_CPU_COUNT;
     const halfCpuCount = Math.floor(normalizedCpuCount / 2);
+    // The pool intentionally stays conservative: we reserve roughly half the machine for the UI,
+    // but still guarantee at least two workers so threaded rendering remains worthwhile.
     return Math.max(AUTO_WORKER_MIN, Math.min(halfCpuCount, WORKER_OVERRIDE_CAP));
 }
 

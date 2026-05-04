@@ -9,7 +9,7 @@ import {
     type LayerProps,
     type UpdateParameters
 } from "@deck.gl/core";
-import type {Device} from "@luma.gl/core";
+import type {Device, Texture} from "@luma.gl/core";
 import {createScenegraphsFromGLTF} from "@luma.gl/gltf";
 import {Geometry, GroupNode, Model, ModelNode} from "@luma.gl/engine";
 import {type ShaderModule, pbrMaterial} from "@luma.gl/shadertools";
@@ -138,22 +138,25 @@ in vec4 vColor;
 out vec4 fragColor;
 
 void main(void) {
-  if (gltfNode.flatTint > 0.5) {
-    fragColor = vColor;
-    DECKGL_FILTER_COLOR(fragColor, geometry);
-    return;
-  }
+  vec4 baseColor;
   #ifdef LIGHTING_PBR
-    fragColor = vColor * pbr_filterColor(vec4(0));
+    baseColor = pbr_filterColor(vec4(0));
     geometry.uv = pbr_vUV;
   #else
     #if defined(HAS_UV) && defined(HAS_BASECOLORMAP)
-      fragColor = vColor * texture(pbr_baseColorSampler, vTEXCOORD_0);
+      baseColor = texture(pbr_baseColorSampler, vTEXCOORD_0);
       geometry.uv = vTEXCOORD_0;
     #else
-      fragColor = vColor;
+      baseColor = vec4(1.0);
     #endif
   #endif
+  if (gltfNode.flatTint > 0.5) {
+    float tintAlpha = clamp(vColor.a, 0.0, 1.0);
+    fragColor = vec4(mix(baseColor.rgb, vColor.rgb, tintAlpha), tintAlpha);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
+  fragColor = vColor * baseColor;
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
 `;
@@ -274,6 +277,7 @@ type ParsedTileGltfSnapshot = {
     center: [number, number, number];
 };
 
+/** Parsed and normalized tile GLTF attachment cached per deck device and tile version. */
 export interface DeckTileGltfAsset {
     readonly cacheKey: string;
     readonly attachmentName: string;
@@ -292,6 +296,7 @@ interface DeckTileGltfAssetCacheEntry {
     promise: Promise<DeckTileGltfAsset | null>;
 }
 
+/** One resolved GLTF-node style record emitted by wasm for a feature/node pair. */
 export interface DeckGltfNodeDatum {
     nodeIndex: number;
     featureAddress: number;
@@ -301,6 +306,7 @@ export interface DeckGltfNodeDatum {
     renderPriority: number;
 }
 
+/** One style contribution pushed into the shared visible GLTF layer. */
 export interface DeckGltfNodeStyleContribution {
     sourceId: string;
     priority: number;
@@ -308,20 +314,37 @@ export interface DeckGltfNodeStyleContribution {
     data: DeckGltfNodeDatum[];
 }
 
+/** Simplified box proxy used only for deck picking of GLTF-backed features. */
 export interface DeckGltfPickProxyDatum {
     nodeIndex: number;
     featureAddress: number;
     positions: Float32Array;
 }
 
+/** One style contribution pushed into the shared invisible GLTF pick-proxy layer. */
 export interface DeckGltfPickProxyStyleContribution {
     sourceId: string;
     data: DeckGltfPickProxyDatum[];
 }
 
+/** Shared visible GLTF layer props fed by all style contributions for one tile asset. */
 export type DeckGltfNodeLayerProps = LayerProps & {
     contributions: DeckGltfNodeStyleContribution[];
     asset: DeckTileGltfAsset;
+};
+
+interface DeckGltfNodeBucketDatum {
+    nodeIndex: number;
+    featureAddress: number;
+    color: [number, number, number, number];
+}
+
+type DeckGltfNodeBucket = {
+    depthTest: boolean;
+    flatTint: boolean;
+    maxPriority: number;
+    data: DeckGltfNodeBucketDatum[];
+    models: Model[];
 };
 
 export type DeckGltfPickProxyLayerProps = LayerProps & {
@@ -331,13 +354,13 @@ export type DeckGltfPickProxyLayerProps = LayerProps & {
 };
 
 const gltfAssetCacheByDevice = new WeakMap<Device, Map<string, DeckTileGltfAssetCacheEntry>>();
-const gltfModelParametersRef = new WeakMap<Model, unknown>();
 const ZERO_PICKING_COLOR: [number, number, number] = [0, 0, 0];
 
 function gltfAssetCacheKey(tile: FeatureTile): string {
     return `${tile.mapTileKey}:${tile.dataVersion}`;
 }
 
+/** Returns the per-device GLTF asset cache shared by visible and picking layers. */
 function getDeviceCache(device: Device): Map<string, DeckTileGltfAssetCacheEntry> {
     let cache = gltfAssetCacheByDevice.get(device);
     if (!cache) {
@@ -364,12 +387,17 @@ function tilePosition64Low(position: [number, number, number]): [number, number,
     ];
 }
 
+/**
+ * Mirrors deck's scenegraph transform behavior so we only compose the node-local matrix
+ * when the layer is rendered in a local Cartesian or meter-offset frame.
+ */
 function shouldComposeModelMatrix(coordinateSystem: CoordinateSystem, isGeospatial: boolean): boolean {
     return coordinateSystem === COORDINATE_SYSTEM.CARTESIAN
         || coordinateSystem === COORDINATE_SYSTEM.METER_OFFSETS
         || (coordinateSystem === COORDINATE_SYSTEM.DEFAULT && !isGeospatial);
 }
 
+/** Builds the scenegraph `Model` options shared by every visible GLTF node draw. */
 function buildModelOptions(layerId: string): ParseGLTFOptions {
     return {
         modelOptions: {
@@ -387,6 +415,7 @@ async function readTileGltfSnapshot(tile: FeatureTile): Promise<ParsedTileGltfSn
     return await tile.getGlbAttachmentSnapshot();
 }
 
+/** Parses one tile attachment into the immutable GLTF asset snapshot shared by all layer states. */
 async function buildTileGltfAsset(
     device: Device,
     tile: FeatureTile,
@@ -413,6 +442,12 @@ async function buildTileGltfAsset(
     };
 }
 
+/**
+ * Walks the parsed scenegraph and records the subtree root for every glTF node index.
+ *
+ * The stored parent-world matrix intentionally excludes the root node's own local transform,
+ * because `GroupNode.traverse()` reapplies that local matrix when descending the subtree.
+ */
 function mapNodeRoots(
     gltfNode: ParsedTileGltfNode,
     parsedNode: GroupNode,
@@ -454,8 +489,10 @@ type LayerScenegraphState = {
     assetCacheKey: string | null;
     scenes: GroupNode[];
     nodeDrawRecords: Map<number, Array<{model: Model; worldMatrix: Matrix4}>>;
+    buckets: DeckGltfNodeBucket[];
     models: Model[];
-    resolvedData: DeckGltfNodeDatum[];
+    sharedTextureKeys: string[];
+    textureCacheDevice: Device | null;
 };
 
 function createEmptyLayerScenegraphState(): LayerScenegraphState {
@@ -463,11 +500,14 @@ function createEmptyLayerScenegraphState(): LayerScenegraphState {
         assetCacheKey: null,
         scenes: [],
         nodeDrawRecords: new Map(),
+        buckets: [],
         models: [],
-        resolvedData: []
+        sharedTextureKeys: [],
+        textureCacheDevice: null
     };
 }
 
+/** Orders contributions deterministically so later resolution is stable across rerenders. */
 function sortContributions(
     left: DeckGltfNodeStyleContribution,
     right: DeckGltfNodeStyleContribution
@@ -487,14 +527,26 @@ function makeResolvedDatumKey(datum: Pick<DeckGltfNodeDatum, "featureAddress" | 
     return `${datum.featureAddress}:${datum.nodeIndex}`;
 }
 
+/**
+ * Resolves the contribution stack for one shared GLTF layer.
+ *
+ * Base contributions replace earlier base styling for the same feature/node, while flat-tint
+ * contributions stay in a separate overlay stream so hover/selection can draw on top.
+ */
 function resolveContributionData(contributions: DeckGltfNodeStyleContribution[]): DeckGltfNodeDatum[] {
-    const resolved = new Map<string, DeckGltfNodeDatum>();
+    const baseByKey = new Map<string, DeckGltfNodeDatum>();
+    const overlayByKey = new Map<string, DeckGltfNodeDatum>();
     for (const contribution of [...contributions].sort(sortContributions)) {
         for (const datum of contribution.data) {
-            resolved.set(makeResolvedDatumKey(datum), datum);
+            const key = makeResolvedDatumKey(datum);
+            if (datum.flatTint) {
+                overlayByKey.set(key, datum);
+            } else {
+                baseByKey.set(key, datum);
+            }
         }
     }
-    return [...resolved.values()].sort((left, right) => {
+    return [...baseByKey.values(), ...overlayByKey.values()].sort((left, right) => {
         const priorityDiff = left.renderPriority - right.renderPriority;
         if (priorityDiff !== 0) {
             return priorityDiff;
@@ -507,6 +559,134 @@ function resolveContributionData(contributions: DeckGltfNodeStyleContribution[])
     });
 }
 
+function gltfCullMode(flatTint: boolean): "back" | "none" {
+    // Selection/hover highlight meshes should stay visible even when imported winding is inconsistent.
+    // For the textured base pass we still cull backfaces to avoid drawing both sides.
+    return flatTint ? "none" : "back";
+}
+
+type SharedExternalTextureCacheEntry = {
+    texture: Texture;
+    refCount: number;
+};
+
+type SharedExternalTextureCache = {
+    nextImageId: number;
+    imageIds: WeakMap<object, number>;
+    entries: Map<string, SharedExternalTextureCacheEntry>;
+};
+
+const sharedExternalTextureCaches = new WeakMap<Device, SharedExternalTextureCache>();
+
+/** Returns the per-device cache that deduplicates repeated external-image texture uploads. */
+function getSharedExternalTextureCache(device: Device): SharedExternalTextureCache {
+    let cache = sharedExternalTextureCaches.get(device);
+    if (!cache) {
+        cache = {
+            nextImageId: 1,
+            imageIds: new WeakMap<object, number>(),
+            entries: new Map()
+        };
+        sharedExternalTextureCaches.set(device, cache);
+    }
+    return cache;
+}
+
+/** Assigns a stable numeric identity to one decoded image object for cache-key generation. */
+function textureCacheImageId(cache: SharedExternalTextureCache, image: object): number {
+    let imageId = cache.imageIds.get(image);
+    if (imageId === undefined) {
+        imageId = cache.nextImageId++;
+        cache.imageIds.set(image, imageId);
+    }
+    return imageId;
+}
+
+/**
+ * Derives a cache key for textures backed by decoded external images.
+ *
+ * Buffer-backed uploads are ignored here because they typically carry unique payload bytes
+ * already, while the expensive `copyExternalImage` path is driven by DOM/ImageBitmap sources.
+ */
+function sharedExternalTextureCacheKey(
+    cache: SharedExternalTextureCache,
+    props: Record<string, unknown>
+): string | null {
+    const image = props["data"];
+    if (!image || typeof image !== "object" || ArrayBuffer.isView(image) || image instanceof ArrayBuffer) {
+        return null;
+    }
+    const width = props["width"];
+    const height = props["height"];
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        return null;
+    }
+    const samplerKey = JSON.stringify(props["sampler"] ?? null);
+    const imageId = textureCacheImageId(cache, image);
+    return `${imageId}:${width}x${height}:${samplerKey}`;
+}
+
+/**
+ * Groups resolved feature/node draws into buckets with identical GL state and shared models.
+ *
+ * This keeps per-frame draw submission cheap while still allowing highlights to sort above
+ * the textured base pass.
+ */
+function resolveBuckets(
+    resolvedData: DeckGltfNodeDatum[],
+    nodeDrawRecords: Map<number, Array<{model: Model; worldMatrix: Matrix4}>>
+): {buckets: DeckGltfNodeBucket[]; models: Model[]} {
+    const buckets = new Map<string, DeckGltfNodeBucket & {modelSet: Set<Model>}>();
+    const models: Model[] = [];
+    const seenModels = new Set<Model>();
+
+    for (const datum of resolvedData) {
+        const bucketKey = `${datum.renderPriority}:${datum.depthTest ? 1 : 0}:${datum.flatTint ? 1 : 0}`;
+        let bucket = buckets.get(bucketKey);
+        if (!bucket) {
+            bucket = {
+                depthTest: datum.depthTest,
+                flatTint: datum.flatTint,
+                maxPriority: datum.renderPriority,
+                data: [],
+                models: [],
+                modelSet: new Set<Model>()
+            };
+            buckets.set(bucketKey, bucket);
+        }
+        bucket.data.push({
+            nodeIndex: datum.nodeIndex,
+            featureAddress: datum.featureAddress,
+            color: datum.color
+        });
+        const drawRecords = nodeDrawRecords.get(datum.nodeIndex);
+        if (!drawRecords) {
+            continue;
+        }
+        for (const drawRecord of drawRecords) {
+            if (!bucket.modelSet.has(drawRecord.model)) {
+                bucket.modelSet.add(drawRecord.model);
+                bucket.models.push(drawRecord.model);
+            }
+            if (!seenModels.has(drawRecord.model)) {
+                seenModels.add(drawRecord.model);
+                models.push(drawRecord.model);
+            }
+        }
+    }
+
+    return {
+        buckets: [...buckets.values()]
+            .sort((left, right) =>
+                left.maxPriority - right.maxPriority
+                || Number(right.depthTest) - Number(left.depthTest)
+            )
+            .map(({modelSet: _modelSet, ...bucket}) => bucket),
+        models
+    };
+}
+
+/** Clones the processed glTF tree so each layer state owns fresh luma scenegraph nodes. */
 export function cloneProcessedGltfForScenegraph(processedGltf: ParsedTileGltf): ParsedTileGltf {
     const clonedNodes: any[] = [];
     const sourceScenes = processedGltf.scenes ?? [];
@@ -540,13 +720,75 @@ export function cloneProcessedGltfForScenegraph(processedGltf: ParsedTileGltf): 
     };
 }
 
+/**
+ * Builds the layer-local scenegraph state used by the visible GLTF renderer.
+ *
+ * The temporary `createTexture` override deduplicates repeated external-image uploads during
+ * `createScenegraphsFromGLTF(...)`, which is where large shared texture sets previously froze
+ * the UI in `copyExternalImage`.
+ */
 function buildLayerScenegraphState(
     device: Device,
     asset: DeckTileGltfAsset,
     layerId: string
-): Omit<LayerScenegraphState, "models" | "resolvedData"> {
+): LayerScenegraphState {
     const processed = cloneProcessedGltfForScenegraph(asset.processedGltf);
-    const {scenes} = createScenegraphsFromGLTF(device, processed, buildModelOptions(`deck-gltf:${layerId}:${asset.cacheKey}`));
+    const sharedTextureCache = getSharedExternalTextureCache(device);
+    const originalCreateTexture = (device as any).createTexture.bind(device);
+    const usedTextureKeys = new Set<string>();
+    const newlyCreatedTextureKeys = new Set<string>();
+    let scenegraphs;
+    try {
+        (device as any).createTexture = (props: unknown) => {
+            if (!props || typeof props !== "object") {
+                return originalCreateTexture(props);
+            }
+            const key = sharedExternalTextureCacheKey(
+                sharedTextureCache,
+                props as Record<string, unknown>
+            );
+            if (!key) {
+                return originalCreateTexture(props);
+            }
+            usedTextureKeys.add(key);
+            const cached = sharedTextureCache.entries.get(key);
+            if (cached) {
+                return cached.texture;
+            }
+            const texture = originalCreateTexture(props);
+            sharedTextureCache.entries.set(key, {
+                texture,
+                refCount: 0
+            });
+            newlyCreatedTextureKeys.add(key);
+            return texture;
+        };
+        scenegraphs = createScenegraphsFromGLTF(
+            device,
+            processed,
+            buildModelOptions(`deck-gltf:${layerId}:${asset.cacheKey}`)
+        );
+        for (const key of usedTextureKeys) {
+            const entry = sharedTextureCache.entries.get(key);
+            if (entry) {
+                entry.refCount += 1;
+            }
+        }
+    } finally {
+        (device as any).createTexture = originalCreateTexture;
+        if (!scenegraphs) {
+            for (const key of newlyCreatedTextureKeys) {
+                const entry = sharedTextureCache.entries.get(key);
+                if (!entry || entry.refCount !== 0) {
+                    continue;
+                }
+                entry.texture.destroy();
+                sharedTextureCache.entries.delete(key);
+            }
+        }
+    }
+
+    const {scenes} = scenegraphs;
     const nodeRoots = new Map<number, GroupNode>();
     const nodeRootWorldMatrices = new Map<number, Matrix4>();
     const nodeIndexByRef = new Map<object, number>();
@@ -556,6 +798,8 @@ function buildLayerScenegraphState(
         const processedSceneNodes = processed.scenes?.[sceneIndex]?.nodes ?? [];
         const sceneChildren = scenes[sceneIndex]?.children ?? [];
         const sceneWorldMatrix = new Matrix4(scenes[sceneIndex]?.matrix ?? new Matrix4());
+        // loaders.gl and luma should stay aligned here, but we clamp defensively so a partially
+        // processed scene does not crash the whole tile render.
         const nodeCount = Math.min(processedSceneNodes.length, sceneChildren.length);
         for (let nodePosition = 0; nodePosition < nodeCount; nodePosition++) {
             const sceneChild = sceneChildren[nodePosition];
@@ -592,16 +836,38 @@ function buildLayerScenegraphState(
     return {
         assetCacheKey: asset.cacheKey,
         scenes,
-        nodeDrawRecords
+        nodeDrawRecords,
+        buckets: [],
+        models: [],
+        sharedTextureKeys: [...usedTextureKeys],
+        textureCacheDevice: device
     };
 }
 
+/** Releases the layer-local scenegraph and decrements any shared texture cache references. */
 function destroyLayerScenegraphState(state: LayerScenegraphState): void {
     for (const scene of state.scenes) {
         scene.destroy();
     }
+    if (state.textureCacheDevice) {
+        const cache = sharedExternalTextureCaches.get(state.textureCacheDevice);
+        if (cache) {
+            for (const key of state.sharedTextureKeys) {
+                const entry = cache.entries.get(key);
+                if (!entry) {
+                    continue;
+                }
+                entry.refCount -= 1;
+                if (entry.refCount <= 0) {
+                    entry.texture.destroy();
+                    cache.entries.delete(key);
+                }
+            }
+        }
+    }
 }
 
+/** Retains the parsed GLTF asset for one tile on a specific deck device. */
 export async function retainDeckTileGltfAsset(
     tile: FeatureTile,
     device: Device
@@ -626,6 +892,7 @@ export async function retainDeckTileGltfAsset(
     return await entry.promise;
 }
 
+/** Releases one retained GLTF asset reference and destroys it once the last user goes away. */
 export function releaseDeckTileGltfAsset(
     tile: FeatureTile,
     device: Device | null | undefined
@@ -653,15 +920,12 @@ export function releaseDeckTileGltfAsset(
 }
 
 /**
- * Primitive GLTF layer that renders selected cached node subtrees in one deck layer and
- * encodes picking identity per emitted feature/node item.
+ * Shared GLTF layer that resolves per-feature style contributions once, buckets them by stable render
+ * state, and renders them inside one primitive layer. This avoids sharing the same Model instances
+ * across multiple deck sublayers while still applying GL state per bucket instead of per model.
  */
 export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
     static override layerName = "DeckGltfNodeLayer";
-
-    override getModels(): Model[] {
-        return (this.state as LayerScenegraphState).models;
-    }
 
     override initializeState(): void {
         this.setState(createEmptyLayerScenegraphState());
@@ -671,6 +935,11 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
         destroyLayerScenegraphState(this.state as LayerScenegraphState);
     }
 
+    override getModels(): Model[] {
+        return (this.state as LayerScenegraphState).models;
+    }
+
+    /** Rebuilds the layer-local scenegraph only when the underlying tile asset version changes. */
     override updateState({props}: UpdateParameters<this>): void {
         const device = this.context.device;
         if (!device) {
@@ -684,40 +953,22 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
         let nextState = currentState;
         if (currentState.assetCacheKey !== props.asset.cacheKey) {
             destroyLayerScenegraphState(currentState);
-            nextState = {
-                ...buildLayerScenegraphState(device, props.asset, String(this.props.id)),
-                models: [],
-                resolvedData: []
-            };
+            nextState = buildLayerScenegraphState(device, props.asset, String(this.props.id));
         }
-
         const resolvedData = resolveContributionData(props.contributions);
-        const models: Model[] = [];
-        const seen = new Set<Model>();
-        for (const datum of resolvedData) {
-            const drawRecords = nextState.nodeDrawRecords.get(datum.nodeIndex);
-            if (!drawRecords) {
-                continue;
-            }
-            for (const drawRecord of drawRecords) {
-                if (seen.has(drawRecord.model)) {
-                    continue;
-                }
-                seen.add(drawRecord.model);
-                models.push(drawRecord.model);
-            }
-        }
+        const {buckets, models} = resolveBuckets(resolvedData, nextState.nodeDrawRecords);
         this.setState({
             ...nextState,
-            models,
-            resolvedData
+            buckets,
+            models
         });
     }
 
+    /** Draws all feature/node records bucketed by stable GL state inside one primitive layer. */
     override draw({renderPass}: {renderPass: unknown}): void {
+        const state = this.state as LayerScenegraphState;
         const {asset, coordinateSystem = COORDINATE_SYSTEM.DEFAULT, modelMatrix} = this.props;
-        const {nodeDrawRecords, resolvedData} = this.state as LayerScenegraphState;
-        if (!resolvedData.length) {
+        if (state.assetCacheKey !== asset.cacheKey || !state.buckets.length) {
             return;
         }
 
@@ -731,61 +982,55 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
             camera: this.context.viewport.cameraPosition as [number, number, number]
         };
         const layerOpacity = Math.max(0, Math.min(1, Number(this.props.opacity ?? 1)));
+        const device = this.context.device;
 
-        for (let itemIndex = 0; itemIndex < resolvedData.length; itemIndex++) {
-            const item = resolvedData[itemIndex];
-            const drawRecords = nodeDrawRecords.get(item.nodeIndex);
-            if (!drawRecords || drawRecords.length === 0) {
-                continue;
-            }
-            const tintColor = normalizeColor(item.color);
-
-            for (const drawRecord of drawRecords) {
-                const node = drawRecord.model;
-                const worldMatrix = drawRecord.worldMatrix;
-                const sceneModelMatrix = modelMatrix
-                    ? new Matrix4(modelMatrix).multiplyRight(worldMatrix)
-                    : worldMatrix;
-
-                node.shaderInputs.setProps({
-                    pbrProjection: pbrProjectionProps,
-                    scenegraph: {
-                        sizeScale: 1,
-                        sizeMinPixels: 0,
-                        sizeMaxPixels: Number.MAX_SAFE_INTEGER,
-                        sceneModelMatrix,
-                        composeModelMatrix: composeTransforms
-                    },
-                    gltfNode: {
-                        tilePosition,
-                        tilePosition64Low: tilePositionLow,
-                        tintColor: [tintColor[0], tintColor[1], tintColor[2], tintColor[3] * layerOpacity],
-                        pickingColor: ZERO_PICKING_COLOR,
-                        flatTint: item.flatTint ? 1 : 0
+        for (const bucket of state.buckets) {
+            // Highlights intentionally bypass depth writes/testing so they remain visible on top of
+            // the textured base pass even when imported winding or coplanar triangles are messy.
+            const parameters = {
+                ...(this.props.parameters ?? {}),
+                depthTest: bucket.depthTest,
+                depthMask: bucket.depthTest,
+                cullMode: gltfCullMode(bucket.flatTint)
+            };
+            device.withParametersWebGL(parameters, () => {
+                for (const item of bucket.data) {
+                    const drawRecords = state.nodeDrawRecords.get(item.nodeIndex);
+                    if (!drawRecords || drawRecords.length === 0) {
+                        continue;
                     }
-                });
-                const currentParameters = node.parameters as Record<string, unknown>;
-                const nextDepthTest = item.depthTest;
-                const nextDepthMask = item.depthTest;
-                const nextParametersRef = this.props.parameters ?? null;
-                const currentParametersRef = gltfModelParametersRef.get(node) ?? null;
-                if (currentParameters["depthTest"] !== nextDepthTest
-                    || currentParameters["depthMask"] !== nextDepthMask
-                    || currentParameters["cullMode"] !== "none"
-                    || currentParametersRef !== nextParametersRef) {
-                    node.setParameters({
-                        ...currentParameters,
-                        ...(this.props.parameters ?? {}),
-                        depthTest: nextDepthTest,
-                        depthMask: nextDepthMask,
-                        cullMode: "none"
-                    } as any);
-                    gltfModelParametersRef.set(node, nextParametersRef);
+                    const tintColor = normalizeColor(item.color);
+
+                    for (const drawRecord of drawRecords) {
+                        const node = drawRecord.model;
+                        const worldMatrix = drawRecord.worldMatrix;
+                        const sceneModelMatrix = modelMatrix
+                            ? new Matrix4(modelMatrix).multiplyRight(worldMatrix)
+                            : worldMatrix;
+
+                        node.shaderInputs.setProps({
+                            pbrProjection: pbrProjectionProps,
+                            scenegraph: {
+                                sizeScale: 1,
+                                sizeMinPixels: 0,
+                                sizeMaxPixels: Number.MAX_SAFE_INTEGER,
+                                sceneModelMatrix,
+                                composeModelMatrix: composeTransforms
+                            },
+                            gltfNode: {
+                                tilePosition,
+                                tilePosition64Low: tilePositionLow,
+                                tintColor: [tintColor[0], tintColor[1], tintColor[2], tintColor[3] * layerOpacity],
+                                pickingColor: ZERO_PICKING_COLOR,
+                                flatTint: bucket.flatTint ? 1 : 0
+                            }
+                        });
+                        if (!node.draw(renderPass as never)) {
+                            this.setNeedsRedraw();
+                        }
+                    }
                 }
-                if (!node.draw(renderPass as never)) {
-                    this.setNeedsRedraw();
-                }
-            }
+            });
         }
     }
 }
@@ -795,6 +1040,7 @@ type GltfPickProxyState = {
     resolvedData: DeckGltfPickProxyDatum[];
 };
 
+/** Returns the empty pick-proxy state used before the first contribution arrives. */
 function createEmptyGltfPickProxyState(): GltfPickProxyState {
     return {
         model: null,
@@ -802,6 +1048,7 @@ function createEmptyGltfPickProxyState(): GltfPickProxyState {
     };
 }
 
+/** Resolves overlapping pick-proxy contributions to one deterministic feature/node record set. */
 function resolvePickProxyData(contributions: DeckGltfPickProxyStyleContribution[]): DeckGltfPickProxyDatum[] {
     const resolved = new Map<string, DeckGltfPickProxyDatum>();
     for (const contribution of [...contributions].sort((left, right) => left.sourceId.localeCompare(right.sourceId))) {
@@ -818,6 +1065,7 @@ function resolvePickProxyData(contributions: DeckGltfPickProxyStyleContribution[
     });
 }
 
+/** Builds the invisible triangle mesh used exclusively for cheap GLTF picking. */
 function buildGltfPickProxyModel(
     layer: DeckGltfPickProxyLayer,
     resolvedData: DeckGltfPickProxyDatum[]
@@ -884,6 +1132,7 @@ export class DeckGltfPickProxyLayer extends Layer<Required<DeckGltfPickProxyLaye
         return model ? [model] : [];
     }
 
+    /** Rebuilds the pick mesh whenever the resolved proxy geometry changes. */
     override updateState({props}: UpdateParameters<this>): void {
         const state = this.state as GltfPickProxyState;
         const resolvedData = resolvePickProxyData(props.contributions);
@@ -895,6 +1144,7 @@ export class DeckGltfPickProxyLayer extends Layer<Required<DeckGltfPickProxyLaye
         });
     }
 
+    /** Reattaches the resolved datum so deck picking can map proxy hits back to feature ids. */
     override getPickingInfo({info}: {
         info: PickingInfo<DeckGltfPickProxyDatum>;
         mode: string;
@@ -908,6 +1158,7 @@ export class DeckGltfPickProxyLayer extends Layer<Required<DeckGltfPickProxyLaye
         };
     }
 
+    /** Draws the invisible pick proxy only during deck's picking pass. */
     override draw({renderPass}: {renderPass: unknown}): void {
         const state = this.state as GltfPickProxyState;
         const model = state.model;

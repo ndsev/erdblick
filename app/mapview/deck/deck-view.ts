@@ -210,6 +210,12 @@ export abstract class DeckMapView implements IRenderView {
     private isCameraInteracting = false;
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
+    /**
+     * Separates visible GLTF rendering from the invisible GLTF pick-proxy pass.
+     *
+     * deck still draws non-pickable layers during picking unless they are filtered out explicitly,
+     * so the visible GLTF layer must be excluded there or it will overwrite the cheap proxy ids.
+     */
     private readonly deckLayerFilter: DeckProps<DeckMercatorView>["layerFilter"] = ({layer, isPicking}) => {
         const layerId = String(layer.id ?? "");
         const layerPickable = Boolean((layer.props as {pickable?: boolean} | undefined)?.pickable);
@@ -994,6 +1000,7 @@ export abstract class DeckMapView implements IRenderView {
             this.hoverPickTimer = null;
             if (this.isCameraInteracting || performance.now() < this.hoverPickingSuspendedUntilMs) {
                 if (this.pendingHoverInfo) {
+                    // Keep the newest pointer sample queued while the camera is still settling.
                     this.scheduleHoverPickProcessing();
                 }
                 return;
@@ -1224,6 +1231,8 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         if (!this.stateService.mode2dState.getValue(this._viewIndex) && selectedLayer.type === "wms") {
+            // WMS backgrounds remain a 2D-only option in erdblick. Dropping them here avoids
+            // carrying an unstable layer into pitched 3D views where it cannot render correctly.
             this.removeBackgroundLayer();
             return;
         }
@@ -1235,6 +1244,7 @@ export abstract class DeckMapView implements IRenderView {
             mode2d: this.stateService.mode2dState.getValue(this._viewIndex)
         });
         if (signature === this.backgroundLayerSignature) {
+            // Skip deck layer churn when only unrelated state changed.
             return;
         }
 
@@ -1252,18 +1262,57 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
+     * Builds a fetch override for authenticated background layers while preserving deck/loaders.gl
+     * request options such as abort signals.
+     */
+    private createBackgroundFetchOverride(headers: Readonly<Record<string, string>>): typeof fetch | undefined {
+        if (Object.keys(headers).length === 0) {
+            return undefined;
+        }
+
+        return async (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+            const mergedHeaders = new Headers(init?.headers);
+            for (const [name, value] of Object.entries(headers)) {
+                mergedHeaders.set(name, value);
+            }
+
+            return fetch(input, {
+                ...init,
+                headers: mergedHeaders
+            });
+        };
+    }
+
+    /** Wraps the optional background fetch override in the deck/loaders.gl `loadOptions` structure. */
+    private createBackgroundLoadOptions(headers: Readonly<Record<string, string>>): {core: {fetch: typeof fetch}} | undefined {
+        const fetchOverride = this.createBackgroundFetchOverride(headers);
+        if (!fetchOverride) {
+            return undefined;
+        }
+
+        return {
+            core: {
+                fetch: fetchOverride
+            }
+        };
+    }
+
+    /**
      * Creates the tiled XYZ background layer used for OSM and bundled imagery.
      *
      * The deck layer id includes the configured background id so switching
      * sources forces a fresh TileLayer instance and tile selection pass.
      * The layer also prefers deck's `best-available` refinement so panning
      * keeps already loaded detailed tiles visible instead of collapsing to a
-     * coarse parent tile while sibling requests are still in flight.
+     * coarse parent tile while sibling requests are still in flight. When
+     * `headers` are configured, tile requests use them for authenticated
+     * HTTP endpoints without changing local bundled backgrounds.
      */
     private createXyzBackgroundLayer(layerConfig: XyzBackgroundLayerConfig, opacity: number): TileLayer<string> {
         return new TileLayer<string>({
             id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
             data: layerConfig.urlTemplate,
+            loadOptions: this.createBackgroundLoadOptions(layerConfig.headers),
             minZoom: layerConfig.minZoom,
             maxZoom: layerConfig.maxZoom,
             tileSize: layerConfig.tileSize,
@@ -1302,10 +1351,14 @@ export abstract class DeckMapView implements IRenderView {
      * Creates the experimental WMS background layer from the config-driven service parameters.
      *
      * The source-specific layer id mirrors the XYZ path so deck does not reuse
-     * stale internal state when the selected background changes.
+     * stale internal state when the selected background changes. WMS metadata
+     * and image requests reuse the same optional header override as XYZ tiles.
      */
     private createWmsBackgroundLayer(layerConfig: WmsBackgroundLayerConfig, opacity: number): WMSLayer {
         const imageSource = new WMSImageSource(layerConfig.url, {
+            core: {
+                loadOptions: this.createBackgroundLoadOptions(layerConfig.headers) ?? {}
+            },
             wms: {
                 wmsParameters: {
                     layers: layerConfig.layers,

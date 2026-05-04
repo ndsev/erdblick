@@ -157,6 +157,7 @@ interface DeckGltfPickProxyLayerData {
     data: DeckGltfPickProxyDatum[];
 }
 
+/** Shared-registry payload that contributes visible GLTF node styling for one tile variant. */
 interface DeckSharedGltfContribution {
     asset: DeckTileGltfAsset;
     order: number;
@@ -165,6 +166,7 @@ interface DeckSharedGltfContribution {
     data: DeckGltfNodeStyleContribution["data"];
 }
 
+/** Shared-registry payload that contributes simplified GLTF picking geometry for one tile variant. */
 interface DeckSharedGltfPickProxyContribution {
     order: number;
     coordinateOrigin: [number, number, number];
@@ -300,11 +302,13 @@ type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualizati
 };
 
 /** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
+/** Resolves the wasm visualization constructor while keeping the call sites strongly typed. */
 function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
     return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
 }
 
 /** Returns the wasm fidelity enum used by deck tile rendering. */
+/** Returns the wasm fidelity enum object used by both worker and main-thread rendering paths. */
 function deckRuleFidelityEnum(): DeckRuleFidelityEnum {
     return coreLib.RuleFidelity as DeckRuleFidelityEnum;
 }
@@ -611,18 +615,21 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     /** GLTF layers are shared per tile/variant, independent of the contributing stylesheet. */
+    /** Returns the shared registry key for the visible GLTF layer of this tile/variant. */
     private sharedGltfLayerKey(variantSuffix: string): string {
         const variant = variantSuffix.length > 0 ? `/${variantSuffix}` : "";
         return `${this.tile.mapTileKey}/gltf${variant}`;
     }
 
     /** GLTF picking proxies are shared per tile/variant alongside the visible GLTF layer. */
+    /** Returns the shared registry key for the invisible GLTF picking proxy of this tile/variant. */
     private sharedGltfPickProxyLayerKey(variantSuffix: string): string {
         const variant = variantSuffix.length > 0 ? `/${variantSuffix}` : "";
         return `${this.tile.mapTileKey}/gltf-pick-proxy${variant}`;
     }
 
     /** One visualization contributes exactly one GLTF style stack entry per shared tile/variant layer. */
+    /** Distinguishes this visualization's visible GLTF contribution inside the shared layer stack. */
     private sharedGltfContributionSourceId(variantSuffix: string): string {
         const suffix = this.layerKeySuffix.length > 0 ? this.layerKeySuffix : "-";
         const variant = variantSuffix.length > 0 ? variantSuffix : "-";
@@ -630,6 +637,7 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     /** One visualization contributes at most one GLTF picking-proxy entry per shared tile/variant layer. */
+    /** Distinguishes this visualization's picking-proxy contribution inside the shared layer stack. */
     private sharedGltfPickProxyContributionSourceId(variantSuffix: string): string {
         const suffix = this.layerKeySuffix.length > 0 ? this.layerKeySuffix : "-";
         const variant = variantSuffix.length > 0 ? variantSuffix : "-";
@@ -637,6 +645,12 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     /** Shared GLTF style precedence: base < stylesheet override < hover < selection. */
+    /**
+     * Encodes the shared-layer precedence for GLTF styling.
+     *
+     * Base styling stays below temporary highlight overlays so hover/selection can tint the same
+     * node set without destroying the textured pass underneath.
+     */
     private gltfContributionPriority(): number {
         switch (this.highlightMode.value) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT.value:
@@ -1197,7 +1211,9 @@ export class DeckTileVisualization implements ITileVisualization {
                 nodeIndex: datum.nodeIndex,
                 featureAddress: datum.featureAddress,
                 color: datum.color,
-                depthTest: gltfLayerData.depthTest,
+                // Highlight overlays must stay on top of the base pass even when the source style
+                // requested depth testing for the original textured geometry.
+                depthTest: flatTint ? false : gltfLayerData.depthTest,
                 flatTint,
                 renderPriority
             }));
@@ -1218,6 +1234,8 @@ export class DeckTileVisualization implements ITileVisualization {
     /** Converts one visualization render entry into a shared GLTF picking-proxy contribution. */
     private buildSharedGltfPickProxyContribution(entry: DeckLayerRenderEntry): DeckSharedGltfPickProxyContribution | null {
         if (this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value) {
+            // Only the non-highlight pass contributes picking geometry; otherwise hover overlays
+            // would pick themselves and reintroduce the flicker we just removed.
             return null;
         }
         const gltfPickProxyLayerData = entry.gltfPickProxyLayerData;
@@ -1231,7 +1249,12 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
-    /** Builds the single shared GLTF layer for one tile/variant from all style contributions. */
+    /**
+     * Reconstructs the single shared visible GLTF layer from all active per-style contributions.
+     *
+     * The shared layer key intentionally excludes the originating style id so multiple styles can
+     * cooperate on the same node set instead of instantiating duplicate scenegraph geometry.
+     */
     private buildSharedGltfLayer(
         layerKey: string,
         rawContributions: ReadonlyMap<string, unknown>,
@@ -1271,7 +1294,7 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
-    /** Builds the single shared GLTF picking-proxy layer for one tile/variant from all base contributions. */
+    /** Reconstructs the shared invisible GLTF pick-proxy layer from all active contributors. */
     private buildSharedGltfPickProxyLayer(
         layerKey: string,
         rawContributions: ReadonlyMap<string, unknown>
