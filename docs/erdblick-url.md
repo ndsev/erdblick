@@ -2,6 +2,20 @@
 
 Erdblick encodes the full UI state inside the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
 
+## Startup State Precedence
+
+Erdblick combines several possible state sources during startup:
+
+1. Built-in application defaults.
+2. Bundled `config.json`.
+3. Server-supplied `/config.erdblick.state`, if the backend provides it.
+4. User-owned browser `localStorage`.
+5. URL query parameters.
+
+The server-supplied `state` object uses the same snapshot shape as Advanced Preferences export/import. It is applied before browser storage and URL hydration, so deployment defaults can guide fresh profiles without overriding a user's saved preferences or an explicit shared link.
+
+State written from server defaults is tracked as config-owned in browser storage. If the backend changes the config defaults later, config-owned values can be replaced. Once the user changes a setting, the stored value becomes user-owned and future server defaults do not overwrite it. Legacy local storage without ownership metadata is treated as user-owned.
+
 ## What Gets Stored in the URL?
 
 - Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll) for each view.
@@ -121,5 +135,5 @@ Keep a few guidelines in mind when preparing URLs for long-term use:
 If a copied URL does not restore the expected state, a few common issues are worth checking first:
 
 - If a link no longer opens correctly, verify that the map IDs and style IDs referenced in the URL still exist.
-- Clear the browser history or use an incognito window if the URL appears correct but the UI keeps loading an older state. Cached `localStorage` overrides may conflict with the encoded state.
+- Clear the browser history or use an incognito window if a link without explicit parameters keeps loading older local state. Explicit URL parameters take precedence over local storage, but values not present in the URL may still come from stored viewer state.
 - If a URL looks correct but loads an unexpected state, use the Preferences dialog to clear stored viewer properties and search history, then reload the link.

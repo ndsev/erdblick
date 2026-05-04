@@ -1050,7 +1050,12 @@ export class MapDataService {
             return;
         }
         const summary = failures
-            .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
+            .map(req => {
+                const noDataSourceSuffix = req.status === MapTileRequestStatus.NoDataSource && req.noDataSourceReason
+                    ? ` (${req.noDataSourceReason})`
+                    : "";
+                return `${req.mapId}/${req.layerId}: ${req.statusText}${noDataSourceSuffix}`;
+            })
             .join(", ");
         const detail = statusMessage ? ` (${statusMessage})` : "";
         this.showErrorMessage(`Tile request failed: ${summary}${detail}`);

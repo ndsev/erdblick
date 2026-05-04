@@ -2,7 +2,7 @@
 
 This is the entry point for all erdblick end-user documentation. Each section links to a dedicated Markdown file so topics stay focused and easy to maintain.
 
-- [Setup Guide](erdblick-setup.md) – Download/build options, serving erdblick with `mapget`, configuration overrides, and browser prerequisites.
+- [Setup Guide](erdblick-setup.md) – Download/build options, serving erdblick with `mapget`, bundled `config.json`, server-supplied `/config.erdblick` overrides, and browser prerequisites.
 - [Basic UI Layout Guide](erdblick-ui-basics.md) – Tour of panels, navigation controls, inspector slots, and toolbar actions.
 - [Search Guide](erdblick-search.md) – Jump-to targets, feature search expressions, history, and troubleshooting.
 - [Style System Guide](erdblick-stylesystem.md) – Managing styles in the UI, YAML structure, expression context, and debugging tips.

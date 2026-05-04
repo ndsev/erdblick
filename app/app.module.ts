@@ -146,6 +146,7 @@ const updateGlobalSpinner = (message: string) => {
 /** App initializer that loads config and then brings up the WASM core, styles, map data, and search workers in order. */
 export const initializeServices = () => {
     const configService = inject(AppConfigService);
+    const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
     const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
@@ -154,6 +155,10 @@ export const initializeServices = () => {
     return (async () => {
         updateGlobalSpinner('Loading app config');
         await configService.load();
+        stateService.seedConfigDefaultState(
+            configService.snapshot.state,
+            configService.snapshot.configStateHash
+        );
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
         updateGlobalSpinner('Initializing coordinates');

@@ -10,7 +10,9 @@ When the map stays blank or appears to render nothing at all, work through these
    **Note:** Focus buttons are only available if your map exposes coverage information.
 2. Ensure that the map layer you want to see is activated (checked).
 3. Open the browser console (F12) to see possible HTTP errors or CORS issues.
-4. Reload, since it could be that you were silently logged out.
+4. Check diagnostics or tile-load messages for `NoDataSource` details:
+   `emptySources` means the backend loaded an empty `sources` list, `allSourcesDisabled` means every configured source has `enabled: false`, `datasourceInitializationFailed` means enabled sources failed during construction, `missingMapOrLayer` means the requested map/layer id is not advertised, and `noConfig` means the backend has no config path.
+5. Reload, since it could be that you were silently logged out.
 
 ## Performance Issues
 

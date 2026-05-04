@@ -9,6 +9,7 @@ The DataSource editor is an optional panel that talks to the backend’s `/confi
 Before the editor can accept changes, the backend has to expose a configuration endpoint and make clear whether its contents are writable:
 
 - Your backend must expose a `/config` endpoint that returns configuration data and, optionally, a JSON schema. If the endpoint is missing or returns an error, the editor will show a read‑only error message.
+- Newer mapget-compatible backends may return HTTP `200` with `datasourceConfigUnavailable: true` when datasource config cannot be exposed. The editor treats that as read-only/unavailable datasource configuration.
 - To allow changes to be persisted, the backend must accept `POST` requests on `/config` and be configured with a writable configuration store (for example a non–read‑only config file or volume).
 - The backend can indicate that editing is disabled by marking the configuration as read‑only. In that case erdblick still displays the configuration, but the **Apply** button is hidden. 
 
@@ -48,4 +49,5 @@ Changing live configuration can have side effects on the running backend, especi
 The DataSource editor deliberately focuses on a narrow slice of configuration so that it remains predictable and safe to use:
 
 - Only data source definitions exposed by the backend appear in the form. Styles and other runtime settings are not part of this editor.
+- Public `/config` sections such as MapViewer's `erdblick` defaults are read by the startup config loader, not edited in this dialog.
 - Validation covers schema correctness but cannot verify that the referenced service actually exists. Keep the `Maps & Layers` panel open to verify connectivity after each change.

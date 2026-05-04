@@ -271,10 +271,11 @@ To control which style sheets are available in a given deployment, configure the
   ```json
   {
     "styles": [
-      { "url": "styles/default.yaml" },
-      { "url": "styles/debug.yaml" }
+      { "url": "default.yaml" },
+      { "url": "debug.yaml" }
     ]
   }
   ```
-- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`).
+- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`). Plain style names are requested from `bundle/styles/<name>`.
+- If your backend supplies `/config.erdblick`, it can provide the same `styles` list at runtime. The referenced YAML files must still be reachable through the normal style bundle routes.
 - Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.

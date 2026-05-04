@@ -44,7 +44,7 @@ Erdblick obtains its list of maps, layers, and styles from the backend through t
 
 - `/sources` exposes every configured map and its layers.
 - `/tiles` streams tile payloads.
-- `/config` provides the optional schema/model JSON used by the DataSource editor.
+- `/config` provides the optional schema/model JSON used by the DataSource editor and may also contain an `erdblick` public section with server-supplied UI defaults.
 
 Configure those data sources in the backend you run. For example, if you use the PyPI mapget package, run `mapget serve --config backend.yaml` and define your sources under the `sources:` key:
 
@@ -58,12 +58,18 @@ sources:
 
 Whenever the YAML file changes, mapget applies the new sources immediately; erdblick will pick them up as soon as `/sources` reflects the update. If your backend exposes a writable `/config` endpoint, you can adjust data sources from inside erdblick via the DataSource editor—see the dedicated guide for that workflow.
 
+At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200`, does not report `datasourceConfigUnavailable: true`, and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config. If `/config` is missing, unreachable, or unavailable, erdblick continues with `config.json`.
+
+The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
+
+The `state` key uses the same snapshot shape exported by Advanced Preferences, not URL query parameter names. It seeds the viewer before local browser storage and URL parameters are applied.
+
 ## Customizing `config/`
 
 The `config/` directory in the erdblick source tree controls UI-side metadata:
 
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
-  - `styles`: array of `{ "id": "...", "url": "styles/<file>.yaml" }`.
+  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `bundle/styles/`.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
@@ -88,9 +94,11 @@ docker run --rm -it -p 8089:8089 --name erdblick \
 
 Adapt the target paths (`/srv/erdblick/...`) to match the layout used by your own packaging.
 
+If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, or background assets.
+
 ## Serving styles and resources
 
-Styles are resolved relative to `config/styles`. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+Style entries that do not start with `http` or `bundle` are resolved under `bundle/styles/`. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
 
 Background-layer URLs follow normal browser semantics. Relative and root-relative paths such as `bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg` or `/imagery/ortho/{z}/{x}/{y}.jpg` work immediately when your web server exposes those paths. Raw server filesystem paths are not supported in `config.json`; publish them through static aliases or reverse-proxy routes instead.
 

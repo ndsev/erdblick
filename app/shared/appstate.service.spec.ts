@@ -1296,4 +1296,156 @@ describe('AppStateService', () => {
         service.ngOnDestroy();
         routerStub.events.complete();
     });
+
+    it('applies config default state for a fresh profile before hydration', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.seedConfigDefaultState({marker: true}, "cfg-hash-1");
+        expect(errors).toEqual([]);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps legacy localStorage values without metadata over seeded config defaults', async () => {
+        localStorage.setItem('marker', '0');
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: true}, "cfg-hash-2");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces config-owned localStorage values with current config defaults', async () => {
+        localStorage.setItem('marker', '0');
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'old-cfg',
+            entries: {
+                marker: {
+                    owner: 'config',
+                    valueHash: 'old'
+                }
+            }
+        }));
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: true}, "cfg-hash-3");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps user-owned localStorage values over seeded config defaults', async () => {
+        localStorage.setItem('marker', '0');
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'cfg',
+            entries: {
+                marker: {
+                    owner: 'user',
+                    valueHash: 'user'
+                }
+            }
+        }));
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: true}, "cfg-hash-4");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps URL parameters as highest precedence over config and localStorage', async () => {
+        localStorage.setItem('marker', '0');
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'cfg',
+            entries: {
+                marker: {
+                    owner: 'user',
+                    valueHash: 'user'
+                }
+            }
+        }));
+
+        const routerStub = createRouterStub({m: '1'});
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: false}, "cfg-hash-5");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('returns validation errors for invalid config default snapshots and leaves defaults unchanged', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.seedConfigDefaultState({marker: ["bad"]}, "cfg-hash-6");
+        expect(errors.length).toBeGreaterThan(0);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+        expect(warnSpy).toHaveBeenCalled();
+
+        warnSpy.mockRestore();
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('ignores empty config default snapshots', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.seedConfigDefaultState({}, "cfg-hash-empty");
+        expect(errors).toEqual([]);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
 });
