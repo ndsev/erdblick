@@ -93,7 +93,7 @@ rules:
 | --- | --- |
 | `type` | Regex that matches the feature type ID (e.g., `LaneGroup`). |
 | `filter` | Simfil expression that runs against the current feature/relation/attribute. |
-| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. |
+| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, `mesh`, `aabb`, or `gltf` primitives. |
 | `aspect` | `feature` (default), `relation`, or `attribute`. Controls how the rule interprets the current entity. |
 | `mode` | `none`, `hover`, or `selection`. Use separate rules for hover/selection-specific rendering. |
 | `fidelity` | `low`, `high`, or `any` (default). Controls whether the rule participates in low-fidelity rendering, high-fidelity rendering, or both. |
@@ -119,6 +119,60 @@ rules:
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
 | `arrow` / `arrow-expression` | `none`, `forward`, `backward`, or `double` arrowheads. Expressions can switch per feature. |
 | `point-merge-grid-cell` | `[x, y, z]` cell size for merging coincident POIs. When set, `$mergeCount` appears in the expression context. |
+
+### GLTF and AABB Geometry
+
+`geometry: ["gltf"]` and `geometry: ["aabb"]` are the two 3D-oriented geometry families currently exposed by erdblick:
+
+- `gltf` renders feature-owned node subsets from a tile-level GLB attachment.
+- `aabb` renders explicit feature bounding boxes. This is mainly useful for low-fidelity 3D fallbacks, debug views, and coarse interaction proxies.
+
+For `gltf` rules, the style system currently treats the attached model as fixed geometry and uses the rule mostly as a visibility/highlight/tint contract:
+
+- Supported and meaningful fields:
+  - `type`, `filter`, `mode`, `fidelity`, `stage`, `lod`, `selectable`
+  - `color` / `color-expression`
+  - `opacity`
+  - `depth-test`
+- Fields that currently do **not** reshape visible GLTF node rendering:
+  - `width`
+  - `outline-color`, `outline-width`
+  - `offset`, `vertical-offset`, `offset-increment`
+  - `billboard`
+
+Important behavior for GLTF highlights:
+
+- `mode: hover` and `mode: selection` rules do not instantiate separate model copies. They act as temporary style overrides on the same shared GLTF node set.
+- In practice this means GLTF highlight rules are best used for `color` / `opacity` overlays, not for geometric displacement tricks.
+- If a GLTF highlight should always stay visible on top of the base model, set `depth-test: false`.
+
+For `aabb` rules, the regular mesh/polygon-style properties apply normally because erdblick renders the box geometry itself.
+
+Example:
+
+```yaml
+rules:
+  - type: Display3D
+    fidelity: high
+    filter: show3d == true
+    geometry: ["gltf"]
+
+  - type: Display3D
+    fidelity: low
+    filter: show3d == true
+    geometry: ["aabb"]
+    color: pink
+    opacity: 0.2
+
+  - type: Display3D
+    geometry: ["gltf"]
+    mode: hover
+    color: yellow
+    opacity: 0.5
+    depth-test: false
+```
+
+If you rely on the built-in `Highlights` style for hover/selection, make sure its feature highlight rules include `gltf` (and optionally `aabb`) in their `geometry` lists.
 
 ### Labeling
 
