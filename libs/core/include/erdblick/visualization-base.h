@@ -276,7 +276,12 @@ protected:
         FeatureStyleRule const& rule,
         BoundEvalFun& evalFun,
         glm::dvec3 const& offset = {.0, .0, .0});
-    /** Emit one GLTF node reference if it passes all current render filters. */
+    /**
+     * Emit one GLTF node reference if it passes all current render filters.
+     *
+     * Rules that target `aabb` are also allowed to consume GLTF-backed features via the
+     * node's exported bounding box, so the optional local offset is threaded through here too.
+     */
     bool addGltfNodeGeometry(
         uint32_t nodeIndex,
         mapget::Point const& aabbOriginWgs,
@@ -284,7 +289,8 @@ protected:
         std::optional<uint32_t> geometryStage,
         uint32_t tileFeatureId,
         FeatureStyleRule const& rule,
-        BoundEvalFun& evalFun);
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
     /** Emit a synthetic two-point line with consistent label placement hints. */
     void addLine(
         mapget::Point const& wgsA,

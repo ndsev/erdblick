@@ -126,6 +126,7 @@ rules:
 
 - `gltf` renders feature-owned node subsets from a tile-level GLB attachment.
 - `aabb` renders explicit feature bounding boxes. This is mainly useful for low-fidelity 3D fallbacks, debug views, and coarse interaction proxies.
+  For GLTF-backed features, `aabb` rules can also render the exported node bounding box instead of the real model geometry.
 
 For `gltf` rules, the style system currently treats the attached model as fixed geometry and uses the rule mostly as a visibility/highlight/tint contract:
 
@@ -146,7 +147,7 @@ Important behavior for GLTF highlights:
 - In practice this means GLTF highlight rules are best used for `color` / `opacity` overlays, not for geometric displacement tricks.
 - If a GLTF highlight should always stay visible on top of the base model, set `depth-test: false`.
 
-For `aabb` rules, the regular mesh/polygon-style properties apply normally because erdblick renders the box geometry itself.
+For `aabb` rules, the regular mesh/polygon-style properties apply normally because erdblick renders the box geometry itself. That also applies when the source feature is GLTF-backed and the box comes from the node's exported bounds instead of an explicit backend AABB feature.
 
 Example:
 

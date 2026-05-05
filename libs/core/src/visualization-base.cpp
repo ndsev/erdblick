@@ -1118,7 +1118,8 @@ bool FeatureLayerVisualizationBase::addGeometry(
             geom->model().stage(),
             tileFeatureId,
             rule,
-            evalFun);
+            evalFun,
+            offset);
     }
     return addGeometry(
         geom->toSelfContained(),
@@ -1157,15 +1158,27 @@ bool FeatureLayerVisualizationBase::addGltfNodeGeometry(
     std::optional<uint32_t> geometryStage,
     uint32_t tileFeatureId,
     FeatureStyleRule const& rule,
-    BoundEvalFun& evalFun)
+    BoundEvalFun& evalFun,
+    glm::dvec3 const& offset)
 {
-    if (!geometryPassesRenderFilters(GeomType::GltfNodeIndex, geometryStage, rule)) {
-        return false;
+    if (geometryPassesRenderFilters(GeomType::GltfNodeIndex, geometryStage, rule)) {
+        auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
+        emitGltfNode(nodeIndex, aabbOriginWgs, aabbSizeWgs, rule, renderFeatureId, evalFun);
+        return true;
     }
 
-    auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
-    emitGltfNode(nodeIndex, aabbOriginWgs, aabbSizeWgs, rule, renderFeatureId, evalFun);
-    return true;
+    // Allow GLTF-backed features to fall back to their exported node AABB when the rule targets
+    // `geometry: ["aabb"]`. This keeps high-fidelity 3D content stylable as cheap boxes without
+    // requiring the backend to duplicate the feature as a second explicit AABB geometry.
+    if (geometryPassesRenderFilters(GeomType::AABB, geometryStage, rule)) {
+        auto const shiftedOriginWgs =
+            hasLocalOffset(offset) ? offsetAabbOriginLocally(aabbOriginWgs, offset) : aabbOriginWgs;
+        auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
+        emitAabb(shiftedOriginWgs, aabbSizeWgs, rule, renderFeatureId, evalFun);
+        return true;
+    }
+
+    return false;
 }
 
 bool FeatureLayerVisualizationBase::addGeometry(
