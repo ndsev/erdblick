@@ -68,6 +68,12 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                                                     [name]="node.id"/>
                                         <label [for]="node.id"
                                                style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                        @if (node.additional) {
+                                            <p-tag class="additional-style-tag"
+                                                   [class.clickable-style-tag]="node.overridesBaseStyle"
+                                                   severity="info" value="Additional" [rounded]="true"
+                                                   (click)="openCompareFromAdditionalTag($event, node.id)"/>
+                                        }
                                         @if (node.modified && !node.imported) {
                                             <p-tag class="modified-style-tag"
                                                    severity="warn" value="Modified" [rounded]="true"
@@ -196,7 +202,7 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
             @if (styleCompareStyleId) {
                 <div class="style-compare-labels">
                     <div>{{ styleCompareLeftLabel }}</div>
-                    <div>Modified Style</div>
+                    <div>{{ styleCompareRightLabel }}</div>
                 </div>
                 <div #styleCompareHost class="style-compare-host"></div>
             }
@@ -204,19 +210,21 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                 <p-button label="Apply" icon="pi pi-check"
                           pTooltip="Apply the current left-side style source"
                           tooltipPosition="bottom"
-                          [disabled]="!styleCompareLeftModified"
+                          [disabled]="styleCompareReadOnly || !styleCompareLeftModified"
                           (click)="applyComparedStyle()"/>
-                <p-button [label]="styleCompareLeftModified ? 'Discard' : 'Close'" icon="pi pi-times"
+                <p-button [label]="styleCompareReadOnly ? 'Close' : (styleCompareLeftModified ? 'Discard' : 'Close')" icon="pi pi-times"
                           pTooltip="Close compare or discard unsaved left-side edits"
                           tooltipPosition="bottom"
                           (click)="closeOrDiscardComparedStyle($event)"/>
                 <p-button label="Export" icon="pi pi-file-export"
                           pTooltip="Export the modified style source"
                           tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly"
                           (click)="exportComparedStyle()"/>
                 <p-button label="Reset" icon="pi pi-refresh"
                           pTooltip="Reset this modified builtin style to the server version"
                           tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly"
                           (click)="resetComparedStyle()"/>
             </div>
         </app-dialog>
@@ -227,9 +235,14 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
             opacity: 0.5;
         }
 
+        .additional-style-tag,
+        .modified-style-tag {
+            margin-left: 0.5em;
+        }
+
+        .additional-style-tag.clickable-style-tag,
         .modified-style-tag {
             cursor: pointer;
-            margin-left: 0.5em;
         }
 
         .updated-modified-style-chip {
@@ -258,6 +271,8 @@ export class StyleComponent implements OnDestroy {
     styleCompareDialogVisible: boolean = false;
     styleCompareLeftModified: boolean = false;
     styleCompareLeftLabel: string = "Original Style";
+    styleCompareRightLabel: string = "Modified Style";
+    styleCompareReadOnly: boolean = false;
     styleCompareStyleId: string = "";
     private styleCompareLeftSource: string = "";
     private styleCompareRightSource: string = "";
@@ -340,6 +355,9 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView?.destroy();
         this.styleCompareView = undefined;
         this.styleCompareLeftModified = false;
+        this.styleCompareReadOnly = false;
+        this.styleCompareLeftLabel = "Original Style";
+        this.styleCompareRightLabel = "Modified Style";
     }
 
     /** Opens the bulk-toggle menu for one style entry. */
@@ -653,6 +671,24 @@ export class StyleComponent implements OnDestroy {
         this.openStyleCompareDialog(styleId, false);
     }
 
+    /** Opens read-only comparison between an overriding additional style and its base style. */
+    openCompareFromAdditionalTag(event: MouseEvent, styleId: string) {
+        event.stopPropagation();
+        const style = this.styleService.styles.get(styleId);
+        const baseSource = this.styleService.getOverriddenBaseStyleSource(styleId);
+        if (!style || !baseSource) {
+            return;
+        }
+        this.styleCompareStyleId = style.id;
+        this.styleCompareLeftLabel = "Base Style";
+        this.styleCompareRightLabel = "Additional Style";
+        this.styleCompareLeftSource = baseSource;
+        this.styleCompareRightSource = style.source;
+        this.styleCompareLeftModified = false;
+        this.styleCompareReadOnly = true;
+        this.styleCompareDialogVisible = true;
+    }
+
     /** Opens style comparison for an entry in the updated-styles dialog. */
     openCompareFromUpdatedChip(event: Event, styleIdOrUrl: string) {
         event.stopPropagation();
@@ -661,7 +697,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies edits from the compare dialog back into the selected builtin style. */
     applyComparedStyle() {
-        if (!this.styleCompareLeftModified || !this.styleCompareStyleId) {
+        if (this.styleCompareReadOnly || !this.styleCompareLeftModified || !this.styleCompareStyleId) {
             return;
         }
         const leftSource = this.getComparedLeftSource();
@@ -685,6 +721,10 @@ export class StyleComponent implements OnDestroy {
     /** Closes the compare dialog or discards unsaved left-side edits first. */
     closeOrDiscardComparedStyle(event: MouseEvent) {
         event.stopPropagation();
+        if (this.styleCompareReadOnly) {
+            this.styleCompareDialog?.close(event);
+            return;
+        }
         if (this.styleCompareLeftModified) {
             this.discardComparedStyleEdits();
             return;
@@ -694,7 +734,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Exports the style currently shown in the compare dialog. */
     exportComparedStyle() {
-        if (!this.styleCompareStyleId) {
+        if (this.styleCompareReadOnly || !this.styleCompareStyleId) {
             return;
         }
         this.exportStyle(this.styleCompareStyleId);
@@ -702,7 +742,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Resets the builtin style currently shown in the compare dialog. */
     resetComparedStyle() {
-        if (!this.styleCompareStyleId) {
+        if (this.styleCompareReadOnly || !this.styleCompareStyleId) {
             return;
         }
         const restoredStyleId = this.styleService.resetModifiedBuiltinStyle(this.styleCompareStyleId);
@@ -749,9 +789,11 @@ export class StyleComponent implements OnDestroy {
         }
         this.styleCompareStyleId = style.id;
         this.styleCompareLeftLabel = fromUpdatedModifiedDialog ? "Updated Style" : "Original Style";
+        this.styleCompareRightLabel = "Modified Style";
         this.styleCompareLeftSource = baselineSource;
         this.styleCompareRightSource = style.source;
         this.styleCompareLeftModified = false;
+        this.styleCompareReadOnly = false;
         this.styleCompareDialogVisible = true;
     }
 
@@ -766,25 +808,31 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView = undefined;
         host.innerHTML = "";
 
+        const leftEditorExtensions = [
+            basicSetup,
+            yaml(),
+            this.compareThemeCompartmentA.of(compareTheme),
+        ];
+        if (this.styleCompareReadOnly) {
+            leftEditorExtensions.push(EditorState.readOnly.of(true));
+        } else {
+            leftEditorExtensions.push(EditorView.updateListener.of(update => {
+                if (!update.docChanged) {
+                    return;
+                }
+                this.ngZone.run(() => {
+                    this.styleCompareLeftModified = this.getComparedLeftSource() !== this.styleCompareLeftSource;
+                });
+            }));
+        }
+
         this.styleCompareView = new MergeView({
             parent: host,
             gutter: true,
-            revertControls: "b-to-a",
+            ...(this.styleCompareReadOnly ? {} : {revertControls: "b-to-a" as const}),
             a: {
                 doc: this.styleCompareLeftSource,
-                extensions: [
-                    basicSetup,
-                    yaml(),
-                    this.compareThemeCompartmentA.of(compareTheme),
-                    EditorView.updateListener.of(update => {
-                        if (!update.docChanged) {
-                            return;
-                        }
-                        this.ngZone.run(() => {
-                            this.styleCompareLeftModified = this.getComparedLeftSource() !== this.styleCompareLeftSource;
-                        });
-                    })
-                ]
+                extensions: leftEditorExtensions
             },
             b: {
                 doc: this.styleCompareRightSource,

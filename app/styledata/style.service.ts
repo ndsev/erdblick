@@ -23,6 +23,10 @@ interface BuiltinStyleBaseline {
     source: string
 }
 
+export interface OverriddenBaseStyleBaseline extends BuiltinStyleBaseline {
+    url: string
+}
+
 export interface StyleLifecycleState {
     id: string,
     sha256: string,
@@ -48,6 +52,7 @@ export interface ErdblickStyle {
     id: string,
     modified: boolean,
     imported: boolean,
+    additional: boolean,
     source: string,
     featureLayerStyle: FeatureLayerStyle,
     options: Array<FeatureStyleOptionWithStringType>,
@@ -57,7 +62,8 @@ export interface ErdblickStyle {
     children?: Array<FeatureStyleOptionWithStringType>,
     expanded?: boolean,
     visible: boolean,
-    url: string
+    url: string,
+    overridesBaseStyle?: OverriddenBaseStyleBaseline
 }
 
 export interface ErdblickStyleGroup extends Record<string, any> {
@@ -113,25 +119,13 @@ export class StyleService {
             if (!configuredStyles.length) {
                 console.warn("No style configuration found in config.json. Skipping builtin style initialization.");
             } else {
-                this.styleUrls = configuredStyles.map((entry: StyleConfigEntry) => {
-                    const normalized: StyleConfigEntry = {...entry};
-                    if (!normalized.url.startsWith("http") && !normalized.url.startsWith("bundle")) {
-                        normalized.url = `bundle/styles/${normalized.url}`;
-                    }
-                    return normalized;
-                });
+                this.styleUrls = configuredStyles.map((entry: StyleConfigEntry) => this.normalizeConfiguredStyleUrl(entry));
 
                 const styleHashes = this.loadStyleHashes();
-                const dataMap = await this.fetchStylesYamlSources(this.styleUrls);
-                for (const [styleUrl, styleString] of dataMap) {
-                    const styleId = this.initializeStyle(styleString, styleUrl);
-                    if (!styleId) {
-                        continue;
-                    }
-                    this.builtinStylesCount++;
-                    this.registerBuiltinServerSource(styleUrl, styleId, styleString, styleHashes);
-                    this.synchronizeLifecycleForStyle(this.styles.get(styleId));
-                }
+                const baseStyles = this.styleUrls.filter(entry => entry.additional !== true);
+                const additionalStyles = this.styleUrls.filter(entry => entry.additional === true);
+                await this.loadConfiguredStyleSources(baseStyles, styleHashes);
+                await this.loadConfiguredStyleSources(additionalStyles, styleHashes);
                 this.loadModifiedBuiltinStyles();
             }
         } catch (error) {
@@ -144,8 +138,47 @@ export class StyleService {
         }
     }
 
+    private normalizeConfiguredStyleUrl(entry: StyleConfigEntry): StyleConfigEntry {
+        const normalized: StyleConfigEntry = {...entry};
+        if (!normalized.url.startsWith("http")
+            && !normalized.url.startsWith("bundle")
+            && !normalized.url.startsWith("/")) {
+            normalized.url = `bundle/styles/${normalized.url}`;
+        }
+        return normalized;
+    }
+
+    private async loadConfiguredStyleSources(styleEntries: StyleConfigEntry[], styleHashes: Map<string, string>) {
+        const dataMap = await this.fetchStylesYamlSources(styleEntries);
+        for (const styleEntry of styleEntries) {
+            const styleString = dataMap.get(styleEntry.url);
+            if (styleString === undefined) {
+                continue;
+            }
+            const styleId = this.initializeStyle(
+                styleString,
+                styleEntry.url,
+                undefined,
+                false,
+                false,
+                styleEntry.additional === true);
+            if (!styleId) {
+                continue;
+            }
+            this.builtinStylesCount++;
+            this.registerBuiltinServerSource(styleEntry.url, styleId, styleString, styleHashes);
+            this.synchronizeLifecycleForStyle(this.styles.get(styleId));
+        }
+    }
+
     /** Parses and registers one style source, optionally replacing an existing style id. */
-    private initializeStyle(styleString: string, styleUrl: string, knownStyleId?: string, modified: boolean = false, imported: boolean = false) {
+    private initializeStyle(
+        styleString: string,
+        styleUrl: string,
+        knownStyleId?: string,
+        modified: boolean = false,
+        imported: boolean = false,
+        additional: boolean = false) {
         if (!styleString) {
             this.erroredStyleIds.set(
                 knownStyleId ?? "mising-style-id",
@@ -161,22 +194,22 @@ export class StyleService {
         const [wasmStyle, options] = parsedStyleAndOptions;
         const styleId = wasmStyle.name();
         const existingStyle = this.styles.get(styleId);
+        const previousKnownStyle = knownStyleId ? this.styles.get(knownStyleId) : undefined;
+        const overridesBaseStyle = additional
+            ? this.resolveOverriddenBaseStyle(existingStyle ?? previousKnownStyle)
+            : undefined;
 
-        // Delete any existing style stored under the style's (potentially new) name.
-        // This is an error in case we are renaming through the style editor,
-        // in this case knownStyleId is set.
         if (existingStyle) {
             if (knownStyleId && styleId !== knownStyleId) {
                 this.infoMessageService.showError(`Illegal attempt to rename ${knownStyleId} to ${styleId}, which already exists.`)
+                wasmStyle.delete?.();
                 return undefined;
             }
-            this.deleteStyle(existingStyle.id);
+            this.removeActiveStyleEntry(existingStyle.id);
         }
 
-        // Delete the previous version of the style, regardless of whether it was renamed or not,
-        // as it will be re-created below.
-        if (knownStyleId && this.styles.has(knownStyleId)) {
-            this.deleteStyle(knownStyleId);
+        if (knownStyleId && knownStyleId !== styleId && this.styles.has(knownStyleId)) {
+            this.removeActiveStyleEntry(knownStyleId);
         }
 
         const isVisible = this.stateService.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
@@ -184,6 +217,7 @@ export class StyleService {
             id: styleId,
             modified: modified,
             imported: imported,
+            additional: additional,
             source: styleString,
             featureLayerStyle: wasmStyle,
             options: options,
@@ -192,7 +226,8 @@ export class StyleService {
             type: "Style",
             children: [],
             visible: isVisible,
-            url: styleUrl
+            url: styleUrl,
+            overridesBaseStyle
         });
 
         // Ensure that if the style was renamed, its visibility is retained.
@@ -203,8 +238,35 @@ export class StyleService {
         return styleId;
     }
 
+    private resolveOverriddenBaseStyle(style?: ErdblickStyle): OverriddenBaseStyleBaseline | undefined {
+        if (!style || style.imported) {
+            return undefined;
+        }
+        if (style.additional) {
+            return style.overridesBaseStyle;
+        }
+        return {
+            id: style.id,
+            url: style.url,
+            source: style.source
+        };
+    }
+
+    private removeActiveStyleEntry(styleId: string) {
+        const style = this.styles.get(styleId);
+        if (!style) {
+            return;
+        }
+        style.featureLayerStyle?.delete();
+        this.styleRemovedForId.next(styleId);
+        this.styles.delete(styleId);
+    }
+
     /** Fetches raw YAML sources for the configured style URLs while preserving input order. */
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
+        if (!styles.length) {
+            return new Map<string, string>();
+        }
         const requests = styles.map((style, index) =>
             this.httpClient.get(style.url, { responseType: 'text' }).pipe(
                 map(data => ({ index, data, styleUrl: style.url })),
@@ -246,7 +308,7 @@ export class StyleService {
                 return;
             }
             const styleString = result.get(style.url)!;
-            const newStyleId = this.initializeStyle(styleString, style.url, styleId);
+            const newStyleId = this.initializeStyle(styleString, style.url, styleId, false, false, style.additional === true);
             if (!newStyleId) {
                 return;
             }
@@ -372,7 +434,7 @@ export class StyleService {
                 this.fetchStylesYamlSources([{id: styleId, url: builtinUrl} as any]).then(map => {
                     const source = map.get(builtinUrl!);
                     if (source) {
-                        const restoredId = this.initializeStyle(source, builtinUrl!, styleId, false, false);
+                        const restoredId = this.initializeStyle(source, builtinUrl!, styleId, false, false, url.additional === true);
                         if (restoredId) {
                             this.registerBuiltinServerSource(builtinUrl, restoredId, source);
                             this.synchronizeLifecycleForStyle(this.styles.get(restoredId));
@@ -393,7 +455,7 @@ export class StyleService {
             return styleId;
         }
         const style = this.styles.get(styleId)!;
-        const newStyleId = this.initializeStyle(styleSource, style.url ?? '', styleId, modified, style.imported);
+        const newStyleId = this.initializeStyle(styleSource, style.url ?? '', styleId, modified, style.imported, style.additional === true);
         if (!newStyleId) {
             return undefined;
         }
@@ -418,7 +480,7 @@ export class StyleService {
         if (!baseline) {
             return undefined;
         }
-        const restoredStyleId = this.initializeStyle(baseline.source, style.url, style.id, false, false);
+        const restoredStyleId = this.initializeStyle(baseline.source, style.url, style.id, false, false, style.additional === true);
         if (!restoredStyleId) {
             return undefined;
         }
@@ -445,6 +507,10 @@ export class StyleService {
             return this.builtinStyleBaselines.get(styleIdOrUrl)!.source;
         }
         return undefined;
+    }
+
+    getOverriddenBaseStyleSource(styleId: string): string | undefined {
+        return this.styles.get(styleId)?.overridesBaseStyle?.source;
     }
 
     /** Lists builtin styles that were modified locally and updated on the server. */
@@ -499,7 +565,13 @@ export class StyleService {
                 if (!matchingBuiltinStyle) {
                     continue;
                 }
-                const newStyleId = this.initializeStyle(style.source, style.url, matchingBuiltinStyle.id, true, style.imported);
+                const newStyleId = this.initializeStyle(
+                    style.source,
+                    style.url,
+                    matchingBuiltinStyle.id,
+                    true,
+                    style.imported,
+                    matchingBuiltinStyle.additional === true);
                 if (!newStyleId) {
                     continue;
                 }

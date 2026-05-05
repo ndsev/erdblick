@@ -94,11 +94,24 @@ docker run --rm -it -p 8089:8089 --name erdblick \
 
 Adapt the target paths (`/srv/erdblick/...`) to match the layout used by your own packaging.
 
-If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, or background assets.
+If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, or background assets by itself.
 
 ## Serving styles and resources
 
-Style entries that do not start with `http` or `bundle` are resolved under `bundle/styles/`. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+Style entries that do not start with `http`, `bundle`, or `/` are resolved under `bundle/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+
+Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional styles are loaded after base styles; if an additional style has the same YAML `name:` as a base style, the additional style is active. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style.
+
+MapViewer Docker images expose `/custom-styles` as the stable mount point for this flow. Their YAML config can use shorthand paths such as:
+
+```yaml
+erdblick:
+  additionalStyles:
+    - customer.yaml
+    - team-a/*
+```
+
+The MapViewer backend expands those to `/custom-styles/customer.yaml` and the direct YAML children of `/custom-styles/team-a`. Wildcard expansion accepts only regular `.yaml` and `.yml` files and is non-recursive. Because `/custom-styles` is statically browser-reachable in that deployment, do not mount directories containing secrets or unrelated YAML files.
 
 Background-layer URLs follow normal browser semantics. Relative and root-relative paths such as `bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg` or `/imagery/ortho/{z}/{x}/{y}.jpg` work immediately when your web server exposes those paths. Raw server filesystem paths are not supported in `config.json`; publish them through static aliases or reverse-proxy routes instead.
 

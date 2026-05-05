@@ -20,6 +20,7 @@ export const WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP =
 export interface StyleConfigEntry {
     id?: string;
     url: string;
+    additional?: boolean;
 }
 
 /** Optional extension-module ids declared in `config.json`. */
@@ -77,6 +78,7 @@ export interface RawAppConfig {
     extensionModules?: ExtensionModulesConfig;
     surveys?: unknown[];
     styles?: Array<StyleConfigEntry | string>;
+    additionalStyles?: Array<StyleConfigEntry | string>;
     state?: Record<string, unknown> | null;
     backgroundLayers?: RawBackgroundLayerConfig[];
     defaultBackgroundLayerId?: string | null;
@@ -113,7 +115,8 @@ export interface AppConfig {
 
 const STYLE_CONFIG_ENTRY_SCHEMA = z.object({
     id: z.string().optional(),
-    url: z.string().min(1)
+    url: z.string().min(1),
+    additional: z.boolean().optional()
 });
 
 const SURVEY_CONFIG_SCHEMA = z.object({
@@ -175,6 +178,7 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     }).partial().optional(),
     surveys: z.array(z.unknown()).optional(),
     styles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
+    additionalStyles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
     state: z.record(z.string(), z.unknown()).nullable().optional(),
     backgroundLayers: z.array(BACKGROUND_LAYER_SCHEMA).optional(),
     defaultBackgroundLayerId: z.string().nullable().optional()
@@ -446,6 +450,7 @@ export class AppConfigService {
             ...staticConfig,
             extensionModules: {...(staticConfig.extensionModules ?? {})},
             styles: staticConfig.styles ? [...staticConfig.styles] : undefined,
+            additionalStyles: staticConfig.additionalStyles ? [...staticConfig.additionalStyles] : undefined,
             surveys: staticConfig.surveys ? [...staticConfig.surveys] : undefined,
             state: staticConfig.state ? {...staticConfig.state} : staticConfig.state ?? null,
             backgroundLayers: staticConfig.backgroundLayers ? [...staticConfig.backgroundLayers] : undefined
@@ -453,6 +458,12 @@ export class AppConfigService {
 
         if (Array.isArray(serverErdblickConfig.styles) && serverErdblickConfig.styles.length > 0) {
             merged.styles = [...serverErdblickConfig.styles];
+        }
+        if (Array.isArray(serverErdblickConfig.additionalStyles) && serverErdblickConfig.additionalStyles.length > 0) {
+            merged.additionalStyles = [
+                ...(merged.additionalStyles ?? []),
+                ...serverErdblickConfig.additionalStyles
+            ];
         }
         if (Array.isArray(serverErdblickConfig.surveys) && serverErdblickConfig.surveys.length > 0) {
             merged.surveys = [...serverErdblickConfig.surveys];
@@ -486,7 +497,10 @@ export class AppConfigService {
 
     /** Parses the raw JSON payload and fills in the defaults erdblick expects at runtime. */
     private normalizeConfig(rawConfig: RawAppConfig, serverConfig: AppServerConfigStatus): AppConfig {
-        const styles = this.normalizeStyles(rawConfig.styles);
+        const styles = [
+            ...this.normalizeStyles(rawConfig.styles, false),
+            ...this.normalizeStyles(rawConfig.additionalStyles, true)
+        ];
         const surveys = this.normalizeSurveys(rawConfig.surveys);
         const extensionModules = this.normalizeExtensionModules(rawConfig.extensionModules);
         const state = this.normalizeState(rawConfig.state);
@@ -512,7 +526,7 @@ export class AppConfigService {
         };
     }
 
-    private normalizeStyles(styles: RawAppConfig["styles"]): StyleConfigEntry[] {
+    private normalizeStyles(styles: RawAppConfig["styles"], additional: boolean): StyleConfigEntry[] {
         if (!Array.isArray(styles)) {
             return [];
         }
@@ -525,7 +539,10 @@ export class AppConfigService {
             if (!parsed.success) {
                 continue;
             }
-            normalized.push(parsed.data);
+            normalized.push({
+                ...parsed.data,
+                additional
+            });
         }
         return normalized;
     }
