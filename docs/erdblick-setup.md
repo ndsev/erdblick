@@ -69,7 +69,8 @@ The `state` key uses the same snapshot shape exported by Advanced Preferences, n
 The `config/` directory in the erdblick source tree controls UI-side metadata:
 
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
-  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `bundle/styles/`.
+  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `bundle/styles/` and this list defines the base style set.
+  - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
@@ -100,18 +101,11 @@ If the hosting backend supplies `/config.erdblick`, prefer that for deployment-s
 
 Style entries that do not start with `http`, `bundle`, or `/` are resolved under `bundle/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
 
-Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional styles are loaded after base styles; if an additional style has the same YAML `name:` as a base style, the additional style is active. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style.
+Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional style URLs are loaded exactly like other browser resources: every URL must already be reachable through the web server. Erdblick itself does not expand wildcards, scan directories, or mount host paths.
 
-MapViewer Docker images expose `/custom-styles` as the stable mount point for this flow. Their YAML config can use shorthand paths such as:
+Additional styles are loaded after base styles. If an additional style has the same YAML `name:` as a base style, the additional style is active and the Styles dialog marks it with an **Additional** tag. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style. For colliding base/additional styles, the **Additional** tag opens a read-only comparison against the base style.
 
-```yaml
-erdblick:
-  additionalStyles:
-    - customer.yaml
-    - team-a/*
-```
-
-The MapViewer backend expands those to `/custom-styles/customer.yaml` and the direct YAML children of `/custom-styles/team-a`. Wildcard expansion accepts only regular `.yaml` and `.yml` files and is non-recursive. Because `/custom-styles` is statically browser-reachable in that deployment, do not mount directories containing secrets or unrelated YAML files.
+Packaging-specific conveniences, such as MapViewer Docker's `/custom-styles` mount and directory wildcard expansion, are implemented by the hosting application before erdblick sees the config.
 
 Background-layer URLs follow normal browser semantics. Relative and root-relative paths such as `bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg` or `/imagery/ortho/{z}/{x}/{y}.jpg` work immediately when your web server exposes those paths. Raw server filesystem paths are not supported in `config.json`; publish them through static aliases or reverse-proxy routes instead.
 
