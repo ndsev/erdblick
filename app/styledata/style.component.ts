@@ -171,7 +171,7 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                                             [(ngModel)]="styleErrorsOnly"
                                             [binary]="true"></p-checkbox>
                                 <label for="style-errors-only">Errors only</label>
-                                <p-button size="small" label="Clear runtime duplicates"
+                                <p-button size="small" label="Clear duplicates"
                                           (click)="styleValidationReportService.clearRuntimeDuplicates()"/>
                             </div>
                             <p-table [value]="filteredStyleIssues(styleIssues)"

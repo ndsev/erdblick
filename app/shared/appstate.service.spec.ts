@@ -105,6 +105,44 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('serializes active search state URLs as compact action tuples', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+
+        service.searchState.next({
+            version: 2,
+            actionId: 'features',
+            input: '**.speed > 80',
+            actionName: 'Search Loaded Features',
+            savedAt: 42,
+        });
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({
+                s: JSON.stringify(['features', '**.speed > 80']),
+            }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('cancels pending URL sync before popstate hydration', async () => {
         vi.useFakeTimers();
         const routerStub = createRouterStub({ m: '0' });

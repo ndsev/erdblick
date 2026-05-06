@@ -16,6 +16,18 @@ import {
     clampBackgroundOpacity,
     DEFAULT_BACKGROUND_LAYER_ID
 } from "./app-config.service";
+import {
+    historyEntryDedupeKey,
+    normalizeResolvedSearchHistoryEntry,
+    normalizeSearchHistoryEntry,
+    normalizeSearchStateValue,
+    SearchHistoryEntry,
+    SearchHistoryStateEntry,
+    SearchStateSchema,
+    SearchStateValue,
+    SearchHistoryStateEntrySchema,
+    serializeSearchStateValue
+} from "./search-history";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -322,13 +334,12 @@ export class AppStateService implements OnDestroy {
         urlParamName: "n"
     });
 
-    readonly searchState = this.createState<[number, string] | []>({
+    readonly searchState = this.createState<SearchStateValue>({
         name: 'search',
         defaultValue: [],
-        schema: z.union([
-            z.tuple([]),
-            z.tuple([z.coerce.number(), z.string()]),
-        ]),
+        schema: SearchStateSchema,
+        toStorage: (value: SearchStateValue) => serializeSearchStateValue(value),
+        fromStorage: (payload: any): SearchStateValue => normalizeSearchStateValue(payload),
         urlParamName: 's',
         urlIncludeInVisualizationOnly: false
     });
@@ -666,13 +677,19 @@ export class AppStateService implements OnDestroy {
         })
     });
 
-    readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
+    readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
         schema: z.union([
             z.null(),
-            z.tuple([z.coerce.number(), z.string()]),
-        ])
+            SearchHistoryStateEntrySchema,
+        ]),
+        fromStorage: (payload: any): SearchHistoryStateEntry | null => {
+            if (payload === null) {
+                return null;
+            }
+            return normalizeSearchHistoryEntry(payload);
+        }
     });
 
     readonly mapsOpenState = this.createState<boolean>({
@@ -1600,7 +1617,7 @@ export class AppStateService implements OnDestroy {
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get search() {return this.searchState.getValue();}
-    set search(val: [number, string] | []) {this.searchState.next(val);};
+    set search(val: SearchStateValue) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
@@ -1651,7 +1668,7 @@ export class AppStateService implements OnDestroy {
     get debugGltfLoggingEnabled() {return this.debugGltfLoggingEnabledState.getValue();}
     set debugGltfLoggingEnabled(val: boolean) {this.debugGltfLoggingEnabledState.next(val);}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
-    set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
+    set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -2454,38 +2471,58 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Updates the active search-history selection and optionally persists the query. */
-    setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
-        const trimmed = value ? [value[0], value[1].trim()] as [number, string] : null;
+    setSearchHistoryState(value: SearchHistoryEntry | null, saveHistory: boolean = true) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
         if (trimmed && saveHistory) {
             this.saveHistoryStateValue(trimmed);
         }
+        this.lastSearchHistoryEntryState.next(trimmed);
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
+    }
+
+    /** Rewrites search state during legacy migration without saving another history row. */
+    migrateSearchStateValue(value: SearchHistoryEntry | null) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
+        this.searchState.next(trimmed ? trimmed : []);
+        this._replaceUrl = false;
+    }
+
+    /** Rewrites the last search entry during legacy migration. Callers decide whether to suppress replay. */
+    migrateLastSearchHistoryEntry(value: SearchHistoryEntry | null) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
         this.lastSearchHistoryEntryState.next(trimmed);
     }
 
     /** Persists one search-history entry into the bounded stored history list. */
-    private saveHistoryStateValue(value: [number, string]) {
+    private saveHistoryStateValue(value: SearchHistoryEntry) {
         const searchHistoryString = localStorage.getItem("searchHistory");
+        let searchHistory: Array<SearchHistoryEntry> = [];
         if (searchHistoryString) {
-            let parsed = JSON.parse(searchHistoryString) as any;
-            let searchHistory: Array<[number, string]>;
-            if (Array.isArray(parsed) && parsed.length && Array.isArray(parsed[0])) {
-                searchHistory = parsed as Array<[number, string]>;
-            } else if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
-                searchHistory = [parsed as [number, string]];
-            } else {
-                searchHistory = [];
+            const parsed = JSON.parse(searchHistoryString) as unknown;
+            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
+                ? parsed
+                : [parsed];
+            const seen = new Set<string>();
+            for (const rawEntry of rawEntries) {
+                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
+                if (!entry) {
+                    continue;
+                }
+                const key = historyEntryDedupeKey(entry);
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                searchHistory.push(entry);
             }
-            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] === value[0] && entry[1] === value[1]));
-            searchHistory.unshift(value);
-            while (searchHistory.length > 100) {
-                searchHistory.pop();
-            }
-            localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
-        } else {
-            localStorage.setItem("searchHistory", JSON.stringify([value]));
         }
+        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
+        searchHistory.unshift(value);
+        while (searchHistory.length > 100) {
+            searchHistory.pop();
+        }
+        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
     }
 
     /** Clears persisted app state from local storage and resets URL-backed state. */

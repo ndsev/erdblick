@@ -3058,15 +3058,59 @@ inspection-tree {
 .map-config-controls {
   display: flex;
   flex-wrap: nowrap;
-  align-items: center;
-  gap: 0.25em 0.5em;
-  padding: 0.25em 0.25em 0 0.25em;
+  gap: 0.25em;
   min-width: 0;
+  flex-direction: column;
+  background-color: aliceblue;
+  margin: 0.25em;
+  padding: 0.25em;
+  border-radius: 0.5em;
 
-  .p-divider-vertical {
-    margin: 0;
-    padding: 0.25em 0;
-    flex: 0 0 auto;
+  .p-panel-header {
+    padding: 0 !important;
+    height: 2em;
+  }
+
+  .p-panel-content {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.25em;
+    padding: 0 !important;
+    min-width: 0;
+    flex-direction: column;
+
+    div {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.25em;
+      min-width: 0;
+      flex-direction: row;
+      align-items: center;
+
+      label {
+        width: 10em;
+      }
+
+      .p-select-label {
+        padding: 0.25em !important;
+      }
+    }
+  }
+
+  div {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.25em;
+    min-width: 0;
+    flex-direction: row;
+
+    label {
+      width: 10em;
+    }
+
+    .p-select-label {
+      padding: 0.25em !important;
+    }
   }
 
   button {
@@ -3253,19 +3297,19 @@ inspection-tree {
 
 .map-tab {
   .grid-controls {
-    display: flex;
-    align-items: flex-start;
     gap: 1em;
+    display: flex;
     margin-top: 0.25em;
     flex-direction: column;
+    align-items: flex-start;
     justify-content: flex-start;
 
     & > div {
-      display: flex;
-      align-items: center;
       gap: 1em;
+      display: flex;
       margin-top: 0.25em;
       flex-direction: row;
+      align-items: center;
     }
 
     button {
@@ -3279,8 +3323,8 @@ inspection-tree {
     }
 
     .grid-level {
-      display: flex;
       gap: 0.5em;
+      display: flex;
       justify-content: flex-end;
 
       button {
@@ -3295,10 +3339,10 @@ inspection-tree {
 
       .p-inputnumber-buttons-horizontal .p-inputnumber-input {
         order: 2;
-        border-radius: 0;
         width: 3em;
-        text-align: center;
         height: 2em;
+        border-radius: 0;
+        text-align: center;
       }
     }
   }

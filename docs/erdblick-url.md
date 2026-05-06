@@ -48,7 +48,7 @@ The table below lists all query parameters used by erdblick when encoding or res
 | `tb` | Per view | Tile-border visibility flag per view. |
 | `z` | Per view | Per-layer zoom level configuration per view, aligned with the `l` list. |
 | `tll` | Global | Maximum number of tiles to load (Tiles to load). |
-| `s` | Global | Current search query, encoded as a view index plus query string. |
+| `s` | Global | Current search query, encoded as `[actionId, query]`. Legacy index-based payloads are still accepted for migration. |
 | `m` | Global | Coordinate marker enablement flag. |
 | `mp` | Global | Coordinate marker position when enabled (longitude and latitude). |
 | `sel` | Global | Encoded inspection panel state (panels, selections, sizes, and highlight colors). |

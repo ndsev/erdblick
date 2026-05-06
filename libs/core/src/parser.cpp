@@ -48,6 +48,7 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
 
                         auto& typeInfo = featureJumpTargets_[compositionId];
                         if (typeInfo.idParts_.empty()) {
+                            typeInfo.id_ = compositionId;
                             typeInfo.idParts_ = idParts;
                             typeInfo.name_ = tp.name_;
                             typeInfo.layerInfo_ = l;
@@ -280,6 +281,7 @@ void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const
 {
     auto result = JsValue::Dict({
+        {"id", JsValue(jumpTarget_.id_)},
         {"name", JsValue(jumpTarget_.name_)},
         {"error", error_ ? JsValue(*error_) : JsValue()},
     });
