@@ -17,6 +17,8 @@ import {
 } from "../mapview/deck/deck-render.worker.pool";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
+import {StyleValidationIssue, StyleSourceRef} from "../styledata/style-validation.model";
+import {StyleValidationReportService} from "../styledata/style-validation-report.service";
 import {Feature, FeatureLayerStyle, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
 import {
     AppStateService,
@@ -180,7 +182,8 @@ export class MapDataService {
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
                 private keyboardService: KeyboardService,
-                private ngZone: NgZone) {
+                private ngZone: NgZone,
+                private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService()) {
         this.loadedTileLayers = new Map();
         this.selectionVisualizations = [];
         this.hoverVisualizations = [];
@@ -212,10 +215,10 @@ export class MapDataService {
         this.stateService.pinLowFiToMaxLodState.subscribe(() => {
             this.scheduleUpdate();
         });
-        this.stateService.debugRenderFullGltfAttachmentState.subscribe(() => {
+        this.stateService.debugRenderFullGltfAttachmentState.pipe(skip(1)).subscribe(() => {
             this.scheduleUpdate();
         });
-        this.stateService.debugGltfLoggingEnabledState.subscribe(() => {
+        this.stateService.debugGltfLoggingEnabledState.pipe(skip(1)).subscribe(() => {
             this.scheduleUpdate();
         });
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -2155,7 +2158,8 @@ export class MapDataService {
         featureIdSubset: string[] = [],
         layerKeySuffix = "",
         boxGrid = false,
-        options: Record<string, boolean | number | string> = {}
+        options: Record<string, boolean | number | string> = {},
+        styleSourceRef?: StyleSourceRef
     ): ITileVisualization {
         return new DeckTileVisualization(
             viewIndex,
@@ -2171,8 +2175,17 @@ export class MapDataService {
             layerKeySuffix,
             boxGrid,
             this.withViewerDebugOptions(options),
-            (requests) => this.resolveRelationExternalTiles(requests)
+            (requests) => this.resolveRelationExternalTiles(requests),
+            styleSourceRef,
+            (issues) => this.recordStyleValidationIssues(issues)
         );
+    }
+
+    /** Publishes runtime style issues collected during tile rendering. */
+    private recordStyleValidationIssues(issues: StyleValidationIssue[]): void {
+        for (const issue of issues) {
+            this.styleValidationReportService.recordIssue(issue);
+        }
     }
 
     /** Injects global viewer debug options into one visualization option bag without mutating the caller input. */
@@ -2186,6 +2199,9 @@ export class MapDataService {
 
     /** Reapplies the global viewer debug toggles to one existing visualization and reports whether it changed. */
     private applyViewerDebugOptionsToVisualization(visualization: ITileVisualization): boolean {
+        if (typeof visualization.setStyleOption !== "function") {
+            return false;
+        }
         let changed = false;
         changed = visualization.setStyleOption(
             DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID,
@@ -2316,7 +2332,8 @@ export class MapDataService {
             [],
             "",
             this.maps.getViewTileBorderState(viewIndex),
-            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId)
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId),
+            style.sourceRef
         );
         viewState.putVisualization(styleId, tileKey, visu);
         if (!stageReady) {
@@ -2773,7 +2790,8 @@ export class MapDataService {
                                 featureIds,
                                 groupKey,
                                 false,
-                                styleOptions
+                                styleOptions,
+                                style.sourceRef
                             );
                             this.tileVisualizationTopic.next({visualization});
                             visualizationCollection.push(visualization);

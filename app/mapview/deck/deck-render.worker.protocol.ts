@@ -1,3 +1,5 @@
+import {StyleSourceRef, StyleValidationIssue} from "../../styledata/style-validation.model";
+
 export const DECK_GEOMETRY_OUTPUT_ALL = 0;
 export const DECK_GEOMETRY_OUTPUT_POINTS_ONLY = 1;
 export const DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY = 2;
@@ -18,7 +20,9 @@ export interface DeckTileRenderTask {
     dataSourceInfoBlob: Uint8Array;
     nodeId: string;
     mapName: string;
+    layerName: string;
     styleSource: string;
+    styleSourceRef: StyleSourceRef;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     fidelityValue: number;
@@ -122,6 +126,7 @@ export interface DeckVisualizationBufferResult extends DeckGeometryBucketBuffers
     coordinateOrigin: Float64Array;
     lowFiBundles: DeckLowFiBundleBuffers[];
     mergedPointFeatures: Record<string, any[]>;
+    styleIssues?: StyleValidationIssue[];
 }
 
 /** Main-thread-friendly view of a worker result after message unpacking and timing normalization. */

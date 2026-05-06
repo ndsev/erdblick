@@ -6,6 +6,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization-base.h
   include/erdblick/visualization-deck.h
   include/erdblick/style.h
+  include/erdblick/style-validation.h
   include/erdblick/rule.h
   include/erdblick/buffer.h
   include/erdblick/color.h
@@ -23,6 +24,7 @@ set(ERDBLICK_SOURCE_FILES
   src/visualization-base.cpp
   src/visualization-deck.cpp
   src/style.cpp
+  src/style-validation.cpp
   src/rule.cpp
   src/color.cpp
   src/buffer.cpp

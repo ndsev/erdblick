@@ -20,6 +20,7 @@ import {
     DeckWorkerInboundMessage,
     DeckWorkerReadyMessage
 } from "./deck-render.worker.protocol";
+import {StyleValidationIssue} from "../../styledata/style-validation.model";
 
 const styleTextEncoder = new TextEncoder();
 const parserCache = new Map<string, TileLayerParser>();
@@ -191,9 +192,36 @@ function transferVisualizationResult(result: DeckVisualizationBufferResult): Arr
     ];
 }
 
+function readRuntimeStyleIssues(
+    deckVisu: DeckFeatureLayerVisualization,
+    task: DeckTileRenderTask
+): StyleValidationIssue[] {
+    const rawIssues = typeof (deckVisu as any).runtimeStyleIssues === "function"
+        ? ((deckVisu as any).runtimeStyleIssues() as StyleValidationIssue[])
+        : [];
+    return (rawIssues ?? []).map(issue => ({
+        ...issue,
+        source: {...(issue.source ?? {}), ...task.styleSourceRef},
+        runtimeContext: {
+            ...(issue.runtimeContext ?? {}),
+            mapName: task.mapName,
+            layerName: task.layerName,
+            tileKey: task.tileKey,
+            renderPath: "worker"
+        }
+    }));
+}
+
 /** Reads the binary render result from the wasm visualization wrapper. */
-function readRenderResult(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
-    return (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+function readRenderResult(
+    deckVisu: DeckFeatureLayerVisualization,
+    task: DeckTileRenderTask
+): DeckVisualizationBufferResult {
+    const renderResult = (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+    return {
+        ...renderResult,
+        styleIssues: readRuntimeStyleIssues(deckVisu, task)
+    };
 }
 
 /** Executes one full staged tile render inside the worker and returns deck-ready buffers. */
@@ -247,7 +275,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         const renderStart = performance.now();
         deckVisu.addTileFeatureLayer(baseLayer);
         deckVisu.run();
-        const renderResult = readRenderResult(deckVisu);
+        const renderResult = readRenderResult(deckVisu, task);
         const renderMs = performance.now() - renderStart;
 
         return {

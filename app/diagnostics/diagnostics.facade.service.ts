@@ -14,6 +14,7 @@ import {
     LogEntry,
     TileSizeDistribution
 } from './diagnostics.model';
+import {StyleValidationReportService} from '../styledata/style-validation-report.service';
 
 interface MapgetStatusDataResponse {
     timestampMs?: unknown;
@@ -35,8 +36,9 @@ interface MapgetStatusDataResponse {
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
 
     constructor(mapService: MapDataService,
-                private readonly stateService: AppStateService) {
-        super(mapService, stateService);
+                private readonly stateService: AppStateService,
+                styleValidationReportService: StyleValidationReportService) {
+        super(mapService, stateService, styleValidationReportService);
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */

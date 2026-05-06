@@ -281,6 +281,15 @@ describe('StyleService', () => {
         (globalThis as any).FileReader = MockFileReader as any;
 
         const initSpy = vi.spyOn(service as any, 'initializeStyle').mockReturnValue('UploadedStyle');
+        vi.spyOn(service, 'validateStyleSource').mockReturnValue({
+            source: {styleName: 'UploadedStyle', sourceKind: 'imported'},
+            valid: true,
+            loadable: true,
+            loadedRuleCount: 1,
+            skippedRuleCount: 0,
+            failedWholeStyleSheet: false,
+            issues: []
+        });
         const saveImportedSpy = vi.spyOn(service, 'saveImportedStyles');
         const reapplySpy = vi.spyOn(service, 'reapplyStyle');
 

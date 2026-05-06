@@ -4,6 +4,7 @@
 #include "buffer.h"
 #include "rule.h"
 #include "interop/js-object.h"
+#include "style-validation.h"
 
 #include <array>
 #include <string_view>
@@ -73,6 +74,8 @@ public:
     explicit FeatureLayerStyle(SharedUint8Array const& yamlArray);
     /** Report whether parsing succeeded and yielded a usable style. */
     [[nodiscard]] bool isValid() const;
+    /** Return the structured validation report from the last parse. */
+    [[nodiscard]] NativeJsValue validationReport() const;
     /** Return the rules in source order. */
     [[nodiscard]] const std::vector<FeatureStyleRule>& rules() const;
     /** Return the declared style options. */
@@ -144,6 +147,7 @@ private:
 
     std::vector<FeatureStyleRule> rules_;
     std::vector<FeatureStyleOption> options_;
+    StyleValidationReport validationReport_;
     bool valid_ = false;
     bool enabled_ = true;
     uint32_t stage_ = 0;

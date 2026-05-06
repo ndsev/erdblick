@@ -3180,6 +3180,28 @@ inspection-tree {
       align-content: center;
       justify-content: space-between;
     }
+
+    .p-tab {
+      padding: 0.25em 1em;
+      margin: 0;
+      font-size: 0.9em;
+    }
+
+    .p-tabpanels {
+      padding: 0.5em 0 0 0;
+      font-size: 0.9em;
+    }
+
+    table {
+      th {
+        text-align: center;
+        padding: 0.5em;
+      }
+
+      td {
+        padding: 0.5em;
+      }
+    }
   }
 }
 

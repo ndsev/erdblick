@@ -81,6 +81,8 @@ class AppStateServiceStub {
     deckThreadedRenderingEnabledState = new BehaviorSubject<boolean>(true);
     deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersCountState = new BehaviorSubject<number>(2);
+    debugRenderFullGltfAttachmentState = new BehaviorSubject<boolean>(false);
+    debugGltfLoggingEnabledState = new BehaviorSubject<boolean>(false);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
     cameraViewDataState = {
         getValue: vi.fn().mockReturnValue({
@@ -113,6 +115,14 @@ class AppStateServiceStub {
 
     get tilePullCompressionEnabled() {
         return this.tilePullCompressionEnabledState.getValue();
+    }
+
+    get debugRenderFullGltfAttachment() {
+        return this.debugRenderFullGltfAttachmentState.getValue();
+    }
+
+    get debugGltfLoggingEnabled() {
+        return this.debugGltfLoggingEnabledState.getValue();
     }
 
     get pinLowFiToMaxLod() {

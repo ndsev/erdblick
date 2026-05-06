@@ -6,6 +6,7 @@ import {
     DeckTileRenderTask,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
+import {StyleSourceRef} from "../../styledata/style-validation.model";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
@@ -20,7 +21,9 @@ export interface DeckTileRenderRequest {
     dataSourceInfoBlob: Uint8Array;
     nodeId: string;
     mapName: string;
+    layerName: string;
     styleSource: string;
+    styleSourceRef: StyleSourceRef;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     fidelityValue: number;
@@ -206,6 +209,7 @@ export class DeckRenderWorkerPool {
                 gltfNodes: bundle.gltfNodes
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
+            styleIssues: result.styleIssues ?? [],
             workerTimings: result.timings
         });
     }

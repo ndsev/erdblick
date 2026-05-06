@@ -35,6 +35,7 @@ import {
     DeckVisualizationBufferResult,
     DeckWorkerTimings
 } from "./deck-render.worker.protocol";
+import {StyleSourceRef, StyleValidationIssue} from "../../styledata/style-validation.model";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
 import {
@@ -214,6 +215,7 @@ interface DeckWasmRenderOutput {
     mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
     vertexCount: number;
     workerTimings: DeckWorkerTimings | null;
+    styleIssues: StyleValidationIssue[];
 }
 
 /** Cached low-fi bundle grouped by LOD after wasm output has been translated for deck. */
@@ -269,6 +271,7 @@ type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualiz
 type DeckRuleFidelityEnum = ErdblickCore_["RuleFidelity"];
 type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
     renderResult(): DeckVisualizationBufferResult;
+    runtimeStyleIssues?(): StyleValidationIssue[];
 };
 
 /** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
@@ -327,6 +330,8 @@ export class DeckTileVisualization implements ITileVisualization {
 
     private readonly style: StyleWithIsDeleted;
     private readonly styleSource: string;
+    private readonly styleSourceRef: StyleSourceRef;
+    private readonly recordStyleIssues: (issues: StyleValidationIssue[]) => void;
     private readonly layerKeySuffix: string;
     private readonly pointMergeService: PointMergeService;
     private readonly highlightMode: HighlightMode;
@@ -380,12 +385,19 @@ export class DeckTileVisualization implements ITileVisualization {
                 boxGrid?: boolean,
                 options?: Record<string, boolean | number | string>,
                 relationExternalTileLoader: (requests: RelationLocateRequest[]) => Promise<RelationLocateResult> =
-                    async () => ({responses: [], tiles: []})) {
+                    async () => ({responses: [], tiles: []}),
+                styleSourceRef?: StyleSourceRef,
+                recordStyleIssues: (issues: StyleValidationIssue[]) => void = () => {}) {
         this.tile = tile;
         this.pointMergeService = pointMergeService;
         this.style = style as StyleWithIsDeleted;
         this.styleSource = styleSource;
         this.styleId = this.style.name();
+        this.styleSourceRef = styleSourceRef ?? {
+            styleName: this.styleId,
+            sourceKind: 'base'
+        };
+        this.recordStyleIssues = recordStyleIssues;
         this.highFidelityStage = Math.max(0, Math.floor(highFidelityStage));
         this.prefersHighFidelity = prefersHighFidelity;
         this.maxLowFiLod = maxLowFiLod;
@@ -1411,58 +1423,39 @@ export class DeckTileVisualization implements ITileVisualization {
         // and avoid ordering races while selection/hover state changes.
         if (this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value) {
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
-            this.setTileVertexCount(fullMainThread.vertexCount);
-            this.latestWorkerTimings = fullMainThread.workerTimings;
-            this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
-            this.latestPointLayerData = fullMainThread.pointLayerData;
-            this.latestLabelLayerData = fullMainThread.labelLayerData;
-            this.latestArrowLayerData = fullMainThread.arrowLayerData;
-            this.latestGltfLayerData = fullMainThread.gltfLayerData;
-            this.latestLowFiBundleData = fullMainThread.lowFiBundles;
-            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
-            return fullMainThread.pathLayerData;
+            return this.applyWasmRenderOutput(fullMainThread);
         }
 
         if (!isDeckRenderWorkerPipelineEnabled()) {
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
-            this.setTileVertexCount(fullMainThread.vertexCount);
-            this.latestWorkerTimings = fullMainThread.workerTimings;
-            this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
-            this.latestPointLayerData = fullMainThread.pointLayerData;
-            this.latestLabelLayerData = fullMainThread.labelLayerData;
-            this.latestArrowLayerData = fullMainThread.arrowLayerData;
-            this.latestGltfLayerData = fullMainThread.gltfLayerData;
-            this.latestLowFiBundleData = fullMainThread.lowFiBundles;
-            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
-            return fullMainThread.pathLayerData;
+            return this.applyWasmRenderOutput(fullMainThread);
         }
 
         try {
             const workerOutput = await this.renderWasmInWorker(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
-            this.setTileVertexCount(workerOutput.vertexCount);
-            this.latestWorkerTimings = workerOutput.workerTimings;
-            this.latestSurfaceLayerData = workerOutput.surfaceLayerData;
-            this.latestPointLayerData = workerOutput.pointLayerData;
-            this.latestLabelLayerData = workerOutput.labelLayerData;
-            this.latestArrowLayerData = workerOutput.arrowLayerData;
-            this.latestGltfLayerData = workerOutput.gltfLayerData;
-            this.latestLowFiBundleData = workerOutput.lowFiBundles;
-            this.latestMergedPointFeatures = workerOutput.mergedPointFeatures;
-            return workerOutput.pathLayerData;
+            return this.applyWasmRenderOutput(workerOutput);
         } catch (error) {
             console.error("Deck worker rendering failed; falling back to main thread rendering.", error);
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
-            this.setTileVertexCount(fullMainThread.vertexCount);
-            this.latestWorkerTimings = fullMainThread.workerTimings;
-            this.latestSurfaceLayerData = fullMainThread.surfaceLayerData;
-            this.latestPointLayerData = fullMainThread.pointLayerData;
-            this.latestLabelLayerData = fullMainThread.labelLayerData;
-            this.latestArrowLayerData = fullMainThread.arrowLayerData;
-            this.latestGltfLayerData = fullMainThread.gltfLayerData;
-            this.latestLowFiBundleData = fullMainThread.lowFiBundles;
-            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
-            return fullMainThread.pathLayerData;
+            return this.applyWasmRenderOutput(fullMainThread);
         }
+    }
+
+    /** Stores one wasm render output and forwards any style issues discovered while evaluating rules. */
+    private applyWasmRenderOutput(output: DeckWasmRenderOutput): DeckPathLayerData[] {
+        this.setTileVertexCount(output.vertexCount);
+        this.latestWorkerTimings = output.workerTimings;
+        this.latestSurfaceLayerData = output.surfaceLayerData;
+        this.latestPointLayerData = output.pointLayerData;
+        this.latestLabelLayerData = output.labelLayerData;
+        this.latestArrowLayerData = output.arrowLayerData;
+        this.latestGltfLayerData = output.gltfLayerData;
+        this.latestLowFiBundleData = output.lowFiBundles;
+        this.latestMergedPointFeatures = output.mergedPointFeatures;
+        if (output.styleIssues.length > 0) {
+            this.recordStyleIssues(output.styleIssues);
+        }
+        return output.pathLayerData;
     }
 
     /** Marshals the current tile/style state to the render-worker pool and translates the result back. */
@@ -1491,7 +1484,9 @@ export class DeckTileVisualization implements ITileVisualization {
             dataSourceInfoBlob,
             nodeId: this.tile.nodeId,
             mapName: this.tile.mapName,
+            layerName: this.tile.layerName,
             styleSource: this.styleSource,
+            styleSourceRef: this.styleSourceRef,
             styleOptions: this.copyStyleOptions(),
             highlightModeValue: this.highlightMode.value,
             fidelityValue: this.fidelityEnumValue(fidelity).value,
@@ -1512,7 +1507,8 @@ export class DeckTileVisualization implements ITileVisualization {
             mergedPointFeatures:
                 (result.mergedPointFeatures ?? {}) as Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
             vertexCount: result.vertexCount,
-            workerTimings: result.workerTimings ?? null
+            workerTimings: result.workerTimings ?? null,
+            styleIssues: this.annotateRuntimeStyleIssues(result.styleIssues, "worker")
         };
     }
 
@@ -1607,7 +1603,8 @@ export class DeckTileVisualization implements ITileVisualization {
                 mergedPointFeatures: renderResult.mergedPointFeatures as
                     Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
                 vertexCount: Math.max(0, Math.floor(vertexCount)),
-                workerTimings: null
+                workerTimings: null,
+                styleIssues: this.annotateRuntimeStyleIssues(renderResult.styleIssues, "main-thread")
             };
         } finally {
             if (deckVisu) {
@@ -1693,8 +1690,8 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     /** Regroups raw GLTF-node buffers by depth-test state into tile-local scenegraph layer payloads. */
-    private buildGltfLayerData(raw: DeckGltfBucketBuffers): DeckGltfLayerData[] {
-        if (!raw.nodeIndices.length) {
+    private buildGltfLayerData(raw: DeckGltfBucketBuffers | undefined): DeckGltfLayerData[] {
+        if (!raw?.nodeIndices.length) {
             return [];
         }
         const itemCount = raw.nodeIndices.length;
@@ -1739,7 +1736,36 @@ export class DeckTileVisualization implements ITileVisualization {
 
     /** Reads the binary render result from the wasm visualization wrapper. */
     private readRenderResultFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
-        return (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+        const deckVisuWithResult = deckVisu as DeckFeatureLayerVisualizationWithRenderResult;
+        const renderResult = deckVisuWithResult.renderResult();
+        const styleIssues = typeof deckVisuWithResult.runtimeStyleIssues === "function"
+            ? deckVisuWithResult.runtimeStyleIssues() ?? []
+            : [];
+        return {
+            ...renderResult,
+            styleIssues
+        };
+    }
+
+    /** Adds tile/style identity to runtime style issues before they leave this visualization. */
+    private annotateRuntimeStyleIssues(
+        issues: StyleValidationIssue[] | undefined,
+        renderPath: "main-thread" | "worker"
+    ): StyleValidationIssue[] {
+        return (issues ?? []).map(issue => ({
+            ...issue,
+            source: {
+                ...(issue.source ?? {}),
+                ...this.styleSourceRef
+            },
+            runtimeContext: {
+                ...(issue.runtimeContext ?? {}),
+                mapName: this.tile.mapName,
+                layerName: this.tile.layerName,
+                tileKey: this.tile.mapTileKey,
+                renderPath
+            }
+        }));
     }
 
     /** Builds path-layer data for both world-space and billboard path buckets. */

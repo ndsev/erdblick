@@ -481,7 +481,8 @@ describe("DeckTileVisualization", () => {
 
         expect(rendered).toBe(true);
         expect((deck.commits[0][0] as any).props.parameters).toEqual({
-            depthTest: false
+            depthTest: false,
+            depthMask: false
         });
     });
 
@@ -1038,7 +1039,7 @@ describe("DeckTileVisualization", () => {
         expect(visu.hasPendingLowFiSwitch()).toBe(true);
     });
 
-    it("does not apply a cached low-fi switch when the requested selection is empty", () => {
+    it("does not apply a cached low-fi switch when the requested selection is empty", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
         const tile = {
@@ -1073,7 +1074,7 @@ describe("DeckTileVisualization", () => {
         visu.completeRender = vi.fn();
         visu.applyLowFiBundleDataToRegistry = vi.fn();
 
-        const switched = visu.tryApplyCachedLowFiSwitch(
+        const switched = await visu.tryApplyCachedLowFiSwitch(
             {renderer: "deck", scene: {layerRegistry: registry}},
             registry,
             "low"

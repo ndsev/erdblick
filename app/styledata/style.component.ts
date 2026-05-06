@@ -21,6 +21,8 @@ import {MergeView} from "@codemirror/merge";
 import {defaultHighlightStyle, syntaxHighlighting} from "@codemirror/language";
 import {oneDark} from "@codemirror/theme-one-dark";
 import {AppDialogComponent} from "../shared/app-dialog.component";
+import {StyleValidationReportService} from "./style-validation-report.service";
+import {StyleValidationIssue, StyleValidationReport} from "./style-validation.model";
 
 
 @Component({
@@ -30,6 +32,18 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                   [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
                   [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
                   (onShow)="onStylesDialogShow()">
+            <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
+                <p-tablist>
+                    <p-tab value="styles">Styles</p-tab>
+                    <p-tab value="errors">
+                        <span>Errors </span>
+                        @if (styleValidationReportService.reports$ | async; as styleIssues) {
+                            <p-badge [value]="styleIssueCount(styleIssues)"/>
+                        }
+                    </p-tab>
+                </p-tablist>
+                <p-tabpanels>
+                    <p-tabpanel value="styles">
             @if (styleService.styleGroups | async; as styleGroups) {
                 <ng-container>
                     @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
@@ -126,7 +140,7 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                     <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
                          class="flex-container">
                 <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
-                    {{ message.key }}: {{ message.value }} (see console)
+                    {{ message.key }}: {{ message.value }}
                 </span>
                     </div>
                 </div>
@@ -140,6 +154,69 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                               class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
                               chooseLabel="Import Style" tabindex="0"/>
             </div>
+                    </p-tabpanel>
+                    <p-tabpanel value="errors">
+                        @if (styleValidationReportService.reports$ | async; as styleIssues) {
+                            <div class="style-errors-toolbar">
+                                <p-iconfield iconPosition="left" class="style-errors-filter">
+                                    <p-inputicon>
+                                        <i class="pi pi-filter"></i>
+                                    </p-inputicon>
+                                    <input pInputText type="text"
+                                           [ngModel]="styleIssueFilter"
+                                           (ngModelChange)="styleIssueFilter = $event"
+                                           placeholder="Filter">
+                                </p-iconfield>
+                                <p-checkbox inputId="style-errors-only"
+                                            [(ngModel)]="styleErrorsOnly"
+                                            [binary]="true"></p-checkbox>
+                                <label for="style-errors-only">Errors only</label>
+                                <p-button size="small" label="Clear runtime duplicates"
+                                          (click)="styleValidationReportService.clearRuntimeDuplicates()"/>
+                            </div>
+                            <p-table [value]="filteredStyleIssues(styleIssues)"
+                                     [scrollable]="true"
+                                     scrollHeight="20em"
+                                     data-testid="style-errors-table"
+                                     [rowTrackBy]="trackByStyleIssue">
+                                <ng-template pTemplate="header">
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Severity</th>
+                                        <th>Impact</th>
+                                        <th>Style</th>
+                                        <th>Rule</th>
+                                        <th>Property</th>
+                                        <th>Location</th>
+                                        <th>Message</th>
+                                    </tr>
+                                </ng-template>
+                                <ng-template pTemplate="body" let-issue>
+                                    <tr [ngClass]="'style-issue-' + issue.severity">
+                                        <td>{{ formatIssueTime(issue) }}</td>
+                                        <td>{{ issue.severity }}</td>
+                                        <td>{{ issue.impact }}</td>
+                                        <td [pTooltip]="issue.source.url || issue.source.configId || ''">
+                                            {{ issue.source.styleName || issue.source.url || issue.source.configId || issue.source.sourceKind }}
+                                        </td>
+                                        <td>{{ issue.rulePath || (issue.ruleIndex !== undefined ? 'rules[' + issue.ruleIndex + ']' : '') }}</td>
+                                        <td>{{ issue.property || '' }}</td>
+                                        <td>{{ formatIssueLocation(issue) }}</td>
+                                        <td [pTooltip]="issue.detail || issue.expression || ''">{{ issue.message }}</td>
+                                    </tr>
+                                </ng-template>
+                                <ng-template pTemplate="emptymessage">
+                                    <tr>
+                                        <td colspan="8">
+                                            <div class="styles-empty">No style validation issues.</div>
+                                        </td>
+                                    </tr>
+                                </ng-template>
+                            </p-table>
+                        }
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
         </app-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
@@ -175,6 +252,28 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                 <p-button (click)="applyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
+            </div>
+        </app-dialog>
+        <app-dialog header="Style Validation Failed" [(visible)]="styleValidationDialogVisible" [modal]="true"
+                  #styleValidationDialog data-testid="style-validation-failed-dialog">
+            @if (lastEditorValidationReport) {
+                <div class="style-validation-summary">
+                    {{ lastEditorValidationReport.source.styleName || lastEditorValidationReport.source.url || 'Style' }}
+                    has {{ validationErrorCount(lastEditorValidationReport) }} validation error(s).
+                </div>
+                <div class="style-validation-details">
+                    @for (issue of firstValidationErrors(lastEditorValidationReport); track issue.id) {
+                        <div class="style-validation-issue">
+                            <span class="style-validation-location">{{ formatIssueLocation(issue) }}</span>
+                            <span class="style-validation-path">{{ issue.rulePath || issue.property || issue.impact }}</span>
+                            <span>{{ issue.message }}</span>
+                        </div>
+                    }
+                </div>
+            }
+            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                <p-button (click)="styleValidationDialog.close($event)" label="Ok"></p-button>
+                <p-button (click)="openStyleErrorsTab(); styleValidationDialog.close($event)" label="Open Errors"></p-button>
             </div>
         </app-dialog>
         <app-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
@@ -248,6 +347,46 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
         .updated-modified-style-chip {
             cursor: pointer;
         }
+
+        .style-errors-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+        }
+
+        .style-errors-filter {
+            flex: 1;
+        }
+
+        .style-errors-filter input {
+            width: 100%;
+        }
+
+        .style-issue-error {
+            color: var(--red-300, #fca5a5);
+        }
+
+        .style-issue-warning {
+            color: var(--yellow-300, #fde68a);
+        }
+
+        .style-validation-details {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35em;
+            margin-top: 0.75em;
+        }
+
+        .style-validation-issue {
+            display: grid;
+            grid-template-columns: 4em minmax(6em, 1fr) 2fr;
+            gap: 0.5em;
+        }
+
+        .style-validation-location,
+        .style-validation-path {
+            color: silver;
+        }
     `],
     standalone: false
 })
@@ -281,6 +420,11 @@ export class StyleComponent implements OnDestroy {
     private readonly compareThemeCompartmentB = new Compartment();
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
+    stylesDialogTab: 'styles' | 'errors' = 'styles';
+    styleIssueFilter: string = '';
+    styleErrorsOnly: boolean = false;
+    styleValidationDialogVisible: boolean = false;
+    lastEditorValidationReport?: StyleValidationReport;
 
     @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -289,6 +433,7 @@ export class StyleComponent implements OnDestroy {
     @ViewChild('styles') stylesDialog: AppDialogComponent | undefined;
     @ViewChild('editorDialog') editorDialog: AppDialogComponent | undefined;
     @ViewChild('warningDialog') warningDialog: AppDialogComponent | undefined;
+    @ViewChild('styleValidationDialog') styleValidationDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareDialog') styleCompareDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareHost') styleCompareHost?: ElementRef<HTMLDivElement>;
 
@@ -297,6 +442,7 @@ export class StyleComponent implements OnDestroy {
     constructor(public mapService: MapDataService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
+                public styleValidationReportService: StyleValidationReportService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
                 private dialogStack: DialogStackService,
@@ -448,7 +594,11 @@ export class StyleComponent implements OnDestroy {
             this.styleService.importStyleYamlFile(event, file, this.styleUploader)
                 .then((ok) => {
                     if (!ok) {
-                        this.messageService.showError(`Could not read empty data for: ${styleId}`);
+                        if (this.styleService.lastValidationReport && !this.styleService.lastValidationReport.valid) {
+                            this.showValidationFailure(this.styleService.lastValidationReport);
+                        } else {
+                            this.messageService.showError(`Could not read empty data for: ${styleId}`);
+                        }
                     }
                 })
                 .catch((error) => {
@@ -486,6 +636,13 @@ export class StyleComponent implements OnDestroy {
         }
         if (!this.styleService.styles.has(styleId)) {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
+            return;
+        }
+        const report = this.styleService.validateStyleSource(
+            styleData,
+            this.styleService.createEditorSourceRef(styleId, styleData));
+        if (!report.valid) {
+            this.showValidationFailure(report);
             return;
         }
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
@@ -705,6 +862,13 @@ export class StyleComponent implements OnDestroy {
             this.messageService.showError("Cannot apply an empty style definition.");
             return;
         }
+        const report = this.styleService.validateStyleSource(
+            leftSource,
+            this.styleService.createEditorSourceRef(this.styleCompareStyleId, leftSource));
+        if (!report.valid) {
+            this.showValidationFailure(report);
+            return;
+        }
         const newStyleId = this.styleService.setStyleSource(this.styleCompareStyleId, leftSource, true);
         if (!newStyleId) {
             this.messageService.showError(`Could not apply compared style changes to ${this.styleCompareStyleId}.`);
@@ -754,6 +918,69 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareDialogVisible = false;
         this.refreshUpdatedStylesDialogVisibility();
         this.mapService.scheduleUpdate();
+    }
+
+    styleIssueCount(issues: StyleValidationIssue[]): number {
+        return issues.filter(issue => issue.severity === 'error').length;
+    }
+
+    filteredStyleIssues(issues: StyleValidationIssue[]): StyleValidationIssue[] {
+        const filterText = this.styleIssueFilter.trim().toLowerCase();
+        return issues.filter(issue => {
+            if (this.styleErrorsOnly && issue.severity !== 'error') {
+                return false;
+            }
+            if (!filterText) {
+                return true;
+            }
+            const haystack = [
+                issue.severity,
+                issue.impact,
+                issue.source.styleName,
+                issue.source.url,
+                issue.source.configId,
+                issue.rulePath,
+                issue.property,
+                issue.message,
+                issue.detail,
+                issue.expression
+            ].filter(Boolean).join(' ').toLowerCase();
+            return haystack.includes(filterText);
+        });
+    }
+
+    trackByStyleIssue = (index: number, issue: StyleValidationIssue): string => {
+        return `${issue.id}:${index}`;
+    };
+
+    formatIssueTime(issue: StyleValidationIssue): string {
+        return new Date(issue.at).toLocaleTimeString();
+    }
+
+    formatIssueLocation(issue: StyleValidationIssue): string {
+        if (!issue.location?.line) {
+            return '';
+        }
+        return issue.location.column ? `${issue.location.line}:${issue.location.column}` : `${issue.location.line}`;
+    }
+
+    validationErrorCount(report: StyleValidationReport): number {
+        return report.issues.filter(issue => issue.severity === 'error').length;
+    }
+
+    firstValidationErrors(report: StyleValidationReport): StyleValidationIssue[] {
+        return report.issues.filter(issue => issue.severity === 'error').slice(0, 6);
+    }
+
+    openStyleErrorsTab(): void {
+        this.stylesDialogTab = 'errors';
+        this.stylesDialogVisible = true;
+    }
+
+    private showValidationFailure(report: StyleValidationReport): void {
+        this.lastEditorValidationReport = report;
+        this.styleValidationDialogVisible = true;
+        this.sourceWasModified = true;
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

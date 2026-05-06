@@ -21,6 +21,8 @@ import {
     SNAPSHOT_INTERVAL_MS,
     UNIT_SUFFIXES
 } from './diagnostics.constants';
+import {StyleValidationReportService} from '../styledata/style-validation-report.service';
+import {StyleValidationIssue} from '../styledata/style-validation.model';
 const UPDATE_EVENT_DEBOUNCE_MS = 1000;
 
 @Injectable()
@@ -41,10 +43,12 @@ export class DiagnosticsDatasource implements OnDestroy {
     private readonly subscriptions: Subscription[] = [];
     private lastBackendConnected = this.mapService.isTileStreamConnected();
     private readonly errorTileKeys = new Set<string>();
+    private readonly loggedStyleIssueIds = new Set<string>();
 
     constructor(
         private readonly mapService: MapDataService,
-        private readonly appStateService: AppStateService
+        private readonly appStateService: AppStateService,
+        private readonly styleValidationReportService: StyleValidationReportService
     ) {
         this.patchConsoleLogging();
         this.refreshPerfStatsIfVisible();
@@ -69,7 +73,8 @@ export class DiagnosticsDatasource implements OnDestroy {
             }),
             this.mapService.tileDataChanged
                 .pipe(auditTime(UPDATE_EVENT_DEBOUNCE_MS))
-                .subscribe(() => this.refreshOnDemand())
+                .subscribe(() => this.refreshOnDemand()),
+            this.styleValidationReportService.reports$.subscribe(issues => this.appendStyleValidationLogs(issues))
         );
     }
 
@@ -217,6 +222,42 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
         const merged = [...this.logs$.getValue(), ...entries];
         this.logs$.next(merged.slice(-MAX_LOGS));
+    }
+
+    private appendStyleValidationLogs(issues: StyleValidationIssue[]): void {
+        const entries: LogEntry[] = [];
+        for (const issue of issues) {
+            const issueLogId = this.styleIssueLogId(issue);
+            if (this.loggedStyleIssueIds.has(issueLogId)) {
+                continue;
+            }
+            this.loggedStyleIssueIds.add(issueLogId);
+            entries.push({
+                at: issue.at,
+                level: issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warn' : 'info',
+                message: this.styleValidationReportService.formatIssueSummary(issue),
+                data: issue
+            });
+        }
+        this.appendLogEntries(entries);
+    }
+
+    /** Builds a stable-enough identity for style issues that may reuse wasm-local ids across tiles. */
+    private styleIssueLogId(issue: StyleValidationIssue): string {
+        return [
+            issue.id,
+            issue.source.url,
+            issue.source.sourceHash,
+            issue.source.styleName,
+            issue.rulePath,
+            issue.property,
+            issue.expression,
+            issue.message,
+            issue.runtimeContext?.mapName,
+            issue.runtimeContext?.layerName,
+            issue.runtimeContext?.tileKey,
+            issue.runtimeContext?.renderPath
+        ].join('|');
     }
 
     /** Monkey-patches console methods once so frontend logs also appear in the diagnostics log. */
