@@ -11,6 +11,11 @@ import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
 import type {FeatureWrapper} from "../mapdata/features.model";
 import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
+import {
+    BackgroundLayerConfig,
+    clampBackgroundOpacity,
+    DEFAULT_BACKGROUND_LAYER_ID
+} from "./app-config.service";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -137,9 +142,9 @@ export interface CameraViewState {
     orientation: { heading: number, pitch: number, roll: number };
 }
 
-/** Persisted enable/opacity settings for the OSM base layer. */
-export interface OsmViewState {
-    enabled: boolean;
+/** Persisted selected background-layer id plus per-view opacity. */
+export interface BackgroundLayerViewState {
+    layerId: string | null;
     opacity: number;
 }
 
@@ -188,15 +193,6 @@ function roundCoordinateStateValue(value: number): number {
         return value;
     }
     return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
-}
-
-/** Clamps OSM opacity into the supported percentage range. */
-function clampOsmOpacity(value: number): number {
-    if (!Number.isFinite(value)) {
-        return 30;
-    }
-    const rounded = Math.round(value);
-    return Math.max(0, Math.min(100, rounded));
 }
 
 /** Clamps persisted zoom-step settings to the supported deck interaction range. */
@@ -484,21 +480,21 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly osmState = this.createMapViewState<OsmViewState>({
-        name: 'osm',
+    readonly backgroundState = this.createMapViewState<BackgroundLayerViewState>({
+        name: 'background',
         defaultValue: {
-            enabled: true,
-            opacity: 6,
+            layerId: DEFAULT_BACKGROUND_LAYER_ID,
+            opacity: 100,
         },
         schema: z.string(),
-        toStorage: (value: OsmViewState) => `${value.enabled ? 1 : 0}~${clampOsmOpacity(value.opacity)}`,
-        fromStorage: (payload: any, currentValue: OsmViewState): OsmViewState => {
+        toStorage: (value: BackgroundLayerViewState) => `${encodeURIComponent(value.layerId ?? '')}~${clampBackgroundOpacity(value.opacity)}`,
+        fromStorage: (payload: any, currentValue: BackgroundLayerViewState): BackgroundLayerViewState => {
             const parts = String(payload).split('~');
-            const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
-            const opacity = parts[1] === undefined ? currentValue.opacity : clampOsmOpacity(Number(parts[1]));
-            return {enabled, opacity};
+            const layerId = parts[0] ? decodeURIComponent(parts[0]) : null;
+            const opacity = parts[1] === undefined ? currentValue.opacity : clampBackgroundOpacity(Number(parts[1]));
+            return {layerId, opacity};
         },
-        urlParamName: 'osm'
+        urlParamName: 'bg'
     });
 
     readonly layerNamesState = this.createState<Array<string>>({
@@ -706,7 +702,7 @@ export class AppStateService implements OnDestroy {
         {name: "Position", code: VIEW_SYNC_POSITION, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
         {name: "Movement", code: VIEW_SYNC_MOVEMENT, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
         {name: "Projection", code: VIEW_SYNC_PROJECTION, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/background settings across views"},
     ];
 
     /** Registers all persisted state slots and wires startup hydration/persistence flow. */
@@ -717,6 +713,7 @@ export class AppStateService implements OnDestroy {
             this.setupStateSubscriptions();
             this.hydrateFromStorage();
             this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+            this.migrateLegacyOsmState(this.router.routerState.snapshot.root?.queryParams ?? {});
             this.isHydrating = false;
             // Keep inbound links stable during passive startup hydration.
             this.skipNextUrlSync = true;
@@ -1303,43 +1300,53 @@ export class AppStateService implements OnDestroy {
         this.layerSyncOptionsState.next(viewIndex, enabled);
     }
 
-    /** Returns the persisted OSM state for the given view. */
-    getOsmState(viewIndex: number): OsmViewState {
-        const value = this.osmState.getValue(viewIndex);
+    /** Returns the persisted background-layer state for the given view. */
+    getBackgroundState(viewIndex: number): BackgroundLayerViewState {
+        const value = this.backgroundState.getValue(viewIndex);
         return {
-            enabled: value.enabled,
-            opacity: clampOsmOpacity(value.opacity),
+            layerId: value.layerId,
+            opacity: clampBackgroundOpacity(value.opacity),
         };
     }
 
-    /** Writes the OSM enable/opacity state for the given view. */
-    setOsmState(viewIndex: number, enabled: boolean, opacity: number): void {
-        this.osmState.next(viewIndex, {
-            enabled,
-            opacity: clampOsmOpacity(opacity),
+    /** Returns the effective background-layer state after missing ids are mapped to the configured default. */
+    resolveBackgroundState(viewIndex: number,
+                           availableLayers: readonly BackgroundLayerConfig[],
+                           defaultBackgroundLayerId: string | null): BackgroundLayerViewState {
+        const rawState = this.getBackgroundState(viewIndex);
+        if (rawState.layerId === null) {
+            return rawState;
+        }
+
+        const availableLayerIds = new Set(availableLayers.map(layer => layer.id));
+        if (availableLayerIds.has(rawState.layerId)) {
+            return rawState;
+        }
+
+        if (defaultBackgroundLayerId && availableLayerIds.has(defaultBackgroundLayerId)) {
+            return {
+                layerId: defaultBackgroundLayerId,
+                opacity: rawState.opacity
+            };
+        }
+
+        return {
+            layerId: null,
+            opacity: rawState.opacity
+        };
+    }
+
+    /** Writes the selected background-layer id and opacity for one view. */
+    setBackgroundState(viewIndex: number, layerId: string | null, opacity: number): void {
+        this.backgroundState.next(viewIndex, {
+            layerId,
+            opacity: clampBackgroundOpacity(opacity),
         });
     }
 
-    /** Returns whether OSM is enabled for the given view. */
-    getOsmEnabled(viewIndex: number): boolean {
-        return this.getOsmState(viewIndex).enabled;
-    }
-
-    /** Sets whether OSM is enabled for the given view. */
-    setOsmEnabled(viewIndex: number, enabled: boolean): void {
-        const current = this.getOsmState(viewIndex);
-        this.setOsmState(viewIndex, enabled, current.opacity);
-    }
-
-    /** Returns the configured OSM opacity for the given view. */
-    getOsmOpacity(viewIndex: number): number {
-        return this.getOsmState(viewIndex).opacity;
-    }
-
-    /** Sets the configured OSM opacity for the given view. */
-    setOsmOpacity(viewIndex: number, opacity: number): void {
-        const current = this.getOsmState(viewIndex);
-        this.setOsmState(viewIndex, current.enabled, opacity);
+    /** Returns the configured background opacity for the given view. */
+    getBackgroundOpacity(viewIndex: number): number {
+        return this.getBackgroundState(viewIndex).opacity;
     }
 
     /** Returns the persisted orientation for the given view. */
@@ -2205,7 +2212,7 @@ export class AppStateService implements OnDestroy {
             }
         };
         pruneViews(this.mode2dState);
-        pruneViews(this.osmState);
+        pruneViews(this.backgroundState);
         pruneViews(this.viewTileBordersState);
         pruneViews(this.viewTileGridModeState);
         pruneViews(this.cameraViewDataState);
@@ -2277,6 +2284,65 @@ export class AppStateService implements OnDestroy {
 
         // Sync all states, so the URL is replaced.
         this.syncAllStates();
+    }
+
+    /** Migrates legacy `osm` URL/storage payloads into the generic background-layer state once on startup. */
+    private migrateLegacyOsmState(params: Params): void {
+        const hasBackgroundStorage = localStorage.getItem(this.backgroundState.appState.name) !== null;
+        const hasBackgroundUrl = params[this.backgroundState.appState.urlParamName ?? this.backgroundState.appState.name] !== undefined;
+        if (hasBackgroundStorage || hasBackgroundUrl) {
+            return;
+        }
+
+        const legacyStorage = localStorage.getItem('osm');
+        const legacyUrl = params['osm'];
+        const legacyPayload = legacyUrl ?? legacyStorage;
+        if (legacyPayload === undefined || legacyPayload === null) {
+            return;
+        }
+
+        const serializedStates = typeof legacyPayload === 'string' && legacyPayload.trim().startsWith('[')
+            ? this.parseLegacyOsmStorage(legacyPayload)
+            : this.parseLegacyOsmUrl(String(legacyPayload));
+        if (!serializedStates.length) {
+            return;
+        }
+
+        serializedStates.forEach((state, viewIndex) => {
+            this.setBackgroundState(viewIndex, state.layerId, state.opacity);
+        });
+    }
+
+    /** Parses the JSON-encoded local-storage payload used by the removed `osm` state slot. */
+    private parseLegacyOsmStorage(rawPayload: string): BackgroundLayerViewState[] {
+        try {
+            const parsed = JSON.parse(rawPayload);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+            return parsed.map(token => this.parseLegacyOsmToken(String(token)));
+        } catch {
+            return [];
+        }
+    }
+
+    /** Parses the compact CSV URL form used by the removed `osm` query parameter. */
+    private parseLegacyOsmUrl(rawPayload: string): BackgroundLayerViewState[] {
+        if (!rawPayload.length) {
+            return [];
+        }
+        return rawPayload.split(',').map(token => this.parseLegacyOsmToken(token));
+    }
+
+    /** Converts one legacy `enabled~opacity` token into the new background-layer state shape. */
+    private parseLegacyOsmToken(rawToken: string): BackgroundLayerViewState {
+        const parts = rawToken.split('~');
+        const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
+        const opacity = parts[1] === undefined ? 6 : clampBackgroundOpacity(Number(parts[1]));
+        return {
+            layerId: enabled ? 'osm' : null,
+            opacity
+        };
     }
 
     /** Drops stale comparison state when the current selection no longer supports it. */

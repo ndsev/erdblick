@@ -3010,13 +3010,16 @@ inspection-tree {
 
 .map-config-controls {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.25em;
+  gap: 0.25em 0.5em;
   padding: 0.25em 0.25em 0 0.25em;
+  min-width: 0;
 
   .p-divider-vertical {
     margin: 0;
     padding: 0.25em 0;
+    flex: 0 0 auto;
   }
 
   button {
@@ -3025,15 +3028,77 @@ inspection-tree {
     box-shadow: none;
   }
 
-  .osm-controls {
-    display: flex;
+  .background-controls {
+    display: inline-flex;
     align-items: center;
-    gap: 0.25em;
+    flex: 0 1 auto;
+    gap: 0.35em;
+    min-width: 0;
+    white-space: nowrap;
 
-    .slider-input {
-      width: 11em;
-      font-size: 0.9em;
-      padding: 0.25em 0.5em;
+    .background-layer-select {
+      width: 10.5rem;
+      max-width: 10.5rem;
+      min-width: 0;
+      flex: 0 1 10.5rem;
+    }
+
+    .background-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5em;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .background-option-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .background-badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25em;
+      flex-shrink: 0;
+    }
+
+    .background-info {
+      font-size: 1rem;
+      cursor: help;
+    }
+
+    .background-opacity-button {
+      flex-shrink: 0;
+    }
+
+    .background-details-info {
+      flex-shrink: 0;
+      font-size: 1rem;
+      cursor: help;
+      color: var(--p-surface-400);
+    }
+  }
+}
+
+.background-opacity-popover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.25em 0.1em;
+
+  .background-opacity-value {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .background-opacity-slider {
+    .p-slider {
+      height: 8rem;
     }
   }
 }

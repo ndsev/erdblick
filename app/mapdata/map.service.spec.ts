@@ -124,8 +124,8 @@ class AppStateServiceStub {
     }
 
     getLayerSyncOption = vi.fn().mockReturnValue(false);
-    getOsmState = vi.fn().mockReturnValue({enabled: false, opacity: 0});
-    setOsmState = vi.fn();
+    getBackgroundState = vi.fn().mockReturnValue({layerId: null, opacity: 0});
+    setBackgroundState = vi.fn();
     setLayerSyncOption = vi.fn();
     prune = vi.fn();
 }

@@ -7,9 +7,9 @@ import {
     type PickingInfo,
     WebMercatorViewport
 } from "@deck.gl/core";
-import {TileLayer, type TileLayerProps} from "@deck.gl/geo-layers";
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
+import {createImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
@@ -22,6 +22,12 @@ import {
     TileFeatureId,
     TileGridMode
 } from "../../shared/appstate.service";
+import {
+    AppConfigService,
+    type BackgroundLayerConfig,
+    type WmsBackgroundLayerConfig,
+    type XyzBackgroundLayerConfig
+} from "../../shared/app-config.service";
 import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
@@ -37,6 +43,7 @@ import {
     tileGridOverlayData
 } from "./deck-tile-grid-overlay.layer";
 import {SearchResultClusterLayer, SearchResultClusterPoint} from "./deck-search-result-cluster.layer";
+import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 
 /** Internal camera state deck uses while the rest of the app still speaks Cesium-like camera values. */
 interface DeckCameraState {
@@ -111,7 +118,8 @@ interface DeckGestureEventLike {
 
 /**
  * Minimal deck.gl map view scaffold used to wire renderer switching and camera-state sync.
- * Detailed deck tile rendering is introduced in later migration tasks.
+ * Besides vector and overlay rendering, it now also owns config-driven raster background
+ * layers so per-view background state stays close to the actual deck layer lifecycle.
  */
 export abstract class DeckMapView implements IRenderView {
     private static readonly EARTH_RADIUS_METERS = 6378137;
@@ -120,8 +128,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
     private static readonly MAX_VIEWPORT_LONGITUDE_SPAN = 360;
     private static readonly WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
-    private static readonly OSM_LAYER_KEY = "osm/tile-layer";
-    private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
+    private static readonly BACKGROUND_LAYER_KEY = "background/layer";
     private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
     private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
     private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
@@ -177,8 +184,7 @@ export abstract class DeckMapView implements IRenderView {
     private tickHandle: number | null = null;
     private deckDevice: Device | null = null;
     private canvasResizeTimer: ReturnType<typeof setTimeout> | null = null;
-    private osmLayerEnabled = false;
-    private osmLayerOpacity = -1;
+    private backgroundLayerSignature = "";
     private tileGridEnabled = false;
     private tileGridMode: TileGridMode = "nds";
     private lastTileGridDiagnosticSignature = "";
@@ -213,7 +219,8 @@ export abstract class DeckMapView implements IRenderView {
                 protected featureSearchService: FeatureSearchService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
-                protected stateService: AppStateService) {
+                protected stateService: AppStateService,
+                protected configService: AppConfigService) {
         this._viewIndex = id;
         this.canvasId = canvasId;
     }
@@ -281,7 +288,7 @@ export abstract class DeckMapView implements IRenderView {
         this.tickCallbacks.clear();
         this.setFeatureHoverState(false);
         this.hoveredFeatureIds.next(undefined);
-        this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.BACKGROUND_LAYER_KEY);
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
@@ -289,8 +296,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
         this.removeTileStateLayers();
         this.stopJumpAreaHighlight();
-        this.osmLayerEnabled = false;
-        this.osmLayerOpacity = -1;
+        this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
         this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
@@ -720,8 +726,20 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.stateService.osmState.pipe(this._viewIndex).subscribe((osmState) => {
-                this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
+            this.stateService.backgroundState.pipe(this._viewIndex).subscribe(() => {
+                this.updateBackgroundLayer();
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.mode2dState.pipe(this._viewIndex).subscribe(() => {
+                this.updateBackgroundLayer();
+            })
+        );
+
+        this.subscriptions.push(
+            this.configService.config$.subscribe(() => {
+                this.updateBackgroundLayer();
             })
         );
 
@@ -1001,8 +1019,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         if (updateViewport) {
             this.updateViewport();
-            const osmState = this.stateService.getOsmState(this._viewIndex);
-            this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
+            this.updateBackgroundLayer();
             this.scheduleTileGridOverlayUpdate();
         }
     }
@@ -1082,31 +1099,73 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
-    /** Adds, updates, or removes the OSM base layer according to the current overlay settings. */
-    private updateOsmLayers(enabled: boolean, opacity: number): void {
-        if (!this.deck || !enabled) {
-            this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
-            this.osmLayerEnabled = false;
-            this.osmLayerOpacity = -1;
+    /** Adds, updates, or removes the configured raster background according to the current view mode and state. */
+    private updateBackgroundLayer(): void {
+        if (!this.deck) {
+            this.removeBackgroundLayer();
             return;
         }
 
-        const clampedOpacity = Math.max(0, Math.min(1, opacity));
-        if (this.osmLayerEnabled && this.osmLayerOpacity === clampedOpacity) {
+        const backgroundLayers = this.configService.getBackgroundLayers();
+        const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
+        const backgroundState = this.stateService.resolveBackgroundState(
+            this._viewIndex,
+            backgroundLayers,
+            defaultBackgroundLayerId
+        );
+        const selectedLayer = backgroundLayers.find(layer => layer.id === backgroundState.layerId);
+        if (!selectedLayer) {
+            this.removeBackgroundLayer();
             return;
         }
 
-        const layer = new TileLayer<string>({
-            id: DeckMapView.OSM_LAYER_KEY,
-            data: DeckMapView.OSM_TILE_URL_TEMPLATE,
-            minZoom: 0,
-            maxZoom: 19,
-            tileSize: 256,
-            opacity: clampedOpacity,
+        if (!this.stateService.mode2dState.getValue(this._viewIndex) && selectedLayer.type === "wms") {
+            this.removeBackgroundLayer();
+            return;
+        }
+
+        const opacity = Math.max(0, Math.min(1, backgroundState.opacity / 100));
+        const signature = JSON.stringify({
+            layerId: selectedLayer.id,
+            opacity,
+            mode2d: this.stateService.mode2dState.getValue(this._viewIndex)
+        });
+        if (signature === this.backgroundLayerSignature) {
+            return;
+        }
+
+        const layer = selectedLayer.type === "xyz"
+            ? this.createXyzBackgroundLayer(selectedLayer, opacity)
+            : this.createWmsBackgroundLayer(selectedLayer, opacity);
+        this.layerRegistry.upsert(DeckMapView.BACKGROUND_LAYER_KEY, layer, -1000);
+        this.backgroundLayerSignature = signature;
+    }
+
+    /** Removes the current background layer and clears the memoized render signature. */
+    private removeBackgroundLayer(): void {
+        this.layerRegistry.remove(DeckMapView.BACKGROUND_LAYER_KEY);
+        this.backgroundLayerSignature = "";
+    }
+
+    /**
+     * Creates the tiled XYZ background layer used for OSM and bundled imagery.
+     *
+     * The deck layer id includes the configured background id so switching
+     * sources forces a fresh TileLayer instance and tile selection pass.
+     */
+    private createXyzBackgroundLayer(layerConfig: XyzBackgroundLayerConfig, opacity: number): TileLayer<string> {
+        return new TileLayer<string>({
+            id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
+            data: layerConfig.urlTemplate,
+            minZoom: layerConfig.minZoom,
+            maxZoom: layerConfig.maxZoom,
+            tileSize: layerConfig.tileSize,
+            extent: layerConfig.extent,
+            opacity,
             pickable: false,
             refinementStrategy: "no-overlap",
             updateTriggers: {
-                renderSubLayers: [clampedOpacity]
+                renderSubLayers: [opacity]
             },
             renderSubLayers: (
                 props: Parameters<NonNullable<TileLayerProps<string>["renderSubLayers"]>>[0]
@@ -1124,15 +1183,48 @@ export abstract class DeckMapView implements IRenderView {
                         boundingBox[1][0],
                         boundingBox[1][1]
                     ],
-                    opacity: clampedOpacity,
+                    opacity,
                     pickable: false,
                     parameters: {depthTest: false}
                 });
             }
         });
-        this.layerRegistry.upsert(DeckMapView.OSM_LAYER_KEY, layer, -1000);
-        this.osmLayerEnabled = true;
-        this.osmLayerOpacity = clampedOpacity;
+    }
+
+    /**
+     * Creates the experimental WMS background layer from the config-driven service parameters.
+     *
+     * The source-specific layer id mirrors the XYZ path so deck does not reuse
+     * stale internal state when the selected background changes.
+     */
+    private createWmsBackgroundLayer(layerConfig: WmsBackgroundLayerConfig, opacity: number): WMSLayer {
+        const imageSource = createImageSource({
+            url: layerConfig.url,
+            type: "wms",
+            wms: {
+                wmsParameters: {
+                    layers: layerConfig.layers,
+                    version: layerConfig.version,
+                    crs: layerConfig.crs,
+                    format: layerConfig.format,
+                    transparent: layerConfig.transparent
+                },
+                vendorParameters: layerConfig.vendorParameters
+            }
+        });
+
+        return new WMSLayer({
+            id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
+            data: imageSource,
+            layers: layerConfig.layers,
+            serviceType: "wms",
+            srs: layerConfig.crs,
+            opacity,
+            pickable: false,
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS,
+            onMetadataLoadError: (error) => console.error("[DeckMapView] Failed to load WMS metadata", error),
+            onImageLoadError: (_requestId, error) => console.error("[DeckMapView] Failed to load WMS image", error)
+        });
     }
 
     /** Schedules one tile-grid overlay refresh on the next animation frame. */

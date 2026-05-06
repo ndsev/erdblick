@@ -7,7 +7,7 @@ Erdblick encodes the full UI state inside the browser URL. That makes it easy to
 - Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll) for each view.
 - Number of map views, which view is focused, view sync flags (position/movement/projection/layers), and 2D/3D projection mode per view.
 - Active maps and the complete layer matrix: which layers are visible in which view and their zoom levels, plus per-view tile-border visibility.
-- Base-map settings: OpenStreetMap overlay toggles and opacity per view.
+- Background-layer settings: selected background id (or off) plus opacity per view.
 - Enabled styles plus the values of all style options per map layer and view.
 - Inspection state: open panels, locked vs. unlocked selections, panel sizes and highlight colors, and any active SourceData selection.
 - Search palette state and the last executed query.
@@ -28,8 +28,7 @@ The table below lists all query parameters used by erdblick when encoding or res
 | `m2d` | Per view | 2D projection mode flag for each view. |
 | `f` | Global | Index of the focused view (0-based), which receives keyboard focus and search-driven camera moves. |
 | `sync` | Global | Enabled view synchronisation flags. Contains a subset of `pos`, `mov`, `proj`, and `lay`. |
-| `osm` | Per view | Base map overlay enablement for each view. |
-| `osmOp` | Per view | Base map opacity (0–100), per view. |
+| `bg` | Per view | Background layer id and opacity per view, encoded as `<layerId>~<opacity>`. An empty layer id disables the background for that view. |
 | `l` | Global | Ordered list of map layer identifiers. Other layer-related parameters index into this list. |
 | `v` | Per view | Layer visibility flags per view, aligned with the `l` list. |
 | `tb` | Per view | Tile-border visibility flag per view. |
@@ -52,14 +51,13 @@ When running the visualization-only build or embedding erdblick without UI panel
 | --- | --- |
 | `lon`, `lat`, `alt` | Center position in degrees and altitude in meters. |
 | `h`, `p`, `r` | Camera orientation (radians: heading, pitch, roll). |
-| `osm` | Toggle the base map overlay (`true`/`false`), per view. |
-| `osmOp` | Base map opacity in percent (0–100), per view. |
+| `bg` | Background layer id and opacity, encoded as `<layerId>~<opacity>` per view. |
 | `tll` | Maximum number of tiles to load, per view. |
 
 Example:
 
 ```
-http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&osm=true&osmOp=30&tll=1024
+http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&bg=osm~30&tll=1024
 ```
 
 ## Multi-View State in Query Parameters
@@ -72,6 +70,8 @@ When you enable split view, erdblick still encodes the full layout into the quer
 - The focused view index is stored so that URL replays preserve which pane responds to keyboard shortcuts and search-based camera moves.
 
 You do not need to set these parameters manually for normal usage, but they make generated URLs stable even for complex multi-view layouts.
+
+Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
 
 ## Style Option Encoding in the URL
 

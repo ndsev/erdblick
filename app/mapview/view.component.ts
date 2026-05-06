@@ -30,6 +30,7 @@ import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
 import {Popover} from "primeng/popover";
 import {coreLib} from "../integrations/wasm";
+import {AppConfigService} from "../shared/app-config.service";
 
 
 
@@ -125,16 +126,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     featureIdsContent: string[] = [];
 
     /**
-     * Construct a map view component with deck-backed rendering.
-     * @param mapService The map model service providing access to data
-     * @param featureSearchService
-     * @param stateService The parameter service, used to update
-     * @param jumpService
-     * @param keyboardService
-     * @param menuService
-     * @param coordinatesService Necessary to pass mouse events to the coordinates panel
-     * @param appModeService
-     * @param cdr
+     * Constructs the host component for one deck-backed view, wiring in the shared
+     * map, search, config, and input services the renderer depends on.
      */
     constructor(public mapService: MapDataService,
                 public featureSearchService: FeatureSearchService,
@@ -144,6 +137,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService,
+                public configService: AppConfigService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone
     ) {
@@ -244,11 +238,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService
+                this.menuService, this.coordinatesService, this.stateService, this.configService
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService
+                this.menuService, this.coordinatesService, this.stateService, this.configService
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());

@@ -13,8 +13,8 @@ import {
  * End-to-end tests for multi-view synchronisation.
  *
  * These specs focus on adding a comparison view, synchronising position and
- * projection between views, and verifying that layer visibility and OSM
- * background toggles stay in sync.
+ * projection between views, and verifying that layer visibility and background
+ * toggles stay in sync.
  */
 
 test.describe('Multi-view synchronisation', () => {
@@ -30,12 +30,12 @@ test.describe('Multi-view synchronisation', () => {
         await expect(leftLayerNode).toBeVisible();
         await expect(rightLayerNode).toBeVisible();
 
-        const leftOsmButton = leftTab.getByTestId('osm-toggle-0');
-        const rightOsmButton = rightTab.getByTestId('osm-toggle-1');
-        await expect(leftOsmButton).toBeVisible();
-        await expect(rightOsmButton).toBeVisible();
-        await expect(leftOsmButton.locator('.pi-eye-slash').first()).toBeVisible();
-        await expect(rightOsmButton.locator('.pi-eye-slash').first()).toBeVisible();
+        const leftBackgroundSelect = leftTab.getByTestId('background-select-0');
+        const rightBackgroundSelect = rightTab.getByTestId('background-select-1');
+        await expect(leftBackgroundSelect).toBeVisible();
+        await expect(rightBackgroundSelect).toBeVisible();
+        await expect(leftBackgroundSelect).toContainText('Blue Marble');
+        await expect(rightBackgroundSelect).toContainText('Blue Marble');
 
         const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
         await expect(secondViewCanvas).toBeVisible();
@@ -86,12 +86,11 @@ test.describe('Multi-view synchronisation', () => {
             return !left && !right;
         }, { timeout: 3000 }).toBe(true);
 
-        await leftOsmButton.click();
+        await leftBackgroundSelect.click();
+        await page.getByText('No Background', { exact: true }).click();
 
-        // Both OSM buttons should use the same "eye" icon state.
-        const leftOsmIcon = leftOsmButton.locator('.pi-eye').first();
-        const rightOsmIcon = rightOsmButton.locator('.pi-eye').first();
-        await expect(rightOsmIcon).toBeVisible();
-        await expect(leftOsmIcon).toBeVisible();
+        // The synced right view should track the same "No Background" selection.
+        await expect(leftBackgroundSelect).toContainText('No Background');
+        await expect(rightBackgroundSelect).toContainText('No Background');
     });
 });

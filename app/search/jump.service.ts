@@ -1,6 +1,5 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
-import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "../mapdata/map.service";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
@@ -9,6 +8,7 @@ import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
 import {Cartographic, Rectangle} from "../integrations/geo";
+import {AppConfigService} from "../shared/app-config.service";
 
 /**
  * Response shape returned by the backend /locate endpoint for jump-target resolution.
@@ -72,39 +72,13 @@ export class JumpTargetService {
     /**
      * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
      */
-    constructor(private httpClient: HttpClient,
-                private mapService: MapDataService,
+    constructor(private mapService: MapDataService,
                 private messageService: InfoMessageService,
                 private menuService: RightClickMenuService,
                 private stateService: AppStateService,
-                private searchService: FeatureSearchService) {
-        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
-            next: (data: any) => {
-                try {
-                    if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
-                        let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
-                        if (jumpTargetsConfig !== undefined) {
-                            const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
-                            // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
-                            this.loadJumpTargetsModule(jumpTargetsPath)
-                                .then((plugin) => plugin.default() as Array<SearchTarget>)
-                                .then((jumpTargets: Array<SearchTarget>) => {
-                                    this.extJumpTargets = jumpTargets;
-                                    this.update();
-                                }).catch((error) => {
-                                    console.error(error);
-                                });
-                            return;
-                        }
-                    }
-                } catch (error) {
-                    console.error(error);
-                }
-            },
-            error: error => {
-                console.error(error);
-            }
-        });
+                private searchService: FeatureSearchService,
+                private configService: AppConfigService) {
+        this.loadConfiguredJumpTargets();
 
         // Filter out feature jump targets based on search value.
         this.targetValueSubject.subscribe(_ => {
@@ -118,6 +92,25 @@ export class JumpTargetService {
                 this.stateService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
             }
         });
+    }
+
+    /** Loads optional jump-target plugins declared in the shared frontend config. */
+    private loadConfiguredJumpTargets() {
+        const jumpTargetsConfig = this.configService.getExtensionModuleId("jumpTargets");
+        if (!jumpTargetsConfig) {
+            return;
+        }
+
+        const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
+        this.loadJumpTargetsModule(jumpTargetsPath)
+            .then((plugin) => plugin.default() as Array<SearchTarget>)
+            .then((jumpTargets: Array<SearchTarget>) => {
+                this.extJumpTargets = jumpTargets;
+                this.update();
+            })
+            .catch((error) => {
+                console.error(error);
+            });
     }
 
     /**

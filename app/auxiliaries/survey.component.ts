@@ -1,16 +1,5 @@
 import {Component, OnDestroy, OnInit} from '@angular/core';
-import {HttpClient} from "@angular/common/http";
-import {Subscription} from "rxjs";
-
-interface SurveyConfig {
-    id: string;
-    link: string;
-    linkHtml: string;
-    start?: string;
-    end?: string;
-    emoji?: string;
-    background?: string;
-}
+import {AppConfigService, SurveyConfig} from "../shared/app-config.service";
 
 @Component({
     selector: 'survey',
@@ -66,27 +55,18 @@ export class SurveyComponent implements OnInit, OnDestroy {
     backgroundColor: string = "blueviolet";
     private fireworksAnimating: boolean = false;
     private fireworksQueue: number = 0;
-    private configSubscription?: Subscription;
     private configApplyTimeout?: number;
 
-    constructor(private httpClient: HttpClient) {
+    constructor(private configService: AppConfigService) {
     }
 
-    /** Loads the survey configuration from `config.json` once the component mounts. */
+    /** Loads the survey configuration once the component mounts. */
     ngOnInit() {
-        this.configSubscription = this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
-            next: (data: any) => {
-                this.scheduleApplySurveyConfig(data);
-            },
-            error: error => {
-                console.error(error);
-            }
-        });
+        this.scheduleApplySurveyConfig(this.configService.snapshot);
     }
 
-    /** Cancels the config subscription and any deferred config-apply callback. */
+    /** Cancels any deferred config-apply callback. */
     ngOnDestroy() {
-        this.configSubscription?.unsubscribe();
         if (this.configApplyTimeout !== undefined) {
             window.clearTimeout(this.configApplyTimeout);
             this.configApplyTimeout = undefined;

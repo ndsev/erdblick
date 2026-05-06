@@ -1390,7 +1390,7 @@ export class MapDataService {
         return this.stateService.getLayerSyncOption(viewIndex);
     }
 
-    /** Mirrors layer, style, and OSM state to sibling views when global view sync is enabled. */
+    /** Mirrors layer, style, and background-layer state to sibling views when global view sync is enabled. */
     private syncViewsIfEnabled(viewIndex: number): SyncViewsResult | null {
         if (!this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
             return null;
@@ -1400,7 +1400,7 @@ export class MapDataService {
             this.applyStyleOptionChange(optionNode, targetIndex);
         }
 
-        this.syncOsmSettingsFromView(viewIndex);
+        this.syncBackgroundSettingsFromView(viewIndex);
 
         return result;
     }
@@ -1429,33 +1429,33 @@ export class MapDataService {
         }
     }
 
-    /** Copies one view's OSM overlay configuration to the other views. */
-    private syncOsmSettingsFromView(viewIndex: number): boolean {
+    /** Copies one view's background-layer selection and opacity to the other views. */
+    private syncBackgroundSettingsFromView(viewIndex: number): boolean {
         const numViews = this.stateService.numViews;
         if (viewIndex < 0 || viewIndex >= numViews) {
             return false;
         }
-        const sourceOsm = this.stateService.getOsmState(viewIndex);
+        const sourceBackground = this.stateService.getBackgroundState(viewIndex);
         let changed = false;
         for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
             if (targetIndex === viewIndex) {
                 continue;
             }
-            const targetOsm = this.stateService.getOsmState(targetIndex);
-            if (targetOsm.enabled !== sourceOsm.enabled || targetOsm.opacity !== sourceOsm.opacity) {
-                this.stateService.setOsmState(targetIndex, sourceOsm.enabled, sourceOsm.opacity);
+            const targetBackground = this.stateService.getBackgroundState(targetIndex);
+            if (targetBackground.layerId !== sourceBackground.layerId || targetBackground.opacity !== sourceBackground.opacity) {
+                this.stateService.setBackgroundState(targetIndex, sourceBackground.layerId, sourceBackground.opacity);
                 changed = true;
             }
         }
         return changed;
     }
 
-    /** Public entry point that syncs OSM settings only when layer sync is globally active. */
-    public syncOsmSettings(viewIndex: number) {
+    /** Public entry point that syncs background-layer settings only when layer sync is globally active. */
+    public syncBackgroundSettings(viewIndex: number) {
         if (!this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
             return;
         }
-        this.syncOsmSettingsFromView(viewIndex);
+        this.syncBackgroundSettingsFromView(viewIndex);
     }
 
     /** Reloads `/sources`, rebuilds the map tree, and refreshes the parser's datasource metadata. */

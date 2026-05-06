@@ -1,5 +1,30 @@
 {
   "styles": [
     {"id":  "Default Style", "url": "default-style.yaml"}
-  ]
+  ],
+  "backgroundLayers": [
+    {
+      "id": "world-overview",
+      "name": "Blue Marble",
+      "type": "xyz",
+      "urlTemplate": "bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg",
+      "attribution": "NASA Blue Marble: Next Generation (July 2004)",
+      "defaultOpacity": 100,
+      "minZoom": 0,
+      "maxZoom": 5,
+      "tileSize": 256
+    },
+    {
+      "id": "osm",
+      "name": "OpenStreetMap",
+      "type": "xyz",
+      "urlTemplate": "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "attribution": "© OpenStreetMap contributors",
+      "defaultOpacity": 6,
+      "minZoom": 0,
+      "maxZoom": 19,
+      "tileSize": 256
+    }
+  ],
+  "defaultBackgroundLayerId": "world-overview"
 }
