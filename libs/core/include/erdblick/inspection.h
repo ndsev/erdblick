@@ -131,6 +131,15 @@ public:
     /** Convert a field using an already translated key. */
     OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
 
+    /**
+     * Store one referenced feature id as inspection node payload.
+     *
+     * Detached feature references may point into another map, so the clickable
+     * inspection metadata must preserve the referenced map id instead of
+     * implicitly inheriting the current feature's tile map.
+     */
+    void assignFeatureReference(InspectionNode& node, mapget::model_ptr<mapget::FeatureId> const& featureId);
+
     /** Intern or reuse a field/value string through the converter's JS string cache. */
     JsValue convertString(const simfil::StringId& f);
     /** Intern or reuse a string_view through the converter's JS string cache. */
