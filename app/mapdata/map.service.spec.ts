@@ -81,6 +81,8 @@ class AppStateServiceStub {
     deckThreadedRenderingEnabledState = new BehaviorSubject<boolean>(true);
     deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersCountState = new BehaviorSubject<number>(2);
+    debugRenderFullGltfAttachmentState = new BehaviorSubject<boolean>(false);
+    debugGltfLoggingEnabledState = new BehaviorSubject<boolean>(false);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
     cameraViewDataState = {
         getValue: vi.fn().mockReturnValue({
@@ -113,6 +115,14 @@ class AppStateServiceStub {
 
     get tilePullCompressionEnabled() {
         return this.tilePullCompressionEnabledState.getValue();
+    }
+
+    get debugRenderFullGltfAttachment() {
+        return this.debugRenderFullGltfAttachmentState.getValue();
+    }
+
+    get debugGltfLoggingEnabled() {
+        return this.debugGltfLoggingEnabledState.getValue();
     }
 
     get pinLowFiToMaxLod() {
@@ -411,6 +421,7 @@ describe('MapDataService', () => {
             isDirty: vi.fn().mockReturnValue(true),
             renderRank: vi.fn().mockReturnValue(0),
             updateStatus: vi.fn(),
+            setStyleOption: vi.fn(),
         } as any;
         const disabledVisu = {
             tile,
@@ -421,6 +432,7 @@ describe('MapDataService', () => {
             isDirty: vi.fn().mockReturnValue(false),
             renderRank: vi.fn().mockReturnValue(1),
             updateStatus: vi.fn(),
+            setStyleOption: vi.fn(),
         } as any;
 
         const fakeMapTree = {

@@ -106,7 +106,7 @@ import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.compo
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
-import {AdvancedPreferencesComponent} from "./shared/advanced-preferences.component";
+import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
 
 /** PrimeNG theme preset used across the application. */

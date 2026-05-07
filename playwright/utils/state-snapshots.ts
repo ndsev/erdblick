@@ -2,13 +2,34 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const SNAPSHOT_FILE_PATTERN = /\.json$/i;
-const SNAPSHOTS_DIR = path.join(process.cwd(), 'test', 'states');
+
+function isStyleOptionStorageKey(key: string): boolean {
+    if (!key) {
+        return false;
+    }
+    const parts = key.split('~');
+    if (parts.length < 3) {
+        return false;
+    }
+    return /^\d+(?:-\d+)*$/.test(parts[1]);
+}
+
+function snapshotsDir(): string {
+    const configuredDir = process.env["EB_TEST_STATES_DIR"]?.trim();
+    if (configuredDir) {
+        return path.isAbsolute(configuredDir)
+            ? configuredDir
+            : path.resolve(process.cwd(), configuredDir);
+    }
+    return path.join(process.cwd(), 'test', 'states');
+}
 
 export function listStateSnapshots(): string[] {
-    if (!fs.existsSync(SNAPSHOTS_DIR)) {
+    const dir = snapshotsDir();
+    if (!fs.existsSync(dir)) {
         return [];
     }
-    return fs.readdirSync(SNAPSHOTS_DIR)
+    return fs.readdirSync(dir)
         .filter(fileName => SNAPSHOT_FILE_PATTERN.test(fileName))
         .sort((a, b) => a.localeCompare(b));
 }
@@ -29,7 +50,7 @@ export function loadStateSnapshotLocalStorageEntries(selectedSnapshot: string | 
         );
     }
 
-    const snapshotPath = path.join(SNAPSHOTS_DIR, selectedFileName);
+    const snapshotPath = path.join(snapshotsDir(), selectedFileName);
     const raw = fs.readFileSync(snapshotPath, {encoding: 'utf8'});
     const parsed = JSON.parse(raw);
 
@@ -39,7 +60,14 @@ export function loadStateSnapshotLocalStorageEntries(selectedSnapshot: string | 
 
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        entries[key] = JSON.stringify(value);
+        if (isStyleOptionStorageKey(key)) {
+            if (typeof value !== 'string') {
+                throw new Error(`State snapshot '${selectedFileName}' style option '${key}' must be a string.`);
+            }
+            entries[key] = value;
+        } else {
+            entries[key] = JSON.stringify(value);
+        }
     }
     return entries;
 }

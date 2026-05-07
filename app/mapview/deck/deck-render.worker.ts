@@ -22,11 +22,16 @@ import {
 } from "./deck-render.worker.protocol";
 
 const styleTextEncoder = new TextEncoder();
+/** Parser cache keyed by datasource metadata so workers do not rebuild parser state for every tile. */
 const parserCache = new Map<string, TileLayerParser>();
+/** Style cache keyed by raw YAML source so repeated renders reuse parsed wasm style objects. */
 const styleCache = new Map<string, FeatureLayerStyle>();
 
+/** Strongly typed handle for the wasm deck visualization constructor exposed after init. */
 type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
+/** Strongly typed handle for the wasm `RuleFidelity` enum object. */
 type RuleFidelityEnum = ErdblickCore_["RuleFidelity"];
+/** Deck visualization variant that exposes the packed binary render result to the worker. */
 type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
     renderResult(): DeckVisualizationBufferResult;
 };
@@ -97,6 +102,7 @@ function resolveHighlightMode(modeValue: number): HighlightMode {
     if (modeValue === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value) {
         return coreLib.HighlightMode.SELECTION_HIGHLIGHT;
     }
+    // Unknown values should degrade to the base pass, not create highlight-only render output.
     return coreLib.HighlightMode.NO_HIGHLIGHT;
 }
 
@@ -109,6 +115,7 @@ function resolveFidelity(fidelityValue: number): RuleFidelity {
     if (fidelityValue === ruleFidelity.LOW.value) {
         return ruleFidelity.LOW;
     }
+    // Unknown values fall back to ANY so the worker keeps rendering instead of silently dropping geometry.
     return ruleFidelity.ANY;
 }
 
@@ -154,6 +161,26 @@ function transferPathBucket(bucket: DeckGeometryBucketBuffers["pathWorld"]): Arr
     ];
 }
 
+/** Collects transferable buffers for one packed GLTF-node bucket. */
+function transferGltfBucket(bucket: DeckGeometryBucketBuffers["gltfNodes"]): ArrayBuffer[] {
+    return [
+        bucket.nodeIndices.buffer,
+        bucket.colors.buffer,
+        bucket.depthTests.buffer,
+        bucket.featureAddresses.buffer
+    ];
+}
+
+/** Collects transferable buffers for one packed GLTF picking-proxy bucket. */
+function transferGltfPickProxyBucket(bucket: DeckGeometryBucketBuffers["gltfPickProxies"]): ArrayBuffer[] {
+    return [
+        bucket.positions.buffer,
+        bucket.startIndices.buffer,
+        bucket.nodeIndices.buffer,
+        bucket.featureAddresses.buffer
+    ];
+}
+
 /** Flattens every transferable array buffer from one geometry result. */
 function transferGeometryBuffers(buffers: DeckGeometryBucketBuffers): ArrayBuffer[] {
     return [
@@ -163,7 +190,9 @@ function transferGeometryBuffers(buffers: DeckGeometryBucketBuffers): ArrayBuffe
         ...transferPathBucket(buffers.pathWorld),
         ...transferPathBucket(buffers.pathBillboard),
         ...transferPathBucket(buffers.arrowWorld),
-        ...transferPathBucket(buffers.arrowBillboard)
+        ...transferPathBucket(buffers.arrowBillboard),
+        ...transferGltfBucket(buffers.gltfNodes),
+        ...transferGltfPickProxyBucket(buffers.gltfPickProxies)
     ];
 }
 
@@ -208,6 +237,8 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         }
         baseLayer = deserializedLayers[0];
         overlays.push(...deserializedLayers.slice(1));
+        // Stage fusion happens inside the worker too so the wasm renderer sees the same merged tile view
+        // as the main-thread path.
         attachOverlayChain(baseLayer, overlays);
         const vertexCount = Math.max(0, Math.floor(Number(baseLayer.numVertices())));
 
@@ -231,6 +262,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
             DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY
         ].includes(task.outputMode)
             ? task.outputMode
+            // Guard against stale main-thread enums so the worker still produces a sane full render.
             : DECK_GEOMETRY_OUTPUT_ALL;
         deckVisu.setGeometryOutputMode(normalizedOutputMode);
         const renderStart = performance.now();
@@ -299,6 +331,18 @@ function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
             colors: new Uint8Array(),
             widths: new Float32Array(),
             featureAddresses: new Uint32Array()
+        },
+        gltfNodes: {
+            nodeIndices: new Uint32Array(),
+            colors: new Uint8Array(),
+            depthTests: new Uint8Array(),
+            featureAddresses: new Uint32Array()
+        },
+        gltfPickProxies: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array(),
+            nodeIndices: new Uint32Array(),
+            featureAddresses: new Uint32Array()
         }
     };
 }
@@ -336,6 +380,7 @@ addEventListener("message", async ({data}) => {
 
     const task = message as DeckTileRenderTask;
     try {
+        // `initializeLibrary()` is idempotent; awaiting it here keeps the worker bootstrap simple.
         await initializeLibrary();
         const result = processTileRenderTask(task);
         postMessage(result, transferVisualizationResult(result));

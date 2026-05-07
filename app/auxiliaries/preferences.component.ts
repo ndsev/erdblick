@@ -25,9 +25,9 @@ import {environment} from "../environments/environment";
     selector: 'preferences',
     template: `
         <app-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
-                  [persistLayout]="true" [layoutId]="dialogLayoutId"
-                  (onShow)="onDialogShow()">
+                    [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
+                    [persistLayout]="true" [layoutId]="dialogLayoutId"
+                    (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load</label>
@@ -104,7 +104,7 @@ import {environment} from "../environments/environment";
             </div>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Tile pull compression 
+                <label>Tile pull compression
                     <i class="pi pi-info-circle" pTooltip="Use only when the bandwith is low" tooltipPosition="top"></i>
                 </label>
                 <p-selectButton [options]="toggleOptions"
@@ -130,12 +130,29 @@ import {environment} from "../environments/environment";
                                 (ngModelChange)="setPinLowFiToMaxLod($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Render worker count override 
-                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues" tooltipPosition="top"></i>
+                <label>GLTF debug: render full attachment</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="debugRenderFullGltfAttachmentSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDebugRenderFullGltfAttachment($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>GLTF debug logging</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="debugGltfLoggingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDebugGltfLoggingEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Render worker count override
+                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues"
+                       tooltipPosition="top"></i>
                 </label>
                 <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
                                 [disabled]="!deckThreadedRenderingEnabledSetting"
-                                (ngModelChange)="setDeckStyleWorkersOverride($event)" />
+                                (ngModelChange)="setDeckStyleWorkersOverride($event)"/>
             </div>
             <div class="slider-container">
                 <label [for]="deckStyleWorkersCountInput">Worker count</label>
@@ -165,11 +182,12 @@ import {environment} from "../environments/environment";
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Dark Mode</label>
-                <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
+                <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label"
+                                optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
             <div class="button-container">
                 <label>Collapse Dock automatically</label>
-                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"/>
+                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"></p-toggleswitch>
             </div>
             <p-divider></p-divider>
             <div class="button-container">
@@ -232,6 +250,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
     pinLowFiToMaxLodSetting: boolean = false;
+    debugRenderFullGltfAttachmentSetting: boolean = false;
+    debugGltfLoggingEnabledSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
@@ -280,6 +300,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
             this.pinLowFiToMaxLodSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.debugRenderFullGltfAttachmentState.subscribe(enabled => {
+            this.debugRenderFullGltfAttachmentSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.debugGltfLoggingEnabledState.subscribe(enabled => {
+            this.debugGltfLoggingEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -395,6 +421,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setPinLowFiToMaxLod(enabled: boolean) {
         this.pinLowFiToMaxLodSetting = enabled;
         this.stateService.pinLowFiToMaxLod = enabled;
+    }
+
+    /** Enables or disables the GLTF full-attachment debug render path. */
+    setDebugRenderFullGltfAttachment(enabled: boolean) {
+        this.debugRenderFullGltfAttachmentSetting = enabled;
+        this.stateService.debugRenderFullGltfAttachment = enabled;
+    }
+
+    /** Enables or disables verbose GLTF console diagnostics. */
+    setDebugGltfLoggingEnabled(enabled: boolean) {
+        this.debugGltfLoggingEnabledSetting = enabled;
+        this.stateService.debugGltfLoggingEnabled = enabled;
     }
 
     /** Enables or disables the explicit Deck render-worker count override. */

@@ -90,6 +90,10 @@ public:
 
     /** Resolve the effective RGBA color, including optional color expressions. */
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
+    /** Report whether the rule explicitly overrides the base RGB tint. */
+    [[nodiscard]] bool hasExplicitColor() const;
+    /** Report whether the rule explicitly overrides opacity. */
+    [[nodiscard]] bool hasExplicitOpacity() const;
     /** Return the configured line width or point radius basis value. */
     [[nodiscard]] float width() const;
     /** Report whether emitted geometry should participate in depth testing. */
@@ -205,6 +209,8 @@ private:
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};
     std::string colorExpression_;
+    bool hasExplicitColor_ = false;
+    bool hasExplicitOpacity_ = false;
     float width_ = 1.;
     bool depthTest_ = true;
     std::optional<bool> billboard_;

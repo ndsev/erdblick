@@ -7,8 +7,8 @@ import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate
     template: `
         <app-dialog header="Copyright and Legal Information" [(visible)]="dialogVisible" [modal]="false"
                   [style]="{'min-height': '10em', 'min-width': '40em'}"
-                  [persistLayout]="true" [layoutId]="dialogLayoutId">
-            <div class="dialog-content">
+                  [persistLayout]="false" [layoutId]="dialogLayoutId">
+            <div class="stats-content">
                 <table class="stats-table">
                     <thead>
                         <tr>
@@ -23,32 +23,11 @@ import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate
                         </tr>
                     </tbody>
                 </table>
-                <button pButton type="button" label="Close" icon="pi pi-cross" (click)="close()"></button>
+                <p-button label="Close" icon="pi pi-times" (click)="close()"></p-button>
             </div>
         </app-dialog>
     `,
-    styles: [
-        `
-            .dialog-content {
-                display: flex;
-                flex-direction: column;
-                gap: 1em;
-            }
-            .stats-table {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            .stats-table th, .stats-table td {
-                border: 1px solid #ccc;
-                padding: 0.5em;
-                text-align: left;
-            }
-            .stats-table th {
-                background-color: #f9f9f9;
-                font-weight: bold;
-            }
-        `
-    ],
+    styles: [``],
     standalone: false
 })
 /** Dialog that aggregates map-level legal and copyright notices. */

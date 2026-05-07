@@ -91,6 +91,44 @@ mapview-container {
   width: 100%;
 }
 
+legal-dialog {
+  .p-dialog-header, .p-dialog-content {
+    padding: 0.5em !important;
+  }
+
+  .stats-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+
+    button {
+      width: 100%;
+    }
+
+    .stats-table {
+      width: 100%;
+      border-collapse: collapse;
+
+      th, td {
+        border: 1px solid var(--p-content-border-color);
+        padding: 0.25em;
+        text-align: left;
+      }
+
+      th {
+        background: var(--p-highlight-background);
+        color: var(--p-treetable-row-color);
+        font-weight: bold;
+      }
+
+      tr {
+        background: var(--p-treetable-row-background);
+        color: var(--p-treetable-row-color);
+      }
+    }
+  }
+}
+
 main-bar {
   position: absolute;
   top: 0.15em;
@@ -100,6 +138,15 @@ main-bar {
   flex-direction: row;
   align-items: center;
   width: 100%;
+
+  .copyright-info {
+    width: 6.5em;
+    font-size: 0.8em;
+    word-wrap: break-word;
+    text-align: end;
+    cursor: pointer;
+    margin-right: 0.5em;
+  }
 
   .maps-button {
     button {

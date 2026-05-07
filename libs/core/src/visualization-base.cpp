@@ -28,6 +28,20 @@ bool hasLocalOffset(glm::dvec3 const& offset)
     return offset.x != .0 || offset.y != .0 || offset.z != .0;
 }
 
+/** Shift an AABB origin by the same local-offset logic used for point geometries. */
+mapget::Point offsetAabbOriginLocally(
+    mapget::Point const& originWgs,
+    glm::dvec3 const& localOffsetMeters)
+{
+    auto const shiftedOrigin = offsetGeometryLocally(
+        SelfContainedGeometry{{originWgs}, GeomType::Points},
+        localOffsetMeters);
+    if (shiftedOrigin.points_.empty()) {
+        return originWgs;
+    }
+    return shiftedOrigin.points_.front();
+}
+
 /** Parsed hover id broken down into the base feature and optional attribute/validity indices. */
 struct ParsedHoverAttributeId {
     std::string_view baseFeatureId_;
@@ -326,6 +340,8 @@ bool FeatureLayerVisualizationBase::geometryPassesRenderFilters(
     case GeomType::Polygon:
     case GeomType::Mesh:
     case GeomType::Line:
+    case GeomType::AABB:
+    case GeomType::GltfNodeIndex:
         return includesNonPointGeometry() || (rule.hasLabel() && includesPointLikeGeometry());
     case GeomType::Points:
         return includesPointLikeGeometry();
@@ -647,6 +663,83 @@ void FeatureLayerVisualizationBase::emitMesh(
     BoundEvalFun& evalFun)
 {
     (void) vertsCartesian;
+    (void) rule;
+    (void) tileFeatureId;
+    (void) evalFun;
+}
+
+void FeatureLayerVisualizationBase::emitAabb(
+    mapget::Point const& originWgs,
+    mapget::Point const& sizeWgs,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    auto const minX = originWgs.x;
+    auto const minY = originWgs.y;
+    auto const minZ = originWgs.z;
+    auto const maxX = originWgs.x + sizeWgs.x;
+    auto const maxY = originWgs.y + sizeWgs.y;
+    auto const maxZ = originWgs.z + sizeWgs.z;
+
+    auto const p000 = mapget::Point{minX, minY, minZ};
+    auto const p001 = mapget::Point{minX, minY, maxZ};
+    auto const p010 = mapget::Point{minX, maxY, minZ};
+    auto const p011 = mapget::Point{minX, maxY, maxZ};
+    auto const p100 = mapget::Point{maxX, minY, minZ};
+    auto const p101 = mapget::Point{maxX, minY, maxZ};
+    auto const p110 = mapget::Point{maxX, maxY, minZ};
+    auto const p111 = mapget::Point{maxX, maxY, maxZ};
+
+    emitMesh(
+        {projectWgsPoint(p000), projectWgsPoint(p100), projectWgsPoint(p110),
+         projectWgsPoint(p000), projectWgsPoint(p110), projectWgsPoint(p010)},
+        rule,
+        tileFeatureId,
+        evalFun);
+    emitMesh(
+        {projectWgsPoint(p001), projectWgsPoint(p011), projectWgsPoint(p111),
+         projectWgsPoint(p001), projectWgsPoint(p111), projectWgsPoint(p101)},
+        rule,
+        tileFeatureId,
+        evalFun);
+    emitMesh(
+        {projectWgsPoint(p000), projectWgsPoint(p001), projectWgsPoint(p101),
+         projectWgsPoint(p000), projectWgsPoint(p101), projectWgsPoint(p100)},
+        rule,
+        tileFeatureId,
+        evalFun);
+    emitMesh(
+        {projectWgsPoint(p010), projectWgsPoint(p110), projectWgsPoint(p111),
+         projectWgsPoint(p010), projectWgsPoint(p111), projectWgsPoint(p011)},
+        rule,
+        tileFeatureId,
+        evalFun);
+    emitMesh(
+        {projectWgsPoint(p000), projectWgsPoint(p010), projectWgsPoint(p011),
+         projectWgsPoint(p000), projectWgsPoint(p011), projectWgsPoint(p001)},
+        rule,
+        tileFeatureId,
+        evalFun);
+    emitMesh(
+        {projectWgsPoint(p100), projectWgsPoint(p101), projectWgsPoint(p111),
+         projectWgsPoint(p100), projectWgsPoint(p111), projectWgsPoint(p110)},
+        rule,
+        tileFeatureId,
+        evalFun);
+}
+
+void FeatureLayerVisualizationBase::emitGltfNode(
+    uint32_t nodeIndex,
+    mapget::Point const& aabbOriginWgs,
+    mapget::Point const& aabbSizeWgs,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    (void) nodeIndex;
+    (void) aabbOriginWgs;
+    (void) aabbSizeWgs;
     (void) rule;
     (void) tileFeatureId;
     (void) evalFun;
@@ -1007,6 +1100,27 @@ bool FeatureLayerVisualizationBase::addGeometry(
     if (!geom) {
         return false;
     }
+    if (geom->geomType() == GeomType::AABB) {
+        return addAabbGeometry(
+            geom->aabbOrigin(),
+            geom->aabbSize(),
+            geom->model().stage(),
+            tileFeatureId,
+            rule,
+            evalFun,
+            offset);
+    }
+    if (geom->geomType() == GeomType::GltfNodeIndex) {
+        return addGltfNodeGeometry(
+            geom->gltfNodeIndex(),
+            geom->gltfNodeAabbOrigin(),
+            geom->gltfNodeAabbSize(),
+            geom->model().stage(),
+            tileFeatureId,
+            rule,
+            evalFun,
+            offset);
+    }
     return addGeometry(
         geom->toSelfContained(),
         geom->model().stage(),
@@ -1015,6 +1129,56 @@ bool FeatureLayerVisualizationBase::addGeometry(
         mapLayerStyleRuleId,
         evalFun,
         offset);
+}
+
+bool FeatureLayerVisualizationBase::addAabbGeometry(
+    mapget::Point const& originWgs,
+    mapget::Point const& sizeWgs,
+    std::optional<uint32_t> geometryStage,
+    uint32_t tileFeatureId,
+    FeatureStyleRule const& rule,
+    BoundEvalFun& evalFun,
+    glm::dvec3 const& offset)
+{
+    if (!geometryPassesRenderFilters(GeomType::AABB, geometryStage, rule)) {
+        return false;
+    }
+
+    auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
+    auto const shiftedOriginWgs =
+        hasLocalOffset(offset) ? offsetAabbOriginLocally(originWgs, offset) : originWgs;
+    emitAabb(shiftedOriginWgs, sizeWgs, rule, renderFeatureId, evalFun);
+    return true;
+}
+
+bool FeatureLayerVisualizationBase::addGltfNodeGeometry(
+    uint32_t nodeIndex,
+    mapget::Point const& aabbOriginWgs,
+    mapget::Point const& aabbSizeWgs,
+    std::optional<uint32_t> geometryStage,
+    uint32_t tileFeatureId,
+    FeatureStyleRule const& rule,
+    BoundEvalFun& evalFun,
+    glm::dvec3 const& offset)
+{
+    if (geometryPassesRenderFilters(GeomType::GltfNodeIndex, geometryStage, rule)) {
+        auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
+        emitGltfNode(nodeIndex, aabbOriginWgs, aabbSizeWgs, rule, renderFeatureId, evalFun);
+        return true;
+    }
+
+    // Allow GLTF-backed features to fall back to their exported node AABB when the rule targets
+    // `geometry: ["aabb"]`. This keeps high-fidelity 3D content stylable as cheap boxes without
+    // requiring the backend to duplicate the feature as a second explicit AABB geometry.
+    if (geometryPassesRenderFilters(GeomType::AABB, geometryStage, rule)) {
+        auto const shiftedOriginWgs =
+            hasLocalOffset(offset) ? offsetAabbOriginLocally(aabbOriginWgs, offset) : aabbOriginWgs;
+        auto const renderFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureId;
+        emitAabb(shiftedOriginWgs, aabbSizeWgs, rule, renderFeatureId, evalFun);
+        return true;
+    }
+
+    return false;
 }
 
 bool FeatureLayerVisualizationBase::addGeometry(
@@ -1060,6 +1224,17 @@ bool FeatureLayerVisualizationBase::addGeometry(
             emittedAnyGeometry = true;
         }
         break;
+    case GeomType::AABB:
+        if (includesNonPointGeometry() && geometryForRendering.points_.size() >= 2) {
+            emitAabb(
+                geometryForRendering.points_[0],
+                geometryForRendering.points_[1],
+                rule,
+                renderFeatureId,
+                evalFun);
+            emittedAnyGeometry = true;
+        }
+        break;
     case GeomType::Points:
         if (!includesPointLikeGeometry()) {
             break;
@@ -1098,6 +1273,8 @@ bool FeatureLayerVisualizationBase::addGeometry(
             }
             emittedAnyGeometry = true;
         }
+        break;
+    case GeomType::GltfNodeIndex:
         break;
     }
 

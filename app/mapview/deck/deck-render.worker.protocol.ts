@@ -1,7 +1,11 @@
+/** Render every deck geometry family the wasm renderer can emit. */
 export const DECK_GEOMETRY_OUTPUT_ALL = 0;
+/** Restrict wasm output to point-like geometry so point-only passes skip heavy mesh work. */
 export const DECK_GEOMETRY_OUTPUT_POINTS_ONLY = 1;
+/** Restrict wasm output to non-point geometry for split point-vs-rest render passes. */
 export const DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY = 2;
 
+/** Discriminated set of geometry-output modes understood by both main thread and worker. */
 export type DeckGeometryOutputMode =
     typeof DECK_GEOMETRY_OUTPUT_ALL |
     typeof DECK_GEOMETRY_OUTPUT_POINTS_ONLY |
@@ -76,6 +80,22 @@ export interface DeckPathBucketBuffers {
     dashArrays?: Float32Array;
 }
 
+/** Packed deck GLTF-node buffers emitted by wasm rendering. */
+export interface DeckGltfBucketBuffers {
+    nodeIndices: Uint32Array;
+    colors: Uint8Array;
+    depthTests: Uint8Array;
+    featureAddresses: Uint32Array;
+}
+
+/** Packed simplified GLTF picking-proxy buffers emitted by wasm rendering. */
+export interface DeckGltfPickProxyBucketBuffers {
+    positions: Float32Array;
+    startIndices: Uint32Array;
+    nodeIndices: Uint32Array;
+    featureAddresses: Uint32Array;
+}
+
 /** Expanded label datum used because deck text layers consume object arrays rather than packed buffers. */
 export interface DeckLabelDatum {
     featureAddress: number;
@@ -101,6 +121,8 @@ export interface DeckGeometryBucketBuffers {
     pathBillboard: DeckPathBucketBuffers;
     arrowWorld: DeckPathBucketBuffers;
     arrowBillboard: DeckPathBucketBuffers;
+    gltfNodes: DeckGltfBucketBuffers;
+    gltfPickProxies: DeckGltfPickProxyBucketBuffers;
 }
 
 /** One low-fidelity bundle emitted in addition to the high-fidelity/default geometry buffers. */

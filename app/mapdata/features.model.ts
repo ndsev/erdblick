@@ -41,6 +41,12 @@ export class FeatureTile {
     private featureIdByAddressCache: Map<number, string> = new Map<number, string>();
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
     private vertexCountCache: number | null = null;
+    private glbAttachmentCacheVersion = -1;
+    private glbAttachmentCache: {
+        name: string;
+        bytes: Uint8Array;
+        center: [number, number, number];
+    } | null | undefined = undefined;
     private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
@@ -117,6 +123,8 @@ export class FeatureTile {
         this.fieldDictBlobCache = null;
         this.dataSourceInfoBlobCache = null;
         this.featureIdByAddressCache.clear();
+        this.glbAttachmentCacheVersion = -1;
+        this.glbAttachmentCache = undefined;
         this.dataVersion += 1;
 
         if (this.mapTileKey === "undefined") {
@@ -306,6 +314,35 @@ export class FeatureTile {
         return encoded;
     }
 
+    /** Returns the optional tile-level GLB attachment together with the tile center anchor. */
+    async getGlbAttachmentSnapshot(): Promise<{
+        name: string;
+        bytes: Uint8Array;
+        center: [number, number, number];
+    } | null> {
+        if (this.glbAttachmentCacheVersion === this.dataVersion && this.glbAttachmentCache !== undefined) {
+            return this.glbAttachmentCache;
+        }
+        const snapshot = await this.peekAsync(async (tileFeatureLayer) => {
+            if (!tileFeatureLayer.hasGlbAttachment()) {
+                return null;
+            }
+            const bytes = uint8ArrayFromWasm((buf) => tileFeatureLayer.copyGlbAttachment(buf));
+            if (!bytes) {
+                return null;
+            }
+            const center = coreLib.getTilePosition(tileFeatureLayer.tileId());
+            return {
+                name: tileFeatureLayer.glbAttachmentName(),
+                bytes,
+                center: [center.x, center.y, center.z] as [number, number, number]
+            };
+        });
+        this.glbAttachmentCacheVersion = this.dataVersion;
+        this.glbAttachmentCache = snapshot;
+        return snapshot;
+    }
+
     /**
      * Reconstructs the canonical map tile key from parser metadata.
      * This defends against placeholder keys and older payloads that omit the composed id.
@@ -460,6 +497,8 @@ export class FeatureTile {
         this.stageLoadStates.clear();
         this.tileFeatureLayerBlob = null;
         this.vertexCountCache = null;
+        this.glbAttachmentCacheVersion = -1;
+        this.glbAttachmentCache = undefined;
         this.renderOrderRank = FeatureTile.DEFAULT_RENDER_ORDER;
         this.disposed = true;
     }

@@ -5,7 +5,11 @@ import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from 
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
+import {
+    DeckTileVisualization,
+    DEBUG_GLTF_LOGGING_OPTION_ID,
+    DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID
+} from "../mapview/deck/deck-tile.visualization.model";
 import {
     configureDeckRenderWorkerSettings,
     getDeckRenderWorkerConcurrency,
@@ -130,6 +134,7 @@ export class MapDataService {
     private dataSourceInfoJson: string | null = null;
     private selectionConversionRevision = 0;
     private hoverConversionRevision = 0;
+    private lastHoverRequestSignature = "";
     private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
     private viewportLoadStartedAtMs: number | null = null;
     private viewportRenderCompletedAtMs: number | null = null;
@@ -206,6 +211,12 @@ export class MapDataService {
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
         this.stateService.pinLowFiToMaxLodState.subscribe(() => {
+            this.scheduleUpdate();
+        });
+        this.stateService.debugRenderFullGltfAttachmentState.subscribe(() => {
+            this.scheduleUpdate();
+        });
+        this.stateService.debugGltfLoggingEnabledState.subscribe(() => {
             this.scheduleUpdate();
         });
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -1321,6 +1332,7 @@ export class MapDataService {
             tileId: tileId,
         });
         this.loadedTileLayers.set(tileKey, placeholder);
+        this.lastHoverRequestSignature = "";
         this.tileDataChanged.next({tileKey, tile: placeholder, reason: "placeholder"});
 
         return true;
@@ -1492,6 +1504,7 @@ export class MapDataService {
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (evictTileLayer(tileLayer)) {
                 tileLayer.dispose();
+                this.lastHoverRequestSignature = "";
                 this.tileDataChanged.next({
                     tileKey: tileLayer.mapTileKey,
                     tile: tileLayer,
@@ -2028,6 +2041,7 @@ export class MapDataService {
             return true;
         });
 
+        this.lastHoverRequestSignature = "";
         this.tileDataChanged.next({
             tileKey: tileLayer.mapTileKey,
             tile: tileLayer,
@@ -2127,6 +2141,18 @@ export class MapDataService {
         }
     }
 
+    /** Returns the stable current ordering index of one visible style contribution. */
+    private styleOrder(styleId: string): number {
+        let index = 0;
+        for (const [id] of this.styleService.styles) {
+            if (id === styleId) {
+                return index;
+            }
+            index += 1;
+        }
+        return 0;
+    }
+
     /** Constructs the concrete deck-backed visualization object for one tile/style/highlight combination. */
     private createTileVisualization(
         viewIndex: number,
@@ -2140,7 +2166,8 @@ export class MapDataService {
         featureIdSubset: string[] = [],
         layerKeySuffix = "",
         boxGrid = false,
-        options: Record<string, boolean | number | string> = {}
+        options: Record<string, boolean | number | string> = {},
+        styleOrder: number = 0
     ): ITileVisualization {
         return new DeckTileVisualization(
             viewIndex,
@@ -2155,9 +2182,33 @@ export class MapDataService {
             featureIdSubset,
             layerKeySuffix,
             boxGrid,
-            options,
+            this.withViewerDebugOptions(options),
+            styleOrder,
             (requests) => this.resolveRelationExternalTiles(requests)
         );
+    }
+
+    /** Injects global viewer debug options into one visualization option bag without mutating the caller input. */
+    private withViewerDebugOptions(options: Record<string, boolean | number | string>): Record<string, boolean | number | string> {
+        return {
+            ...options,
+            [DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID]: this.stateService.debugRenderFullGltfAttachment,
+            [DEBUG_GLTF_LOGGING_OPTION_ID]: this.stateService.debugGltfLoggingEnabled
+        };
+    }
+
+    /** Reapplies the global viewer debug toggles to one existing visualization and reports whether it changed. */
+    private applyViewerDebugOptionsToVisualization(visualization: ITileVisualization): boolean {
+        let changed = false;
+        changed = visualization.setStyleOption(
+            DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID,
+            this.stateService.debugRenderFullGltfAttachment
+        ) || changed;
+        changed = visualization.setStyleOption(
+            DEBUG_GLTF_LOGGING_OPTION_ID,
+            this.stateService.debugGltfLoggingEnabled
+        ) || changed;
+        return changed;
     }
 
     /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
@@ -2240,6 +2291,7 @@ export class MapDataService {
         const renderPolicy = this.tileRenderPolicyForView(viewIndex, tileLayer);
         const highFidelityStage = this.getLayerHighFidelityStage(mapName, layerName);
         const requestedStageDiagnostic = Math.max(0, this.getLayerStageCount(mapName, layerName) - 1);
+        const styleOrder = this.styleOrder(styleId);
         tileLayer.stats.set(
             `Rendering/Policy/View-${viewIndex}/RequestedMaxStage#value`,
             [requestedStageDiagnostic]);
@@ -2255,11 +2307,13 @@ export class MapDataService {
             existing.highFidelityStage = highFidelityStage;
             existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
             existing.maxLowFiLod = renderPolicy.maxLowFiLod;
+            existing.styleOrder = styleOrder;
+            const debugChanged = this.applyViewerDebugOptionsToVisualization(existing);
             if (!stageReady) {
                 existing.updateStatus(false);
                 return;
             }
-            if (existing.isDirty()) {
+            if (debugChanged || existing.isDirty()) {
                 existing.updateStatus(true);
                 this.queueVisualization(viewState, existing);
             }
@@ -2277,7 +2331,8 @@ export class MapDataService {
             [],
             "",
             this.maps.getViewTileBorderState(viewIndex),
-            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId)
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId),
+            styleOrder
         );
         viewState.putVisualization(styleId, tileKey, visu);
         if (!stageReady) {
@@ -2552,6 +2607,15 @@ export class MapDataService {
 
     /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */
     async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
+        const requestSignature = tileFeatureIds
+            .filter((id): id is TileFeatureId => !!id)
+            .map((id) => `${id.mapTileKey}/${id.featureId}`)
+            .sort()
+            .join("|");
+        if (requestSignature === this.lastHoverRequestSignature) {
+            return;
+        }
+        this.lastHoverRequestSignature = requestSignature;
         const revision = ++this.hoverConversionRevision;
         const features = await this.loadFeatures(tileFeatureIds);
         if (revision !== this.hoverConversionRevision) {
@@ -2584,8 +2648,7 @@ export class MapDataService {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
         }
-        const position = features[0].peek((parsedFeature: Feature) => parsedFeature.center());
-        this.moveToWgs84PositionTopic.next({targetView: viewIndex, x: position.x, y: position.y});
+        this.zoomToFeature(viewIndex, features[0]);
     }
 
     /**
@@ -2735,7 +2798,8 @@ export class MapDataService {
                                 featureIds,
                                 groupKey,
                                 false,
-                                styleOptions
+                                styleOptions,
+                                this.styleOrder(style.id)
                             );
                             this.tileVisualizationTopic.next({visualization});
                             visualizationCollection.push(visualization);

@@ -3,7 +3,6 @@ import {HttpClient} from "@angular/common/http";
 import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
 import {z} from "zod";
 
-/** Default background-layer id used when no config-driven override is available. */
 /**
  * Stable internal id for the built-in bundled background.
  *
@@ -44,6 +43,7 @@ export interface BackgroundLayerBaseConfig {
     id: string;
     name: string;
     attribution?: string;
+    headers: Record<string, string>;
     defaultOpacity: number;
     minZoom: number;
     maxZoom: number;
@@ -100,6 +100,7 @@ const BACKGROUND_LAYER_BASE_SCHEMA = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
     attribution: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     defaultOpacity: z.coerce.number().optional(),
     minZoom: z.coerce.number().int().optional(),
     maxZoom: z.coerce.number().int().optional()
@@ -152,6 +153,7 @@ const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
         type: "xyz",
         urlTemplate: "bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg",
         attribution: "NASA Blue Marble: Next Generation (July 2004)",
+        headers: {},
         defaultOpacity: 100,
         minZoom: 0,
         maxZoom: 5,
@@ -163,6 +165,7 @@ const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
         type: "xyz",
         urlTemplate: "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
         attribution: "© OpenStreetMap contributors",
+        headers: {},
         defaultOpacity: 6,
         minZoom: 0,
         maxZoom: 19,
@@ -252,6 +255,7 @@ export class AppConfigService {
 
         const rawBackgroundLayers = parsed.data.backgroundLayers?.length
             ? parsed.data.backgroundLayers
+            // Keep the bundled fallback backgrounds available even when config.json omits the section.
             : DEFAULT_BACKGROUND_LAYERS;
         const backgroundLayers = rawBackgroundLayers.map(layer => this.normalizeBackgroundLayer(layer));
         const defaultBackgroundLayerId = this.resolveDefaultBackgroundLayerId(
@@ -270,13 +274,14 @@ export class AppConfigService {
 
     /** Applies per-layer defaults so rendering code can avoid scattered `undefined` handling. */
     private normalizeBackgroundLayer(layer: z.infer<typeof XYZ_BACKGROUND_LAYER_SCHEMA> | z.infer<typeof WMS_BACKGROUND_LAYER_SCHEMA>): BackgroundLayerConfig {
-        const defaultOpacity = clampBackgroundOpacity(layer.defaultOpacity ?? (layer.type === "xyz" ? 100 : 100));
+        const defaultOpacity = clampBackgroundOpacity(layer.defaultOpacity ?? 100);
         const minZoom = layer.minZoom ?? 0;
         const maxZoom = layer.maxZoom ?? (layer.type === "xyz" ? 19 : 22);
 
         if (layer.type === "xyz") {
             return {
                 ...layer,
+                headers: layer.headers ?? {},
                 defaultOpacity,
                 minZoom,
                 maxZoom,
@@ -286,6 +291,7 @@ export class AppConfigService {
 
         return {
             ...layer,
+            headers: layer.headers ?? {},
             defaultOpacity,
             minZoom,
             maxZoom,
@@ -305,6 +311,8 @@ export class AppConfigService {
         if (requestedDefaultId && backgroundLayers.some(layer => layer.id === requestedDefaultId)) {
             return requestedDefaultId;
         }
+        // Falling back to the first configured layer keeps persisted state valid even when a
+        // previously configured default disappears from a newer config.json.
         return backgroundLayers[0].id;
     }
 }

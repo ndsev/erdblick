@@ -162,6 +162,21 @@ protected:
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun);
+    /** Emit one AABB in renderer-specific form. */
+    virtual void emitAabb(
+        mapget::Point const& originWgs,
+        mapget::Point const& sizeWgs,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    /** Emit one GLTF-backed node reference in renderer-specific form. */
+    virtual void emitGltfNode(
+        uint32_t nodeIndex,
+        mapget::Point const& aabbOriginWgs,
+        mapget::Point const& aabbSizeWgs,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
     /** Emit one point in renderer-specific form. */
     virtual void emitPoint(
         JsValue const& xyzPos,
@@ -250,6 +265,30 @@ protected:
         uint32_t tileFeatureId,
         FeatureStyleRule const& rule,
         std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
+    /** Expand one WGS84 AABB into a mesh-style render primitive. */
+    bool addAabbGeometry(
+        mapget::Point const& originWgs,
+        mapget::Point const& sizeWgs,
+        std::optional<uint32_t> geometryStage,
+        uint32_t tileFeatureId,
+        FeatureStyleRule const& rule,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
+    /**
+     * Emit one GLTF node reference if it passes all current render filters.
+     *
+     * Rules that target `aabb` are also allowed to consume GLTF-backed features via the
+     * node's exported bounding box, so the optional local offset is threaded through here too.
+     */
+    bool addGltfNodeGeometry(
+        uint32_t nodeIndex,
+        mapget::Point const& aabbOriginWgs,
+        mapget::Point const& aabbSizeWgs,
+        std::optional<uint32_t> geometryStage,
+        uint32_t tileFeatureId,
+        FeatureStyleRule const& rule,
         BoundEvalFun& evalFun,
         glm::dvec3 const& offset = {.0, .0, .0});
     /** Emit a synthetic two-point line with consistent label placement hints. */
