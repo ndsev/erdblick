@@ -363,7 +363,7 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
         }
 
         .style-issue-error {
-            color: var(--red-300, #fca5a5);
+            color: var(--p-message-error-color, var(--p-button-danger-background));
         }
 
         .style-issue-warning {
