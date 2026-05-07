@@ -98,6 +98,22 @@ auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
     return "0x" + value.toHex(false);
 }
 
+/** Convert one 3D point to the `[x, y, z]` list format used by inspection arrays. */
+JsValue pointArrayValue(const mapget::Point& point)
+{
+    return JsValue::List({JsValue(point.x), JsValue(point.y), JsValue(point.z)});
+}
+
+/** Compute the center point of an origin/size box description. */
+mapget::Point boxCenter(const mapget::Point& origin, const mapget::Point& size)
+{
+    return {
+        origin.x + size.x * 0.5,
+        origin.y + size.y * 0.5,
+        origin.z + size.z * 0.5
+    };
+}
+
 /** Resolve the layer's configured high-fidelity stage with safe fallbacks for legacy metadata. */
 uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
 {
@@ -345,11 +361,17 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
             FieldOrIndex(key.as<std::string>()),
         ValueType::String);
     std::string typeString;
+    auto pushPointField = [this](std::string_view const& name, mapget::Point const& point) {
+        auto fieldScope = push(name, std::string(name), ValueType::Number | ValueType::ArrayBit);
+        fieldScope->value_ = pointArrayValue(point);
+    };
     switch (g->geomType()) {
     case GeomType::Points: typeString = "Points"; break;
     case GeomType::Line: typeString = "Polyline"; break;
     case GeomType::Polygon: typeString = "Polygon"; break;
     case GeomType::Mesh: typeString = "Mesh"; break;
+    case GeomType::AABB: typeString = "Bounding Box"; break;
+    case GeomType::GltfNodeIndex: typeString = "3D Object"; break;
     }
     geomScope->value_ = convertString(typeString);
     if (auto geometryName = g->name()) {
@@ -357,6 +379,24 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     }
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
+
+    if (g->geomType() == GeomType::AABB) {
+        auto const origin = g->aabbOrigin();
+        auto const size = g->aabbSize();
+        pushPointField("origin", origin);
+        pushPointField("size", size);
+        pushPointField("center", boxCenter(origin, size));
+        return;
+    }
+
+    if (g->geomType() == GeomType::GltfNodeIndex) {
+        auto const origin = g->gltfNodeAabbOrigin();
+        auto const size = g->gltfNodeAabbSize();
+        pushPointField("origin", origin);
+        pushPointField("size", size);
+        pushPointField("center", boxCenter(origin, size));
+        return;
+    }
 
     uint32_t index = 0;
     g->forEachPoint(
@@ -366,7 +406,7 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
                 JsValue(index),
                 index++,
                 ValueType::Number | ValueType::ArrayBit);
-            ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
+            ptScope->value_ = pointArrayValue(pt);
             return true;
         });
 }

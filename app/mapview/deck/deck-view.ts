@@ -3,6 +3,7 @@ import {
     COORDINATE_SYSTEM,
     Deck as DeckGlDeck,
     type DeckProps,
+    type InteractionState,
     MapView as DeckMercatorView,
     type PickingInfo,
     WebMercatorViewport
@@ -146,6 +147,8 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
+    private static readonly HOVER_PICK_THROTTLE_MS = 75;
+    private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
     // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
@@ -200,8 +203,35 @@ export abstract class DeckMapView implements IRenderView {
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
     private isHoveringFeature = false;
+    private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
+    private pendingHoverInfo: PickingInfo | null = null;
+    private lastProcessedHoverPickAtMs = 0;
+    private hoverPickingSuspendedUntilMs = 0;
+    private isCameraInteracting = false;
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
+    /**
+     * Separates visible GLTF rendering from the invisible GLTF pick-proxy pass.
+     *
+     * deck still draws non-pickable layers during picking unless they are filtered out explicitly,
+     * so the visible GLTF layer must be excluded there or it will overwrite the cheap proxy ids.
+     */
+    private readonly deckLayerFilter: DeckProps<DeckMercatorView>["layerFilter"] = ({layer, isPicking}) => {
+        const layerId = String(layer.id ?? "");
+        const layerPickable = Boolean((layer.props as {pickable?: boolean} | undefined)?.pickable);
+        const isGltfPickProxyLayer = layerId.includes("/gltf-pick-proxy");
+        const isVisibleGltfLayer = layerId.includes("/gltf") && !isGltfPickProxyLayer;
+        if (isPicking) {
+            if (!layerPickable) {
+                return false;
+            }
+            if (isGltfPickProxyLayer) {
+                return true;
+            }
+            return !isVisibleGltfLayer;
+        }
+        return !isGltfPickProxyLayer;
+    };
     private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
 
     get viewIndex() {
@@ -254,6 +284,7 @@ export abstract class DeckMapView implements IRenderView {
             viewState: this.viewState,
             layers: [],
             controller: this.createDeckControllerOptions(),
+            layerFilter: this.deckLayerFilter,
             onDeviceInitialized: (device) => {
                 this.deckDevice = device;
             },
@@ -264,7 +295,9 @@ export abstract class DeckMapView implements IRenderView {
                 this.scheduleCanvasResize(width, height);
             },
             getCursor: this.deckCursor,
-            onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
+            onViewStateChange: ({viewState, interactionState}) =>
+                this.onViewStateChange(viewState as DeckCameraState, interactionState),
+            onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
             onHover: (info) => this.onHover(info),
             onClick: (info, event) => this.onClick(info, event)
         };
@@ -288,6 +321,7 @@ export abstract class DeckMapView implements IRenderView {
         this.tickCallbacks.clear();
         this.setFeatureHoverState(false);
         this.hoveredFeatureIds.next(undefined);
+        this.cancelHoverPickScheduling();
         this.layerRegistry.remove(DeckMapView.BACKGROUND_LAYER_KEY);
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
@@ -881,22 +915,59 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Handles deck camera updates in controlled mode and feeds the sanitized state back into app state. */
-    private onViewStateChange(rawViewState: DeckCameraState): void {
+    private onViewStateChange(rawViewState: DeckCameraState, interactionState?: InteractionState): void {
         if (this.suppressDeckViewStateEvent) {
             return;
         }
         if (this.stateService.focusedView !== this._viewIndex) {
             this.stateService.focusedView = this._viewIndex;
         }
+        this.noteCameraInteraction(interactionState);
         // Deck is wired in controlled mode (`viewState` prop). User interactions only
         // take effect if we feed the updated camera state back via `setProps`.
         this.updateViewState(rawViewState, true, true);
         this.pushViewStateToAppState();
     }
 
+    /** Tracks whether the camera is actively moving so hover picking can be suspended. */
+    private onInteractionStateChange(interactionState: InteractionState): void {
+        this.noteCameraInteraction(interactionState);
+    }
+
+    /** Records the latest camera interaction state and temporarily suppresses expensive hover picking. */
+    private noteCameraInteraction(interactionState: InteractionState | undefined): void {
+        if (!interactionState) {
+            return;
+        }
+        this.isCameraInteracting = Boolean(
+            interactionState.isDragging
+            || interactionState.isPanning
+            || interactionState.isRotating
+            || interactionState.isZooming
+            || interactionState.inTransition
+        );
+        this.hoverPickingSuspendedUntilMs = performance.now() + DeckMapView.HOVER_PICK_SUSPEND_AFTER_CAMERA_MS;
+        if (this.isCameraInteracting) {
+            this.cancelHoverPickScheduling();
+        } else if (this.pendingHoverInfo) {
+            this.scheduleHoverPickProcessing();
+        }
+    }
+
+    /** Cancels any pending deferred hover-pick work. */
+    private cancelHoverPickScheduling(): void {
+        if (!this.hoverPickTimer) {
+            return;
+        }
+        clearTimeout(this.hoverPickTimer);
+        this.hoverPickTimer = null;
+    }
+
     /** Updates hover coordinates, hover highlights, and the hover-popover source data. */
     private onHover(info: PickingInfo): void {
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
+            this.pendingHoverInfo = null;
+            this.cancelHoverPickScheduling();
             this.setFeatureHoverState(false);
             void this.mapService.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
@@ -910,6 +981,45 @@ export abstract class DeckMapView implements IRenderView {
                 );
             }
         }
+        this.pendingHoverInfo = info;
+        this.scheduleHoverPickProcessing();
+    }
+
+    /** Schedules one throttled hover pick once the camera is idle enough for interactive picking again. */
+    private scheduleHoverPickProcessing(): void {
+        if (this.hoverPickTimer) {
+            return;
+        }
+        const now = performance.now();
+        const nextEligibleAt = Math.max(
+            this.lastProcessedHoverPickAtMs + DeckMapView.HOVER_PICK_THROTTLE_MS,
+            this.hoverPickingSuspendedUntilMs
+        );
+        const delayMs = Math.max(0, nextEligibleAt - now);
+        this.hoverPickTimer = setTimeout(() => {
+            this.hoverPickTimer = null;
+            if (this.isCameraInteracting || performance.now() < this.hoverPickingSuspendedUntilMs) {
+                if (this.pendingHoverInfo) {
+                    // Keep the newest pointer sample queued while the camera is still settling.
+                    this.scheduleHoverPickProcessing();
+                }
+                return;
+            }
+            const pendingInfo = this.pendingHoverInfo;
+            this.pendingHoverInfo = null;
+            if (!pendingInfo) {
+                return;
+            }
+            this.lastProcessedHoverPickAtMs = performance.now();
+            this.processHoverPick(pendingInfo);
+            if (this.pendingHoverInfo) {
+                this.scheduleHoverPickProcessing();
+            }
+        }, delayMs);
+    }
+
+    /** Runs the expensive deck pick once and updates hover state from the resolved feature ids. */
+    private processHoverPick(info: PickingInfo): void {
         const featureIds = this.pickFeature({x: info.x, y: info.y});
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
@@ -1121,6 +1231,8 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         if (!this.stateService.mode2dState.getValue(this._viewIndex) && selectedLayer.type === "wms") {
+            // WMS backgrounds remain a 2D-only option in erdblick. Dropping them here avoids
+            // carrying an unstable layer into pitched 3D views where it cannot render correctly.
             this.removeBackgroundLayer();
             return;
         }
@@ -1132,6 +1244,7 @@ export abstract class DeckMapView implements IRenderView {
             mode2d: this.stateService.mode2dState.getValue(this._viewIndex)
         });
         if (signature === this.backgroundLayerSignature) {
+            // Skip deck layer churn when only unrelated state changed.
             return;
         }
 
@@ -1149,22 +1262,64 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
+     * Builds a fetch override for authenticated background layers while preserving deck/loaders.gl
+     * request options such as abort signals.
+     */
+    private createBackgroundFetchOverride(headers: Readonly<Record<string, string>>): typeof fetch | undefined {
+        if (Object.keys(headers).length === 0) {
+            return undefined;
+        }
+
+        return async (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+            const mergedHeaders = new Headers(init?.headers);
+            for (const [name, value] of Object.entries(headers)) {
+                mergedHeaders.set(name, value);
+            }
+
+            return fetch(input, {
+                ...init,
+                headers: mergedHeaders
+            });
+        };
+    }
+
+    /** Wraps the optional background fetch override in the deck/loaders.gl `loadOptions` structure. */
+    private createBackgroundLoadOptions(headers: Readonly<Record<string, string>>): {core: {fetch: typeof fetch}} | undefined {
+        const fetchOverride = this.createBackgroundFetchOverride(headers);
+        if (!fetchOverride) {
+            return undefined;
+        }
+
+        return {
+            core: {
+                fetch: fetchOverride
+            }
+        };
+    }
+
+    /**
      * Creates the tiled XYZ background layer used for OSM and bundled imagery.
      *
      * The deck layer id includes the configured background id so switching
      * sources forces a fresh TileLayer instance and tile selection pass.
+     * The layer also prefers deck's `best-available` refinement so panning
+     * keeps already loaded detailed tiles visible instead of collapsing to a
+     * coarse parent tile while sibling requests are still in flight. When
+     * `headers` are configured, tile requests use them for authenticated
+     * HTTP endpoints without changing local bundled backgrounds.
      */
     private createXyzBackgroundLayer(layerConfig: XyzBackgroundLayerConfig, opacity: number): TileLayer<string> {
         return new TileLayer<string>({
             id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
             data: layerConfig.urlTemplate,
+            loadOptions: this.createBackgroundLoadOptions(layerConfig.headers),
             minZoom: layerConfig.minZoom,
             maxZoom: layerConfig.maxZoom,
             tileSize: layerConfig.tileSize,
             extent: layerConfig.extent,
             opacity,
             pickable: false,
-            refinementStrategy: "no-overlap",
+            refinementStrategy: "best-available",
             updateTriggers: {
                 renderSubLayers: [opacity]
             },
@@ -1196,10 +1351,14 @@ export abstract class DeckMapView implements IRenderView {
      * Creates the experimental WMS background layer from the config-driven service parameters.
      *
      * The source-specific layer id mirrors the XYZ path so deck does not reuse
-     * stale internal state when the selected background changes.
+     * stale internal state when the selected background changes. WMS metadata
+     * and image requests reuse the same optional header override as XYZ tiles.
      */
     private createWmsBackgroundLayer(layerConfig: WmsBackgroundLayerConfig, opacity: number): WMSLayer {
         const imageSource = new WMSImageSource(layerConfig.url, {
+            core: {
+                loadOptions: this.createBackgroundLoadOptions(layerConfig.headers) ?? {}
+            },
             wms: {
                 wmsParameters: {
                     layers: layerConfig.layers,

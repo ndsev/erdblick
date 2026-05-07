@@ -421,6 +421,7 @@ describe('MapDataService', () => {
             isDirty: vi.fn().mockReturnValue(true),
             renderRank: vi.fn().mockReturnValue(0),
             updateStatus: vi.fn(),
+            setStyleOption: vi.fn(),
         } as any;
         const disabledVisu = {
             tile,
@@ -431,6 +432,7 @@ describe('MapDataService', () => {
             isDirty: vi.fn().mockReturnValue(false),
             renderRank: vi.fn().mockReturnValue(1),
             updateStatus: vi.fn(),
+            setStyleOption: vi.fn(),
         } as any;
 
         const fakeMapTree = {

@@ -81,6 +81,18 @@ function emptyRenderResult(): any {
             widths: new Float32Array(),
             featureAddresses: new Uint32Array()
         },
+        gltfNodes: {
+            nodeIndices: new Uint32Array(),
+            colors: new Uint8Array(),
+            depthTests: new Uint8Array(),
+            featureAddresses: new Uint32Array()
+        },
+        gltfPickProxies: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array(),
+            nodeIndices: new Uint32Array(),
+            featureAddresses: new Uint32Array()
+        },
         coordinateOrigin: new Float64Array([0, 0, 0]),
         labelWorld: [],
         labelBillboard: [],
@@ -1308,6 +1320,7 @@ describe("DeckTileVisualization", () => {
                 "",
                 false,
                 {},
+                0,
                 relationExternalTileLoader
             ) as any;
 

@@ -484,6 +484,47 @@ In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces
 - For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into render primitives held by `MergedPointsTile`.
 - When styles or view sync options change, `MapDataService.addTileFeatureLayer` clears and rebuilds `visualizationQueue` so that tiles are re-rendered with the new configuration.
 
+### GLTF Runtime Architecture
+
+GLTF-backed features add one extra layer of structure on top of the normal point/line/polygon rendering path:
+
+- The backend attaches one GLB payload to the whole tile layer, while individual features reference node subsets inside that GLB.
+- The WASM renderer therefore emits two GLTF-specific outputs:
+  - visible node references (`gltfNodes`)
+  - simplified per-node picking proxies (`gltfPickProxies`) derived from the node AABBs
+
+At runtime, `DeckTileVisualization` does **not** instantiate one deck layer per style rule for GLTF data. Instead it feeds a shared registry entry per tile/variant:
+
+- one shared visible `DeckGltfNodeLayer`
+- one shared invisible `DeckGltfPickProxyLayer`
+
+This is important for both correctness and performance:
+
+- the visible GLTF scenegraph should only be instantiated once per tile/version
+- hover and selection should restyle the same node set instead of creating duplicate model layers
+- picking should use the cheap proxy geometry instead of the real textured GLTF meshes
+
+The contribution flow looks like this:
+
+1. Each style visualization contributes visible GLTF node styling into the shared visible layer.
+2. Only the base, non-highlight pass contributes picking proxies into the shared pick layer.
+3. The visible layer resolves the contribution stack per `featureAddress/nodeIndex`.
+
+Current precedence is:
+
+- base style contributions
+- hover overrides
+- selection overrides
+
+For GLTF features, hover and selection are therefore implemented as temporary style overrides on the shared node set, not as separate model instantiations. This is why `mode: hover` / `mode: selection` GLTF rules are currently best understood as tint/depth overrides, not as full geometric restyling.
+
+The pick-proxy split is also deliberate:
+
+- the screen pass draws the visible `/gltf` layer and hides `/gltf-pick-proxy`
+- the picking pass draws `/gltf-pick-proxy` and excludes the visible `/gltf` layer
+
+Without that separation, deck's picking pass would sample the real visible GLTF meshes again, which is much slower and can also cause hover flicker when highlight overlays participate in picking.
+
 ### Staged Loading and LOD Policy
 
 Erdblick must treat backend stage metadata as authoritative and avoid hard-coding “stage 0 means low-fi” assumptions. The important inputs are:

@@ -75,8 +75,8 @@ The `config/` directory in the erdblick source tree controls UI-side metadata:
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
   - `backgroundLayers`: optional array of raster backgrounds shown in the Maps panel. Supported types are:
-    - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, and `defaultOpacity`.
-    - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, `vendorParameters`, and `defaultOpacity`.
+    - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`.
+    - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, optional HTTP `headers`, optional `vendorParameters`, and `defaultOpacity`.
   - `defaultBackgroundLayerId`: optional id of the background enabled by default for new views.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.
@@ -108,6 +108,8 @@ Additional styles are loaded after base styles. If an additional style has the s
 Packaging-specific conveniences, such as MapViewer Docker's `/custom-styles` mount and directory wildcard expansion, are implemented by the hosting application before erdblick sees the config.
 
 Background-layer URLs follow normal browser semantics. Relative and root-relative paths such as `bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg` or `/imagery/ortho/{z}/{x}/{y}.jpg` work immediately when your web server exposes those paths. Raw server filesystem paths are not supported in `config.json`; publish them through static aliases or reverse-proxy routes instead.
+
+If an XYZ or WMS background needs HTTP authentication, add a `headers` object to that background entry. Erdblick attaches those headers to tile, metadata, and WMS image requests. The remote service must still allow those custom headers via CORS if it is served from another origin.
 
 WMS backgrounds are currently marked experimental in the UI because they rely on deck.gl’s experimental `WMSLayer`. They are intended for 2D use first and may not behave correctly in pitched 3D views.
 

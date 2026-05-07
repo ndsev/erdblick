@@ -1290,7 +1290,9 @@ export class AppStateService implements OnDestroy {
             const valueHash = this.stateValueHashForMeta(state);
             this.currentConfigDefaultKeys.add(key);
             this.configDefaultValueHashes.set(key, valueHash);
-            this.setMetaOwner(key, "config", valueHash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", valueHash);
+            }
         }
 
         const serializedStyleOptions = this.stylesState.serialize(false) ?? {};
@@ -1304,7 +1306,9 @@ export class AppStateService implements OnDestroy {
             const valueHash = hashStateValue(serializedValue);
             this.currentConfigDefaultKeys.add(key);
             this.configDefaultValueHashes.set(key, valueHash);
-            this.setMetaOwner(key, "config", valueHash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", valueHash);
+            }
         }
 
         this.persistConfigDefaultStateMeta();
@@ -1523,6 +1527,15 @@ export class AppStateService implements OnDestroy {
 
     private setMetaOwner(key: string, owner: "config" | "user", valueHash: string): void {
         this.configDefaultStateMeta.entries[key] = {owner, valueHash};
+    }
+
+    /**
+     * Returns whether a freshly seeded config default may claim the persisted
+     * slot instead of preserving an existing user or legacy local override.
+     */
+    private configDefaultMayOwnStorageKey(key: string): boolean {
+        const metaEntry = this.configDefaultStateMeta.entries[key];
+        return metaEntry?.owner === "config" || localStorage.getItem(key) === null;
     }
 
     private stateValueHashForMeta(state: AppState<unknown>): string {
