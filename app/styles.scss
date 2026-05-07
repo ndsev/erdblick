@@ -3066,6 +3066,7 @@ inspection-tree {
 
 .tile-grid-toggle-row,
 .tile-grid-mode-row,
+.background-toggle-row,
 .background-opacity-row,
 .background-details {
   display: flex;
@@ -3074,7 +3075,8 @@ inspection-tree {
 }
 
 .tile-grid-toggle-row,
-.tile-grid-mode-row {
+.tile-grid-mode-row,
+.background-toggle-row {
   justify-content: space-between;
 }
 
@@ -3319,6 +3321,9 @@ inspection-tree {
       }
 
       .p-tag {
+        width: 5.5em;
+        justify-content: flex-start;
+
         div {
           display: flex;
           flex-direction: row;
@@ -3331,13 +3336,6 @@ inspection-tree {
     .p-button {
       width: 1.75em !important;
       height: 1.75em !important;
-    }
-
-    .close-view-button {
-      .p-button {
-        background-color: var(--p-badge-danger-background);
-        border-color: var(--p-badge-danger-background);
-      }
     }
   }
 

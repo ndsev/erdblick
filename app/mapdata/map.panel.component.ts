@@ -38,27 +38,27 @@ interface BackgroundLayerOption {
                   'border-bottom-left-radius': '0 !important' }">
             <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
                       (mousedown)="$event.stopPropagation()"/>
-            <p-accordion data-testid="map-tabs" [value]="['0']">
+            <p-accordion data-testid="map-tabs" [value]="['0']" [multiple]="true">
                 @for (index of viewIndices; track index) {
                     <p-accordion-panel class="map-tab" [value]="index" [attr.data-testid]="getMapTabTestId(index)">
                         <p-accordion-header>
                             <div class="maps-header">
                                 <div class="maps-view-title">
                                     @if (stateService.numViews > 1) {
-                                        <p-tag severity="success" [rounded]="true">
+                                        <p-tag severity="info" [rounded]="true">
                                             @if (index < 1) {
                                                 <div>
                                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                                         splitscreen_left
                                                     </span>
-                                                    <span>Left View</span>
+                                                    <span>Left</span>
                                                 </div>
                                             } @else {
                                                 <div>
                                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                                         splitscreen_right
                                                     </span>
-                                                    <span>Right View</span>
+                                                    <span>Right</span>
                                                 </div>
                                             }
                                         </p-tag>
@@ -98,10 +98,11 @@ interface BackgroundLayerOption {
                                             opacity
                                         </span>
                                     </p-button>
-                                    @if (index > 1) {
+                                    @if (viewIndices.length > 1) {
                                         <p-button onEnterClick (click)="removeView($event, index)" class="close-view-button"
                                                   icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
-                                                  tooltipPosition="bottom" tabindex="0">
+                                                  [styleClass]="'map-controls-button p-button-secondary'"
+                                                  tooltipPosition="bottom" tabindex="0" [disabled]="index < 1">
                                         </p-button>
                                     }
                                     <p-popover #tileGridPopover [baseZIndex]="30000">
@@ -142,6 +143,13 @@ interface BackgroundLayerOption {
                                     </p-popover>
                                     <p-popover #backgroundPopover [baseZIndex]="30000">
                                         <div class="background-settings-popover" [attr.data-testid]="getBackgroundPopoverTestId(index)">
+                                            <div class="background-toggle-row">
+                                                <label [for]="'background-enabled-' + index">Background</label>
+                                                <p-toggleswitch [ngModel]="isBackgroundEnabled(index)"
+                                                                (ngModelChange)="setBackgroundEnabled(index, $event)"
+                                                                [inputId]="'background-enabled-' + index"
+                                                                [attr.data-testid]="getBackgroundEnabledTestId(index)"/>
+                                            </div>
                                             <p-select class="background-layer-select"
                                                       [attr.data-testid]="getBackgroundSelectTestId(index)"
                                                       [options]="backgroundOptions[index]"
@@ -150,11 +158,13 @@ interface BackgroundLayerOption {
                                                       optionLabel="label"
                                                       optionValue="value"
                                                       optionDisabled="disabled"
+                                                      [disabled]="!isBackgroundEnabled(index) || !backgroundOptions[index]?.length"
+                                                      placeholder="Select Background"
                                                       appendTo="body"
                                                       tabindex="0">
                                                 <ng-template let-option pTemplate="selectedItem">
                                                     <div class="background-option">
-                                                        <span class="background-option-label">{{ option?.label ?? 'No Background' }}</span>
+                                                        <span class="background-option-label">{{ option?.label ?? 'Select Background' }}</span>
                                                         @if (option?.experimental) {
                                                             <span class="background-badges">
                                                                 <p-tag severity="warn" value="EXPERIMENTAL" />
@@ -386,6 +396,7 @@ export class MapPanelComponent {
     backgroundOpacityValue: number[] = [100];
     backgroundOptions: BackgroundLayerOption[][] = [[]];
     backgroundDetails: string[] = [""];
+    lastEnabledBackgroundLayerIds: Array<string | null> = [];
     tileBordersEnabled: boolean[] = [];
     tileGridModes: TileGridMode[] = [];
 
@@ -514,22 +525,23 @@ export class MapPanelComponent {
             this.createBackgroundOptions(index, backgroundLayers));
         this.backgroundDetails = Array.from({length: numViews}, (_, index) =>
             this.backgroundDetailText(index, backgroundLayers));
+        this.backgroundLayerIds.forEach((layerId, index) => {
+            if (layerId !== null) {
+                this.lastEnabledBackgroundLayerIds[index] = layerId;
+            }
+        });
+        this.lastEnabledBackgroundLayerIds.length = numViews;
     }
 
     /** Builds the background-layer dropdown options for one view, including 3D WMS gating. */
     private createBackgroundOptions(viewIndex: number, backgroundLayers: readonly BackgroundLayerConfig[]): BackgroundLayerOption[] {
         const is2d = this.stateService.mode2dState.getValue(viewIndex);
-        return [{
-            label: "No Background",
-            value: null,
-            disabled: false,
-            experimental: false
-        }, ...backgroundLayers.map(layer => ({
+        return backgroundLayers.map(layer => ({
             label: layer.name,
             value: layer.id,
             disabled: !is2d && layer.type === "wms",
             experimental: layer.type === "wms"
-        }))];
+        }));
     }
 
     /** Summarizes attribution and capability notes for the currently selected background layer. */
@@ -642,8 +654,35 @@ export class MapPanelComponent {
 
     /** Writes the current background-layer selection and opacity for one view back into app state. */
     updateBackgroundLayer(viewIndex: number) {
+        if (this.backgroundLayerIds[viewIndex] !== null) {
+            this.lastEnabledBackgroundLayerIds[viewIndex] = this.backgroundLayerIds[viewIndex];
+        }
         this.stateService.setBackgroundState(viewIndex, this.backgroundLayerIds[viewIndex], this.backgroundOpacityValue[viewIndex]);
         this.mapService.syncBackgroundSettings(viewIndex);
+    }
+
+    /** Returns whether the selected view currently has a background layer enabled. */
+    isBackgroundEnabled(viewIndex: number): boolean {
+        return this.backgroundLayerIds[viewIndex] !== null;
+    }
+
+    /** Enables or disables the selected view background while remembering the last active layer id locally. */
+    setBackgroundEnabled(viewIndex: number, enabled: boolean) {
+        if (!enabled) {
+            if (this.backgroundLayerIds[viewIndex] !== null) {
+                this.lastEnabledBackgroundLayerIds[viewIndex] = this.backgroundLayerIds[viewIndex];
+            }
+            this.backgroundLayerIds[viewIndex] = null;
+            this.updateBackgroundLayer(viewIndex);
+            return;
+        }
+
+        const restoredLayerId = this.lastEnabledBackgroundLayerIds[viewIndex];
+        const restoredOption = this.backgroundOptions[viewIndex]?.find(option =>
+            option.value === restoredLayerId && !option.disabled);
+        const fallbackOption = this.backgroundOptions[viewIndex]?.find(option => !option.disabled);
+        this.backgroundLayerIds[viewIndex] = restoredOption?.value ?? fallbackOption?.value ?? null;
+        this.updateBackgroundLayer(viewIndex);
     }
 
     /** Opens or closes the popup tile-grid controls for the selected view. */
@@ -671,6 +710,11 @@ export class MapPanelComponent {
     /** Returns the stable test id for one background-layer selector. */
     getBackgroundSelectTestId(viewIndex: number): string {
         return `background-select-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one background enable switch. */
+    getBackgroundEnabledTestId(viewIndex: number): string {
+        return `background-enabled-${viewIndex}`;
     }
 
     /** Returns the stable test id for one tile-grid toolbar button. */

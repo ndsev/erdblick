@@ -50,10 +50,18 @@ test.describe('Multi-view synchronisation', () => {
         await expect(rightBackgroundButton).toBeVisible();
         await leftBackgroundButton.click();
         const leftBackgroundSelect = page.getByTestId('background-select-0');
+        const leftBackgroundEnabled = page.getByTestId('background-enabled-0').locator('input');
+        await expect(leftBackgroundEnabled).toBeChecked();
         await expect(leftBackgroundSelect).toBeVisible();
         await expect(leftBackgroundSelect).toContainText('Blue Marble');
+        await leftBackgroundSelect.click();
+        await expect(page.locator('.p-select-option', { hasText: 'No Background' })).toHaveCount(0);
+        await page.keyboard.press('Escape');
+        await page.keyboard.press('Escape');
         await rightBackgroundButton.click();
         const rightBackgroundSelect = page.getByTestId('background-select-1');
+        const rightBackgroundEnabled = page.getByTestId('background-enabled-1').locator('input');
+        await expect(rightBackgroundEnabled).toBeChecked();
         await expect(rightBackgroundSelect).toBeVisible();
         await expect(rightBackgroundSelect).toContainText('Blue Marble');
         await page.keyboard.press('Escape');
@@ -108,14 +116,23 @@ test.describe('Multi-view synchronisation', () => {
         }, { timeout: 3000 }).toBe(true);
 
         await leftBackgroundButton.click();
-        await expect(leftBackgroundSelect).toBeVisible();
-        await leftBackgroundSelect.click();
-        await page.getByText('No Background', { exact: true }).click();
+        await expect(leftBackgroundEnabled).toBeChecked();
+        await leftBackgroundEnabled.click();
+        await expect(leftBackgroundEnabled).not.toBeChecked();
 
-        // The synced right view should track the same "No Background" selection.
-        await expect(leftBackgroundSelect).toContainText('No Background');
+        // The synced right view should track the same disabled background state.
         await page.keyboard.press('Escape');
         await rightBackgroundButton.click();
-        await expect(rightBackgroundSelect).toContainText('No Background');
+        await expect(rightBackgroundEnabled).not.toBeChecked();
+        await page.keyboard.press('Escape');
+
+        await leftBackgroundButton.click();
+        await leftBackgroundEnabled.click();
+        await expect(leftBackgroundEnabled).toBeChecked();
+        await expect(leftBackgroundSelect).toContainText('Blue Marble');
+        await page.keyboard.press('Escape');
+        await rightBackgroundButton.click();
+        await expect(rightBackgroundEnabled).toBeChecked();
+        await expect(rightBackgroundSelect).toContainText('Blue Marble');
     });
 });
