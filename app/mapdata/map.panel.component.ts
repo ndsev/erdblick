@@ -78,7 +78,7 @@ interface BackgroundLayerOption {
                                     <p-button onEnterClick (click)="toggleTileGridPopover($event, tileGridPopover)"
                                               (mousedown)="$event.stopPropagation()"
                                               [attr.data-testid]="getTileGridButtonTestId(index)"
-                                              [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
+                                              [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
                                               [style]="{'padding-left': '0', 'padding-right': '0'}"
                                               icon="" label="" pTooltip="Configure tile grid"
                                               tooltipPosition="bottom" tabindex="0">
@@ -90,7 +90,7 @@ interface BackgroundLayerOption {
                                               (mousedown)="$event.stopPropagation()"
                                               class="background-opacity-button"
                                               [attr.data-testid]="getBackgroundButtonTestId(index)"
-                                              [styleClass]="backgroundLayerIds[index] !== null ? 'map-controls-button p-button-primary' : 'map-controls-button p-button-secondary'"
+                                              [styleClass]="backgroundLayerIds[index] !== null ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
                                               [style]="{'padding-left': '0', 'padding-right': '0'}"
                                               icon="" label="" pTooltip="Configure background layer"
                                               tooltipPosition="bottom" tabindex="0">
