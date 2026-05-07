@@ -31,6 +31,8 @@ import {
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
+const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
+const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
@@ -72,6 +74,22 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+function normalizeFeatureSearchGrouping(value: unknown): number[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const result: number[] = [];
+    for (const item of value) {
+        const numeric = Number(item);
+        if (!Number.isInteger(numeric) || !FEATURE_SEARCH_GROUPING_OPTION_IDS.has(numeric) || result.includes(numeric)) {
+            continue;
+        }
+        result.push(numeric);
+    }
+    return result;
+}
 
 /** Version information shown in diagnostics and about dialogs. */
 export interface Versions {
@@ -675,6 +693,15 @@ export class AppStateService implements OnDestroy {
                 error: Boolish
             })
         })
+    });
+
+    readonly featureSearchGroupingState = this.createState<number[]>({
+        name: 'featureSearchGrouping',
+        defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
+        schema: z.array(z.coerce.number()),
+        toStorage: (value: number[]) => normalizeFeatureSearchGrouping(value),
+        fromStorage: (payload: any): number[] => normalizeFeatureSearchGrouping(payload),
+        snapshotPersist: false
     });
 
     readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
@@ -1676,6 +1703,8 @@ export class AppStateService implements OnDestroy {
             logFilter: {...val.logFilter}
         });
     };
+    get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
+    set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get debugRenderFullGltfAttachment() {return this.debugRenderFullGltfAttachmentState.getValue();}
     set debugRenderFullGltfAttachment(val: boolean) {this.debugRenderFullGltfAttachmentState.next(val);}
     get debugGltfLoggingEnabled() {return this.debugGltfLoggingEnabledState.getValue();}

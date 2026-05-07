@@ -76,6 +76,7 @@ import {MainBarComponent} from "./app.mainbar.component";
 import {IconFieldModule} from 'primeng/iconfield';
 import {InputIconModule} from 'primeng/inputicon';
 import {PopoverModule} from "primeng/popover";
+import {RadioButtonModule} from "primeng/radiobutton";
 import {provideAnimationsAsync} from "@angular/platform-browser/animations/async";
 import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
@@ -262,6 +263,7 @@ export const initializeServices = () => {
         IconFieldModule,
         InputIconModule,
         PopoverModule,
+        RadioButtonModule,
         SelectButtonModule,
         ChipModule,
         Splitter,

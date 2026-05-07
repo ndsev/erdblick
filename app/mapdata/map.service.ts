@@ -2877,7 +2877,15 @@ export class MapDataService {
     /** Toggles the diagnostic tile-border overlay in one view. */
     toggleViewTileBorderVisibility(viewIndex: number) {
         const nextState = !this.maps.getViewTileBorderState(viewIndex);
-        this.maps.setViewTileBorderState(viewIndex, nextState);
+        this.setViewTileBorderVisibility(viewIndex, nextState);
+    }
+
+    /** Sets diagnostic tile-border overlay visibility in one view. */
+    setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
+        if (this.maps.getViewTileBorderState(viewIndex) === enabled) {
+            return;
+        }
+        this.maps.setViewTileBorderState(viewIndex, enabled);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }

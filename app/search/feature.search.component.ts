@@ -1,4 +1,4 @@
-import {Component, ViewChild, ViewContainerRef} from "@angular/core";
+import {Component, OnDestroy, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -11,6 +11,12 @@ import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
+import {Subscription} from "rxjs";
+
+interface FeatureSearchGroupingOption {
+    name: string;
+    value: number;
+}
 
 @Component({
     selector: "feature-search",
@@ -71,7 +77,7 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                         <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
                             <span>Group:</span>
                             <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
-                                           [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
+                                           [showToggleAll]="false" (ngModelChange)="onGroupingOptionsChange($event)"
                                            placeholder="Select Grouping" [maxSelectedLabels]="5"
                                            display="chip" optionLabel="name">
                             </p-multiSelect>
@@ -158,8 +164,9 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 /**
  * Dialog that presents long-running feature-search progress, result grouping, diagnostics, and traces.
  */
-export class FeatureSearchComponent {
+export class FeatureSearchComponent implements OnDestroy {
     readonly featureSearchLayoutId = FEATURE_SEARCH_DIALOG_LAYOUT_ID;
+    private readonly subscriptions = new Subscription();
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
@@ -170,13 +177,13 @@ export class FeatureSearchComponent {
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     resultsTree: TreeNode[] = [];
-    grouping: { name: string, value: number }[] = [
+    grouping: FeatureSearchGroupingOption[] = [
         {name: 'Maps', value: 1},
         {name: 'Layers', value: 2},
         {name: 'Features', value: 3},
         {name: 'Tiles', value: 4}
     ];
-    selectedGroupingOptions: { name: string, value: number }[] = [this.grouping[0]];
+    selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
 
     // Active result panel index
     resultPanelIndex: string = "";
@@ -198,7 +205,17 @@ export class FeatureSearchComponent {
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService) {
-        this.searchService.progress.subscribe(searchState => {
+        this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
+        this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
+            const nextOptions = this.groupingOptionsFromValues(groupingValues);
+            if (this.sameGroupingOptions(this.selectedGroupingOptions, nextOptions)) {
+                return;
+            }
+            this.selectedGroupingOptions = nextOptions;
+            this.recalculateResultsByGroups();
+        }));
+
+        this.subscriptions.add(this.searchService.progress.subscribe(searchState => {
             if (!searchState) {
                 this.awaitedTilesToLoad = 0;
                 this.resultsTree = [];
@@ -216,12 +233,16 @@ export class FeatureSearchComponent {
                 this.resultsStatus = "Loading...";
                 this.canPauseStopSearch = true;
             }
-        });
-        this.searchService.diagnosticsMessages.subscribe(value => {
+        }));
+        this.subscriptions.add(this.searchService.diagnosticsMessages.subscribe(value => {
             this.diagnostics = value;
             if (this.diagnostics.length > 0 && this.results.length === 0)
                 this.resultPanelIndex = 'diagnostics';
-        })
+        }));
+    }
+
+    ngOnDestroy() {
+        this.subscriptions.unsubscribe();
     }
 
     get isPanelVisible(): boolean {
@@ -342,6 +363,27 @@ export class FeatureSearchComponent {
         if (message.fix) {
             this.searchService.fixedDiagnosticsSearchQuery.next(message.fix);
         }
+    }
+
+    onGroupingOptionsChange(options: FeatureSearchGroupingOption[]) {
+        const groupingValues = this.groupingValuesFromOptions(options);
+        this.selectedGroupingOptions = this.groupingOptionsFromValues(groupingValues);
+        this.stateService.featureSearchGrouping = groupingValues;
+        this.recalculateResultsByGroups();
+    }
+
+    private groupingOptionsFromValues(values: number[]): FeatureSearchGroupingOption[] {
+        const selected = new Set(values);
+        return this.grouping.filter(option => selected.has(option.value));
+    }
+
+    private groupingValuesFromOptions(options: FeatureSearchGroupingOption[] | null | undefined): number[] {
+        const selected = new Set((options ?? []).map(option => option.value));
+        return this.grouping.filter(option => selected.has(option.value)).map(option => option.value);
+    }
+
+    private sameGroupingOptions(lhs: FeatureSearchGroupingOption[], rhs: FeatureSearchGroupingOption[]): boolean {
+        return lhs.length === rhs.length && lhs.every((option, index) => option.value === rhs[index]?.value);
     }
 
     /**

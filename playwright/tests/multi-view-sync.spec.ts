@@ -30,12 +30,33 @@ test.describe('Multi-view synchronisation', () => {
         await expect(leftLayerNode).toBeVisible();
         await expect(rightLayerNode).toBeVisible();
 
-        const leftBackgroundSelect = leftTab.getByTestId('background-select-0');
-        const rightBackgroundSelect = rightTab.getByTestId('background-select-1');
+        const leftTileGridButton = leftTab.getByTestId('tile-grid-button-0');
+        await expect(leftTileGridButton).toBeVisible();
+        await leftTileGridButton.click();
+        const leftTileGridPopover = page.getByTestId('tile-grid-popover-0');
+        await expect(leftTileGridPopover).toBeVisible();
+        const leftTileGridModeXyz = leftTileGridPopover.getByTestId('tile-grid-mode-xyz-0');
+        await leftTileGridModeXyz.click();
+        await expect(leftTileGridModeXyz.locator('input')).toBeChecked();
+        const leftTileGridEnabled = leftTileGridPopover.getByTestId('tile-grid-enabled-0').locator('input');
+        await expect(leftTileGridEnabled).toBeChecked();
+        await leftTileGridEnabled.click();
+        await expect(leftTileGridEnabled).not.toBeChecked();
+        await page.keyboard.press('Escape');
+
+        const leftBackgroundButton = leftTab.getByTestId('background-button-0');
+        const rightBackgroundButton = rightTab.getByTestId('background-button-1');
+        await expect(leftBackgroundButton).toBeVisible();
+        await expect(rightBackgroundButton).toBeVisible();
+        await leftBackgroundButton.click();
+        const leftBackgroundSelect = page.getByTestId('background-select-0');
         await expect(leftBackgroundSelect).toBeVisible();
-        await expect(rightBackgroundSelect).toBeVisible();
         await expect(leftBackgroundSelect).toContainText('Blue Marble');
+        await rightBackgroundButton.click();
+        const rightBackgroundSelect = page.getByTestId('background-select-1');
+        await expect(rightBackgroundSelect).toBeVisible();
         await expect(rightBackgroundSelect).toContainText('Blue Marble');
+        await page.keyboard.press('Escape');
 
         const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
         await expect(secondViewCanvas).toBeVisible();
@@ -86,11 +107,15 @@ test.describe('Multi-view synchronisation', () => {
             return !left && !right;
         }, { timeout: 3000 }).toBe(true);
 
+        await leftBackgroundButton.click();
+        await expect(leftBackgroundSelect).toBeVisible();
         await leftBackgroundSelect.click();
         await page.getByText('No Background', { exact: true }).click();
 
         // The synced right view should track the same "No Background" selection.
         await expect(leftBackgroundSelect).toContainText('No Background');
+        await page.keyboard.press('Escape');
+        await rightBackgroundButton.click();
         await expect(rightBackgroundSelect).toContainText('No Background');
     });
 });
