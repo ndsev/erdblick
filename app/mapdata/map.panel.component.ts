@@ -38,7 +38,7 @@ interface BackgroundLayerOption {
                   'border-bottom-left-radius': '0 !important' }">
             <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
                       (mousedown)="$event.stopPropagation()"/>
-            <p-accordion data-testid="map-tabs" [value]="['0']" [multiple]="true">
+            <p-accordion data-testid="map-tabs" [(value)]="mapAccordionValue" [multiple]="true">
                 @for (index of viewIndices; track index) {
                     <p-accordion-panel class="map-tab" [value]="index" [attr.data-testid]="getMapTabTestId(index)">
                         <p-accordion-header>
@@ -389,6 +389,7 @@ export class MapPanelComponent {
 
     subscriptions: Subscription[] = [];
     viewIndices: number[] = [];
+    mapAccordionValue: number[] = [0];
 
     mapsCollapsed: boolean[] = [];
 
@@ -447,7 +448,18 @@ export class MapPanelComponent {
 
         this.subscriptions.push(
             this.stateService.numViewsState.subscribe(numViews => {
+                const previousViewIndices = new Set(this.viewIndices);
                 this.viewIndices = Array.from({length: numViews}, (_, i) => i);
+                const validViewIndices = new Set(this.viewIndices);
+                this.mapAccordionValue = this.mapAccordionValue.filter(index => validViewIndices.has(index));
+                for (const viewIndex of this.viewIndices) {
+                    if (!previousViewIndices.has(viewIndex) && !this.mapAccordionValue.includes(viewIndex)) {
+                        this.mapAccordionValue.push(viewIndex);
+                    }
+                }
+                if (numViews === 1) {
+                    this.mapAccordionValue = [0];
+                }
                 this.tileBordersEnabled = [];
                 this.tileGridModes = [];
                 this.viewIndices.forEach(viewIndex => {
