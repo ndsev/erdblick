@@ -2892,21 +2892,26 @@ inspection-tree {
 }
 
 .feature-search-dialog {
-  .p-dialog {
+  .p-dialog.p-component {
     width: 30em;
     min-width: 25em;
+    min-height: min(32em, calc(100vh - 5em));
+    max-height: calc(100vh - 5em);
     margin: 0 !important;
-    overflow-x: hidden;
+    overflow: hidden;
   }
 
   .p-dialog-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     padding: 0 0.5em 0.5em 0.5em;
-    min-height: 30em;
-    max-height: calc(100vh - 5em);
+    min-height: 0;
     overflow: hidden;
   }
 
   .p-dialog-header {
+    flex: 0 0 2em;
     padding: 0 0 0 0.5em;
     height: 2em;
     overflow: clip;
@@ -3160,25 +3165,44 @@ inspection-tree {
     width: 30em;
     min-height: 18em;
     max-width: calc(100vw - 1em);
+    max-height: calc(100vh - 1em);
+    overflow: hidden;
   }
 
   .p-dialog-header {
     padding: 0.75em;
     height: 2.5em;
+    flex: 0 0 auto;
   }
 
   .p-dialog-content {
-    padding: 0.5em;
+    padding: 0.25em;
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     min-height: 0;
+    overflow: hidden;
 
     .dialog-controls {
+      flex: 0 0 auto;
       margin-top: 0.5em;
       display: flex;
       flex-direction: row;
-      align-content: center;
+      align-items: center;
+      gap: 0.5em;
       justify-content: space-between;
+    }
+
+    .style-sheets-tabs {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .p-tablist {
+      flex: 0 0 auto;
     }
 
     .p-tab {
@@ -3188,8 +3212,50 @@ inspection-tree {
     }
 
     .p-tabpanels {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
       padding: 0.5em 0 0 0;
       font-size: 0.9em;
+    }
+
+    .p-tabpanel {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: scroll;
+      padding: 0.5em;
+    }
+
+    .style-errors-tab {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      gap: 0.5em;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .style-errors-toolbar {
+      flex: 0 0 auto;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .style-errors-table {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .style-errors-table.p-datatable-flex-scrollable {
+      height: 100%;
+    }
+
+    .style-errors-table .p-datatable-table-container {
+      flex: 1 1 auto;
+      min-height: 0;
     }
 
     table {
@@ -3206,13 +3272,14 @@ inspection-tree {
 }
 
 .styles-container {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
-  height: auto;
   min-height: 0;
-  max-height: calc(75vh - 2em);
   overflow: auto;
 
   .p-tree {
+    flex: 0 0 auto;
     padding: 0;
 
     .p-tree-root {
@@ -3248,6 +3315,10 @@ inspection-tree {
         box-shadow: none;
       }
     }
+  }
+
+  .styles-error-list {
+    flex: 0 0 auto;
   }
 }
 
@@ -3518,41 +3589,87 @@ inspection-tree {
 .editor-dialog {
   .spinner {
     display: flex;
+    flex: 1 1 auto;
     justify-content: center;
     width: 100%;
-    height: calc(100% - 4em);
+    min-height: 4em;
     align-items: center;
   }
 
   .p-dialog {
     width: 50em;
     max-width: calc(100vw - 1em);
+    max-height: calc(100vh - 1em);
+    overflow: hidden;
 
     .p-dialog-header {
       padding: 0.75em;
       height: 2.5em;
+      flex: 0 0 auto;
     }
 
     .p-dialog-content {
       padding: 0.5em;
-      max-height: calc(75vh + 3em);
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
       min-width: 0;
+      min-height: 0;
       max-width: 100%;
-      overflow-x: hidden;
+      overflow: hidden;
     }
   }
 
   .cm-editor {
     flex: 1 1 auto;
     width: 100%;
+    height: 100%;
     min-width: 0;
+    min-height: 0;
     max-width: 100%;
   }
 
   .cm-scroller {
     min-width: 0;
+    min-height: 0;
     max-width: 100%;
     overflow-x: auto;
+  }
+
+  .editor-actions,
+  .advanced-preferences-actions {
+    flex: 0 0 auto;
+    margin-top: 0.5em;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+  }
+
+  .editor-actions-left,
+  .editor-actions-right,
+  .advanced-preferences-actions-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5em;
+    min-width: 0;
+  }
+
+  .editor-shortcuts,
+  .editor-status {
+    display: flex;
+    flex: 0 1 18em;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    color: silver;
+    font-size: 1em;
+  }
+
+  .editor-status-warning {
+    color: orange;
   }
 }
 
@@ -3637,13 +3754,16 @@ inspection-tree {
 }
 
 .editor-container {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   width: 100%;
   max-width: 100%;
-  height: calc(100% - 4em);
-  max-height: calc(75vh - 2em);
-  overflow-x: hidden;
-  overflow-y: auto;
+  height: calc(75vh - 2em);
+  max-height: none;
+  overflow: hidden;
   border: 1px solid silver;
 }
 
@@ -3688,6 +3808,15 @@ inspection-tree {
 }
 
 .feature-search-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+
+  .p-tablist {
+    flex: 0 0 auto;
+  }
+
   .p-tab {
     padding: 0.25em 1em;
     margin: 0;
@@ -3695,6 +3824,10 @@ inspection-tree {
   }
 
   .p-tabpanels {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
     padding: 0.5em 0 0 0;
     font-size: 0.9em;
 
@@ -3703,10 +3836,21 @@ inspection-tree {
     }
   }
 
-  // Ensure results tree shows a reasonable viewport height
+  .p-tabpanel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .p-tree {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+
     .p-scroller {
-      height: calc(100vh - 23em) !important;
+      min-height: 0;
+      overflow: auto;
     }
   }
 
@@ -4199,7 +4343,13 @@ inspection-tree {
 
     .editor-container {
       width: 100%;
-      max-height: calc(100% - 3em);
+      height: calc(100vh - 8em);
+      max-height: none;
+    }
+
+    .editor-actions,
+    .advanced-preferences-actions {
+      flex-wrap: wrap;
     }
   }
 
