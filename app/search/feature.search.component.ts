@@ -23,8 +23,8 @@ interface FeatureSearchGroupingOption {
     template: `
         <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
                   [closeOnEscape]="false"
-                  [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
-                  [persistLayout]="true" [layoutId]="featureSearchLayoutId"
+                  [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)" [draggable]="true" [resizable]="true"
+                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="featureSearchLayoutId"
                   (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
@@ -167,6 +167,7 @@ interface FeatureSearchGroupingOption {
 export class FeatureSearchComponent implements OnDestroy {
     readonly featureSearchLayoutId = FEATURE_SEARCH_DIALOG_LAYOUT_ID;
     private readonly subscriptions = new Subscription();
+    featureSearchDialogVisible = false;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
@@ -221,7 +222,10 @@ export class FeatureSearchComponent implements OnDestroy {
                 this.resultsTree = [];
                 return;
             }
-            this.isPanelVisible = true;
+            if (searchState !== this.searchService.currentSearch) {
+                return;
+            }
+            this.featureSearchDialogVisible = true;
             this.percentDone = searchState.percentDone();
             this.totalTiles = searchState.getTaskCount();
             this.doneTiles = searchState.getCompletedCount();
@@ -245,20 +249,22 @@ export class FeatureSearchComponent implements OnDestroy {
         this.subscriptions.unsubscribe();
     }
 
-    get isPanelVisible(): boolean {
-        return this.stateService.isDialogOpen(this.featureSearchLayoutId);
-    }
-
-    set isPanelVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.featureSearchLayoutId, visible);
-    }
-
     /**
      * Recomputes the virtual tree height once the dialog becomes measurable.
      */
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
+    }
+
+    /**
+     * Terminates active search work as soon as PrimeNG starts closing the dialog.
+     */
+    onPanelVisibleChange(visible: boolean) {
+        this.featureSearchDialogVisible = visible;
+        if (!visible) {
+            this.searchService.clear();
+        }
     }
 
     /**
@@ -340,7 +346,7 @@ export class FeatureSearchComponent implements OnDestroy {
     }
 
     /**
-     * Resets dialog-local state and clears the underlying search service when the dialog closes.
+     * Resets dialog-local state after the dialog closes.
      */
     onHide(_: any) {
         this.traces = [];
@@ -352,8 +358,10 @@ export class FeatureSearchComponent implements OnDestroy {
         this.resultsTree = [];
         this.showFilter = false;
         this.resultsStatus = "Loading...";
-        this.searchService.clear();
-        this.isPanelVisible = false;
+        if (this.searchService.currentSearch) {
+            this.searchService.clear();
+        }
+        this.featureSearchDialogVisible = false;
     }
 
     /**
