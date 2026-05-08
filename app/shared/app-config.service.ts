@@ -424,9 +424,7 @@ export class AppConfigService {
                     ? payload.datasourceConfigUnavailableReason
                     : null;
 
-            if (!serverConfig.datasourceConfigUnavailable
-                && payload.erdblick
-                && isPlainObject(payload.erdblick)) {
+            if (payload.erdblick && isPlainObject(payload.erdblick)) {
                 erdblickConfig = this.parseRawConfig(payload.erdblick, "/config.erdblick");
             }
         } catch (error) {

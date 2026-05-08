@@ -32,11 +32,11 @@ describe("AppConfigService", () => {
         expect(config.serverConfig.datasourceConfigUnavailableReason).toBeNull();
     });
 
-    it("keeps static config when /config reports datasourceConfigUnavailable", async () => {
+    it("applies public erdblick config when datasource model is unavailable", async () => {
         const {service, httpClient} = createService();
         const serverBody: ServerConfigResponse = {
             datasourceConfigUnavailable: true,
-            datasourceConfigUnavailableReason: "configPathUnset",
+            datasourceConfigUnavailableReason: "getConfigDisabled",
             erdblick: {
                 styles: [{url: "server.yaml"}]
             }
@@ -50,10 +50,10 @@ describe("AppConfigService", () => {
 
         const config = await service.load();
 
-        expect(config.styles).toEqual([{url: "static.yaml", additional: false}]);
+        expect(config.styles).toEqual([{url: "server.yaml", additional: false}]);
         expect(config.serverConfig.available).toBe(true);
         expect(config.serverConfig.datasourceConfigUnavailable).toBe(true);
-        expect(config.serverConfig.datasourceConfigUnavailableReason).toBe("configPathUnset");
+        expect(config.serverConfig.datasourceConfigUnavailableReason).toBe("getConfigDisabled");
     });
 
     it("overrides static styles only when server styles are non-empty", async () => {
