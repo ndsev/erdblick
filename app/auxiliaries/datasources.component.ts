@@ -26,29 +26,43 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
                 <div class="spinner datasource-loading-spinner">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
-            } @else if (errorMessage || readOnly) {
-                <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+            } @else if (errorMessage) {
+                <div class="editor-actions datasource-message-actions">
+                    <div class="editor-actions-left">
                         <p-button (click)="closeEditorDialog($event)" label="Close" icon="pi pi-times"></p-button>
-                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
-                            <div style="color: orange">
-                                {{ errorMessage ? errorMessage : "Data Source configuration is set to read-only!" }}
+                        <div class="editor-status">
+                            <div class="editor-status-warning">
+                                {{ errorMessage }}
                             </div>
                         </div>
                     </div>
                 </div>
             } @else {
                 <editor [sessionId]="datasourcesEditorSessionId"></editor>
-                <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                        <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
-                                  [disabled]="!wasModified"></p-button>
+                <div class="editor-actions datasource-editor-actions">
+                    <div class="editor-actions-left">
+                        @if (!readOnly) {
+                            <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
+                                      [disabled]="!wasModified"></p-button>
+                        }
                         <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Close"'
                                   icon="pi pi-times"></p-button>
-                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
-                            <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
-                            <div>Press <span style="color: grey">Esc</span> to quit</div>
-                        </div>
+                        @if (readOnly) {
+                            <div class="editor-status">
+                                <div class="editor-status-warning">Data Source configuration is read-only.</div>
+                            </div>
+                        } @else if (datasourceModelHidden) {
+                            <div class="editor-status">
+                                <div class="editor-status-warning">
+                                    Data Source is not readable but is writable. Applying changes will overwrite the configuration.
+                                </div>
+                            </div>
+                        } @else {
+                            <div class="editor-shortcuts">
+                                <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                                <div>Press <span style="color: grey">Esc</span> to quit</div>
+                            </div>
+                        }
                     </div>
                 </div>
             }
@@ -80,6 +94,7 @@ export class DatasourcesComponent {
     loading = false;
     errorMessage = '';
     readOnly = true;
+    datasourceModelHidden = false;
 
     @ViewChild('editorDialog') editorDialog: AppDialogComponent | undefined;
     @ViewChild('warningDialog') warningDialog: AppDialogComponent | undefined;
@@ -161,6 +176,7 @@ export class DatasourcesComponent {
     /** Fetches the current datasource configuration and opens it in the shared JSON editor. */
     private getConfig() {
         this.readOnly = true;
+        this.datasourceModelHidden = false;
         this.errorMessage = '';
         this.loading = true;
         this.http.get('config').subscribe({
@@ -180,9 +196,18 @@ export class DatasourcesComponent {
                     this.loading = false;
                     return;
                 }
+                this.readOnly = data['readOnly'] ?? true;
+                this.datasourceModelHidden = data['datasourceConfigUnavailable'] === true;
+                if (this.datasourceModelHidden && this.readOnly) {
+                    const reason = data['datasourceConfigUnavailableReason'] ?? 'unknown';
+                    this.errorMessage = reason === 'getConfigDisabled'
+                        ? 'Data Source configuration is disabled: GET and POST are disabled.'
+                        : `Data Source configuration is unavailable: ${reason}`;
+                    this.loading = false;
+                    return;
+                }
                 this.schema = data['schema'];
                 this.model = data['model'];
-                this.readOnly = data['readOnly'] ?? true;
                 this.dataSourcesConfig = JSON.stringify(this.model, null, 2);
                 this.loading = false;
                 this.editorService.createSession({

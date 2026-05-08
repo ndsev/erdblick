@@ -247,37 +247,37 @@ interface BackgroundLayerOption {
                                                 [popup]="true"
                                                 appendTo="body"/>
                                         <div class="flex-container">
-                                    <span class="checkbox-entry">
-                                        <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
-                                              (click)="showLayersToggleMenu($event, index, node.id, '')">
-                                                more_vert
-                                        </span>
-                                        <p-checkbox [(ngModel)]="node.visible[index]"
-                                                    (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
-                                                    [binary]="true"
-                                                    [inputId]="index + '_' + node.id"
-                                                    [name]="index + '_' + node.id" tabindex="0"/>
-                                        <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
-                                    </span>
+                                            <span class="checkbox-entry">
+                                                <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
+                                                      (click)="showLayersToggleMenu($event, index, node.id, '')">
+                                                        more_vert
+                                                </span>
+                                                <p-checkbox [(ngModel)]="node.visible[index]"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
+                                                            [binary]="true"
+                                                            [inputId]="index + '_' + node.id"
+                                                            [name]="index + '_' + node.id" tabindex="0"/>
+                                                <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                            </span>
                                             <div class="map-controls">
                                                 <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
                                                           label="" pTooltip="Focus on map" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0"
                                                           *ngIf="flatCoverage(node).length">
-                                            <span class="material-symbols-outlined"
-                                                  style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
-                                                </p-button>
-                                                <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                          pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
-                                                          tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0"
-                                                          [disabled]="!metadataMenusEntries.get(node.id)?.length">
-                                            <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                                data_object
-                                            </span>
+                                                    <span class="material-symbols-outlined"
+                                                          style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                                        </p-button>
+                                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
+                                                                  pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
+                                                                  tooltipPosition="bottom"
+                                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                                  tabindex="0"
+                                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                                        data_object
+                                                    </span>
                                                 </p-button>
                                             </div>
                                         </div>
@@ -287,19 +287,19 @@ interface BackgroundLayerOption {
                                         <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                             <div class="font-bold white-space-nowrap"
                                                  style="display: flex; align-items: center;">
-                                            <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
-                                                  (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
-                                                more_vert
-                                            </span>
+                                                <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
+                                                      (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
+                                                    more_vert
+                                                </span>
                                                 <span class="checkbox-entry">
-                                                <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
-                                                            (click)="$event.stopPropagation()"
-                                                            (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
-                                                            [binary]="true"
-                                                            [inputId]="index + '_' + node.key"
-                                                            [name]="index + '_' + node.key" tabindex="0"/>
-                                                <label [for]="index + '_' + node.key">{{ node.id }}</label>
-                                            </span>
+                                                    <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
+                                                                (click)="$event.stopPropagation()"
+                                                                (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
+                                                                [binary]="true"
+                                                                [inputId]="index + '_' + node.key"
+                                                                [name]="index + '_' + node.key" tabindex="0"/>
+                                                    <label [for]="index + '_' + node.key">{{ node.id }}</label>
+                                                </span>
                                             </div>
                                             <div class="tree-node-controls">
                                                 <p-button onEnterClick *ngIf="node.info.coverage.length"
@@ -307,8 +307,10 @@ interface BackgroundLayerOption {
                                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0">
-                                            <span class="material-symbols-outlined"
-                                                  style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                                    <span class="material-symbols-outlined"
+                                                      style="font-size: 1.2em; margin: 0 auto;">
+                                                        center_focus_strong
+                                                    </span>
                                                 </p-button>
                                                 <p-inputNumber [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"
                                                                (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
@@ -351,7 +353,7 @@ interface BackgroundLayerOption {
                                         </span>
                                         </div>
                                     </ng-template>
-                                    
+                                    <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
                                 </p-tree>
                             </div>
                             </ng-container>

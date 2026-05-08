@@ -44,107 +44,172 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                 </p-tablist>
                 <p-tabpanels>
                     <p-tabpanel value="styles">
-            @if (styleService.styleGroups | async; as styleGroups) {
-                <ng-container>
-                    @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
-                        <div>No styles loaded.</div>
-                    }
-                    <div class="styles-container">
-                        <p-tree [value]="styleGroups" data-testid="style-tree">
-                            <!-- Group Node Template -->
-                            <ng-template let-node pTemplate="Group">
-                            <span>
-                                <p-checkbox [ngModel]="node.visible"
-                                            (click)="$event.stopPropagation()"
-                                            (ngModelChange)="toggleStyleGroup(node.id, $event)"
-                                            [binary]="true"
-                                            [inputId]="node.id"
-                                            [name]="node.id" tabindex="0"/>
-                                <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                            </span>
-                            </ng-template>
-                            <!-- Style Node Template -->
-                            <ng-template let-node pTemplate="Style">
-                                <div class="flex-container" [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)">
-                                    <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-symbols-outlined menu-toggler"
-                                          [attr.data-testid]="'style-menu-button-' + styleTestIdSuffix(node.id)"
-                                          (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
-                                        more_vert
-                                    </span>
-                                        <span>
-                                        <p-checkbox [(ngModel)]="node.visible"
-                                                    [attr.data-testid]="'style-visibility-' + styleTestIdSuffix(node.id)"
+                        <div class="styles-container">
+                            @if (styleService.styleGroups | async; as styleGroups) {
+                                @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
+                                    <div class="styles-empty">No styles loaded.</div>
+                                }
+                                <p-tree [value]="styleGroups" data-testid="style-tree">
+                                    <!-- Group Node Template -->
+                                    <ng-template let-node pTemplate="Group">
+                                    <span>
+                                        <p-checkbox [ngModel]="node.visible"
                                                     (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="applyStyleConfig(node.id)"
+                                                    (ngModelChange)="toggleStyleGroup(node.id, $event)"
                                                     [binary]="true"
                                                     [inputId]="node.id"
-                                                    [name]="node.id"/>
-                                        <label [for]="node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                                        @if (node.additional) {
-                                            <p-tag class="additional-style-tag"
-                                                   [class.clickable-style-tag]="node.overridesBaseStyle"
-                                                   severity="info" value="Additional" [rounded]="true"
-                                                   (click)="openCompareFromAdditionalTag($event, node.id)"/>
-                                        }
-                                        @if (node.modified && !node.imported) {
-                                            <p-tag class="modified-style-tag"
-                                                   severity="warn" value="Modified" [rounded]="true"
-                                                   (click)="openCompareFromModifiedTag($event, node.id)"/>
-                                        }
+                                                    [name]="node.id" tabindex="0"/>
+                                        <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
-                                    </div>
-                                    <div class="tree-node-controls">
-                                        @if (node.imported) {
-                                            <p-button onEnterClick (click)="removeStyle(node.id)"
-                                                      [attr.data-testid]="'style-remove-button-' + styleTestIdSuffix(node.id)"
-                                                      icon="pi pi-trash"
-                                                      label="" pTooltip="Remove style"
-                                                      tooltipPosition="bottom" tabindex="0">
-                                            </p-button>
-                                        } @else {
-                                            <p-button onEnterClick (click)="resetStyle(node.id)"
-                                                      [attr.data-testid]="'style-reset-button-' + styleTestIdSuffix(node.id)"
-                                                      icon="pi pi-refresh"
-                                                      label="" pTooltip="Reset style to server version"
-                                                      tooltipPosition="bottom" tabindex="0">
-                                            </p-button>
-                                        }
-                                        <p-button onEnterClick (click)="showStyleEditor(node.id)"
-                                                  [attr.data-testid]="'style-edit-button-' + styleTestIdSuffix(node.id)"
-                                                  icon="pi pi-file-edit"
-                                                  label="" pTooltip="Edit style"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
+                                    </ng-template>
+                                    <!-- Style Node Template -->
+                                    <ng-template let-node pTemplate="Style">
+                                        <div class="flex-container" [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)">
+                                            <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
+                                            <span onEnterClick class="material-symbols-outlined menu-toggler"
+                                                  [attr.data-testid]="'style-menu-button-' + styleTestIdSuffix(node.id)"
+                                                  (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
+                                                more_vert
+                                            </span>
+                                                <span>
+                                                <p-checkbox [(ngModel)]="node.visible"
+                                                            [attr.data-testid]="'style-visibility-' + styleTestIdSuffix(node.id)"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="applyStyleConfig(node.id)"
+                                                            [binary]="true"
+                                                            [inputId]="node.id"
+                                                            [name]="node.id"/>
+                                                <label [for]="node.id"
+                                                       style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                                @if (node.additional) {
+                                                    <p-tag class="additional-style-tag"
+                                                           [class.clickable-style-tag]="node.overridesBaseStyle"
+                                                           severity="info" value="Additional" [rounded]="true"
+                                                           (click)="openCompareFromAdditionalTag($event, node.id)"/>
+                                                }
+                                                @if (node.modified && !node.imported) {
+                                                    <p-tag class="modified-style-tag"
+                                                           severity="warn" value="Modified" [rounded]="true"
+                                                           (click)="openCompareFromModifiedTag($event, node.id)"/>
+                                                }
+                                            </span>
+                                            </div>
+                                            <div class="tree-node-controls">
+                                                @if (node.imported) {
+                                                    <p-button onEnterClick (click)="removeStyle(node.id)"
+                                                              [attr.data-testid]="'style-remove-button-' + styleTestIdSuffix(node.id)"
+                                                              icon="pi pi-trash"
+                                                              label="" pTooltip="Remove style"
+                                                              tooltipPosition="bottom" tabindex="0">
+                                                    </p-button>
+                                                } @else {
+                                                    <p-button onEnterClick (click)="resetStyle(node.id)"
+                                                              [attr.data-testid]="'style-reset-button-' + styleTestIdSuffix(node.id)"
+                                                              icon="pi pi-refresh"
+                                                              label="" pTooltip="Reset style to server version"
+                                                              tooltipPosition="bottom" tabindex="0">
+                                                    </p-button>
+                                                }
+                                                <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                          [attr.data-testid]="'style-edit-button-' + styleTestIdSuffix(node.id)"
+                                                          icon="pi pi-file-edit"
+                                                          label="" pTooltip="Edit style"
+                                                          tooltipPosition="bottom" tabindex="0">
+                                                </p-button>
+                                            </div>
+                                        </div>
+                                    </ng-template>
+                                    <!-- Bool Node Template -->
+                                    <ng-template let-node pTemplate="Bool">
+                                        <div style="display: flex; align-items: center;">
+                                        <span style="font-style: oblique">
+                                            <label [for]="node.styleId + '_' + node.id"
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
+                                        </span>
+                                        </div>
+                                    </ng-template>
+                                    <ng-template let-node pTemplate="String">
+                                    </ng-template>
+                                </p-tree>
+                            }
+                            @if (styleService.erroredStyleIds.size > 0) {
+                                <div class="styles-error-list">
+                                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
+                                         class="flex-container">
+                                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
+                                            {{ message.key }}: {{ message.value }}
+                                        </span>
                                     </div>
                                 </div>
-                            </ng-template>
-                            <!-- Bool Node Template -->
-                            <ng-template let-node pTemplate="Bool">
-                                <div style="display: flex; align-items: center;">
-                                <span style="font-style: oblique">
-                                    <label [for]="node.styleId + '_' + node.id"
-                                           style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
-                                </span>
+                            }
+                        </div>
+                    </p-tabpanel>
+                    <p-tabpanel value="errors">
+                        @if (styleValidationReportService.reports$ | async; as styleIssues) {
+                            <div class="style-errors-tab">
+                                <div class="style-errors-toolbar">
+                                    <p-iconfield iconPosition="left" class="style-errors-filter">
+                                        <p-inputicon>
+                                            <i class="pi pi-filter"></i>
+                                        </p-inputicon>
+                                        <input pInputText type="text"
+                                               [ngModel]="styleIssueFilter"
+                                               (ngModelChange)="styleIssueFilter = $event"
+                                               placeholder="Filter">
+                                    </p-iconfield>
+                                    <p-checkbox inputId="style-errors-only"
+                                                [(ngModel)]="styleErrorsOnly"
+                                                [binary]="true"></p-checkbox>
+                                    <label for="style-errors-only">Errors only</label>
+                                    <p-button size="small" label="Clear duplicates"
+                                              (click)="styleValidationReportService.clearRuntimeDuplicates()"/>
                                 </div>
-                            </ng-template>
-                            <ng-template let-node pTemplate="String">
-                            </ng-template>
-                        </p-tree>
-                    </div>
-                </ng-container>
-            }
-            @if (styleService.erroredStyleIds.size > 0) {
-                <div class="styles-container">
-                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
-                         class="flex-container">
-                <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
-                    {{ message.key }}: {{ message.value }}
-                </span>
-                    </div>
-                </div>
-            }
+                                <p-table [value]="filteredStyleIssues(styleIssues)"
+                                         [scrollable]="true"
+                                         scrollHeight="flex"
+                                         class="style-errors-table"
+                                         styleClass="style-errors-table"
+                                         data-testid="style-errors-table"
+                                         [rowTrackBy]="trackByStyleIssue">
+                                    <ng-template pTemplate="header">
+                                        <tr>
+                                            <th>Time</th>
+                                            <th>Severity</th>
+                                            <th>Impact</th>
+                                            <th>Style</th>
+                                            <th>Rule</th>
+                                            <th>Property</th>
+                                            <th>Location</th>
+                                            <th>Message</th>
+                                        </tr>
+                                    </ng-template>
+                                    <ng-template pTemplate="body" let-issue>
+                                        <tr [ngClass]="'style-issue-' + issue.severity">
+                                            <td>{{ formatIssueTime(issue) }}</td>
+                                            <td>{{ issue.severity }}</td>
+                                            <td>{{ issue.impact }}</td>
+                                            <td [pTooltip]="issue.source.url || issue.source.configId || ''">
+                                                {{ issue.source.styleName || issue.source.url || issue.source.configId || issue.source.sourceKind }}
+                                            </td>
+                                            <td>{{ issue.rulePath || (issue.ruleIndex !== undefined ? 'rules[' + issue.ruleIndex + ']' : '') }}</td>
+                                            <td>{{ issue.property || '' }}</td>
+                                            <td>{{ formatIssueLocation(issue) }}</td>
+                                            <td [pTooltip]="issue.detail || issue.expression || ''">{{ issue.message }}</td>
+                                        </tr>
+                                    </ng-template>
+                                    <ng-template pTemplate="emptymessage">
+                                        <tr>
+                                            <td colspan="8">
+                                                <div class="styles-empty">No style validation issues.</div>
+                                            </td>
+                                        </tr>
+                                    </ng-template>
+                                </p-table>
+                            </div>
+                        }
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
             <div class="dialog-controls">
                 <p-button data-testid="styles-close-button" (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
                 <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
@@ -154,69 +219,6 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                               class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
                               chooseLabel="Import Style" tabindex="0"/>
             </div>
-                    </p-tabpanel>
-                    <p-tabpanel value="errors">
-                        @if (styleValidationReportService.reports$ | async; as styleIssues) {
-                            <div class="style-errors-toolbar">
-                                <p-iconfield iconPosition="left" class="style-errors-filter">
-                                    <p-inputicon>
-                                        <i class="pi pi-filter"></i>
-                                    </p-inputicon>
-                                    <input pInputText type="text"
-                                           [ngModel]="styleIssueFilter"
-                                           (ngModelChange)="styleIssueFilter = $event"
-                                           placeholder="Filter">
-                                </p-iconfield>
-                                <p-checkbox inputId="style-errors-only"
-                                            [(ngModel)]="styleErrorsOnly"
-                                            [binary]="true"></p-checkbox>
-                                <label for="style-errors-only">Errors only</label>
-                                <p-button size="small" label="Clear duplicates"
-                                          (click)="styleValidationReportService.clearRuntimeDuplicates()"/>
-                            </div>
-                            <p-table [value]="filteredStyleIssues(styleIssues)"
-                                     [scrollable]="true"
-                                     scrollHeight="20em"
-                                     data-testid="style-errors-table"
-                                     [rowTrackBy]="trackByStyleIssue">
-                                <ng-template pTemplate="header">
-                                    <tr>
-                                        <th>Time</th>
-                                        <th>Severity</th>
-                                        <th>Impact</th>
-                                        <th>Style</th>
-                                        <th>Rule</th>
-                                        <th>Property</th>
-                                        <th>Location</th>
-                                        <th>Message</th>
-                                    </tr>
-                                </ng-template>
-                                <ng-template pTemplate="body" let-issue>
-                                    <tr [ngClass]="'style-issue-' + issue.severity">
-                                        <td>{{ formatIssueTime(issue) }}</td>
-                                        <td>{{ issue.severity }}</td>
-                                        <td>{{ issue.impact }}</td>
-                                        <td [pTooltip]="issue.source.url || issue.source.configId || ''">
-                                            {{ issue.source.styleName || issue.source.url || issue.source.configId || issue.source.sourceKind }}
-                                        </td>
-                                        <td>{{ issue.rulePath || (issue.ruleIndex !== undefined ? 'rules[' + issue.ruleIndex + ']' : '') }}</td>
-                                        <td>{{ issue.property || '' }}</td>
-                                        <td>{{ formatIssueLocation(issue) }}</td>
-                                        <td [pTooltip]="issue.detail || issue.expression || ''">{{ issue.message }}</td>
-                                    </tr>
-                                </ng-template>
-                                <ng-template pTemplate="emptymessage">
-                                    <tr>
-                                        <td colspan="8">
-                                            <div class="styles-empty">No style validation issues.</div>
-                                        </td>
-                                    </tr>
-                                </ng-template>
-                            </p-table>
-                        }
-                    </p-tabpanel>
-                </p-tabpanels>
-            </p-tabs>
         </app-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
@@ -225,19 +227,19 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
             <editor [sessionId]="styleEditorSessionId"></editor>
-            <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+            <div class="editor-actions style-editor-actions">
+                <div class="editor-actions-left">
                     <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
-                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
+                    <div class="editor-shortcuts">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
                         <div>Press <span style="color: grey">Esc</span> to quit</div>
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                <div class="editor-actions-right">
                     <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
                               [disabled]="sourceWasModified || !stateService.styleEditorTargetId" label="Export" icon="pi pi-file-export">
                     </p-button>

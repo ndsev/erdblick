@@ -58,7 +58,7 @@ sources:
 
 Whenever the YAML file changes, mapget applies the new sources immediately; erdblick will pick them up as soon as `/sources` reflects the update. If your backend exposes a writable `/config` endpoint, you can adjust data sources from inside erdblick via the DataSource editor—see the dedicated guide for that workflow.
 
-At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200`, does not report `datasourceConfigUnavailable: true`, and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config. If `/config` is missing, unreachable, or unavailable, erdblick continues with `config.json`.
+At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `config.json`.
 
 The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
 
