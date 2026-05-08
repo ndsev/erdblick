@@ -92,6 +92,17 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                                                            severity="warn" value="Modified" [rounded]="true"
                                                            (click)="openCompareFromModifiedTag($event, node.id)"/>
                                                 }
+                                                @if (styleErrorCount(node) > 0) {
+                                                    <span onEnterClick
+                                                          class="material-symbols-outlined style-validation-error-icon"
+                                                          [attr.data-testid]="'style-validation-error-button-' + styleTestIdSuffix(node.id)"
+                                                          pTooltip="Open style validation errors"
+                                                          tooltipPosition="bottom"
+                                                          tabindex="0" style="font-size: 1.5em"
+                                                          (click)="openStyleErrorsForStyle($event, node)">
+                                                        error
+                                                    </span>
+                                                }
                                             </span>
                                             </div>
                                             <div class="tree-node-controls">
@@ -184,7 +195,9 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                                         </tr>
                                     </ng-template>
                                     <ng-template pTemplate="body" let-issue>
-                                        <tr [ngClass]="'style-issue-' + issue.severity">
+                                        <tr onEnterClick tabindex="0" class="style-error-row"
+                                            [ngClass]="'style-issue-' + issue.severity"
+                                            (click)="openStyleIssue(issue)">
                                             <td>{{ formatIssueTime(issue) }}</td>
                                             <td>{{ issue.severity }}</td>
                                             <td>{{ issue.impact }}</td>
@@ -341,6 +354,14 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
             margin-left: 0.5em;
         }
 
+        .style-validation-error-icon {
+            color: var(--p-message-error-color, var(--p-button-danger-background));
+            cursor: pointer;
+            font-size: 1.15em;
+            margin-left: 0.35em;
+            vertical-align: middle;
+        }
+
         .additional-style-tag.clickable-style-tag,
         .modified-style-tag {
             cursor: pointer;
@@ -370,6 +391,14 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
 
         .style-issue-warning {
             color: var(--yellow-300, #fde68a);
+        }
+
+        .style-error-row {
+            cursor: pointer;
+        }
+
+        .style-error-row:hover {
+            background: var(--p-highlight-background);
         }
 
         .style-validation-details {
@@ -955,6 +984,18 @@ export class StyleComponent implements OnDestroy {
         return `${issue.id}:${index}`;
     };
 
+    styleErrorCount(style: ErdblickStyle): number {
+        let count = 0;
+        for (const issue of this.styleValidationReportService.reports$.getValue()) {
+            if (issue.severity === 'error'
+                && issue.phase !== 'runtime'
+                && this.issueMatchesStyle(issue, style, true)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     formatIssueTime(issue: StyleValidationIssue): string {
         return new Date(issue.at).toLocaleTimeString();
     }
@@ -979,10 +1020,93 @@ export class StyleComponent implements OnDestroy {
         this.stylesDialogVisible = true;
     }
 
+    openStyleErrorsForStyle(event: MouseEvent, style: ErdblickStyle): void {
+        event.stopPropagation();
+        this.styleIssueFilter = style.id;
+        this.styleErrorsOnly = true;
+        this.openStyleErrorsTab();
+    }
+
+    openStyleIssue(issue: StyleValidationIssue): void {
+        const style = this.resolveStyleForIssue(issue);
+        if (!style) {
+            this.messageService.showError(`Could not find loaded style for ${this.issueSourceLabel(issue)}.`);
+            return;
+        }
+
+        const currentTargetId = this.stateService.styleEditorTargetId;
+        const sameEditorSession = this.styleEditorVisible
+            && currentTargetId === style.id
+            && this.editorService.hasSession(this.styleEditorSessionId);
+        if (!sameEditorSession) {
+            if (this.styleEditorVisible && this.sourceWasModified && currentTargetId && currentTargetId !== style.id) {
+                this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
+                return;
+            }
+            if (!this.prepareStyleEditorSession(style.id)) {
+                this.messageService.showError(`Could not load style source for ${style.id}.`);
+                return;
+            }
+        }
+
+        this.styleEditorVisible = true;
+        this.revealStyleIssueLocation(issue);
+    }
+
     private showValidationFailure(report: StyleValidationReport): void {
         this.lastEditorValidationReport = report;
         this.styleValidationDialogVisible = true;
         this.sourceWasModified = true;
+    }
+
+    private revealStyleIssueLocation(issue: StyleValidationIssue): void {
+        if (!issue.location?.line) {
+            this.messageService.showInfo('This style issue has no source location.');
+            return;
+        }
+        const reveal = () => this.editorService.revealLocation(this.styleEditorSessionId, {
+            line: issue.location!.line!,
+            column: issue.location!.column,
+            length: issue.location!.length
+        });
+        window.requestAnimationFrame(reveal);
+    }
+
+    private resolveStyleForIssue(issue: StyleValidationIssue): ErdblickStyle | undefined {
+        for (const style of this.styleService.styles.values()) {
+            if (this.issueMatchesStyle(issue, style, false)) {
+                return style;
+            }
+        }
+        return undefined;
+    }
+
+    private issueMatchesStyle(issue: StyleValidationIssue, style: ErdblickStyle, currentSourceOnly: boolean): boolean {
+        const source = issue.source;
+        const sameHash = !!source.sourceHash && source.sourceHash === style.sourceRef?.sourceHash;
+        const sameName = !!source.styleName && source.styleName === style.id;
+        const sameUrl = !!source.url && !!style.url && source.url === style.url;
+        const sameConfig = !!source.configId
+            && (source.configId === style.sourceRef?.configId || source.configId === style.id);
+
+        if (!currentSourceOnly) {
+            return sameHash || sameName || sameUrl || sameConfig;
+        }
+        if (source.sourceKind === 'editor') {
+            return sameName && this.stateService.styleEditorTargetId === style.id && this.sourceWasModified;
+        }
+        if (source.sourceHash && style.sourceRef?.sourceHash) {
+            return sameHash;
+        }
+        return sameName || sameUrl || sameConfig;
+    }
+
+    private issueSourceLabel(issue: StyleValidationIssue): string {
+        return issue.source.styleName
+            || issue.source.url
+            || issue.source.configId
+            || issue.source.sourceKind
+            || 'style issue';
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
