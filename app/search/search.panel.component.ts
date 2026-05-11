@@ -200,6 +200,7 @@ export class SearchPanelComponent implements AfterViewInit {
         return this.staticTargetsForValue(this.searchInputValue);
     }
 
+    /** Builds static search targets for the current input value. */
     private staticTargetsForValue(inputValue: string) {
         const targetsArray: Array<SearchTarget> = [];
         const value = inputValue.trim();
@@ -444,10 +445,12 @@ export class SearchPanelComponent implements AfterViewInit {
         });
     }
 
+    /** Normalizes a raw persisted search entry from state. */
     private resolveStateEntry(raw: unknown): SearchHistoryStateEntry | null {
         return normalizeSearchHistoryEntry(raw);
     }
 
+    /** Runs an action without triggering search history execution side effects. */
     private withSuppressedHistoryExecution(action: () => void) {
         this.suppressHistoryExecution = true;
         try {
@@ -457,6 +460,7 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /** Returns search targets applicable to an input value. */
     private searchItemsForValue(value: string): Array<SearchTarget> {
         return [
             ...this.jumpService.getJumpTargetsForValue(value),
@@ -464,6 +468,7 @@ export class SearchPanelComponent implements AfterViewInit {
         ];
     }
 
+    /** Indexes search targets by id while ignoring duplicates. */
     private buildTargetById(targets: Array<SearchTarget>): Map<string, SearchTarget> {
         const result = new Map<string, SearchTarget>();
         for (const target of targets) {
@@ -478,12 +483,14 @@ export class SearchPanelComponent implements AfterViewInit {
         return result;
     }
 
+    /** Stores the current search targets and their id index. */
     private setCurrentSearchItems(searchItems: Array<SearchTarget>, input: string = this.searchInputValue) {
         this.searchItems = searchItems;
         this.targetById = this.buildTargetById(searchItems);
         this.targetByIdInput = input;
     }
 
+    /** Finds the current search target represented by a history entry. */
     private resolveTargetForEntry(entry: SearchHistoryEntry): SearchTarget | undefined {
         if (entry.input === this.targetByIdInput) {
             return this.targetById.get(entry.actionId);
@@ -491,6 +498,7 @@ export class SearchPanelComponent implements AfterViewInit {
         return this.buildTargetById(this.searchItemsForValue(entry.input)).get(entry.actionId);
     }
 
+    /** Creates a persisted history entry for a selected target. */
     private searchHistoryEntryForTarget(target: SearchTarget, input: string): SearchHistoryEntry | null {
         const trimmedInput = input.trim();
         if (!trimmedInput) {
@@ -505,6 +513,7 @@ export class SearchPanelComponent implements AfterViewInit {
         };
     }
 
+    /** Converts a legacy index-based history entry to target-id form. */
     private migrateLegacySearchHistoryEntry(entry: LegacySearchHistoryEntry): SearchHistoryEntry | null {
         const [index, input] = entry;
         const targets = this.searchItemsForValue(input);
@@ -514,6 +523,7 @@ export class SearchPanelComponent implements AfterViewInit {
         return this.searchHistoryEntryForTarget(targets[index], input);
     }
 
+    /** Builds the display model for a search history entry. */
     private toHistoryViewEntry(entry: SearchHistoryEntry): SearchHistoryViewEntry {
         const target = this.resolveTargetForEntry(entry);
         const resolvedEntry = target ? withSearchHistoryActionName(entry, target.name) : entry;
@@ -523,6 +533,7 @@ export class SearchPanelComponent implements AfterViewInit {
         };
     }
 
+    /** Persists the bounded search history list. */
     private writeSearchHistory(entries: Array<SearchHistoryEntry>) {
         localStorage.setItem("searchHistory", JSON.stringify(entries));
     }
@@ -858,6 +869,7 @@ export class SearchPanelComponent implements AfterViewInit {
         this.refreshSearchMenu();
     }
 
+    /** Refreshes search menu state from the current input value. */
     private refreshSearchMenu() {
         this.activeSearchItems = [];
         this.inactiveSearchItems = [];
@@ -876,6 +888,7 @@ export class SearchPanelComponent implements AfterViewInit {
         this.refreshVisibleSearchHistory();
     }
 
+    /** Refreshes the history suggestions shown in the search menu. */
     private refreshVisibleSearchHistory() {
         const value = this.searchInputValue;
         if (!value) {

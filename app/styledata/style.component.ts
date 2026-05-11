@@ -951,10 +951,12 @@ export class StyleComponent implements OnDestroy {
         this.mapService.scheduleUpdate();
     }
 
+    /** Returns the number of issues associated with a style. */
     styleIssueCount(issues: StyleValidationIssue[]): number {
         return issues.filter(issue => issue.severity === 'error').length;
     }
 
+    /** Returns validation issues that match the active style filters. */
     filteredStyleIssues(issues: StyleValidationIssue[]): StyleValidationIssue[] {
         const filterText = this.styleIssueFilter.trim().toLowerCase();
         return issues.filter(issue => {
@@ -984,6 +986,7 @@ export class StyleComponent implements OnDestroy {
         return `${issue.id}:${index}`;
     };
 
+    /** Returns the number of error-level issues for a style. */
     styleErrorCount(style: ErdblickStyle): number {
         let count = 0;
         for (const issue of this.styleValidationReportService.reports$.getValue()) {
@@ -996,10 +999,12 @@ export class StyleComponent implements OnDestroy {
         return count;
     }
 
+    /** Formats a validation issue timestamp for display. */
     formatIssueTime(issue: StyleValidationIssue): string {
         return new Date(issue.at).toLocaleTimeString();
     }
 
+    /** Formats a validation issue source location for display. */
     formatIssueLocation(issue: StyleValidationIssue): string {
         if (!issue.location?.line) {
             return '';
@@ -1007,19 +1012,23 @@ export class StyleComponent implements OnDestroy {
         return issue.location.column ? `${issue.location.line}:${issue.location.column}` : `${issue.location.line}`;
     }
 
+    /** Returns the number of visible validation errors. */
     validationErrorCount(report: StyleValidationReport): number {
         return report.issues.filter(issue => issue.severity === 'error').length;
     }
 
+    /** Returns the first visible validation errors for the dialog footer. */
     firstValidationErrors(report: StyleValidationReport): StyleValidationIssue[] {
         return report.issues.filter(issue => issue.severity === 'error').slice(0, 6);
     }
 
+    /** Opens the styles dialog on the validation errors tab. */
     openStyleErrorsTab(): void {
         this.stylesDialogTab = 'errors';
         this.stylesDialogVisible = true;
     }
 
+    /** Opens validation errors filtered to a specific style. */
     openStyleErrorsForStyle(event: MouseEvent, style: ErdblickStyle): void {
         event.stopPropagation();
         this.styleIssueFilter = style.id;
@@ -1027,6 +1036,7 @@ export class StyleComponent implements OnDestroy {
         this.openStyleErrorsTab();
     }
 
+    /** Opens the editor at the location of a validation issue. */
     openStyleIssue(issue: StyleValidationIssue): void {
         const style = this.resolveStyleForIssue(issue);
         if (!style) {
@@ -1053,17 +1063,20 @@ export class StyleComponent implements OnDestroy {
         this.revealStyleIssueLocation(issue);
     }
 
+    /** Shows the most relevant validation failure to the user. */
     private showValidationFailure(report: StyleValidationReport): void {
         this.lastEditorValidationReport = report;
         this.styleValidationDialogVisible = true;
         this.sourceWasModified = true;
     }
 
+    /** Reveals a validation issue location after the editor is ready. */
     private revealStyleIssueLocation(issue: StyleValidationIssue): void {
         if (!issue.location?.line) {
             this.messageService.showInfo('This style issue has no source location.');
             return;
         }
+        /** Moves the editor cursor to the requested validation issue. */
         const reveal = () => this.editorService.revealLocation(this.styleEditorSessionId, {
             line: issue.location!.line!,
             column: issue.location!.column,
@@ -1072,6 +1085,7 @@ export class StyleComponent implements OnDestroy {
         window.requestAnimationFrame(reveal);
     }
 
+    /** Finds the style entry associated with a validation issue. */
     private resolveStyleForIssue(issue: StyleValidationIssue): ErdblickStyle | undefined {
         for (const style of this.styleService.styles.values()) {
             if (this.issueMatchesStyle(issue, style, false)) {
@@ -1081,6 +1095,7 @@ export class StyleComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Checks whether a validation issue belongs to a style. */
     private issueMatchesStyle(issue: StyleValidationIssue, style: ErdblickStyle, currentSourceOnly: boolean): boolean {
         const source = issue.source;
         const sameHash = !!source.sourceHash && source.sourceHash === style.sourceRef?.sourceHash;
@@ -1101,6 +1116,7 @@ export class StyleComponent implements OnDestroy {
         return sameName || sameUrl || sameConfig;
     }
 
+    /** Returns the display label for a validation issue source. */
     private issueSourceLabel(issue: StyleValidationIssue): string {
         return issue.source.styleName
             || issue.source.url
@@ -1111,6 +1127,7 @@ export class StyleComponent implements OnDestroy {
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
 
+    /** Builds a stable test id suffix for a style entry. */
     styleTestIdSuffix(styleId: string): string {
         return styleId
             .trim()

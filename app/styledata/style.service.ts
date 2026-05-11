@@ -148,6 +148,7 @@ export class StyleService {
         }
     }
 
+    /** Normalizes a configured style URL against the config path. */
     private normalizeConfiguredStyleUrl(entry: StyleConfigEntry): StyleConfigEntry {
         const normalized: StyleConfigEntry = {...entry};
         if (!normalized.url.startsWith("http")
@@ -158,6 +159,7 @@ export class StyleService {
         return normalized;
     }
 
+    /** Loads all styles declared by application configuration. */
     private async loadConfiguredStyleSources(styleEntries: StyleConfigEntry[], styleHashes: Map<string, string>) {
         const dataMap = await this.fetchStylesYamlSources(styleEntries);
         for (const styleEntry of styleEntries) {
@@ -277,6 +279,7 @@ export class StyleService {
         return styleId;
     }
 
+    /** Resolves the base style hidden by an override style. */
     private resolveOverriddenBaseStyle(style?: ErdblickStyle): OverriddenBaseStyleBaseline | undefined {
         if (!style || style.imported) {
             return undefined;
@@ -291,6 +294,7 @@ export class StyleService {
         };
     }
 
+    /** Removes a style entry from the active style maps. */
     private removeActiveStyleEntry(styleId: string) {
         const style = this.styles.get(styleId);
         if (!style) {
@@ -563,6 +567,7 @@ export class StyleService {
         return undefined;
     }
 
+    /** Returns the source URL of the base style replaced by an override. */
     getOverriddenBaseStyleSource(styleId: string): string | undefined {
         return this.styles.get(styleId)?.overridesBaseStyle?.source;
     }
@@ -644,6 +649,7 @@ export class StyleService {
         localStorage.removeItem('builtinStyleData');
     }
 
+    /** Validates style source text and records the resulting report. */
     validateStyleSource(
         styleString: string,
         sourceRef: StyleSourceRef
@@ -738,6 +744,7 @@ export class StyleService {
         return undefined;
     }
 
+    /** Creates a validation source reference for an editor-backed style. */
     createEditorSourceRef(styleId: string, styleSource: string): StyleSourceRef {
         const existing = this.styles.get(styleId);
         return {
@@ -749,6 +756,7 @@ export class StyleService {
         };
     }
 
+    /** Reads a validation report produced by the WASM style parser. */
     private readWasmValidationReport(
         featureLayerStyle: FeatureLayerStyle,
         sourceRef: StyleSourceRef,
@@ -768,6 +776,7 @@ export class StyleService {
         });
     }
 
+    /** Normalizes a raw WASM validation report. */
     private normalizeValidationReport(
         rawReport: Partial<StyleValidationReport> | undefined,
         sourceRef: StyleSourceRef
@@ -788,6 +797,7 @@ export class StyleService {
         };
     }
 
+    /** Normalizes a raw validation issue. */
     private normalizeValidationIssue(
         issue: Partial<StyleValidationIssue>,
         sourceRef: StyleSourceRef,
@@ -811,6 +821,7 @@ export class StyleService {
         };
     }
 
+    /** Creates an empty successful validation report. */
     private createSuccessReport(
         styleString: string,
         sourceRef: StyleSourceRef,
@@ -831,6 +842,7 @@ export class StyleService {
         };
     }
 
+    /** Creates a validation report for client-side failures. */
     private createClientValidationFailureReport(
         styleString: string,
         sourceRef: StyleSourceRef,
@@ -859,6 +871,7 @@ export class StyleService {
         };
     }
 
+    /** Creates a validation report for failed style fetches. */
     private createFetchFailureReport(style: StyleConfigEntry, error: unknown): StyleValidationReport {
         const source: StyleSourceRef = {
             configId: style.id,
@@ -886,6 +899,7 @@ export class StyleService {
         };
     }
 
+    /** Creates a validation source reference for a style URL. */
     private createStyleSourceRef(
         styleString: string,
         styleUrl: string,
@@ -902,6 +916,7 @@ export class StyleService {
         };
     }
 
+    /** Returns the validation source kind for a style entry. */
     private styleSourceKind(modified: boolean, imported: boolean, additional: boolean): StyleSourceKind {
         if (imported) {
             return 'imported';
@@ -954,8 +969,10 @@ export class StyleService {
         const ungrouped: Array<ErdblickStyle> = [];
 
         let keyCounter = 0;
+        /** Returns the next unique group key for the style tree. */
         const nextKey = () => (keyCounter++).toString();
 
+        /** Returns the style group for a path, creating missing groups as needed. */
         const getOrCreateGroupByPath = (path: string): ErdblickStyleGroup => {
             const segments = path.split('/');
             const top = segments[0];
@@ -1011,6 +1028,7 @@ export class StyleService {
         }
 
         // compute derived visibility for groups
+        /** Computes aggregate visibility for a style group. */
         const computeGroupVisibility = (group: ErdblickStyleGroup): boolean => {
             let anyVisible = false;
             for (const child of group.children) {

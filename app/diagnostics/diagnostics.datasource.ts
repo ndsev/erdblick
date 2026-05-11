@@ -224,6 +224,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.logs$.next(merged.slice(-MAX_LOGS));
     }
 
+    /** Adds new style-validation issues to the diagnostics log stream. */
     private appendStyleValidationLogs(issues: StyleValidationIssue[]): void {
         const entries: LogEntry[] = [];
         for (const issue of issues) {
@@ -276,6 +277,7 @@ export class DiagnosticsDatasource implements OnDestroy {
             debug: console.debug
         };
 
+        /** Wraps a console method so diagnostics can mirror emitted messages. */
         const wrap = (method: keyof typeof original, level: LogLevel) => {
             const originalMethod = original[method] ?? original.log;
             (console as any)[method] = (...args: unknown[]) => {

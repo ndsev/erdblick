@@ -10,7 +10,6 @@ import {SceneMode} from "../../integrations/geo";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
 import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
-import {ScenegraphLayer} from "@deck.gl/mesh-layers";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import type {Device} from "@luma.gl/core";
 import {Matrix4} from "@math.gl/core";
@@ -40,7 +39,6 @@ import {StyleSourceRef, StyleValidationIssue} from "../../styledata/style-valida
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
 import {
-    cloneProcessedGltfForScenegraph,
     DeckGltfPickProxyDatum,
     DeckGltfPickProxyLayer,
     type DeckGltfPickProxyStyleContribution,
@@ -173,9 +171,6 @@ interface DeckSharedGltfPickProxyContribution {
     coordinateOrigin: [number, number, number];
     data: DeckGltfPickProxyStyleContribution["data"];
 }
-
-export const DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID = "$debugRenderFullGltfAttachment";
-export const DEBUG_GLTF_LOGGING_OPTION_ID = "$debugGltfLogging";
 
 /** Label-layer payload grouped by billboard and depth-test mode. */
 interface DeckLabelLayerData {
@@ -399,7 +394,6 @@ export class DeckTileVisualization implements ITileVisualization {
     private activeRenderedFidelity: "low" | "high" | "any" | null = null;
     private activeRenderedLowFiLods: number[] = [];
     private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
-    private readonly seenGltfDebugMessages = new Set<string>();
     private activeGltfAsset: DeckTileGltfAsset | null = null;
     private activeGltfAssetDevice: Device | null = null;
     private activeGltfAssetVersion = -1;
@@ -534,7 +528,6 @@ export class DeckTileVisualization implements ITileVisualization {
                     gltfPickProxyLayerData
                 );
             await this.attachGltfAssetsToEntries(sceneHandle, layerEntries);
-            this.logGltfRenderSummary(fidelity, layerEntries);
 
             this.clearMergedPointVisualizations(sceneHandle);
             this.applyLayerEntriesToRegistry(sceneHandle, registry, layerEntries);
@@ -808,26 +801,13 @@ export class DeckTileVisualization implements ITileVisualization {
         entries: DeckLayerRenderEntry[]
     ): Promise<void> {
         const gltfLayerData = entries.flatMap((entry) => entry.gltfLayerData);
-        const needsAssetForDebug = this.shouldRenderFullGltfAttachmentDebug();
-        if (!needsAssetForDebug && !gltfLayerData.some((entry) => entry.length > 0)) {
+        if (!gltfLayerData.some((entry) => entry.length > 0)) {
             this.releaseActiveGltfAsset();
             return;
         }
         const asset = await this.ensureActiveGltfAsset(sceneHandle);
         for (const gltfEntry of gltfLayerData) {
             gltfEntry.asset = asset;
-        }
-        if (asset) {
-            this.logGltfDebug("Retained tile GLTF asset", {
-                attachmentName: asset.attachmentName,
-                byteLength: asset.byteLength,
-                sceneCount: asset.sceneCount,
-                modelNodeCount: asset.modelNodeCount,
-                nodeRootCount: asset.nodeRootCount,
-                tilePosition: asset.tilePosition
-            });
-        } else {
-            this.logGltfDebug("No GLTF attachment is available for this tile.");
         }
     }
 
@@ -850,35 +830,6 @@ export class DeckTileVisualization implements ITileVisualization {
         const desiredSharedGltfLayerSources = new Map<string, string>();
         const desiredSharedGltfPickProxyLayerSources = new Map<string, string>();
         const modelMatrix = this.modelMatrixForScene(sceneHandle);
-        const debugRenderFullAsset = this.shouldRenderFullGltfAttachmentDebug();
-        const debugAsset = this.activeGltfAsset;
-
-        if (debugRenderFullAsset && debugAsset) {
-            const layerKeys = this.resolveLayerKeys(this.composeGeometryVariant("", "gltf-debug-full"));
-            const gltfLayer = new ScenegraphLayer({
-                id: layerKeys.gltfLayerKey,
-                data: [{position: debugAsset.tilePosition, color: [255, 255, 255, 255]}],
-                scenegraph: cloneProcessedGltfForScenegraph(debugAsset.processedGltf),
-                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                modelMatrix,
-                parameters: {
-                    ...this.layerParametersForDepthTest(true),
-                    cullMode: "none"
-                },
-                pickable: false,
-                _lighting: "flat",
-                getPosition: (datum: {position: [number, number, number]}) => datum.position,
-                getColor: (datum: {color: [number, number, number, number]}) => datum.color
-            });
-            registry.upsert(layerKeys.gltfLayerKey, gltfLayer, 375 + layerOrderBias);
-            desiredGltfLayerKeys.add(layerKeys.gltfLayerKey);
-            this.logGltfDebug("Rendering full GLTF attachment in debug bypass mode.", {
-                attachmentName: debugAsset.attachmentName,
-                sceneCount: debugAsset.sceneCount,
-                modelNodeCount: debugAsset.modelNodeCount,
-                tilePosition: debugAsset.tilePosition
-            });
-        }
 
         for (const entry of entries) {
             for (const surfaceLayerData of entry.surfaceLayerData) {
@@ -1047,10 +998,6 @@ export class DeckTileVisualization implements ITileVisualization {
                 desiredArrowLayerKeys.add(layerKeys.arrowLayerKey);
             }
 
-            if (debugRenderFullAsset) {
-                continue;
-            }
-
             const sharedGltfContribution = this.buildSharedGltfContribution(entry);
             if (sharedGltfContribution) {
                 const sharedGltfLayerKey = this.sharedGltfLayerKey(entry.variantSuffix);
@@ -1133,68 +1080,6 @@ export class DeckTileVisualization implements ITileVisualization {
         return parts.join("::");
     }
 
-    /** Returns whether the viewer-wide GLTF debug toggle should bypass filtered node rendering for base tiles. */
-    private shouldRenderFullGltfAttachmentDebug(): boolean {
-        return this.highlightMode.value === coreLib.HighlightMode.NO_HIGHLIGHT.value
-            && this.options[DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID] === true;
-    }
-
-    /** Returns whether verbose GLTF diagnostics are enabled for this visualization. */
-    private shouldLogGltfDebug(): boolean {
-        return this.options[DEBUG_GLTF_LOGGING_OPTION_ID] === true;
-    }
-
-    /** Emits one deduplicated GLTF diagnostics message into the console-backed diagnostics log. */
-    private logGltfDebug(message: string, data?: Record<string, unknown>): void {
-        if (!this.shouldLogGltfDebug()) {
-            return;
-        }
-        const payload = {
-            view: this.viewIndex,
-            tileKey: this.tile.mapTileKey,
-            styleId: this.styleId,
-            highlightMode: this.highlightModeLabel(),
-            ...data
-        };
-        const signature = `${message}:${JSON.stringify(payload)}`;
-        if (this.seenGltfDebugMessages.has(signature)) {
-            return;
-        }
-        this.seenGltfDebugMessages.add(signature);
-        console.info(`[GLTF] ${message}`, payload);
-    }
-
-    /** Logs a compact summary of the GLTF render data emitted by wasm for this tile/style render pass. */
-    private logGltfRenderSummary(
-        fidelity: "low" | "high" | "any" | null,
-        entries: DeckLayerRenderEntry[]
-    ): void {
-        if (!this.shouldLogGltfDebug()) {
-            return;
-        }
-        const gltfEntries = entries.flatMap((entry) => entry.gltfLayerData);
-        const totalRenderedNodes = gltfEntries.reduce((sum, entry) => sum + entry.length, 0);
-        const uniqueNodeCount = new Set(
-            gltfEntries.flatMap((entry) => entry.data.map((datum) => datum.nodeIndex))
-        ).size;
-        const featureCount = new Set(
-            gltfEntries.flatMap((entry) => entry.data.map((datum) => datum.featureAddress))
-        ).size;
-        this.logGltfDebug("Wasm GLTF render output summary", {
-            fidelity,
-            highFidelityStage: this.highFidelityStage,
-            maxLowFiLod: this.maxLowFiLod,
-            debugFullAttachment: this.shouldRenderFullGltfAttachmentDebug(),
-            emittedLayerCount: gltfEntries.length,
-            renderedNodeCount: totalRenderedNodes,
-            uniqueNodeCount,
-            featureCount
-        });
-        if (totalRenderedNodes === 0) {
-            this.logGltfDebug("Wasm emitted no GLTF node references for this render pass.");
-        }
-    }
-
     /** Chooses deck layer parameters that either honor or bypass depth testing. */
     private layerParametersForDepthTest(depthTest: boolean) {
         return depthTest ? undefined : DECK_NO_DEPTH_TEST_PARAMETERS;
@@ -1210,15 +1095,6 @@ export class DeckTileVisualization implements ITileVisualization {
         const flatTint = this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value;
         const renderPriority = this.gltfContributionPriority();
         const data = entry.gltfLayerData.flatMap((gltfLayerData) => {
-            this.logGltfDebug("Preparing shared GLTF contribution.", {
-                variantSuffix: entry.variantSuffix,
-                depthTest: gltfLayerData.depthTest,
-                renderedNodeCount: gltfLayerData.length,
-                uniqueNodeCount: new Set(gltfLayerData.data.map((datum) => datum.nodeIndex)).size,
-                assetNodeRootCount: asset.nodeRootCount,
-                sourceStyleId: this.styleId,
-                highlightMode: this.highlightModeLabel()
-            });
             return gltfLayerData.data.map((datum) => ({
                 nodeIndex: datum.nodeIndex,
                 featureAddress: datum.featureAddress,

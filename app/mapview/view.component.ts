@@ -336,6 +336,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         });
     }
 
+    /** Returns the DOM id used for this map view canvas. */
     get canvasId(): string {
         return `mapViewContainer-${this.viewIndex()}`;
     }

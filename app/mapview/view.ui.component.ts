@@ -165,6 +165,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
     }
 
+    /** Builds a stable test id for view UI controls. */
     viewUiTestId(): string {
         const mapView = this.mapView();
         return `view-ui-container-${mapView ? mapView.viewIndex : 'unknown'}`;

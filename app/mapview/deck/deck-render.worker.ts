@@ -210,6 +210,7 @@ function transferVisualizationResult(result: DeckVisualizationBufferResult): Arr
     ];
 }
 
+/** Reads runtime style validation issues from a render result. */
 function readRuntimeStyleIssues(
     deckVisu: DeckFeatureLayerVisualization,
     task: DeckTileRenderTask

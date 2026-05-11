@@ -205,6 +205,7 @@ export class InspectionContainerComponent implements OnDestroy {
         }
     }
 
+    /** Checks whether two inspection panel orderings are identical. */
     private ordersEqual(a: number[], b: number[]): boolean {
         if (a.length !== b.length) {
             return false;
@@ -256,6 +257,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.stateService.setInspectionPanelUndockedState(panelId, true);
     }
 
+    /** Returns whether a screen point lies inside the inspection dock. */
     private isPointInDock(x: number, y: number): boolean {
         const rect = this.dockContainerRef?.nativeElement.getBoundingClientRect();
         if (!rect) {

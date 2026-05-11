@@ -245,6 +245,7 @@ export class FeatureSearchComponent implements OnDestroy {
         }));
     }
 
+    /** Stops feature search subscriptions when the component is destroyed. */
     ngOnDestroy() {
         this.subscriptions.unsubscribe();
     }
@@ -373,6 +374,7 @@ export class FeatureSearchComponent implements OnDestroy {
         }
     }
 
+    /** Applies user changes to feature search grouping options. */
     onGroupingOptionsChange(options: FeatureSearchGroupingOption[]) {
         const groupingValues = this.groupingValuesFromOptions(options);
         this.selectedGroupingOptions = this.groupingOptionsFromValues(groupingValues);
@@ -380,16 +382,19 @@ export class FeatureSearchComponent implements OnDestroy {
         this.recalculateResultsByGroups();
     }
 
+    /** Converts persisted grouping values into dropdown options. */
     private groupingOptionsFromValues(values: number[]): FeatureSearchGroupingOption[] {
         const selected = new Set(values);
         return this.grouping.filter(option => selected.has(option.value));
     }
 
+    /** Converts dropdown options into persisted grouping values. */
     private groupingValuesFromOptions(options: FeatureSearchGroupingOption[] | null | undefined): number[] {
         const selected = new Set((options ?? []).map(option => option.value));
         return this.grouping.filter(option => selected.has(option.value)).map(option => option.value);
     }
 
+    /** Checks whether two grouping option lists are equivalent. */
     private sameGroupingOptions(lhs: FeatureSearchGroupingOption[], rhs: FeatureSearchGroupingOption[]): boolean {
         return lhs.length === rhs.length && lhs.every((option, index) => option.value === rhs[index]?.value);
     }
@@ -424,6 +429,7 @@ export class FeatureSearchComponent implements OnDestroy {
             4: { label: 'Tiles',    get: (r) => r.tileId }
         };
 
+        /** Builds the feature search result tree with aggregate counts. */
         const buildTreeWithCounts = (items: ResultItem[], depth: number, parentKey: string): [TreeNode[], number] => {
             if (depth >= selectedOrder.length || selectedOrder.length === 0) {
                 const leaves = items.map((it, idx) => ({

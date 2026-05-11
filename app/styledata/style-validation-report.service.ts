@@ -13,6 +13,7 @@ const MAX_STYLE_VALIDATION_ISSUES = 500;
 export class StyleValidationReportService {
     readonly reports$ = new BehaviorSubject<StyleValidationIssue[]>([]);
 
+    /** Stores a full validation report for a style source. */
     recordReport(report: StyleValidationReport, sourceOverride?: Partial<StyleSourceRef>): StyleValidationReport {
         const source = {...report.source, ...sourceOverride} as StyleSourceRef;
         const issues = report.issues.map(issue => ({
@@ -23,15 +24,18 @@ export class StyleValidationReportService {
         return {...report, source, issues};
     }
 
+    /** Stores a single runtime validation issue. */
     recordIssue(issue: StyleValidationIssue): void {
         this.appendIssues([issue]);
     }
 
+    /** Clears validation issues for one style source. */
     clearForSource(sourceRef: Partial<StyleSourceRef>): void {
         const key = this.sourceKey(sourceRef);
         this.reports$.next(this.reports$.getValue().filter(issue => this.sourceKey(issue.source) !== key));
     }
 
+    /** Clears runtime validation issues for one style id. */
     clearRuntimeIssuesForStyle(styleNameOrHash: string): void {
         this.reports$.next(this.reports$.getValue().filter(issue => {
             if (issue.phase !== 'runtime') {
@@ -41,6 +45,7 @@ export class StyleValidationReportService {
         }));
     }
 
+    /** Clears duplicate runtime issues from the report stream. */
     clearRuntimeDuplicates(): void {
         const seen = new Set<string>();
         const result: StyleValidationIssue[] = [];
@@ -67,6 +72,7 @@ export class StyleValidationReportService {
         this.reports$.next(result);
     }
 
+    /** Formats a validation issue summary for display. */
     formatIssueSummary(issue: StyleValidationIssue): string {
         const source = issue.source.url || issue.source.styleName || issue.source.configId || issue.source.sourceKind;
         const path = issue.rulePath || (issue.ruleIndex !== undefined ? `rules[${issue.ruleIndex}]` : '');
@@ -77,6 +83,7 @@ export class StyleValidationReportService {
         return `Style validation: ${source}${path ? ` ${path}${property}` : ''}${location}: ${issue.message}`;
     }
 
+    /** Appends new issues while preserving existing unrelated issues. */
     private appendIssues(issues: StyleValidationIssue[]): void {
         if (!issues.length) {
             return;
@@ -85,6 +92,7 @@ export class StyleValidationReportService {
         this.reports$.next(merged.slice(-MAX_STYLE_VALIDATION_ISSUES));
     }
 
+    /** Builds the internal report key for a validation source. */
     private sourceKey(sourceRef: Partial<StyleSourceRef>): string {
         return sourceRef.url
             || sourceRef.sourceHash

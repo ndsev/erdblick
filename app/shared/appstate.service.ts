@@ -75,6 +75,7 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#58cf08"
 ]
 
+/** Normalizes feature search grouping values from persisted state. */
 function normalizeFeatureSearchGrouping(value: unknown): number[] {
     if (!Array.isArray(value)) {
         return [];
@@ -262,6 +263,7 @@ function cloneStateValue<T>(value: T): T {
     return result as T;
 }
 
+/** Serializes state values with deterministic key ordering. */
 function stableSerializeStateValue(value: unknown): string {
     if (value === null) {
         return "null";
@@ -286,6 +288,7 @@ function stableSerializeStateValue(value: unknown): string {
     return JSON.stringify(value);
 }
 
+/** Computes a stable hash for a state value. */
 function hashStateValue(value: unknown): string {
     const serialized = stableSerializeStateValue(value);
     let hash = 0x811c9dc5;
@@ -338,9 +341,11 @@ export class AppStateService implements OnDestroy {
     private currentConfigDefaultKeys = new Set<string>();
 
     // Base UI metrics
+    /** Returns the configured base font size. */
     get baseFontSize(): number {
         return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
     }
+    /** Returns the default inspection panel size. */
     get defaultInspectionPanelSize(): [number, number] {
         return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
     }
@@ -535,18 +540,6 @@ export class AppStateService implements OnDestroy {
 
     readonly pinLowFiToMaxLodState = this.createState<boolean>({
         name: 'pinLowFiToMaxLod',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly debugRenderFullGltfAttachmentState = this.createState<boolean>({
-        name: 'debugRenderFullGltfAttachment',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly debugGltfLoggingEnabledState = this.createState<boolean>({
-        name: 'debugGltfLoggingEnabled',
         defaultValue: false,
         schema: Boolish
     });
@@ -894,16 +887,19 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns whether state updates should replace the current URL. */
     get replaceUrl() {
         const currentValue = this._replaceUrl;
         this._replaceUrl = true;
         return currentValue;
     }
 
+    /** Creates an application state entry and registers it for persistence. */
     private createState<T>(options: AppStateOptions<T>): AppState<T> {
         return new AppState<T>(this.statePool, options);
     }
 
+    /** Creates a state entry scoped to each map view. */
     private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
         const state = new MapViewState<T>(this.statePool, options);
         this.mapViewStates.push(state as MapViewState<unknown>);
@@ -1507,6 +1503,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Loads metadata describing the configured default state. */
     private loadConfigDefaultStateMeta(): ConfigDefaultStateMeta {
         const emptyMeta: ConfigDefaultStateMeta = {
             version: 1,
@@ -1548,10 +1545,12 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Persists metadata for the configured default state. */
     private persistConfigDefaultStateMeta(): void {
         localStorage.setItem(this.CONFIG_DEFAULT_STATE_META_KEY, JSON.stringify(this.configDefaultStateMeta));
     }
 
+    /** Assigns ownership metadata to a state entry. */
     private setMetaOwner(key: string, owner: "config" | "user", valueHash: string): void {
         this.configDefaultStateMeta.entries[key] = {owner, valueHash};
     }
@@ -1565,10 +1564,12 @@ export class AppStateService implements OnDestroy {
         return metaEntry?.owner === "config" || localStorage.getItem(key) === null;
     }
 
+    /** Computes the hash stored in state metadata. */
     private stateValueHashForMeta(state: AppState<unknown>): string {
         return hashStateValue(state.toSnapshotValue());
     }
 
+    /** Runs a state mutation without marking user-owned metadata. */
     private withSystemStateMutation(action: () => void): void {
         const previous = this.isSystemStateMutation;
         this.isSystemStateMutation = true;
@@ -1705,10 +1706,6 @@ export class AppStateService implements OnDestroy {
     };
     get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
-    get debugRenderFullGltfAttachment() {return this.debugRenderFullGltfAttachmentState.getValue();}
-    set debugRenderFullGltfAttachment(val: boolean) {this.debugRenderFullGltfAttachmentState.next(val);}
-    get debugGltfLoggingEnabled() {return this.debugGltfLoggingEnabledState.getValue();}
-    set debugGltfLoggingEnabled(val: boolean) {this.debugGltfLoggingEnabledState.next(val);}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}

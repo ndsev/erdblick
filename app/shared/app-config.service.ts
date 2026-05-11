@@ -295,10 +295,12 @@ export function isAllowedSurveyLinkHtml(linkHtml: string): boolean {
     return true;
 }
 
+/** Returns whether a value is a non-array object. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Returns whether a config value should participate in merging. */
 function isMeaningfulValue(value: unknown): boolean {
     if (value === null || value === undefined) {
         return false;
@@ -321,6 +323,7 @@ function isMeaningfulValue(value: unknown): boolean {
     return false;
 }
 
+/** Merges meaningful object values while preserving existing defaults. */
 function mergeMeaningfulObjectValues(
     base: Record<string, unknown>,
     override: Record<string, unknown>
@@ -380,6 +383,7 @@ export class AppConfigService {
         return this.snapshot.defaultBackgroundLayerId;
     }
 
+    /** Loads static and server configuration into the resolved app config. */
     private async loadInternal(): Promise<AppConfig> {
         const staticRawConfig = await this.loadStaticConfig();
         const serverResult = await this.loadServerConfig();
@@ -389,6 +393,7 @@ export class AppConfigService {
         return normalized;
     }
 
+    /** Loads the bundled static application configuration. */
     private async loadStaticConfig(): Promise<RawAppConfig> {
         try {
             const rawConfig = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
@@ -399,6 +404,7 @@ export class AppConfigService {
         }
     }
 
+    /** Loads server-provided configuration overrides. */
     private async loadServerConfig(): Promise<{
         serverConfig: AppServerConfigStatus;
         erdblickConfig: Partial<RawAppConfig>;
@@ -434,6 +440,7 @@ export class AppConfigService {
         return {serverConfig, erdblickConfig};
     }
 
+    /** Parses raw configuration text into an object. */
     private parseRawConfig(rawConfig: unknown, sourceLabel: string): RawAppConfig {
         const parsed = RAW_APP_CONFIG_SCHEMA.safeParse(rawConfig);
         if (!parsed.success) {
@@ -443,6 +450,7 @@ export class AppConfigService {
         return parsed.data;
     }
 
+    /** Merges server erdblick settings into the active config. */
     private mergeServerErdblickConfig(
         staticConfig: RawAppConfig,
         serverErdblickConfig: Partial<RawAppConfig>
@@ -528,6 +536,7 @@ export class AppConfigService {
         };
     }
 
+    /** Normalizes configured style entries. */
     private normalizeStyles(styles: RawAppConfig["styles"], additional: boolean): StyleConfigEntry[] {
         if (!Array.isArray(styles)) {
             return [];
@@ -549,6 +558,7 @@ export class AppConfigService {
         return normalized;
     }
 
+    /** Normalizes configured survey links. */
     private normalizeSurveys(rawSurveys: unknown[] | undefined): SurveyConfig[] {
         if (!Array.isArray(rawSurveys)) {
             return [];
@@ -568,6 +578,7 @@ export class AppConfigService {
         return surveys;
     }
 
+    /** Normalizes configured extension module entries. */
     private normalizeExtensionModules(extensionModules: ExtensionModulesConfig | undefined): ExtensionModulesConfig {
         const normalized: ExtensionModulesConfig = {};
         if (!extensionModules) {
@@ -582,6 +593,7 @@ export class AppConfigService {
         return normalized;
     }
 
+    /** Normalizes configured default application state. */
     private normalizeState(state: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
         if (!state || !isPlainObject(state)) {
             return null;
@@ -636,6 +648,7 @@ export class AppConfigService {
         return backgroundLayers[0].id;
     }
 
+    /** Computes a stable hash for configured state. */
     private hashConfigState(state: Record<string, unknown> | null): string {
         const serialized = this.stableSerialize(state ?? {});
         // FNV-1a 32-bit
@@ -647,6 +660,7 @@ export class AppConfigService {
         return hash.toString(16).padStart(8, "0");
     }
 
+    /** Serializes config state with deterministic key ordering. */
     private stableSerialize(value: unknown): string {
         if (value === null) {
             return "null";

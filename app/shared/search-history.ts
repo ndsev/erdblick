@@ -35,10 +35,12 @@ export const SearchStateSchema = z.union([
     SearchHistoryStateEntrySchema
 ]);
 
+/** Returns whether a stored search entry uses the legacy index format. */
 export function isLegacySearchHistoryEntry(entry: SearchHistoryStateEntry | null | undefined): entry is LegacySearchHistoryEntry {
     return Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "number";
 }
 
+/** Normalizes a raw search history entry. */
 export function normalizeSearchHistoryEntry(raw: unknown): SearchHistoryStateEntry | null {
     if (Array.isArray(raw) && raw.length === 2 && typeof raw[1] === "string") {
         const input = raw[1].trim();
@@ -86,6 +88,7 @@ export function normalizeSearchHistoryEntry(raw: unknown): SearchHistoryStateEnt
     };
 }
 
+/** Normalizes a raw resolved search history entry. */
 export function normalizeResolvedSearchHistoryEntry(raw: unknown): SearchHistoryEntry | null {
     const normalized = normalizeSearchHistoryEntry(raw);
     if (!normalized || isLegacySearchHistoryEntry(normalized)) {
@@ -94,6 +97,7 @@ export function normalizeResolvedSearchHistoryEntry(raw: unknown): SearchHistory
     return normalized;
 }
 
+/** Normalizes the complete search state payload. */
 export function normalizeSearchStateValue(raw: unknown): SearchStateValue {
     if (Array.isArray(raw) && raw.length === 0) {
         return [];
@@ -101,6 +105,7 @@ export function normalizeSearchStateValue(raw: unknown): SearchStateValue {
     return normalizeSearchHistoryEntry(raw) ?? [];
 }
 
+/** Serializes search state for persistence. */
 export function serializeSearchStateValue(value: SearchStateValue): SerializedSearchStateValue {
     if (Array.isArray(value) && value.length === 0) {
         return [];
@@ -115,18 +120,22 @@ export function serializeSearchStateValue(value: SearchStateValue): SerializedSe
     return [normalized.actionId, normalized.input];
 }
 
+/** Builds the dedupe key for a search history entry. */
 export function historyEntryDedupeKey(entry: SearchHistoryEntry): string {
     return `${entry.actionId}\u0000${entry.input}`;
 }
 
+/** Builds the stable key for a search history entry. */
 export function historyEntryKey(entry: SearchHistoryEntry): string {
     return `${historyEntryDedupeKey(entry)}\u0000${entry.savedAt ?? ""}`;
 }
 
+/** Returns whether two search history entries target the same result. */
 export function sameSearchHistoryEntry(lhs: SearchHistoryEntry | null, rhs: SearchHistoryEntry | null): boolean {
     return !!lhs && !!rhs && lhs.actionId === rhs.actionId && lhs.input === rhs.input;
 }
 
+/** Attaches an action name to a search history entry. */
 export function withSearchHistoryActionName(entry: SearchHistoryEntry, actionName: string | undefined): SearchHistoryEntry {
     const trimmedName = actionName?.trim();
     return {

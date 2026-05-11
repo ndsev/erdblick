@@ -5,11 +5,7 @@ import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from 
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {
-    DeckTileVisualization,
-    DEBUG_GLTF_LOGGING_OPTION_ID,
-    DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID
-} from "../mapview/deck/deck-tile.visualization.model";
+import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
 import {
     configureDeckRenderWorkerSettings,
     getDeckRenderWorkerConcurrency,
@@ -160,14 +156,17 @@ export class MapDataService {
     styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
 
     maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService, this.styleService));
+    /** Returns the mutable map tree owned by the map data service. */
     get maps() {
         return this.maps$.getValue();
     }
 
+    /** Returns whether tile loading and rendering are currently paused. */
     get tilePipelinePaused(): boolean {
         return this.tilePipelinePaused$.getValue();
     }
 
+    /** Returns datasource metadata as a JSON string for diagnostics and debug views. */
     getDataSourceInfoJson(): string | null {
         return this.dataSourceInfoJson;
     }
@@ -214,12 +213,6 @@ export class MapDataService {
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
         this.stateService.pinLowFiToMaxLodState.subscribe(() => {
-            this.scheduleUpdate();
-        });
-        this.stateService.debugRenderFullGltfAttachmentState.pipe(skip(1)).subscribe(() => {
-            this.scheduleUpdate();
-        });
-        this.stateService.debugGltfLoggingEnabledState.pipe(skip(1)).subscribe(() => {
             this.scheduleUpdate();
         });
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -2191,7 +2184,7 @@ export class MapDataService {
             featureIdSubset,
             layerKeySuffix,
             boxGrid,
-            this.withViewerDebugOptions(options),
+            options,
             styleOrder,
             (requests) => this.resolveRelationExternalTiles(requests),
             styleSourceRef,
@@ -2204,32 +2197,6 @@ export class MapDataService {
         for (const issue of issues) {
             this.styleValidationReportService.recordIssue(issue);
         }
-    }
-
-    /** Injects global viewer debug options into one visualization option bag without mutating the caller input. */
-    private withViewerDebugOptions(options: Record<string, boolean | number | string>): Record<string, boolean | number | string> {
-        return {
-            ...options,
-            [DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID]: this.stateService.debugRenderFullGltfAttachment,
-            [DEBUG_GLTF_LOGGING_OPTION_ID]: this.stateService.debugGltfLoggingEnabled
-        };
-    }
-
-    /** Reapplies the global viewer debug toggles to one existing visualization and reports whether it changed. */
-    private applyViewerDebugOptionsToVisualization(visualization: ITileVisualization): boolean {
-        if (typeof visualization.setStyleOption !== "function") {
-            return false;
-        }
-        let changed = false;
-        changed = visualization.setStyleOption(
-            DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID,
-            this.stateService.debugRenderFullGltfAttachment
-        ) || changed;
-        changed = visualization.setStyleOption(
-            DEBUG_GLTF_LOGGING_OPTION_ID,
-            this.stateService.debugGltfLoggingEnabled
-        ) || changed;
-        return changed;
     }
 
     /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
@@ -2329,12 +2296,11 @@ export class MapDataService {
             existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
             existing.maxLowFiLod = renderPolicy.maxLowFiLod;
             existing.styleOrder = styleOrder;
-            const debugChanged = this.applyViewerDebugOptionsToVisualization(existing);
             if (!stageReady) {
                 existing.updateStatus(false);
                 return;
             }
-            if (debugChanged || existing.isDirty()) {
+            if (existing.isDirty()) {
                 existing.updateStatus(true);
                 this.queueVisualization(viewState, existing);
             }
