@@ -56,7 +56,6 @@ test.describe('Multi-view synchronisation', () => {
         await expect(leftBackgroundEnabled).not.toBeChecked();
         await expect(leftBackgroundSelect).toBeVisible();
         await page.keyboard.press('Escape');
-        await page.keyboard.press('Escape');
         await rightBackgroundButton.click();
         const rightBackgroundSelect = page.getByTestId('background-select-1');
         const rightBackgroundEnabled = page.getByTestId('background-enabled-1').locator('input');
