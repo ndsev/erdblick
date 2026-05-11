@@ -76,6 +76,7 @@ import {MainBarComponent} from "./app.mainbar.component";
 import {IconFieldModule} from 'primeng/iconfield';
 import {InputIconModule} from 'primeng/inputicon';
 import {PopoverModule} from "primeng/popover";
+import {RadioButtonModule} from "primeng/radiobutton";
 import {provideAnimationsAsync} from "@angular/platform-browser/animations/async";
 import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
@@ -108,6 +109,7 @@ import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
+import {Panel} from "primeng/panel";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -146,6 +148,7 @@ const updateGlobalSpinner = (message: string) => {
 /** App initializer that loads config and then brings up the WASM core, styles, map data, and search workers in order. */
 export const initializeServices = () => {
     const configService = inject(AppConfigService);
+    const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
     const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
@@ -154,6 +157,10 @@ export const initializeServices = () => {
     return (async () => {
         updateGlobalSpinner('Loading app config');
         await configService.load();
+        stateService.seedConfigDefaultState(
+            configService.snapshot.state,
+            configService.snapshot.configStateHash
+        );
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
         updateGlobalSpinner('Initializing coordinates');
@@ -256,6 +263,7 @@ export const initializeServices = () => {
         IconFieldModule,
         InputIconModule,
         PopoverModule,
+        RadioButtonModule,
         SelectButtonModule,
         ChipModule,
         Splitter,
@@ -263,7 +271,8 @@ export const initializeServices = () => {
         ToggleButton,
         Menubar,
         Ripple,
-        Tag
+        Tag,
+        Panel
     ],
     providers: [
         provideAppInitializer(initializeServices),

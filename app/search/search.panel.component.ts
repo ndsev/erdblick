@@ -13,12 +13,21 @@ import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
+import {
+    historyEntryDedupeKey,
+    historyEntryKey,
+    isLegacySearchHistoryEntry,
+    LegacySearchHistoryEntry,
+    normalizeResolvedSearchHistoryEntry,
+    normalizeSearchHistoryEntry,
+    sameSearchHistoryEntry,
+    SearchHistoryEntry,
+    SearchHistoryStateEntry,
+    withSearchHistoryActionName
+} from "../shared/search-history";
 
-/**
- * Search target augmented with its current index in the flattened action list.
- */
-interface ExtendedSearchTarget extends SearchTarget {
-    index: number;
+interface SearchHistoryViewEntry extends SearchHistoryEntry {
+    label: string;
 }
 
 @Component({
@@ -72,7 +81,7 @@ interface ExtendedSearchTarget extends SearchTarget {
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div data-testid="search-menu-panel">
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
-                            <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
+                            <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle {{ item.color }}">
                                     <i class="pi {{ item.icon }}"></i>
@@ -85,8 +94,8 @@ interface ExtendedSearchTarget extends SearchTarget {
                             </div>
                         </div>
 
-                        <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
-                            <div onEnterClick (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
+                        <div class="search-menu" *ngFor="let item of visibleSearchHistory" >
+                            <div onEnterClick (click)="selectHistoryEntry(item)" class="search-option-wrapper" tabindex="0">
                                 <div class="icon-circle violet">
                                     <i class="pi pi-history"></i>
                                 </div>
@@ -96,12 +105,12 @@ interface ExtendedSearchTarget extends SearchTarget {
                                         <br>
                                         <span [innerHTML]="item.label"></span>
                                     </div>
-                                    <p-button (click)="removeSearchHistoryEntry(i)" icon="pi pi-times" tabindex="-1"></p-button>
+                                    <p-button (click)="removeSearchHistoryEntry(item)" icon="pi pi-times" tabindex="-1"></p-button>
                                 </div>
                             </div>
                         </div>
                         <div class="search-menu" *ngFor="let item of inactiveSearchItems; let i = index">
-                            <div onEnterClick (click)="targetToHistory(i)" class="search-option-wrapper"
+                            <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
                                  [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle grey">
                                     <i class="pi {{ item.icon }}"></i>
@@ -141,11 +150,14 @@ export class SearchPanelComponent implements AfterViewInit {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
 
     searchItems: Array<SearchTarget> = [];
-    activeSearchItems: Array<ExtendedSearchTarget> = [];
+    private targetById = new Map<string, SearchTarget>();
+    private targetByIdInput = "";
+    activeSearchItems: Array<SearchTarget> = [];
     inactiveSearchItems: Array<SearchTarget> = [];
     searchInputValue: string = "";
-    searchHistory: Array<any> = [];
-    visibleSearchHistory: Array<any> = [];
+    searchHistory: Array<SearchHistoryViewEntry> = [];
+    visibleSearchHistory: Array<SearchHistoryViewEntry> = [];
+    private suppressHistoryExecution = false;
 
     /* Autocompletion */
     private searchInputChanged: Subject<void> = new Subject<void>();
@@ -185,8 +197,13 @@ export class SearchPanelComponent implements AfterViewInit {
      * Computes the static jump targets whose labels depend on the current query string.
      */
     public get staticTargets() {
+        return this.staticTargetsForValue(this.searchInputValue);
+    }
+
+    /** Builds static search targets for the current input value. */
+    private staticTargetsForValue(inputValue: string) {
         const targetsArray: Array<SearchTarget> = [];
-        const value = this.searchInputValue.trim();
+        const value = inputValue.trim();
 
         /////////// Jump to mapget tile id
         let label = "tileId = ?";
@@ -196,6 +213,7 @@ export class SearchPanelComponent implements AfterViewInit {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
+            id: "j:mapget-tile-id",
             icon: "pi-table",
             color: "green",
             name: "Mapget Tile ID",
@@ -213,6 +231,7 @@ export class SearchPanelComponent implements AfterViewInit {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
+            id: "j:wgs84-lon-lat",
             icon: "pi-map-marker",
             color: "green",
             name: "WGS84 Lon-Lat Coordinates",
@@ -230,6 +249,7 @@ export class SearchPanelComponent implements AfterViewInit {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
+            id: "j:wgs84-lat-lon",
             icon: "pi-map-marker",
             color: "green",
             name: "WGS84 Lat-Lon Coordinates",
@@ -247,6 +267,7 @@ export class SearchPanelComponent implements AfterViewInit {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
+            id: "e:gm",
             icon: "pi-map-marker",
             color: "green",
             name: "Open WGS84 Lat-Lon in Google Maps",
@@ -256,6 +277,7 @@ export class SearchPanelComponent implements AfterViewInit {
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
         targetsArray.push({
+            id: "e:osm",
             icon: "pi-map-marker",
             color: "green",
             name: "Open WGS84 Lat-Lon in Open Street Maps",
@@ -287,10 +309,12 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
-            this.searchItems = [
+            this.setCurrentSearchItems([
                 ...jumpTargets,
                 ...this.staticTargets
-            ];
+            ]);
+            this.reloadSearchHistory();
+            this.refreshSearchMenu();
         });
 
         // TODO: Get rid of map selection, as soon as we support
@@ -304,13 +328,26 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.stateService.searchState.subscribe(search => {
-            if (search.length === 2) {
-                this.searchInputValue = search[1];
-                const currentEntry: [number, string] = [search[0], search[1]];
-                const lastEntry = this.stateService.lastSearchHistoryEntry;
-                if (!lastEntry || lastEntry[0] !== currentEntry[0] || lastEntry[1] !== currentEntry[1]) {
-                    this.stateService.lastSearchHistoryEntry = currentEntry;
+            const entry = this.resolveStateEntry(search);
+            if (!entry) {
+                return;
+            }
+            if (isLegacySearchHistoryEntry(entry)) {
+                this.searchInputValue = entry[1];
+                const migrated = this.migrateLegacySearchHistoryEntry(entry);
+                if (migrated) {
+                    this.withSuppressedHistoryExecution(() => {
+                        this.stateService.migrateSearchStateValue(migrated);
+                        this.stateService.migrateLastSearchHistoryEntry(migrated);
+                    });
                 }
+                return;
+            }
+
+            this.searchInputValue = entry.input;
+            const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
+            if (!sameSearchHistoryEntry(lastEntry, entry)) {
+                this.stateService.lastSearchHistoryEntry = entry;
             }
         });
 
@@ -318,17 +355,18 @@ export class SearchPanelComponent implements AfterViewInit {
             if (!this.stateService.ready.getValue()) {
                 return;
             }
-            // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
-            if (entry) {
-                const query = entry[1]
-                    .replace(/ä/g, "ae")
-                    .replace(/ö/g, "oe")
-                    .replace(/ü/g, "ue")
-                    .replace(/ß/g, "ss")
-                    .replace(/Ä/g, "Ae")
-                    .replace(/Ö/g, "Oe")
-                    .replace(/Ü/g, "Ue");
-                this.runTarget(entry[0]);
+            const resolvedEntry = this.resolveStateEntry(entry);
+            if (isLegacySearchHistoryEntry(resolvedEntry)) {
+                const migrated = this.migrateLegacySearchHistoryEntry(resolvedEntry);
+                if (migrated) {
+                    this.withSuppressedHistoryExecution(() => this.stateService.migrateLastSearchHistoryEntry(migrated));
+                }
+                this.reloadSearchHistory();
+                return;
+            }
+            if (resolvedEntry && !this.suppressHistoryExecution) {
+                this.searchInputValue = resolvedEntry.input;
+                this.runTarget(resolvedEntry);
                 this.dialog.close(new Event("close-on-execute"));
             }
             this.reloadSearchHistory();
@@ -337,15 +375,12 @@ export class SearchPanelComponent implements AfterViewInit {
         this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
                 const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
-                for (let i = 0; i < this.searchItems.length; i++) {
-                    // TODO: Introduce a static ID for the action, so we can reference it directly.
-                    // NOTE: Currently relying on string name matching which is fragile. Should use
-                    // stable IDs for actions to avoid issues with name changes or localization.
-                    if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
-                        this.stateService.setSearchHistoryState([i, value]);
-                        break;
-                    }
-                }
+                this.stateService.setSearchHistoryState({
+                    version: 2,
+                    actionId: "source-data",
+                    input: value,
+                    actionName: "Inspect Tile Layer Source Data"
+                });
             }
         });
 
@@ -410,33 +445,181 @@ export class SearchPanelComponent implements AfterViewInit {
         });
     }
 
+    /** Normalizes a raw persisted search entry from state. */
+    private resolveStateEntry(raw: unknown): SearchHistoryStateEntry | null {
+        return normalizeSearchHistoryEntry(raw);
+    }
+
+    /** Runs an action without triggering search history execution side effects. */
+    private withSuppressedHistoryExecution(action: () => void) {
+        this.suppressHistoryExecution = true;
+        try {
+            action();
+        } finally {
+            this.suppressHistoryExecution = false;
+        }
+    }
+
+    /** Returns search targets applicable to an input value. */
+    private searchItemsForValue(value: string): Array<SearchTarget> {
+        return [
+            ...this.jumpService.getJumpTargetsForValue(value),
+            ...this.staticTargetsForValue(value)
+        ];
+    }
+
+    /** Indexes search targets by id while ignoring duplicates. */
+    private buildTargetById(targets: Array<SearchTarget>): Map<string, SearchTarget> {
+        const result = new Map<string, SearchTarget>();
+        for (const target of targets) {
+            if (!target.id) {
+                throw new Error(`Search target is missing a stable id: ${target.name}`);
+            }
+            if (result.has(target.id)) {
+                throw new Error(`Duplicate search target id: ${target.id}`);
+            }
+            result.set(target.id, target);
+        }
+        return result;
+    }
+
+    /** Stores the current search targets and their id index. */
+    private setCurrentSearchItems(searchItems: Array<SearchTarget>, input: string = this.searchInputValue) {
+        this.searchItems = searchItems;
+        this.targetById = this.buildTargetById(searchItems);
+        this.targetByIdInput = input;
+    }
+
+    /** Finds the current search target represented by a history entry. */
+    private resolveTargetForEntry(entry: SearchHistoryEntry): SearchTarget | undefined {
+        if (entry.input === this.targetByIdInput) {
+            return this.targetById.get(entry.actionId);
+        }
+        return this.buildTargetById(this.searchItemsForValue(entry.input)).get(entry.actionId);
+    }
+
+    /** Creates a persisted history entry for a selected target. */
+    private searchHistoryEntryForTarget(target: SearchTarget, input: string): SearchHistoryEntry | null {
+        const trimmedInput = input.trim();
+        if (!trimmedInput) {
+            return null;
+        }
+        return {
+            version: 2,
+            actionId: target.id,
+            input: trimmedInput,
+            actionName: target.name,
+            savedAt: Date.now()
+        };
+    }
+
+    /** Converts a legacy index-based history entry to target-id form. */
+    private migrateLegacySearchHistoryEntry(entry: LegacySearchHistoryEntry): SearchHistoryEntry | null {
+        const [index, input] = entry;
+        const targets = this.searchItemsForValue(input);
+        if (index < 0 || index >= targets.length) {
+            return null;
+        }
+        return this.searchHistoryEntryForTarget(targets[index], input);
+    }
+
+    /** Builds the display model for a search history entry. */
+    private toHistoryViewEntry(entry: SearchHistoryEntry): SearchHistoryViewEntry {
+        const target = this.resolveTargetForEntry(entry);
+        const resolvedEntry = target ? withSearchHistoryActionName(entry, target.name) : entry;
+        return {
+            ...resolvedEntry,
+            label: target?.name ?? entry.actionName ?? "Search action is no longer available"
+        };
+    }
+
+    /** Persists the bounded search history list. */
+    private writeSearchHistory(entries: Array<SearchHistoryEntry>) {
+        localStorage.setItem("searchHistory", JSON.stringify(entries));
+    }
+
     /**
      * Reloads persisted search history and drops entries that no longer point at valid actions.
      */
     private reloadSearchHistory() {
         const searchHistoryString = localStorage.getItem("searchHistory");
-        if (searchHistoryString) {
-            const searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
+        if (!searchHistoryString) {
             this.searchHistory = [];
-            searchHistory.forEach(value => {
-                if (0 <= value[0] && value[0] < this.searchItems.length) {
-                    const item = this.searchItems[value[0]];
-                    this.searchHistory.push({label: item.name, index: value[0], input: value[1]});
-                }
-            });
-            this.visibleSearchHistory = this.searchHistory;
+            this.visibleSearchHistory = [];
+            return;
+        }
+
+        const rawSearchHistory = JSON.parse(searchHistoryString) as unknown;
+        const rawEntries = Array.isArray(rawSearchHistory) &&
+            !(rawSearchHistory.length === 2 && typeof rawSearchHistory[1] === "string")
+            ? rawSearchHistory
+            : [rawSearchHistory];
+        const migratedEntries: Array<SearchHistoryEntry> = [];
+        const seenKeys = new Set<string>();
+        let shouldRewrite = false;
+
+        for (const rawEntry of rawEntries) {
+            const normalized = normalizeSearchHistoryEntry(rawEntry);
+            if (!normalized) {
+                shouldRewrite = true;
+                continue;
+            }
+
+            const entry = isLegacySearchHistoryEntry(normalized)
+                ? this.migrateLegacySearchHistoryEntry(normalized)
+                : normalized;
+            if (!entry) {
+                shouldRewrite = true;
+                continue;
+            }
+
+            const viewEntry = this.toHistoryViewEntry(entry);
+            const refreshedEntry = {
+                version: 2 as const,
+                actionId: viewEntry.actionId,
+                input: viewEntry.input,
+                ...(viewEntry.actionName ? {actionName: viewEntry.actionName} : {}),
+                ...(viewEntry.savedAt !== undefined ? {savedAt: viewEntry.savedAt} : {})
+            };
+            const dedupeKey = historyEntryDedupeKey(refreshedEntry);
+            if (seenKeys.has(dedupeKey)) {
+                shouldRewrite = true;
+                continue;
+            }
+            seenKeys.add(dedupeKey);
+            migratedEntries.push(refreshedEntry);
+            shouldRewrite ||= entry !== normalized ||
+                JSON.stringify(refreshedEntry) !== JSON.stringify(normalizeResolvedSearchHistoryEntry(rawEntry));
+        }
+
+        while (migratedEntries.length > 100) {
+            migratedEntries.pop();
+            shouldRewrite = true;
+        }
+
+        this.searchHistory = migratedEntries.map(entry => this.toHistoryViewEntry(entry));
+        this.refreshVisibleSearchHistory();
+        if (shouldRewrite) {
+            this.writeSearchHistory(migratedEntries);
         }
     }
 
     /**
      * Removes one persisted history entry and mirrors the change back to app state.
      */
-    removeSearchHistoryEntry(index: number) {
-        this.searchHistory.splice(index, 1);
-        const searchHistory: [number, string][] = this.searchHistory.map(entry => [entry.index, entry.input]);
-        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
+    removeSearchHistoryEntry(entry: SearchHistoryEntry) {
+        const key = historyEntryKey(entry);
+        this.searchHistory = this.searchHistory.filter(historyEntry => historyEntryKey(historyEntry) !== key);
+        this.writeSearchHistory(this.searchHistory.map(historyEntry => ({
+            version: 2,
+            actionId: historyEntry.actionId,
+            input: historyEntry.input,
+            ...(historyEntry.actionName ? {actionName: historyEntry.actionName} : {}),
+            ...(historyEntry.savedAt !== undefined ? {savedAt: historyEntry.savedAt} : {})
+        })));
         this.reloadSearchHistory();
-        if (index == 0) {
+        const activeSearch = normalizeResolvedSearchHistoryEntry(this.stateService.search);
+        if (activeSearch && historyEntryKey(activeSearch) === key) {
             this.stateService.search = [];
         }
     }
@@ -678,28 +861,44 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!value) {
             this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
-            this.searchItems = [...this.jumpService.jumpTargets.getValue(), ...this.staticTargets];
-            this.activeSearchItems = [];
+            this.setCurrentSearchItems([...this.jumpService.jumpTargets.getValue(), ...this.staticTargets]);
+            this.refreshSearchMenu();
+            return;
+        }
+        this.jumpService.targetValueSubject.next(value);
+        this.refreshSearchMenu();
+    }
+
+    /** Refreshes search menu state from the current input value. */
+    private refreshSearchMenu() {
+        this.activeSearchItems = [];
+        this.inactiveSearchItems = [];
+        if (!this.searchInputValue) {
             this.inactiveSearchItems = this.searchItems;
             this.visibleSearchHistory = this.searchHistory;
             return;
         }
-        this.jumpService.targetValueSubject.next(value);
-        this.activeSearchItems = [];
-        this.inactiveSearchItems = [];
-        for (let i = 0; i < this.searchItems.length; i++) {
-            if (this.searchItems[i].validate(this.searchInputValue)) {
-                const target = this.searchItems[i] as ExtendedSearchTarget;
-                target.index = i;
-                this.activeSearchItems.push(target);
+        for (const searchItem of this.searchItems) {
+            if (searchItem.validate(this.searchInputValue)) {
+                this.activeSearchItems.push(searchItem);
             } else {
-                this.inactiveSearchItems.push(this.searchItems[i]);
+                this.inactiveSearchItems.push(searchItem);
             }
+        }
+        this.refreshVisibleSearchHistory();
+    }
+
+    /** Refreshes the history suggestions shown in the search menu. */
+    private refreshVisibleSearchHistory() {
+        const value = this.searchInputValue;
+        if (!value) {
+            this.visibleSearchHistory = this.searchHistory;
+            return;
         }
         this.visibleSearchHistory = Object.values(
             this.searchHistory.reduce((acc, obj) => {
                 if (obj.input.includes(value)) {
-                    const key = `${obj.label}-${obj.index}-${obj.input}`;
+                    const key = historyEntryDedupeKey(obj);
                     if (!acc[key]) {
                         acc[key] = obj;
                     }
@@ -720,22 +919,33 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Persists the currently selected target and input so the central search-state flow executes it.
      */
-    targetToHistory(index: number) {
-        this.stateService.setSearchHistoryState([index, this.searchInputValue]);
+    targetToHistory(target: SearchTarget) {
+        const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
+        if (entry) {
+            this.stateService.setSearchHistoryState(entry);
+        }
     }
 
     /**
      * Executes the chosen search target by either jumping locally or delegating to its side-effect callback.
      */
-    runTarget(index: number) {
-        const item = this.searchItems[index];
+    runTarget(entry: SearchHistoryEntry) {
+        const item = this.resolveTargetForEntry(entry);
+        if (!item) {
+            this.messageService.showError("Search action is no longer available");
+            return;
+        }
+        if (!item.validate(entry.input)) {
+            this.messageService.showError("Search action is not valid for the stored input");
+            return;
+        }
         if (item.jump !== undefined) {
-            this.jumpToLocation(item.jump(this.searchInputValue));
+            this.jumpToLocation(item.jump(entry.input));
             return;
         }
 
         if (item.execute !== undefined) {
-            item.execute(this.searchInputValue);
+            item.execute(entry.input);
             return;
         }
     }
@@ -844,7 +1054,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 event.stopPropagation();
             } else {
                 if (this.searchInputValue.trim() && this.activeSearchItems.length) {
-                    this.stateService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
+                    this.targetToHistory(this.activeSearchItems[0]);
                 } else {
                     this.stateService.setSearchHistoryState(null);
                 }
@@ -928,11 +1138,14 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Replays one persisted search history entry through the shared search-state channel.
      */
-    selectHistoryEntry(index: number) {
-        const entry = this.searchHistory[index];
-        if (entry.index !== undefined && entry.input !== undefined) {
-            this.stateService.setSearchHistoryState([entry.index, entry.input]);
-        }
+    selectHistoryEntry(entry: SearchHistoryEntry) {
+        this.stateService.setSearchHistoryState({
+            version: 2,
+            actionId: entry.actionId,
+            input: entry.input,
+            ...(entry.actionName ? {actionName: entry.actionName} : {}),
+            ...(entry.savedAt !== undefined ? {savedAt: entry.savedAt} : {})
+        });
     }
 
     /**

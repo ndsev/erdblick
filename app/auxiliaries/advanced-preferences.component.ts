@@ -82,6 +82,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
     `],
     standalone: false
 })
+/** Provides the advanced preferences JSON editor dialog. */
 export class AdvancedPreferencesComponent {
     readonly dialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesEditorSessionId = 'advanced-preferences-editor';
@@ -154,6 +155,7 @@ export class AdvancedPreferencesComponent {
         this.dialogVisible = false;
     }
 
+    /** Validates and imports the edited application-state snapshot. */
     saveSnapshot(closeAfterSave: boolean = false) {
         const editorText = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
         let parsed: unknown;
@@ -181,10 +183,12 @@ export class AdvancedPreferencesComponent {
         }
     }
 
+    /** Opens the hidden file input used to import a snapshot. */
     triggerImport() {
         this.snapshotFileInput?.nativeElement.click();
     }
 
+    /** Reads a selected snapshot file into the editor. */
     async onImportFileSelected(event: Event) {
         const input = event.target as HTMLInputElement;
         const file = input.files?.[0];
@@ -203,6 +207,7 @@ export class AdvancedPreferencesComponent {
         input.value = '';
     }
 
+    /** Downloads the current snapshot editor contents as JSON. */
     exportSnapshot() {
         const source = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
         const blob = new Blob([source], {type: 'application/json;charset=utf-8'});
@@ -249,6 +254,7 @@ export class AdvancedPreferencesComponent {
         this.validationError = errors.length ? errors[0] : '';
     }
 
+    /** Formats the current time for exported snapshot filenames. */
     private snapshotTimestamp(): string {
         return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '_');
     }

@@ -27,6 +27,7 @@ interface LocateResponse {
  * Targets can either jump to a location or execute a side effect such as starting a feature search.
  */
 export interface SearchTarget {
+    id: string;
     icon: string;
     color: string;
     name: string;
@@ -41,6 +42,7 @@ export interface SearchTarget {
  * Core-lib jump-target description parsed from a feature id expression.
  */
 interface FeatureJumpAction {
+    id: string;
     name: string;
     error: string|null;
     idParts: Array<{key: string, value: string|number}>;
@@ -105,7 +107,7 @@ export class JumpTargetService {
         this.loadJumpTargetsModule(jumpTargetsPath)
             .then((plugin) => plugin.default() as Array<SearchTarget>)
             .then((jumpTargets: Array<SearchTarget>) => {
-                this.extJumpTargets = jumpTargets;
+                this.extJumpTargets = this.validatePluginJumpTargets(jumpTargets);
                 this.update();
             })
             .catch((error) => {
@@ -113,13 +115,30 @@ export class JumpTargetService {
             });
     }
 
+    private validatePluginJumpTargets(jumpTargets: Array<SearchTarget>): Array<SearchTarget> {
+        if (!Array.isArray(jumpTargets)) {
+            throw new Error("Jump-target plugin must return an array.");
+        }
+        const seenIds = new Set<string>();
+        for (const target of jumpTargets) {
+            if (!target || typeof target.id !== "string" || !target.id.trim()) {
+                throw new Error(`Jump-target plugin returned a target without a stable id: ${target?.name ?? "<unnamed>"}`);
+            }
+            if (seenIds.has(target.id)) {
+                throw new Error(`Duplicate jump-target plugin id: ${target.id}`);
+            }
+            seenIds.add(target.id);
+        }
+        return jumpTargets;
+    }
+
     /**
      * Returns the dynamic action that runs a simfil query across the currently loaded tiles.
      */
-    getFeatureMatchTarget(): SearchTarget {
+    getFeatureMatchTarget(searchString: string = this.targetValueSubject.getValue()): SearchTarget {
         let simfilError = '';
         try {
-            coreLib.validateSimfilQuery(this.targetValueSubject.getValue());
+            coreLib.validateSimfilQuery(searchString);
         } catch (e: any) {
             const parsingError = e.message.split(': ');
             simfilError = parsingError.length > 1 ? parsingError.slice(1).join(": ") : parsingError[0];
@@ -129,6 +148,7 @@ export class JumpTargetService {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
         return {
+            id: "features",
             icon: "pi-bolt",
             color: "blue",
             name: "Search Loaded Features",
@@ -155,8 +175,7 @@ export class JumpTargetService {
      *
      * The parser accepts quoted map and layer ids because both may contain spaces.
      */
-    getInspectTileSourceDataTarget() {
-        const searchString = this.targetValueSubject.getValue();
+    getInspectTileSourceDataTarget(searchString: string = this.targetValueSubject.getValue()) {
         let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
         let valid = true;
 
@@ -236,6 +255,7 @@ export class JumpTargetService {
         }
 
         return {
+            id: "source-data",
             icon: "pi-database",
             color: "red",
             name: "Inspect Tile Layer Source Data",
@@ -285,9 +305,9 @@ export class JumpTargetService {
     /**
      * Recomputes the active search targets whenever the query string or plugin state changes.
      */
-    update() {
-        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(this.targetValueSubject.getValue());
-        let featureJumpTargetsConverted = [];
+    getJumpTargetsForValue(value: string): Array<SearchTarget> {
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(value) as Array<FeatureJumpAction>;
+        let featureJumpTargetsConverted: Array<SearchTarget> = [];
         if (featureJumpTargets) {
             featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
                 let label = fjt.idParts.map(idPart => `${idPart.key}=${idPart.value}`).join(" | ")
@@ -295,6 +315,7 @@ export class JumpTargetService {
                     label += `<br><span class="search-option-warning">${fjt.error}</span>`;
                 }
                 return {
+                    id: `fj:${fjt.id}`,
                     icon: "pi-arrow-down-left-and-arrow-up-right-to-center",
                     color: "orange",
                     name: `Jump to ${fjt.name}`,
@@ -309,12 +330,16 @@ export class JumpTargetService {
             });
         }
 
-        this.jumpTargets.next([
-            this.getFeatureMatchTarget(),
-            this.getInspectTileSourceDataTarget(),
+        return [
+            this.getFeatureMatchTarget(value),
+            this.getInspectTileSourceDataTarget(value),
             ...featureJumpTargetsConverted,
             ...this.extJumpTargets
-        ]);
+        ];
+    }
+
+    update() {
+        this.jumpTargets.next(this.getJumpTargetsForValue(this.targetValueSubject.getValue()));
     }
 
     /**

@@ -64,6 +64,8 @@ public:
     [[nodiscard]] NativeJsValue externalRelationReferences() const;
     /** Feed resolved external relation targets back into pending relation visualizations. */
     void processResolvedExternalReferences(NativeJsValue const& resolvedReferences);
+    /** Return structured runtime style evaluation issues collected during rendering. */
+    [[nodiscard]] NativeJsValue runtimeStyleIssues() const;
 
 protected:
     /**
@@ -345,6 +347,13 @@ protected:
         bool autoWildcard);
     /** Resolve and memoize the constant value of a cached expression, if any. */
     void resolveCachedConstant(CachedExpression& cached);
+    /** Record one bounded runtime style evaluation issue. */
+    void recordRuntimeStyleIssue(
+        std::string property,
+        std::string expression,
+        std::string message,
+        std::optional<uint32_t> ruleIndex = std::nullopt,
+        std::string impact = "property-fallback");
     /** Inject current option values into the simfil overlay context. */
     void addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context);
     /** Remember a relation target that lives in another tile for frontend-assisted resolution. */
@@ -396,6 +405,7 @@ protected:
     std::deque<RelationStyleState> relationStyleStates_;
     JsValue externalRelationReferences_;
     std::vector<PendingExternalRelation> externalRelationVisualizations_;
+    std::vector<StyleValidationIssue> runtimeStyleIssues_;
 };
 
 }  // namespace erdblick

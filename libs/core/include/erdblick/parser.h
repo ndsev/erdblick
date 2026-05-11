@@ -102,6 +102,7 @@ public:
      */
     struct FeatureJumpTarget
     {
+        std::string id_;
         std::string name_;
         std::vector<std::string> maps_;
         std::vector<mapget::IdPart> idParts_;

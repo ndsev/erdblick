@@ -636,12 +636,14 @@ export class FeatureSearchService {
      * Resets all search, completion, diagnostics, and overlay state to the idle baseline.
      */
     clear() {
-        this.stop();
+        if (this.currentSearch) {
+            this.jobGroupManager.removeGroup(this.currentSearch.id);
+        }
+        this.currentSearch = null;
         this.resultTree = new FeatureSearchQuadTree();
         this.resultsPerTile.clear();
         this.pendingSearchTilesByKey.clear();
         this.clearSearchResultPoints();
-        this.progress.next(null);
         this.searchResults = [];
         this.traceResults = [];
         this.diagnosticsMessages.next([]);
@@ -653,10 +655,7 @@ export class FeatureSearchService {
         this.completionCandidateList = [];
         this.completionPending.next(false);
         this.completionCandidates.next([]);
-        if (this.currentSearch) {
-            this.jobGroupManager.removeGroup(this.currentSearch.id)
-        }
-        this.currentSearch = null;
+        this.progress.next(null);
         this.jobGroupManager.clearCompleted();
         this.currentCompletion = null;
     }

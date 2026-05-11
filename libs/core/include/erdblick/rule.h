@@ -19,6 +19,11 @@ struct BoundEvalFun
 {
     simfil::model_ptr<simfil::OverlayNode> context_;
     std::function<simfil::Value(std::string const& expr)> eval_;
+    std::function<void(
+        std::string const& property,
+        std::string const& expression,
+        std::string const& message,
+        uint32_t ruleIndex)> reportIssue_;
 };
 
 /**

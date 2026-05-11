@@ -124,7 +124,7 @@ classDiagram
     mapget-compatible HTTP + WebSocket API
   }
   class ConfigFiles {
-    config.json and extensions
+    config.json, /config.erdblick, extensions
   }
   class StyleBundles {
     YAML style sheets
@@ -156,14 +156,14 @@ classDiagram
 In code, the main responsibilities are:
 
 - `AppComponent` and the PrimeNG-based panels present the UI (maps and layers, styles, search, inspection, preferences, statistics, DataSource editor).
-- `AppConfigService` loads `config/config.json` once, normalizes style, survey, extension-module, and background-layer metadata, and feeds the frontend services that depend on deployment-specific configuration.
+- `AppConfigService` loads bundled `config/config.json`, optionally merges a public `/config.erdblick` backend section, normalizes style and `additionalStyles` entries, survey, extension-module, background-layer, and startup-state metadata, and feeds the frontend services that depend on deployment-specific configuration.
 - `MapViewComponent` and `MapView` encapsulate the deck.gl view per pane (two or more views), read camera changes, and forward interaction events to services.
-- `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding).
+- `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding). It can seed config-provided default state before local storage and URL hydration, while preserving user-owned browser state.
 - `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
-- `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
+- `StyleService` loads YAML style sheets from the normalized style URL list, loads base styles before additional styles, tracks additional/base collisions, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
 - `DeckMapView` also renders config-driven raster background layers: tiled XYZ sources for bundled or remote imagery, and experimental WMS sources for 2D-first deployments.
 - `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
-- A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, bundled background imagery under `bundle/images/backgrounds`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
+- A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor and server-supplied UI defaults. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, bundled background imagery under `bundle/images/backgrounds`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
 
 The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
 
@@ -252,7 +252,7 @@ flowchart LR
   State[AppStateService<br>style state]
   MapSvc[MapDataService<br>tiles]
   Core[WASM core<br>FeatureLayerStyle]
-  Backend[Backend<br>config.json and styles]
+  Backend[Backend<br>config and styles]
 
   StylePanel --> StyleSvc
   StylePanel --> State
@@ -265,12 +265,12 @@ flowchart LR
 
 This group is responsible for turning YAML style sheets into runtime style objects:
 
-- `StyleService` loads style metadata from `config/config.json`, fetches YAML files, constructs `FeatureLayerStyle` instances, and exposes style options.
+- `StyleService` loads normalized style metadata from `AppConfigService`, fetches YAML files, constructs `FeatureLayerStyle` instances, and exposes style options.
 - `StyleComponent` lets users enable or disable styles, tweak options, import or export definitions, and open the embedded editor.
 - `AppStateService` tracks which styles and options are enabled so they can be restored across reloads or encoded in URLs.
 - `MapDataService` listens for style add and remove events and re-renders tiles when styles change.
 - The WASM core parses style YAML into executable style programs.
-- The backend serves `config.json` and the YAML files referenced within it.
+- The backend serves `config.json`, optional `/config.erdblick` defaults, and the YAML files referenced by the normalized style configuration.
 
 ### Search (search/*)
 

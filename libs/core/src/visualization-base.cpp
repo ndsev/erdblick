@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <deque>
 #include <iostream>
 #include <regex>
@@ -146,6 +147,12 @@ model_ptr<Feature> findFeatureAcrossTiles(
     KeyValuePairs const& featureId)
 {
     return findFeatureAcrossTiles(tiles, typeId, castToKeyValueView(featureId));
+}
+
+uint64_t runtimeIssueNowMillis()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
 }
@@ -381,6 +388,10 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
         [this, &relationContext](auto&& expression)
         {
             return visualization_.evaluateExpression(expression, *relationContext, false, false);
+        },
+        [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
+        {
+            visualization_.recordRuntimeStyleIssue(property, expression, message, ruleIndex);
         }};
 
     auto const preferredGeometryStage =
@@ -543,6 +554,15 @@ FeatureLayerVisualizationBase::~FeatureLayerVisualizationBase() = default;
 NativeJsValue FeatureLayerVisualizationBase::externalRelationReferences() const
 {
     return *externalRelationReferences_;
+}
+
+NativeJsValue FeatureLayerVisualizationBase::runtimeStyleIssues() const
+{
+    auto issues = JsValue::List();
+    for (auto const& issue : runtimeStyleIssues_) {
+        issues.push(issue.toJsValue());
+    }
+    return *issues;
 }
 
 void FeatureLayerVisualizationBase::processResolvedExternalReferences(
@@ -906,7 +926,11 @@ void FeatureLayerVisualizationBase::run()
         };
         auto boundEvalFun = BoundEvalFun{
             simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::null()),
-            {}
+            {},
+            [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
+            {
+                recordRuntimeStyleIssue(property, expression, message, ruleIndex);
+            }
         };
         boundEvalFun.eval_ = [this, &ensureEvaluationContext, &boundEvalFun](auto&& str)
         {
@@ -1502,6 +1526,12 @@ FeatureLayerVisualizationBase::getOrCompileExpression(
     if (!ast) {
         std::cout << "Error compiling " << expression << ": " << ast.error().message
                   << std::endl;
+        recordRuntimeStyleIssue(
+            "expression",
+            expression,
+            "Could not compile expression: " + ast.error().message,
+            std::nullopt,
+            "runtime-sample-skipped");
         expressionCache_.erase(iter);
         return nullptr;
     }
@@ -1529,11 +1559,53 @@ void FeatureLayerVisualizationBase::resolveCachedConstant(CachedExpression& cach
     if (!results) {
         std::cout << "Error evaluating constant expression " << cached.ast_->query()
                   << ": " << results.error().message << std::endl;
+        recordRuntimeStyleIssue(
+            "expression",
+            cached.ast_->query(),
+            "Could not evaluate constant expression: " + results.error().message,
+            std::nullopt,
+            "runtime-sample-skipped");
         return;
     }
     if (!results->empty()) {
         cached.constantValue_ = std::move((*results)[0]);
     }
+}
+
+void FeatureLayerVisualizationBase::recordRuntimeStyleIssue(
+    std::string property,
+    std::string expression,
+    std::string message,
+    std::optional<uint32_t> ruleIndex,
+    std::string impact)
+{
+    constexpr size_t kMaxRuntimeStyleIssues = 50;
+    if (runtimeStyleIssues_.size() >= kMaxRuntimeStyleIssues) {
+        return;
+    }
+    auto duplicate = std::ranges::any_of(runtimeStyleIssues_, [&](auto const& issue) {
+        return issue.property == property
+            && issue.expression == expression
+            && issue.message == message
+            && issue.ruleIndex == ruleIndex;
+    });
+    if (duplicate) {
+        return;
+    }
+
+    auto& issue = runtimeStyleIssues_.emplace_back();
+    issue.id = "style-runtime-" + std::to_string(runtimeStyleIssues_.size());
+    issue.at = runtimeIssueNowMillis();
+    issue.severity = "error";
+    issue.phase = "runtime";
+    issue.impact = std::move(impact);
+    issue.message = std::move(message);
+    issue.ruleIndex = ruleIndex;
+    if (ruleIndex) {
+        issue.rulePath = "rules[" + std::to_string(*ruleIndex) + "]";
+    }
+    issue.property = std::move(property);
+    issue.expression = std::move(expression);
 }
 
 std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpression(
@@ -1573,6 +1645,12 @@ simfil::Value FeatureLayerVisualizationBase::evaluateExpression(
         if (!results) {
             std::cout << "Error evaluating " << expression << ": " << results.error().message
                       << std::endl;
+            recordRuntimeStyleIssue(
+                "expression",
+                expression,
+                "Could not evaluate expression: " + results.error().message,
+                std::nullopt,
+                "runtime-sample-skipped");
             return simfil::Value::null();
         }
 
@@ -1582,10 +1660,22 @@ simfil::Value FeatureLayerVisualizationBase::evaluateExpression(
     }
     catch (std::exception const& e) {
         std::cout << "Error evaluating " << expression << ": " << e.what() << std::endl;
+        recordRuntimeStyleIssue(
+            "expression",
+            expression,
+            std::string("Could not evaluate expression: ") + e.what(),
+            std::nullopt,
+            "runtime-sample-skipped");
         return simfil::Value::null();
     }
 
     std::cout << "Expression " << expression << " returned nothing." << std::endl;
+    recordRuntimeStyleIssue(
+        "expression",
+        expression,
+        "Expression returned no value.",
+        std::nullopt,
+        "runtime-sample-skipped");
     return simfil::Value::null();
 }
 
@@ -1640,6 +1730,10 @@ void FeatureLayerVisualizationBase::addAttribute(
         [this, &attrEvaluationContext](auto&& str)
         {
             return evaluateExpression(str, *attrEvaluationContext, false, false);
+        },
+        [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
+        {
+            recordRuntimeStyleIssue(property, expression, message, ruleIndex);
         }};
 
     // Check if the attribute's values match the attribute filter for the rule.

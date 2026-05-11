@@ -89,7 +89,12 @@ export class ErdblickDebugApi {
             featureLayerStyle: style,
             options: [],
             visible: true,
-            url: ""
+            url: "",
+            additional: false,
+            sourceRef: {
+                styleName: "_builtin",
+                sourceKind: "base"
+            }
         }, true);
     }
 

@@ -5,11 +5,7 @@ import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from 
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {
-    DeckTileVisualization,
-    DEBUG_GLTF_LOGGING_OPTION_ID,
-    DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID
-} from "../mapview/deck/deck-tile.visualization.model";
+import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
 import {
     configureDeckRenderWorkerSettings,
     getDeckRenderWorkerConcurrency,
@@ -17,6 +13,8 @@ import {
 } from "../mapview/deck/deck-render.worker.pool";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
+import {StyleValidationIssue, StyleSourceRef} from "../styledata/style-validation.model";
+import {StyleValidationReportService} from "../styledata/style-validation-report.service";
 import {Feature, FeatureLayerStyle, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
 import {
     AppStateService,
@@ -158,14 +156,17 @@ export class MapDataService {
     styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
 
     maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService, this.styleService));
+    /** Returns the mutable map tree owned by the map data service. */
     get maps() {
         return this.maps$.getValue();
     }
 
+    /** Returns whether tile loading and rendering are currently paused. */
     get tilePipelinePaused(): boolean {
         return this.tilePipelinePaused$.getValue();
     }
 
+    /** Returns datasource metadata as a JSON string for diagnostics and debug views. */
     getDataSourceInfoJson(): string | null {
         return this.dataSourceInfoJson;
     }
@@ -181,7 +182,8 @@ export class MapDataService {
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
                 private keyboardService: KeyboardService,
-                private ngZone: NgZone) {
+                private ngZone: NgZone,
+                private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService()) {
         this.loadedTileLayers = new Map();
         this.selectionVisualizations = [];
         this.hoverVisualizations = [];
@@ -211,12 +213,6 @@ export class MapDataService {
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
         this.stateService.pinLowFiToMaxLodState.subscribe(() => {
-            this.scheduleUpdate();
-        });
-        this.stateService.debugRenderFullGltfAttachmentState.subscribe(() => {
-            this.scheduleUpdate();
-        });
-        this.stateService.debugGltfLoggingEnabledState.subscribe(() => {
             this.scheduleUpdate();
         });
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -1051,7 +1047,12 @@ export class MapDataService {
             return;
         }
         const summary = failures
-            .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
+            .map(req => {
+                const noDataSourceSuffix = req.status === MapTileRequestStatus.NoDataSource && req.noDataSourceReason
+                    ? ` (${req.noDataSourceReason})`
+                    : "";
+                return `${req.mapId}/${req.layerId}: ${req.statusText}${noDataSourceSuffix}`;
+            })
             .join(", ");
         const detail = statusMessage ? ` (${statusMessage})` : "";
         this.showErrorMessage(`Tile request failed: ${summary}${detail}`);
@@ -2167,7 +2168,8 @@ export class MapDataService {
         layerKeySuffix = "",
         boxGrid = false,
         options: Record<string, boolean | number | string> = {},
-        styleOrder: number = 0
+        styleOrder: number = 0,
+        styleSourceRef?: StyleSourceRef
     ): ITileVisualization {
         return new DeckTileVisualization(
             viewIndex,
@@ -2182,33 +2184,19 @@ export class MapDataService {
             featureIdSubset,
             layerKeySuffix,
             boxGrid,
-            this.withViewerDebugOptions(options),
+            options,
             styleOrder,
-            (requests) => this.resolveRelationExternalTiles(requests)
+            (requests) => this.resolveRelationExternalTiles(requests),
+            styleSourceRef,
+            (issues) => this.recordStyleValidationIssues(issues)
         );
     }
 
-    /** Injects global viewer debug options into one visualization option bag without mutating the caller input. */
-    private withViewerDebugOptions(options: Record<string, boolean | number | string>): Record<string, boolean | number | string> {
-        return {
-            ...options,
-            [DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID]: this.stateService.debugRenderFullGltfAttachment,
-            [DEBUG_GLTF_LOGGING_OPTION_ID]: this.stateService.debugGltfLoggingEnabled
-        };
-    }
-
-    /** Reapplies the global viewer debug toggles to one existing visualization and reports whether it changed. */
-    private applyViewerDebugOptionsToVisualization(visualization: ITileVisualization): boolean {
-        let changed = false;
-        changed = visualization.setStyleOption(
-            DEBUG_RENDER_FULL_GLTF_ATTACHMENT_OPTION_ID,
-            this.stateService.debugRenderFullGltfAttachment
-        ) || changed;
-        changed = visualization.setStyleOption(
-            DEBUG_GLTF_LOGGING_OPTION_ID,
-            this.stateService.debugGltfLoggingEnabled
-        ) || changed;
-        return changed;
+    /** Publishes runtime style issues collected during tile rendering. */
+    private recordStyleValidationIssues(issues: StyleValidationIssue[]): void {
+        for (const issue of issues) {
+            this.styleValidationReportService.recordIssue(issue);
+        }
     }
 
     /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
@@ -2308,12 +2296,11 @@ export class MapDataService {
             existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
             existing.maxLowFiLod = renderPolicy.maxLowFiLod;
             existing.styleOrder = styleOrder;
-            const debugChanged = this.applyViewerDebugOptionsToVisualization(existing);
             if (!stageReady) {
                 existing.updateStatus(false);
                 return;
             }
-            if (debugChanged || existing.isDirty()) {
+            if (existing.isDirty()) {
                 existing.updateStatus(true);
                 this.queueVisualization(viewState, existing);
             }
@@ -2332,7 +2319,8 @@ export class MapDataService {
             "",
             this.maps.getViewTileBorderState(viewIndex),
             this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId),
-            styleOrder
+            styleOrder,
+            style.sourceRef
         );
         viewState.putVisualization(styleId, tileKey, visu);
         if (!stageReady) {
@@ -2799,7 +2787,8 @@ export class MapDataService {
                                 groupKey,
                                 false,
                                 styleOptions,
-                                this.styleOrder(style.id)
+                                this.styleOrder(style.id),
+                                style.sourceRef
                             );
                             this.tileVisualizationTopic.next({visualization});
                             visualizationCollection.push(visualization);
@@ -2854,7 +2843,15 @@ export class MapDataService {
     /** Toggles the diagnostic tile-border overlay in one view. */
     toggleViewTileBorderVisibility(viewIndex: number) {
         const nextState = !this.maps.getViewTileBorderState(viewIndex);
-        this.maps.setViewTileBorderState(viewIndex, nextState);
+        this.setViewTileBorderVisibility(viewIndex, nextState);
+    }
+
+    /** Sets diagnostic tile-border overlay visibility in one view. */
+    setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
+        if (this.maps.getViewTileBorderState(viewIndex) === enabled) {
+            return;
+        }
+        this.maps.setViewTileBorderState(viewIndex, enabled);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }

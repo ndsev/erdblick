@@ -614,6 +614,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const nodeLookup = new Map<string, TreeTableNode>();
         const activePathKeys = new Set<string>();
 
+        /** Returns an existing stage node or creates it under the current parent. */
         const ensureNode = (pathKey: string, label: string, parent?: TreeTableNode): TreeTableNode => {
             activePathKeys.add(pathKey);
             const existing = nodeLookup.get(pathKey);
@@ -681,6 +682,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             });
         });
 
+        /** Sorts stage nodes by activity before rendering the tree. */
         const sortNodes = (nodes: TreeTableNode[]) => {
             nodes.sort((a, b) => String(a.data?.key ?? '').localeCompare(String(b.data?.key ?? '')));
             nodes.forEach(node => {
@@ -871,6 +873,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const leafValues: number[] = [];
         const parentValuesByDepth = new Map<number, number[]>();
 
+        /** Collects performance tree nodes that match the active filter. */
         const collect = (items: TreeTableNode[], depth: number) => {
             for (const node of items) {
                 const rowData = this.getRowData(node);
@@ -903,6 +906,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             }
         });
 
+        /** Applies a node update while preserving aggregate counters. */
         const apply = (items: TreeTableNode[], depth: number) => {
             for (const node of items) {
                 const rowData = this.getRowData(node);

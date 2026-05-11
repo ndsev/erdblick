@@ -67,6 +67,7 @@ describe('JumpTargetService', () => {
     it('loads jump-target plugin and merges its targets into jumpTargets', async () => {
         const pluginTargets = [
             {
+                id: 'plugin:mock',
                 icon: 'pi-mock',
                 color: 'green',
                 name: 'Mock Jump Target',
@@ -99,9 +100,68 @@ describe('JumpTargetService', () => {
             const combinedNames = combined.map(t => t.name);
             const hasPluginTarget = [...pluginNames].some(name => combinedNames.includes(name));
             expect(hasPluginTarget).toBe(true);
+            expect(service.extJumpTargets[0].id).toBe('plugin:mock');
         } finally {
             loaderSpy.mockRestore();
         }
+    });
+
+    it('rejects jump-target plugin targets without stable ids', async () => {
+        const pluginTargets = [
+            {
+                icon: 'pi-mock',
+                color: 'green',
+                name: 'Mock Jump Target',
+                label: 'Mock jump target',
+                enabled: false,
+                jump: () => [1, 2],
+                validate: () => true,
+            },
+        ];
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const loaderSpy = vi.spyOn(JumpTargetService.prototype as any, 'loadJumpTargetsModule')
+            .mockResolvedValue({default: () => pluginTargets});
+
+        try {
+            const {service} = createService({extensionModules: {jumpTargets: 'jump_plugin'}});
+            for (let i = 0; i < 10; i++) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            expect(service.extJumpTargets).toEqual([]);
+            expect(consoleSpy).toHaveBeenCalled();
+        } finally {
+            loaderSpy.mockRestore();
+            consoleSpy.mockRestore();
+        }
+    });
+
+    it('builds feature jump target ids from core composition ids', () => {
+        const {service, mapService} = createService();
+        mapService.tileLayerParser.filterFeatureJumpTargets = vi.fn(() => [
+            {
+                id: 'Lane.id:4',
+                name: 'Lane',
+                error: null,
+                idParts: [{key: 'id', value: '1'}],
+                maps: ['m1'],
+            },
+            {
+                id: 'Lane.primary_id:4.secondary_id:8',
+                name: 'Lane',
+                error: null,
+                idParts: [{key: 'primary_id', value: '1'}, {key: 'secondary_id', value: '2'}],
+                maps: ['m1'],
+            },
+        ]);
+
+        const featureJumpIds = service.getJumpTargetsForValue('Lane 1')
+            .filter(target => target.name === 'Jump to Lane')
+            .map(target => target.id);
+
+        expect(featureJumpIds).toEqual([
+            'fj:Lane.id:4',
+            'fj:Lane.primary_id:4.secondary_id:8',
+        ]);
     });
 
     it('validates mapget tile IDs as numeric without whitespace', () => {
@@ -193,12 +253,14 @@ describe('JumpTargetService', () => {
 
         const actions = [
             {
+                id: 'A1.id:4',
                 name: 'A1',
                 error: 'oops',
                 idParts: [{key: 'id', value: '1'}],
                 maps: ['m1'],
             },
             {
+                id: 'A2.id:4',
                 name: 'A2',
                 error: null,
                 idParts: [{key: 'id', value: '2'}],

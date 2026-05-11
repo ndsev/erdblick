@@ -1,3 +1,5 @@
+import {StyleSourceRef, StyleValidationIssue} from "../../styledata/style-validation.model";
+
 /** Render every deck geometry family the wasm renderer can emit. */
 export const DECK_GEOMETRY_OUTPUT_ALL = 0;
 /** Restrict wasm output to point-like geometry so point-only passes skip heavy mesh work. */
@@ -22,7 +24,9 @@ export interface DeckTileRenderTask {
     dataSourceInfoBlob: Uint8Array;
     nodeId: string;
     mapName: string;
+    layerName: string;
     styleSource: string;
+    styleSourceRef: StyleSourceRef;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     fidelityValue: number;
@@ -135,6 +139,7 @@ export interface DeckVisualizationBufferResult extends DeckGeometryBucketBuffers
     coordinateOrigin: Float64Array;
     lowFiBundles: DeckLowFiBundleBuffers[];
     mergedPointFeatures: Record<string, any[]>;
+    styleIssues?: StyleValidationIssue[];
 }
 
 /** Main-thread-friendly view of a worker result after message unpacking and timing normalization. */

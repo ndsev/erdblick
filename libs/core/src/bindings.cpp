@@ -623,6 +623,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
+        .function("isValid", &FeatureLayerStyle::isValid)
+        .function("validationReport", &FeatureLayerStyle::validationReport)
         .function("name", &FeatureLayerStyle::name)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
@@ -744,6 +746,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 }))
         .function("abiVersion", &DeckFeatureLayerVisualization::abiVersion)
         .function("renderResult", &DeckFeatureLayerVisualization::renderResult)
+        .function(
+            "runtimeStyleIssues",
+            std::function<NativeJsValue(DeckFeatureLayerVisualization const&)>(
+                [](DeckFeatureLayerVisualization const& self)
+                {
+                    return self.runtimeStyleIssues();
+                }))
         .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures)
         .function("externalRelationReferences", &DeckFeatureLayerVisualization::externalRelationReferences)
         .function(

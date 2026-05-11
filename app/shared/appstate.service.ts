@@ -16,9 +16,23 @@ import {
     clampBackgroundOpacity,
     DEFAULT_BACKGROUND_LAYER_ID
 } from "./app-config.service";
+import {
+    historyEntryDedupeKey,
+    normalizeResolvedSearchHistoryEntry,
+    normalizeSearchHistoryEntry,
+    normalizeSearchStateValue,
+    SearchHistoryEntry,
+    SearchHistoryStateEntry,
+    SearchStateSchema,
+    SearchStateValue,
+    SearchHistoryStateEntrySchema,
+    serializeSearchStateValue
+} from "./search-history";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
+const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
+const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
@@ -60,6 +74,23 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+/** Normalizes feature search grouping values from persisted state. */
+function normalizeFeatureSearchGrouping(value: unknown): number[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const result: number[] = [];
+    for (const item of value) {
+        const numeric = Number(item);
+        if (!Number.isInteger(numeric) || !FEATURE_SEARCH_GROUPING_OPTION_IDS.has(numeric) || result.includes(numeric)) {
+            continue;
+        }
+        result.push(numeric);
+    }
+    return result;
+}
 
 /** Version information shown in diagnostics and about dialogs. */
 export interface Versions {
@@ -181,6 +212,17 @@ interface SnapshotNormalizationResult {
     errors: string[];
 }
 
+interface ConfigDefaultStateMetaEntry {
+    owner: "config" | "user";
+    valueHash: string;
+}
+
+interface ConfigDefaultStateMeta {
+    version: 1;
+    sourceHash: string;
+    entries: Record<string, ConfigDefaultStateMetaEntry>;
+}
+
 /** Returns whether the layer id refers to source or meta-data rather than a feature layer. */
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
@@ -221,6 +263,42 @@ function cloneStateValue<T>(value: T): T {
     return result as T;
 }
 
+/** Serializes state values with deterministic key ordering. */
+function stableSerializeStateValue(value: unknown): string {
+    if (value === null) {
+        return "null";
+    }
+    if (value === undefined) {
+        return "undefined";
+    }
+    if (typeof value === "string") {
+        return JSON.stringify(value);
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map(entry => stableSerializeStateValue(entry)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+        const objectValue = value as Record<string, unknown>;
+        const keys = Object.keys(objectValue).sort();
+        return `{${keys.map(key => `${JSON.stringify(key)}:${stableSerializeStateValue(objectValue[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+}
+
+/** Computes a stable hash for a state value. */
+function hashStateValue(value: unknown): string {
+    const serialized = stableSerializeStateValue(value);
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < serialized.length; i++) {
+        hash ^= serialized.charCodeAt(i);
+        hash = (hash * 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+}
+
 @Injectable({providedIn: 'root'})
 /**
  * Centralizes persisted viewer state, URL/storage hydration, dialog layout, selection state,
@@ -237,10 +315,13 @@ export class AppStateService implements OnDestroy {
     private _replaceUrl = true;
 
     private isHydrating = false;
+    private isSeedingConfigDefaults = false;
+    private isSystemStateMutation = false;
     private isReady = false;
     private subscriptionsSetup = false;
     private pendingUrlSyncStates = new Set<AppState<any>>;
     private pendingStorageSyncStates = new Set<AppState<any>>;
+    private pendingUserOwnershipStates = new Set<string>();
     private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
     private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
@@ -248,13 +329,23 @@ export class AppStateService implements OnDestroy {
     // One-shot guard used to keep inbound v1 links stable during passive startup.
     private skipNextUrlSync = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
+    private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
+    private configDefaultStateMeta: ConfigDefaultStateMeta = {
+        version: 1,
+        sourceHash: "",
+        entries: Object.create(null)
+    };
+    private configDefaultValueHashes = new Map<string, string>();
+    private currentConfigDefaultKeys = new Set<string>();
 
     // Base UI metrics
+    /** Returns the configured base font size. */
     get baseFontSize(): number {
         return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
     }
+    /** Returns the default inspection panel size. */
     get defaultInspectionPanelSize(): [number, number] {
         return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
     }
@@ -266,13 +357,12 @@ export class AppStateService implements OnDestroy {
         urlParamName: "n"
     });
 
-    readonly searchState = this.createState<[number, string] | []>({
+    readonly searchState = this.createState<SearchStateValue>({
         name: 'search',
         defaultValue: [],
-        schema: z.union([
-            z.tuple([]),
-            z.tuple([z.coerce.number(), z.string()]),
-        ]),
+        schema: SearchStateSchema,
+        toStorage: (value: SearchStateValue) => serializeSearchStateValue(value),
+        fromStorage: (payload: any): SearchStateValue => normalizeSearchStateValue(payload),
         urlParamName: 's',
         urlIncludeInVisualizationOnly: false
     });
@@ -454,18 +544,6 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
-    readonly debugRenderFullGltfAttachmentState = this.createState<boolean>({
-        name: 'debugRenderFullGltfAttachment',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly debugGltfLoggingEnabledState = this.createState<boolean>({
-        name: 'debugGltfLoggingEnabled',
-        defaultValue: false,
-        schema: Boolish
-    });
-
     readonly deckStyleWorkersCountState = this.createState<number>({
         name: 'deckStyleWorkersCount',
         defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
@@ -610,13 +688,28 @@ export class AppStateService implements OnDestroy {
         })
     });
 
-    readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
+    readonly featureSearchGroupingState = this.createState<number[]>({
+        name: 'featureSearchGrouping',
+        defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
+        schema: z.array(z.coerce.number()),
+        toStorage: (value: number[]) => normalizeFeatureSearchGrouping(value),
+        fromStorage: (payload: any): number[] => normalizeFeatureSearchGrouping(payload),
+        snapshotPersist: false
+    });
+
+    readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
         schema: z.union([
             z.null(),
-            z.tuple([z.coerce.number(), z.string()]),
-        ])
+            SearchHistoryStateEntrySchema,
+        ]),
+        fromStorage: (payload: any): SearchHistoryStateEntry | null => {
+            if (payload === null) {
+                return null;
+            }
+            return normalizeSearchHistoryEntry(payload);
+        }
     });
 
     readonly mapsOpenState = this.createState<boolean>({
@@ -794,16 +887,19 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns whether state updates should replace the current URL. */
     get replaceUrl() {
         const currentValue = this._replaceUrl;
         this._replaceUrl = true;
         return currentValue;
     }
 
+    /** Creates an application state entry and registers it for persistence. */
     private createState<T>(options: AppStateOptions<T>): AppState<T> {
         return new AppState<T>(this.statePool, options);
     }
 
+    /** Creates a state entry scoped to each map view. */
     private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
         const state = new MapViewState<T>(this.statePool, options);
         this.mapViewStates.push(state as MapViewState<unknown>);
@@ -858,7 +954,16 @@ export class AppStateService implements OnDestroy {
 
     /** Handles one state-slot change and schedules the required persistence work. */
     private onStateChanged(state: AppState<any>, force: boolean = false): void {
-        if (!force && (this.isHydrating || !this.isReady)) {
+        const markUserOwned = !force
+            && this.isReady
+            && !this.isHydrating
+            && !this.isSeedingConfigDefaults
+            && !this.isSystemStateMutation;
+        if (markUserOwned) {
+            this.pendingUserOwnershipStates.add(state.name);
+        }
+
+        if (!force && (this.isHydrating || !this.isReady || this.isSeedingConfigDefaults)) {
             return;
         }
 
@@ -901,6 +1006,7 @@ export class AppStateService implements OnDestroy {
     /** Writes all storage-backed state slots to local storage. */
     private syncStorage(): void {
         for (const state of this.pendingStorageSyncStates) {
+            const markUserOwned = this.pendingUserOwnershipStates.has(state.name);
             try {
                 const serialized = state.serialize(false);
                 if (serialized === undefined) {
@@ -913,10 +1019,48 @@ export class AppStateService implements OnDestroy {
                 for (const [k, v] of Object.entries(serialized)) {
                     localStorage.setItem(k, v);
                 }
+
+                const stateHash = this.stateValueHashForMeta(state);
+                const expectedConfigHash = this.configDefaultValueHashes.get(state.name);
+                if (expectedConfigHash && expectedConfigHash === stateHash) {
+                    this.setMetaOwner(state.name, "config", stateHash);
+                } else if (markUserOwned) {
+                    this.setMetaOwner(state.name, "user", stateHash);
+                } else if (this.configDefaultStateMeta.entries[state.name]) {
+                    this.configDefaultStateMeta.entries[state.name].valueHash = stateHash;
+                }
+
+                if (state === this.stylesState) {
+                    const serializedStyleEntries = this.stylesState.serialize(false) ?? {};
+                    const serializedStyleKeys = new Set(
+                        Object.keys(serializedStyleEntries).filter(key =>
+                            this.stylesState.isStyleOptionUrlParamKey(key)));
+                    for (const key of Object.keys(this.configDefaultStateMeta.entries)) {
+                        if (this.stylesState.isStyleOptionUrlParamKey(key) && !serializedStyleKeys.has(key)) {
+                            delete this.configDefaultStateMeta.entries[key];
+                        }
+                    }
+                    for (const [key, value] of Object.entries(serializedStyleEntries)) {
+                        if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+                            continue;
+                        }
+                        const valueHash = hashStateValue(value);
+                        const expectedStyleConfigHash = this.configDefaultValueHashes.get(key);
+                        if (expectedStyleConfigHash && expectedStyleConfigHash === valueHash) {
+                            this.setMetaOwner(key, "config", valueHash);
+                        } else if (markUserOwned) {
+                            this.setMetaOwner(key, "user", valueHash);
+                        } else if (this.configDefaultStateMeta.entries[key]) {
+                            this.configDefaultStateMeta.entries[key].valueHash = valueHash;
+                        }
+                    }
+                }
             } catch (error) {
                 console.error(`[AppStateService] Failed to persist state '${state.name}'`, error);
             }
+            this.pendingUserOwnershipStates.delete(state.name);
         }
+        this.persistConfigDefaultStateMeta();
         this.pendingStorageSyncStates.clear();
     }
 
@@ -997,19 +1141,52 @@ export class AppStateService implements OnDestroy {
     /** Restores storage-backed state slots from local storage during startup. */
     private hydrateFromStorage(): void {
         this.withHydration(() => {
+            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
             for (const state of this.statePool.values()) {
                 if (state === this.stylesState) {
                     continue;
                 }
                 const raw = localStorage.getItem(state.name);
-                if (raw) {
-                    state.deserialize(raw);
+                if (raw === null) {
+                    continue;
                 }
+
+                const metaEntry = this.configDefaultStateMeta.entries[state.name];
+                if (metaEntry?.owner === "config") {
+                    if (this.currentConfigDefaultKeys.has(state.name)) {
+                        // Keep freshly seeded config default in-memory values.
+                        continue;
+                    }
+
+                    // Config-owned storage without current config default should be dropped.
+                    state.resetToDefault();
+                    localStorage.removeItem(state.name);
+                    delete this.configDefaultStateMeta.entries[state.name];
+                    continue;
+                }
+
+                state.deserialize(raw);
             }
+
             const styleOptionEntries = this.collectStyleOptionStorageEntries();
-            if (Object.keys(styleOptionEntries).length) {
-                this.stylesState.deserialize(styleOptionEntries);
+            const filteredStyleOptionEntries: Record<string, string> = Object.create(null);
+            for (const [key, value] of Object.entries(styleOptionEntries)) {
+                const metaEntry = this.configDefaultStateMeta.entries[key];
+                if (metaEntry?.owner === "config") {
+                    if (this.currentConfigDefaultKeys.has(key)) {
+                        continue;
+                    }
+                    localStorage.removeItem(key);
+                    delete this.configDefaultStateMeta.entries[key];
+                    continue;
+                }
+                filteredStyleOptionEntries[key] = value;
             }
+
+            if (Object.keys(filteredStyleOptionEntries).length) {
+                this.stylesState.deserialize(filteredStyleOptionEntries);
+            }
+            this.persistConfigDefaultStateMeta();
         });
     }
 
@@ -1072,6 +1249,93 @@ export class AppStateService implements OnDestroy {
     /** Validates a snapshot without mutating the current application state. */
     validateSnapshot(snapshot: unknown): string[] {
         return this.normalizeSnapshot(snapshot).errors;
+    }
+
+    /** Seeds config-provided default snapshot values before storage and URL hydration. */
+    seedConfigDefaultState(snapshot: unknown, sourceHash: string): string[] {
+        if (snapshot === null || snapshot === undefined) {
+            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+            this.configDefaultStateMeta.sourceHash = sourceHash || "";
+            this.configDefaultValueHashes.clear();
+            this.currentConfigDefaultKeys.clear();
+            this.persistConfigDefaultStateMeta();
+            return [];
+        }
+        if (typeof snapshot === "object" && !Array.isArray(snapshot) && Object.keys(snapshot as Record<string, unknown>).length === 0) {
+            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+            this.configDefaultStateMeta.sourceHash = sourceHash || "";
+            this.configDefaultValueHashes.clear();
+            this.currentConfigDefaultKeys.clear();
+            this.persistConfigDefaultStateMeta();
+            return [];
+        }
+
+        const normalizedResult = this.normalizeSnapshot(snapshot);
+        if (normalizedResult.errors.length) {
+            normalizedResult.errors.forEach(error =>
+                console.warn(`[AppStateService] Ignoring invalid config state: ${error}`));
+            return normalizedResult.errors;
+        }
+
+        const normalized = normalizedResult.normalized ?? {};
+        const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        const appliedStateKeys = new Set<string>();
+
+        this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+        this.configDefaultStateMeta.sourceHash = sourceHash || "";
+        this.configDefaultValueHashes.clear();
+        this.currentConfigDefaultKeys.clear();
+
+        this.isSeedingConfigDefaults = true;
+        try {
+            for (const [key, value] of Object.entries(normalized)) {
+                const state = this.statePool.get(key);
+                if (!state || !state.isSnapshotState()) {
+                    continue;
+                }
+                state.applySnapshotValue(value);
+                appliedStateKeys.add(key);
+            }
+
+            if (Object.keys(styleOptionEntries).length) {
+                this.stylesState.deserialize(styleOptionEntries);
+                this.stylesState.next(new Map(this.stylesState.getValue()));
+            }
+        } finally {
+            this.isSeedingConfigDefaults = false;
+        }
+
+        for (const key of appliedStateKeys) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                continue;
+            }
+            const valueHash = this.stateValueHashForMeta(state);
+            this.currentConfigDefaultKeys.add(key);
+            this.configDefaultValueHashes.set(key, valueHash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", valueHash);
+            }
+        }
+
+        const serializedStyleOptions = this.stylesState.serialize(false) ?? {};
+        for (const [key, serializedValue] of Object.entries(serializedStyleOptions)) {
+            if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            if (!Object.prototype.hasOwnProperty.call(styleOptionEntries, key)) {
+                continue;
+            }
+            const valueHash = hashStateValue(serializedValue);
+            this.currentConfigDefaultKeys.add(key);
+            this.configDefaultValueHashes.set(key, valueHash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", valueHash);
+            }
+        }
+
+        this.persistConfigDefaultStateMeta();
+        return [];
     }
 
     /** Normalizes, validates, and applies a snapshot import. */
@@ -1239,6 +1503,83 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Loads metadata describing the configured default state. */
+    private loadConfigDefaultStateMeta(): ConfigDefaultStateMeta {
+        const emptyMeta: ConfigDefaultStateMeta = {
+            version: 1,
+            sourceHash: "",
+            entries: Object.create(null)
+        };
+
+        const raw = localStorage.getItem(this.CONFIG_DEFAULT_STATE_META_KEY);
+        if (!raw) {
+            return emptyMeta;
+        }
+
+        try {
+            const parsed = JSON.parse(raw) as Partial<ConfigDefaultStateMeta>;
+            if (parsed.version !== 1 || !parsed.entries || typeof parsed.entries !== "object") {
+                return emptyMeta;
+            }
+
+            const entries: Record<string, ConfigDefaultStateMetaEntry> = Object.create(null);
+            for (const [key, entry] of Object.entries(parsed.entries)) {
+                if (!entry || typeof entry !== "object") {
+                    continue;
+                }
+                const owner = (entry as ConfigDefaultStateMetaEntry).owner;
+                const valueHash = (entry as ConfigDefaultStateMetaEntry).valueHash;
+                if ((owner !== "config" && owner !== "user") || typeof valueHash !== "string") {
+                    continue;
+                }
+                entries[key] = {owner, valueHash};
+            }
+
+            return {
+                version: 1,
+                sourceHash: typeof parsed.sourceHash === "string" ? parsed.sourceHash : "",
+                entries
+            };
+        } catch {
+            return emptyMeta;
+        }
+    }
+
+    /** Persists metadata for the configured default state. */
+    private persistConfigDefaultStateMeta(): void {
+        localStorage.setItem(this.CONFIG_DEFAULT_STATE_META_KEY, JSON.stringify(this.configDefaultStateMeta));
+    }
+
+    /** Assigns ownership metadata to a state entry. */
+    private setMetaOwner(key: string, owner: "config" | "user", valueHash: string): void {
+        this.configDefaultStateMeta.entries[key] = {owner, valueHash};
+    }
+
+    /**
+     * Returns whether a freshly seeded config default may claim the persisted
+     * slot instead of preserving an existing user or legacy local override.
+     */
+    private configDefaultMayOwnStorageKey(key: string): boolean {
+        const metaEntry = this.configDefaultStateMeta.entries[key];
+        return metaEntry?.owner === "config" || localStorage.getItem(key) === null;
+    }
+
+    /** Computes the hash stored in state metadata. */
+    private stateValueHashForMeta(state: AppState<unknown>): string {
+        return hashStateValue(state.toSnapshotValue());
+    }
+
+    /** Runs a state mutation without marking user-owned metadata. */
+    private withSystemStateMutation(action: () => void): void {
+        const previous = this.isSystemStateMutation;
+        this.isSystemStateMutation = true;
+        try {
+            action();
+        } finally {
+            this.isSystemStateMutation = previous;
+        }
+    }
+
     /** Recursively normalizes one snapshot subtree while collecting validation issues. */
     private normalizeSnapshotNode(
         value: unknown,
@@ -1317,7 +1658,7 @@ export class AppStateService implements OnDestroy {
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get search() {return this.searchState.getValue();}
-    set search(val: [number, string] | []) {this.searchState.next(val);};
+    set search(val: SearchStateValue) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
@@ -1363,12 +1704,10 @@ export class AppStateService implements OnDestroy {
             logFilter: {...val.logFilter}
         });
     };
-    get debugRenderFullGltfAttachment() {return this.debugRenderFullGltfAttachmentState.getValue();}
-    set debugRenderFullGltfAttachment(val: boolean) {this.debugRenderFullGltfAttachmentState.next(val);}
-    get debugGltfLoggingEnabled() {return this.debugGltfLoggingEnabledState.getValue();}
-    set debugGltfLoggingEnabled(val: boolean) {this.debugGltfLoggingEnabledState.next(val);}
+    get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
+    set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
-    set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
+    set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -2171,38 +2510,58 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Updates the active search-history selection and optionally persists the query. */
-    setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
-        const trimmed = value ? [value[0], value[1].trim()] as [number, string] : null;
+    setSearchHistoryState(value: SearchHistoryEntry | null, saveHistory: boolean = true) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
         if (trimmed && saveHistory) {
             this.saveHistoryStateValue(trimmed);
         }
+        this.lastSearchHistoryEntryState.next(trimmed);
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
+    }
+
+    /** Rewrites search state during legacy migration without saving another history row. */
+    migrateSearchStateValue(value: SearchHistoryEntry | null) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
+        this.searchState.next(trimmed ? trimmed : []);
+        this._replaceUrl = false;
+    }
+
+    /** Rewrites the last search entry during legacy migration. Callers decide whether to suppress replay. */
+    migrateLastSearchHistoryEntry(value: SearchHistoryEntry | null) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
         this.lastSearchHistoryEntryState.next(trimmed);
     }
 
     /** Persists one search-history entry into the bounded stored history list. */
-    private saveHistoryStateValue(value: [number, string]) {
+    private saveHistoryStateValue(value: SearchHistoryEntry) {
         const searchHistoryString = localStorage.getItem("searchHistory");
+        let searchHistory: Array<SearchHistoryEntry> = [];
         if (searchHistoryString) {
-            let parsed = JSON.parse(searchHistoryString) as any;
-            let searchHistory: Array<[number, string]>;
-            if (Array.isArray(parsed) && parsed.length && Array.isArray(parsed[0])) {
-                searchHistory = parsed as Array<[number, string]>;
-            } else if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
-                searchHistory = [parsed as [number, string]];
-            } else {
-                searchHistory = [];
+            const parsed = JSON.parse(searchHistoryString) as unknown;
+            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
+                ? parsed
+                : [parsed];
+            const seen = new Set<string>();
+            for (const rawEntry of rawEntries) {
+                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
+                if (!entry) {
+                    continue;
+                }
+                const key = historyEntryDedupeKey(entry);
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                searchHistory.push(entry);
             }
-            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] === value[0] && entry[1] === value[1]));
-            searchHistory.unshift(value);
-            while (searchHistory.length > 100) {
-                searchHistory.pop();
-            }
-            localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
-        } else {
-            localStorage.setItem("searchHistory", JSON.stringify([value]));
         }
+        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
+        searchHistory.unshift(value);
+        while (searchHistory.length > 100) {
+            searchHistory.pop();
+        }
+        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
     }
 
     /** Clears persisted app state from local storage and resets URL-backed state. */
@@ -2214,28 +2573,30 @@ export class AppStateService implements OnDestroy {
         this.clearStyleOptionStorageEntries();
         localStorage.removeItem('searchHistory');
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
+        localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
         const {origin, pathname} = window.location;
         window.location.href = origin + pathname;
     }
 
     /** Removes persisted map/layer/style references that no longer exist in the loaded data. */
     prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
-        // 1) Build sets of present maps, layers and styles
-        const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
-        const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
-        for (const [mapId, mapNode] of presentMaps.entries()) {
-            // Use feature layers (exclude SourceData) via children
-            for (const layer of mapNode.children) {
-                presentLayerIds.add(`${mapId}/${layer.id}`);
+        this.withSystemStateMutation(() => {
+            // 1) Build sets of present maps, layers and styles
+            const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+            const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
+            for (const [mapId, mapNode] of presentMaps.entries()) {
+                // Use feature layers (exclude SourceData) via children
+                for (const layer of mapNode.children) {
+                    presentLayerIds.add(`${mapId}/${layer.id}`);
+                }
+                // Selection pruning must keep SourceData inspections too.
+                for (const layerId of mapNode.layers.keys()) {
+                    presentSelectionLayerIds.add(`${mapId}/${layerId}`);
+                }
             }
-            // Selection pruning must keep SourceData inspections too.
-            for (const layerId of mapNode.layers.keys()) {
-                presentSelectionLayerIds.add(`${mapId}/${layerId}`);
-            }
-        }
 
-        const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
-        const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
+            const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
+            const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
 
         // 2) Prune layerNames and per-view layer arrays (visibility, zoom levels)
         const oldLayerNames = this.layerNames;
@@ -2381,10 +2742,11 @@ export class AppStateService implements OnDestroy {
         if (nextPanels.length !== panels.length) {
             this.selectionState.next(nextPanels);
         }
-        this.sanitizeInspectionComparisonForSelection(nextPanels);
+            this.sanitizeInspectionComparisonForSelection(nextPanels);
 
-        // Sync all states, so the URL is replaced.
-        this.syncAllStates();
+            // Sync all states, so the URL is replaced.
+            this.syncAllStates();
+        });
     }
 
     /** Migrates legacy `osm` URL/storage payloads into the generic background-layer state once on startup. */

@@ -425,7 +425,18 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
 
     // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!evalFun.eval_(filter_).as<simfil::ValueType::Bool>()) {
+        auto filterValue = evalFun.eval_(filter_);
+        if (!filterValue.isa(simfil::ValueType::Bool)) {
+            if (evalFun.reportIssue_) {
+                evalFun.reportIssue_(
+                    "filter",
+                    filter_,
+                    "Filter expression did not evaluate to a boolean: " + filterValue.toString(),
+                    index_);
+            }
+            return nullptr;
+        }
+        if (!filterValue.as<simfil::ValueType::Bool>()) {
             return nullptr;
         }
     }
@@ -506,8 +517,17 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
             return Color(colorStr.c_str()).toFVec4(color_.a);
         }
         else
+        {
+            if (evalFun.reportIssue_) {
+                evalFun.reportIssue_(
+                    "color-expression",
+                    colorExpression_,
+                    "Color expression returned an unsupported value: " + colorVal.toString(),
+                    index_);
+            }
             std::cout << "Invalid result for color expression: " << colorExpression_
                       << ": " << colorVal.toString() << std::endl;
+        }
     }
     return color_;
 }
@@ -572,6 +592,13 @@ FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) con
                 return *arrowMode;
         }
 
+        if (evalFun.reportIssue_) {
+            evalFun.reportIssue_(
+                "arrow-expression",
+                arrowExpression_,
+                "Arrow expression returned an unsupported value: " + arrowVal.toString(),
+                index_);
+        }
         std::cout << "Invalid result for arrow expression: " << arrowExpression_
                   << ": " << arrowVal.toString() << std::endl;
     }
@@ -771,6 +798,13 @@ std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
         auto iconUrlVal = evalFun.eval_(iconUrlExpression_);
         if (iconUrlVal.isa(simfil::ValueType::String)) {
             return iconUrlVal.as<simfil::ValueType::String>();
+        }
+        if (evalFun.reportIssue_) {
+            evalFun.reportIssue_(
+                "icon-url-expression",
+                iconUrlExpression_,
+                "Icon URL expression returned an unsupported value: " + iconUrlVal.toString(),
+                index_);
         }
         std::cout << "Invalid result for iconUrl expression: " << iconUrlExpression_
                   << ": " << iconUrlVal.toString() << std::endl;

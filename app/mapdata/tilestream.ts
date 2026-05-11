@@ -26,6 +26,7 @@ export interface MapTileStreamStatusRequest {
     layerId: string;
     status: MapTileRequestStatus;
     statusText: string;
+    noDataSourceReason?: string;
 }
 
 export interface MapTileStreamStatusPayload {

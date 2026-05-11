@@ -192,6 +192,7 @@ export class FeaturePanelComponent implements OnDestroy {
             nodePath: string;
         }
 
+        /** Checks whether an inspection value identifies a geometry type. */
         const isGeometryTypeValue = (value: unknown): boolean => {
             if (typeof value !== "string") {
                 return false;
@@ -199,6 +200,7 @@ export class FeaturePanelComponent implements OnDestroy {
             return value === "Points" || value === "Polyline" || value === "Polygon" || value === "Mesh";
         };
 
+        /** Extracts the geometry name bubble from an inspection tree node. */
         const extractGeometryNameBubble = (children: TreeTableNode[]): string | null => {
             const nameNode = children.find(child => child.data?.["key"] === "name");
             const name = nameNode?.data?.["value"];
@@ -212,6 +214,7 @@ export class FeaturePanelComponent implements OnDestroy {
             return trimmed;
         };
 
+        /** Removes validity suffixes from displayed inspection names. */
         const stripValiditySuffix = (hoverId: string): string => {
             const validityIndex = hoverId.indexOf(":validity#");
             if (validityIndex >= 0) {
@@ -220,9 +223,11 @@ export class FeaturePanelComponent implements OnDestroy {
             return hoverId;
         };
 
+        /** Builds a stable tree node id from the current traversal path. */
         const makeNodeId = (context: HoverAnnotationContext, key: string, ordinal: number): string =>
             `${context.nodePath}/${ordinal}:${key}`;
 
+        /** Converts inspection model sections into PrimeNG tree table nodes. */
         const convertToTreeTableNodes = (
             dataNodes: Array<InspectionModelData> | undefined,
             context: HoverAnnotationContext

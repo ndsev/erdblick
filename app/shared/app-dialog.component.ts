@@ -57,6 +57,7 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
     standalone: true,
     imports: [DialogModule, NgTemplateOutlet]
 })
+/** Wraps PrimeNG dialogs with shared layout persistence behavior. */
 export class AppDialogComponent implements OnChanges, OnDestroy {
     @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
     @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
@@ -103,32 +104,39 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.refreshEffectiveStyle();
     }
 
+    /** Refreshes dialog layout style when inputs change. */
     ngOnChanges(changes: SimpleChanges): void {
         if (changes['style'] || changes['layoutId'] || changes['persistLayout'] || changes['persistOpenState'] || changes['resizable'] || changes['visible']) {
             this.refreshEffectiveStyle(this.visible);
         }
     }
 
+    /** Cancels pending layout reveal work when the wrapper is destroyed. */
     ngOnDestroy(): void {
         this.cancelRevealPersistedLayout();
     }
 
+    /** Returns the underlying PrimeNG dialog container element. */
     container(): HTMLElement | undefined {
         return this.dialog?.container() ?? undefined;
     }
 
+    /** Closes the wrapped PrimeNG dialog. */
     close(event?: Event): void {
         this.dialog?.close(event ?? new Event('close'));
     }
 
+    /** Returns the underlying PrimeNG dialog wrapper element. */
     get wrapper() {
         return this.dialog?.wrapper;
     }
 
+    /** Returns whether the wrapped dialog is currently being dragged. */
     get dragging(): boolean {
         return this.dialog?.dragging ?? false;
     }
 
+    /** Synchronizes visible state after PrimeNG emits a visibility change. */
     protected handleVisibleChange(value: boolean): void {
         this.visible = value;
         this.syncPersistedOpenState(value);
@@ -136,12 +144,14 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.visibleChange.emit(value);
     }
 
+    /** Applies persisted layout before forwarding the show event. */
     protected handleOnShow(event: any): void {
         this.syncPersistedOpenState(true);
         this.applyOrCapturePersistedLayout();
         this.onShow.emit(event);
     }
 
+    /** Stores closed state and forwards the hide event. */
     protected handleOnHide(event: any): void {
         this.cancelRevealPersistedLayout();
         this.syncPersistedOpenState(false);
@@ -149,16 +159,19 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.onHide.emit(event);
     }
 
+    /** Persists layout after a dialog drag finishes. */
     protected handleOnDragEnd(event: any): void {
         this.persistCurrentLayout();
         this.onDragEnd.emit(event);
     }
 
+    /** Persists layout after a dialog resize finishes. */
     protected handleOnResizeEnd(event: any): void {
         this.persistCurrentLayout();
         this.onResizeEnd.emit(event);
     }
 
+    /** Applies an existing layout or captures the first rendered layout. */
     private applyOrCapturePersistedLayout(): void {
         if (!this.persistLayout || !this.layoutId) {
             return;
@@ -213,6 +226,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         });
     }
 
+    /** Persists the current dialog bounds and open state. */
     private persistCurrentLayout(): void {
         if (!this.persistLayout || !this.layoutId) {
             return;
@@ -229,6 +243,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.stateService.upsertDialogLayout(this.layoutId, layout);
     }
 
+    /** Reads rounded dialog bounds from a container element. */
     private readLayoutFromContainer(container: HTMLElement): AppDialogLayout {
         const rect = container.getBoundingClientRect();
         return {
@@ -243,6 +258,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         };
     }
 
+    /** Clamps a persisted dialog layout to the current viewport. */
     private normalizeLayout(layout: AppDialogLayout): AppDialogLayout {
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
@@ -259,12 +275,14 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         };
     }
 
+    /** Applies persisted position and size to a dialog container. */
     private applyLayout(container: HTMLElement, layout: AppDialogLayout): void {
         this.applyPosition(container, layout.position);
         container.style.width = `${layout.size.width}px`;
         container.style.height = `${layout.size.height}px`;
     }
 
+    /** Applies persisted fixed positioning to a dialog container. */
     private applyPosition(container: HTMLElement, position: {left: number; top: number}): void {
         container.style.position = 'fixed';
         container.style.left = `${position.left}px`;
@@ -272,6 +290,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         container.style.margin = '0';
     }
 
+    /** Rebuilds the style object passed to the wrapped dialog. */
     private refreshEffectiveStyle(hideUntilApplied: boolean = false, layoutOverride?: AppDialogLayout): void {
         const nextStyle = {...this.style};
         const layout = layoutOverride ?? (this.persistLayout && this.layoutId
@@ -297,6 +316,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.effectiveStyle = nextStyle;
     }
 
+    /** Schedules a hidden dialog to become visible after persisted layout applies. */
     private scheduleRevealPersistedLayout(container: HTMLElement): void {
         this.cancelRevealPersistedLayout();
         this.revealPersistedLayoutFrame = window.requestAnimationFrame(() => {
@@ -305,6 +325,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         });
     }
 
+    /** Cancels any pending persisted-layout reveal frame. */
     private cancelRevealPersistedLayout(): void {
         if (this.revealPersistedLayoutFrame === undefined) {
             return;
@@ -313,6 +334,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.revealPersistedLayoutFrame = undefined;
     }
 
+    /** Stores open state for dialogs with persisted layout ids. */
     private syncPersistedOpenState(open: boolean): void {
         if (!this.persistLayout || !this.layoutId || !this.persistOpenState) {
             return;

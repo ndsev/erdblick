@@ -423,6 +423,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.panelDragRequest.emit({panel: this.panel(), event});
     }
 
+    /** Checks whether an event target should keep its own pointer behavior. */
     private isInteractiveTarget(target: HTMLElement | null): boolean {
         if (!target) {
             return false;

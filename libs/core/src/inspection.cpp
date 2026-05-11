@@ -339,8 +339,7 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     }
     auto relGroupScope = push(relGroup);
     auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
-    relScope->value_ = JsValue(r->target()->toString());
-    relScope->mapId_ = JsValue(r->model().mapId());
+    assignFeatureReference(*relScope, r->target());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (auto const sourceValidity = r->sourceValidityOrNull()) {
@@ -440,8 +439,7 @@ void InspectionConverter::convertValidity(
 
         if (auto featureId = v.featureId()) {
             auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
-            featureIdScope->value_ = convertString(featureId->toString());
-            featureIdScope->mapId_ = JsValue(tile_->mapId());
+            assignFeatureReference(*featureIdScope, featureId);
         }
 
         if (auto transitionNumber = v.transitionNumber()) {
@@ -567,15 +565,9 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
         value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
     {
-        auto vv = value->value();
-        if (std::holds_alternative<std::string_view>(vv)) {
-            singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::FeatureId};
-        } else if (std::holds_alternative<std::string>(vv)) {
-            singleValue = {convertString(std::get<std::string>(vv)), ValueType::FeatureId};
-        } else {
-            singleValue = {convertString(""), ValueType::FeatureId};
-        }
-        fieldScope->mapId_ = JsValue(tile_->mapId());
+        auto featureId = tile_->resolve<FeatureId>(*value);
+        assignFeatureReference(*fieldScope, featureId);
+        singleValue = {fieldScope->value_, ValueType::FeatureId};
     }
     else {
         switch (value->type()) {
@@ -636,6 +628,21 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
         return singleValue;
     }
     return {};
+}
+
+void InspectionConverter::assignFeatureReference(
+    InspectionNode& node,
+    model_ptr<FeatureId> const& featureId)
+{
+    node.type_ = ValueType::FeatureId;
+    if (!featureId) {
+        node.value_ = convertString("");
+        node.mapId_ = JsValue(tile_->mapId());
+        return;
+    }
+
+    node.value_ = convertString(featureId->toString());
+    node.mapId_ = JsValue(featureId->mapId());
 }
 
 JsValue InspectionConverter::convertString(const simfil::StringId& f)
