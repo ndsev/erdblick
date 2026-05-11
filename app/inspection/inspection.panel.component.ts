@@ -15,12 +15,14 @@ import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 
+/** Select option for switching between source-data layers within one inspected tile. */
 interface SourceLayerMenuItem {
     label: string,
     disabled: boolean,
     command: () => void
 }
 
+/** Shared surface implemented by feature and source-data panel bodies for dock sizing logic. */
 interface InspectionPanelContentAdapter {
     measurePreferredHeightEm: () => number | undefined;
     refreshLayout: () => void;
@@ -29,7 +31,7 @@ interface InspectionPanelContentAdapter {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="inspect-panel" [value]="accordionValue" [transitionOptions]="accordionTransitionOptions">
+        <p-accordion class="inspect-panel" data-testid="inspection-panel" [(value)]="accordionValue" [transitionOptions]="accordionTransitionOptions">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
@@ -199,6 +201,7 @@ interface InspectionPanelContentAdapter {
     `],
     standalone: false
 })
+/** Docked accordion variant of an inspection panel. */
 export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     title = "";
     isExpanded: boolean = false;
@@ -281,17 +284,20 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Performs the first layout sync after the docked panel has a rendered body. */
     ngAfterViewInit() {
         this.detectSafari();
         this.scheduleAutoExpand();
     }
 
+    /** Applies the currently selected source-data layer switch. */
     protected onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
             this.selectedLayerItem.command();
         }
     }
 
+    /** Stops header interaction propagation while using the source-data layer dropdown. */
     protected onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
     }
@@ -313,6 +319,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
     }
 
+    /** Detects Safari because its resize/accordion behavior needs different animation defaults. */
     private detectSafari() {
         const isSafari = /Safari/i.test(navigator.userAgent);
         if (isSafari) {
@@ -320,21 +327,25 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Surfaces source-data loading failures inline inside the docked panel. */
     protected onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
     }
 
+    /** Toggles whether the panel can be replaced by future selection changes. */
     protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
         this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
+    /** Removes this docked inspection panel from the selection set. */
     protected unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
     }
 
+    /** Moves the panel into a floating dialog. */
     protected undock(event: MouseEvent) {
         event.stopPropagation();
         this.ejectedPanel.emit(this.panel());
@@ -345,6 +356,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         return !panel.undocked && this.dockedPanelCount() > 1;
     }
 
+    /** Switches between default dock height and content-fit height for this panel. */
     protected toggleDockAutoSize(event: MouseEvent) {
         event.stopPropagation();
         if (!this.showDockAutoSizeToggle()) {
@@ -359,6 +371,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.refreshPanelContentLayout();
     }
 
+    /** Moves the camera to the first feature represented by this panel. */
     private focusOnFeature(event?: MouseEvent) {
         event?.stopPropagation();
         const panel = this.panel();
@@ -368,31 +381,37 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.mapService.zoomToFeature(undefined, panel.features[0]);
     }
 
+    /** UI wrapper around the focus action for toolbar buttons and menus. */
     protected focusOnFeatureAction(event: MouseEvent) {
         this.focusOnFeature(event);
     }
 
+    /** Opens the feature GeoJSON in a separate browser tab. */
     protected openGeoJsonInNewTabAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.openGeoJsonInNewTab();
     }
 
+    /** Starts a GeoJSON download for the current feature selection. */
     protected downloadGeoJsonAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.downloadGeoJson();
     }
 
+    /** Copies the current feature GeoJSON to the clipboard. */
     protected copyGeoJsonAction(event: MouseEvent) {
         event.stopPropagation();
         this.featurePanel?.copyGeoJson();
     }
 
+    /** Opens the comparison picker anchored to the compare toolbar button. */
     protected openComparePopover(event: MouseEvent) {
         event.stopPropagation();
         this.refreshCompareOptions();
         this.comparePopover.toggle(event);
     }
 
+    /** Starts a dock drag request when the user drags the panel header. */
     protected onHeaderPointerDown(event: PointerEvent) {
         if (event.button !== 0) {
             return;
@@ -404,6 +423,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.panelDragRequest.emit({panel: this.panel(), event});
     }
 
+    /** Checks whether an event target should keep its own pointer behavior. */
     private isInteractiveTarget(target: HTMLElement | null): boolean {
         if (!target) {
             return false;
@@ -421,6 +441,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         return Math.max(contentHeight, panel.size[1], DEFAULT_DOCKED_EM_HEIGHT);
     }
 
+    /** Persists the current body height in both local state and shared app state. */
     private applyPanelHeight(panel: InspectionPanelModel<FeatureWrapper>, heightEm: number) {
         if (!Number.isFinite(heightEm) || heightEm <= 0) {
             return;
@@ -429,6 +450,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.stateService.setInspectionPanelSize(panel.id, [panel.size[0], heightEm]);
     }
 
+    /** Refreshes whichever content component is currently mounted inside the panel body. */
     private refreshPanelContentLayout() {
         const refresh = () => this.getPanelContentAdapter()?.refreshLayout();
         window.requestAnimationFrame(() => {
@@ -444,6 +466,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         return heightEm > DEFAULT_DOCKED_EM_HEIGHT + 0.1;
     }
 
+    /** Opens the overflow menu used on narrow docked panels. */
     protected openExtraMenu(event: MouseEvent) {
         event.stopPropagation();
         this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
@@ -483,6 +506,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.extraMenu.toggle(event);
     }
 
+    /** Reanchors the compare popover when launched from the overflow menu. */
     private openCompareFromMenu(menuEvent: MenuItemCommandEvent) {
         this.refreshCompareOptions();
         const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
@@ -496,6 +520,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Refreshes compare candidates and drops ids that are no longer valid. */
     protected refreshCompareOptions() {
         this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
@@ -503,6 +528,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         );
     }
 
+    /** Opens the comparison dialog with this docked panel as the base entry. */
     protected applyComparison(event: MouseEvent) {
         event.stopPropagation();
         if (!this.selectedCompareIds.length) {
@@ -521,10 +547,12 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.comparePopover.hide();
     }
 
+    /** Clears pending auto-expand work when the docked panel is destroyed. */
     ngOnDestroy() {
         this.clearScheduledAutoExpand();
     }
 
+    /** Defers content-fit height measurement until after the accordion body is laid out. */
     private scheduleAutoExpand() {
         this.clearScheduledAutoExpand();
         this.autoExpandRafFirst = window.requestAnimationFrame(() => {
@@ -536,6 +564,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Cancels any deferred auto-expand measurement. */
     private clearScheduledAutoExpand() {
         if (this.autoExpandRafFirst !== undefined) {
             window.cancelAnimationFrame(this.autoExpandRafFirst);

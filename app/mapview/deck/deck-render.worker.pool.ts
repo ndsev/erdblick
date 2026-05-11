@@ -6,11 +6,13 @@ import {
     DeckTileRenderTask,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
+import {StyleSourceRef} from "../../styledata/style-validation.model";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
 const WORKER_OVERRIDE_CAP = 32;
 
+/** Main-thread request payload accepted by the render-worker pool. */
 export interface DeckTileRenderRequest {
     viewIndex: number;
     tileKey: string;
@@ -19,7 +21,9 @@ export interface DeckTileRenderRequest {
     dataSourceInfoBlob: Uint8Array;
     nodeId: string;
     mapName: string;
+    layerName: string;
     styleSource: string;
+    styleSourceRef: StyleSourceRef;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     fidelityValue: number;
@@ -30,17 +34,23 @@ export interface DeckTileRenderRequest {
     mergeCountSnapshot: Record<string, number>;
 }
 
+/** Runtime settings that decide whether worker rendering is used and how many workers are spawned. */
 export interface DeckRenderWorkerSettings {
     threadedRenderingEnabled: boolean;
     workerCountOverride: number | null;
 }
 
+/** Promise bookkeeping kept until one worker finishes rendering a specific tile task. */
 type PendingTask = {
     task: DeckTileRenderTask;
     resolve: (value: DeckTileRenderBuffers) => void;
     reject: (reason?: unknown) => void;
 };
 
+/**
+ * Pool of module workers that turn staged tile/style inputs into deck-ready buffers.
+ * The pool lazily initializes, keeps one task in flight per worker, and can be rebuilt on settings changes.
+ */
 export class DeckRenderWorkerPool {
     private readonly workers: Worker[] = [];
     private readonly workerBusy: boolean[] = [];
@@ -54,8 +64,10 @@ export class DeckRenderWorkerPool {
     private initPromise: Promise<void> | null = null;
     private nextTaskId = 0;
 
+    /** Creates the pool wrapper with the maximum number of workers to spawn on initialization. */
     constructor(private readonly maxWorkers: number) {}
 
+    /** Queues one tile render request onto the next free worker and resolves with the packed buffers. */
     async renderTile(request: DeckTileRenderRequest): Promise<DeckTileRenderBuffers> {
         await this.ensureInitialized();
         const workerIndex = await this.acquireWorkerSlot();
@@ -72,6 +84,7 @@ export class DeckRenderWorkerPool {
         });
     }
 
+    /** Initializes workers once and shares the same promise across concurrent callers. */
     private async ensureInitialized(): Promise<void> {
         if (!this.initPromise) {
             this.initPromise = this.initializeWorkers().catch((error) => {
@@ -82,12 +95,14 @@ export class DeckRenderWorkerPool {
         return await this.initPromise;
     }
 
+    /** Starts the first worker from the module URL and clones additional workers from its script blob. */
     private async initializeWorkers(): Promise<void> {
         const firstWorker = new Worker(new URL("./deck-render.worker", import.meta.url), {type: "module"});
         const moduleUrl = await this.waitForWorkerReady(firstWorker);
         this.registerWorker(firstWorker, 0);
 
         if (this.maxWorkers <= 1) {
+            // Single-worker mode skips the blob fan-out path entirely to avoid unnecessary fetch/blob work.
             return;
         }
 
@@ -100,6 +115,7 @@ export class DeckRenderWorkerPool {
         }
     }
 
+    /** Waits for the initial worker handshake that confirms the worker script finished booting. */
     private waitForWorkerReady(worker: Worker): Promise<string> {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -121,6 +137,7 @@ export class DeckRenderWorkerPool {
         });
     }
 
+    /** Fetches the booted worker module and turns it into a blob URL for cheaper worker fan-out. */
     private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
         const response = await fetch(workerModuleUrl, {cache: "force-cache"});
         if (!response.ok) {
@@ -132,6 +149,7 @@ export class DeckRenderWorkerPool {
         return URL.createObjectURL(blob);
     }
 
+    /** Registers message/error handlers for one worker slot. */
     private registerWorker(worker: Worker, index: number): void {
         this.workers[index] = worker;
         this.workerBusy[index] = false;
@@ -150,10 +168,12 @@ export class DeckRenderWorkerPool {
                 this.inFlightByTaskId.delete(runningTaskId);
                 inFlight!.reject(new Error(event.message || "Deck worker execution failed."));
             }
+            // The slot is still reusable after one task failure; the pool only tears down on reconfiguration.
             this.releaseWorkerSlot(index);
         };
     }
 
+    /** Resolves or rejects the promise associated with a completed worker task. */
     private handleTaskResult(result: DeckTileRenderResult): void {
         const pending = this.inFlightByTaskId.get(result.taskId);
         if (!pending) {
@@ -176,6 +196,8 @@ export class DeckRenderWorkerPool {
             pathBillboard: result.pathBillboard,
             arrowWorld: result.arrowWorld,
             arrowBillboard: result.arrowBillboard,
+            gltfNodes: result.gltfNodes,
+            gltfPickProxies: result.gltfPickProxies,
             coordinateOrigin: result.coordinateOrigin,
             lowFiBundles: (result.lowFiBundles ?? []).map((bundle): DeckLowFiBundleBuffers => ({
                 lod: Number.isFinite(bundle.lod) ? Math.max(0, Math.min(7, Math.floor(bundle.lod))) : 0,
@@ -187,13 +209,17 @@ export class DeckRenderWorkerPool {
                 pathWorld: bundle.pathWorld,
                 pathBillboard: bundle.pathBillboard,
                 arrowWorld: bundle.arrowWorld,
-                arrowBillboard: bundle.arrowBillboard
+                arrowBillboard: bundle.arrowBillboard,
+                gltfNodes: bundle.gltfNodes,
+                gltfPickProxies: bundle.gltfPickProxies
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
+            styleIssues: result.styleIssues ?? [],
             workerTimings: result.timings
         });
     }
 
+    /** Acquires the next idle worker slot or waits until one becomes available. */
     private async acquireWorkerSlot(): Promise<number> {
         for (let i = 0; i < this.workers.length; i++) {
             if (this.workerBusy[i]) {
@@ -207,6 +233,7 @@ export class DeckRenderWorkerPool {
         });
     }
 
+    /** Releases a worker slot and immediately hands it to the next waiter if one exists. */
     private releaseWorkerSlot(index: number): void {
         const waiter = this.availableWorkerWaiters.shift();
         if (waiter) {
@@ -217,11 +244,13 @@ export class DeckRenderWorkerPool {
         this.workerBusy[index] = false;
     }
 
+    /** Builds a unique task id used to correlate worker results back to their pending promise. */
     private makeTaskId(): string {
         this.nextTaskId += 1;
         return `deck-task-${Date.now()}-${this.nextTaskId}`;
     }
 
+    /** Tears down the entire pool and rejects every pending or waiting task with a reset reason. */
     dispose(reason = "Deck render worker pool reset."): void {
         const resetError = new Error(reason);
         this.availableWorkerWaiters.splice(0).forEach(waiter => waiter.reject(resetError));
@@ -250,6 +279,7 @@ let settings: DeckRenderWorkerSettings = {
 
 let singleton: DeckRenderWorkerPool | null = null;
 
+/** Normalizes a user-provided worker override into the supported range or clears it. */
 function sanitizeWorkerOverride(workerCountOverride: number | null): number | null {
     if (workerCountOverride === null || workerCountOverride === undefined) {
         return null;
@@ -260,6 +290,7 @@ function sanitizeWorkerOverride(workerCountOverride: number | null): number | nu
     return Math.max(1, Math.min(Math.floor(workerCountOverride), WORKER_OVERRIDE_CAP));
 }
 
+/** Chooses an automatic worker count from the reported CPU count with conservative caps. */
 function resolveAutoWorkerCount(): number {
     const rawCpuCount = Number(
         globalThis.navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK_CPU_COUNT
@@ -269,9 +300,12 @@ function resolveAutoWorkerCount(): number {
             ? Math.floor(rawCpuCount)
             : AUTO_WORKER_FALLBACK_CPU_COUNT;
     const halfCpuCount = Math.floor(normalizedCpuCount / 2);
+    // The pool intentionally stays conservative: we reserve roughly half the machine for the UI,
+    // but still guarantee at least two workers so threaded rendering remains worthwhile.
     return Math.max(AUTO_WORKER_MIN, Math.min(halfCpuCount, WORKER_OVERRIDE_CAP));
 }
 
+/** Resolves the effective worker count after applying enable/disable state and overrides. */
 function resolveConfiguredWorkerCount(): number {
     if (!settings.threadedRenderingEnabled) {
         return 0;
@@ -282,6 +316,7 @@ function resolveConfiguredWorkerCount(): number {
     return resolveAutoWorkerCount();
 }
 
+/** Applies new worker-pool settings and disposes the singleton when the configuration changed. */
 export function configureDeckRenderWorkerSettings(next: DeckRenderWorkerSettings): void {
     const normalized: DeckRenderWorkerSettings = {
         threadedRenderingEnabled: next.threadedRenderingEnabled !== false,
@@ -297,18 +332,22 @@ export function configureDeckRenderWorkerSettings(next: DeckRenderWorkerSettings
     }
 }
 
+/** Returns whether threaded deck rendering is currently enabled at all. */
 export function isDeckRenderWorkerPipelineEnabled(): boolean {
     return settings.threadedRenderingEnabled;
 }
 
+/** Returns the currently configured worker concurrency. */
 export function getDeckRenderWorkerConcurrency(): number {
     return resolveConfiguredWorkerCount();
 }
 
+/** Returns the automatic worker count that would be chosen without an explicit override. */
 export function getDeckRenderAutoWorkerCount(): number {
     return resolveAutoWorkerCount();
 }
 
+/** Returns the lazily created singleton worker pool. */
 export function deckRenderWorkerPool(): DeckRenderWorkerPool {
     if (!settings.threadedRenderingEnabled) {
         throw new Error("Deck render worker pipeline is disabled.");

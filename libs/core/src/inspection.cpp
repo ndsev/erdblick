@@ -13,6 +13,7 @@ using namespace mapget;
 namespace
 {
 
+/** Check whether a field name can be emitted as a bare GeoJSON-path identifier. */
 bool isBareGeoJsonPathField(std::string_view field)
 {
     if (field.empty()) {
@@ -32,6 +33,7 @@ bool isBareGeoJsonPathField(std::string_view field)
     });
 }
 
+/** Escape a field name for use inside a `["..."]` GeoJSON-path segment. */
 std::string escapedGeoJsonPathField(std::string_view field)
 {
     std::string escaped;
@@ -45,6 +47,7 @@ std::string escapedGeoJsonPathField(std::string_view field)
     return escaped;
 }
 
+/** Append one field segment to an existing GeoJSON path using bare or bracket notation. */
 std::string appendGeoJsonPathField(std::string_view base, std::string_view field)
 {
     if (isBareGeoJsonPathField(field)) {
@@ -95,6 +98,23 @@ auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
     return "0x" + value.toHex(false);
 }
 
+/** Convert one 3D point to the `[x, y, z]` list format used by inspection arrays. */
+JsValue pointArrayValue(const mapget::Point& point)
+{
+    return JsValue::List({JsValue(point.x), JsValue(point.y), JsValue(point.z)});
+}
+
+/** Compute the center point of an origin/size box description. */
+mapget::Point boxCenter(const mapget::Point& origin, const mapget::Point& size)
+{
+    return {
+        origin.x + size.x * 0.5,
+        origin.y + size.y * 0.5,
+        origin.z + size.z * 0.5
+    };
+}
+
+/** Resolve the layer's configured high-fidelity stage with safe fallbacks for legacy metadata. */
 uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
 {
     auto const layerInfo = layer.layerInfo();
@@ -104,6 +124,7 @@ uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
     return std::min(stages - 1U, configured);
 }
 
+/** Resolve the display label for a geometry stage using layer metadata when present. */
 std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
 {
     auto const layerInfo = layer.layerInfo();
@@ -113,6 +134,7 @@ std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
     return fmt::format("Stage {}", stage);
 }
 
+/** Hide stage labels for baseline/high-fi geometry and show them only for add-on stages. */
 bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
 {
     return stage > highFidelityStage(layer);
@@ -317,8 +339,7 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     }
     auto relGroupScope = push(relGroup);
     auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
-    relScope->value_ = JsValue(r->target()->toString());
-    relScope->mapId_ = JsValue(r->model().mapId());
+    assignFeatureReference(*relScope, r->target());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (auto const sourceValidity = r->sourceValidityOrNull()) {
@@ -339,11 +360,17 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
             FieldOrIndex(key.as<std::string>()),
         ValueType::String);
     std::string typeString;
+    auto pushPointField = [this](std::string_view const& name, mapget::Point const& point) {
+        auto fieldScope = push(name, std::string(name), ValueType::Number | ValueType::ArrayBit);
+        fieldScope->value_ = pointArrayValue(point);
+    };
     switch (g->geomType()) {
     case GeomType::Points: typeString = "Points"; break;
     case GeomType::Line: typeString = "Polyline"; break;
     case GeomType::Polygon: typeString = "Polygon"; break;
     case GeomType::Mesh: typeString = "Mesh"; break;
+    case GeomType::AABB: typeString = "Bounding Box"; break;
+    case GeomType::GltfNodeIndex: typeString = "3D Object"; break;
     }
     geomScope->value_ = convertString(typeString);
     if (auto geometryName = g->name()) {
@@ -351,6 +378,24 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     }
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
+
+    if (g->geomType() == GeomType::AABB) {
+        auto const origin = g->aabbOrigin();
+        auto const size = g->aabbSize();
+        pushPointField("origin", origin);
+        pushPointField("size", size);
+        pushPointField("center", boxCenter(origin, size));
+        return;
+    }
+
+    if (g->geomType() == GeomType::GltfNodeIndex) {
+        auto const origin = g->gltfNodeAabbOrigin();
+        auto const size = g->gltfNodeAabbSize();
+        pushPointField("origin", origin);
+        pushPointField("size", size);
+        pushPointField("center", boxCenter(origin, size));
+        return;
+    }
 
     uint32_t index = 0;
     g->forEachPoint(
@@ -360,7 +405,7 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
                 JsValue(index),
                 index++,
                 ValueType::Number | ValueType::ArrayBit);
-            ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
+            ptScope->value_ = pointArrayValue(pt);
             return true;
         });
 }
@@ -394,8 +439,7 @@ void InspectionConverter::convertValidity(
 
         if (auto featureId = v.featureId()) {
             auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
-            featureIdScope->value_ = convertString(featureId->toString());
-            featureIdScope->mapId_ = JsValue(tile_->mapId());
+            assignFeatureReference(*featureIdScope, featureId);
         }
 
         if (auto transitionNumber = v.transitionNumber()) {
@@ -521,15 +565,9 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
         value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
     {
-        auto vv = value->value();
-        if (std::holds_alternative<std::string_view>(vv)) {
-            singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::FeatureId};
-        } else if (std::holds_alternative<std::string>(vv)) {
-            singleValue = {convertString(std::get<std::string>(vv)), ValueType::FeatureId};
-        } else {
-            singleValue = {convertString(""), ValueType::FeatureId};
-        }
-        fieldScope->mapId_ = JsValue(tile_->mapId());
+        auto featureId = tile_->resolve<FeatureId>(*value);
+        assignFeatureReference(*fieldScope, featureId);
+        singleValue = {fieldScope->value_, ValueType::FeatureId};
     }
     else {
         switch (value->type()) {
@@ -590,6 +628,21 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
         return singleValue;
     }
     return {};
+}
+
+void InspectionConverter::assignFeatureReference(
+    InspectionNode& node,
+    model_ptr<FeatureId> const& featureId)
+{
+    node.type_ = ValueType::FeatureId;
+    if (!featureId) {
+        node.value_ = convertString("");
+        node.mapId_ = JsValue(tile_->mapId());
+        return;
+    }
+
+    node.value_ = convertString(featureId->toString());
+    node.mapId_ = JsValue(featureId->mapId());
 }
 
 JsValue InspectionConverter::convertString(const simfil::StringId& f)

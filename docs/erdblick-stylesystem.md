@@ -16,7 +16,7 @@ Most day-to-day style work happens directly inside the Styles dialog, where you 
    - Import/Export buttons to move styles in and out of the browser’s `localStorage`.
 4. **Reset browser-stored versions** via the Preferences dialog: use the “Clear” buttons for imported styles and modified built-in styles if the UI behaves unexpectedly.
 
-Built-in styles that were edited locally show a **Modified** tag. Click it to open the **compare dialog** against the shipped version.
+Built-in styles that were edited locally show a **Modified** tag. Click it to open the **compare dialog** against the shipped version. Styles supplied through `additionalStyles` show an **Additional** tag. If an additional style overrides a base style with the same YAML `name:`, clicking **Additional** opens a read-only comparison against the base style.
 
 In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options.
 That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
@@ -93,7 +93,7 @@ rules:
 | --- | --- |
 | `type` | Regex that matches the feature type ID (e.g., `LaneGroup`). |
 | `filter` | Simfil expression that runs against the current feature/relation/attribute. |
-| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. |
+| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, `mesh`, `aabb`, or `gltf` primitives. |
 | `aspect` | `feature` (default), `relation`, or `attribute`. Controls how the rule interprets the current entity. |
 | `mode` | `none`, `hover`, or `selection`. Use separate rules for hover/selection-specific rendering. |
 | `fidelity` | `low`, `high`, or `any` (default). Controls whether the rule participates in low-fidelity rendering, high-fidelity rendering, or both. |
@@ -119,6 +119,61 @@ rules:
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
 | `arrow` / `arrow-expression` | `none`, `forward`, `backward`, or `double` arrowheads. Expressions can switch per feature. |
 | `point-merge-grid-cell` | `[x, y, z]` cell size for merging coincident POIs. When set, `$mergeCount` appears in the expression context. |
+
+### GLTF and AABB Geometry
+
+`geometry: ["gltf"]` and `geometry: ["aabb"]` are the two 3D-oriented geometry families currently exposed by erdblick:
+
+- `gltf` renders feature-owned node subsets from a tile-level GLB attachment.
+- `aabb` renders explicit feature bounding boxes. This is mainly useful for low-fidelity 3D fallbacks, debug views, and coarse interaction proxies.
+  For GLTF-backed features, `aabb` rules can also render the exported node bounding box instead of the real model geometry.
+
+For `gltf` rules, the style system currently treats the attached model as fixed geometry and uses the rule mostly as a visibility/highlight/tint contract:
+
+- Supported and meaningful fields:
+  - `type`, `filter`, `mode`, `fidelity`, `stage`, `lod`, `selectable`
+  - `color` / `color-expression`
+  - `opacity`
+  - `depth-test`
+- Fields that currently do **not** reshape visible GLTF node rendering:
+  - `width`
+  - `outline-color`, `outline-width`
+  - `offset`, `vertical-offset`, `offset-increment`
+  - `billboard`
+
+Important behavior for GLTF highlights:
+
+- `mode: hover` and `mode: selection` rules do not instantiate separate model copies. They act as temporary style overrides on the same shared GLTF node set.
+- In practice this means GLTF highlight rules are best used for `color` / `opacity` overlays, not for geometric displacement tricks.
+- If a GLTF highlight should always stay visible on top of the base model, set `depth-test: false`.
+
+For `aabb` rules, the regular mesh/polygon-style properties apply normally because erdblick renders the box geometry itself. That also applies when the source feature is GLTF-backed and the box comes from the node's exported bounds instead of an explicit backend AABB feature.
+
+Example:
+
+```yaml
+rules:
+  - type: Display3D
+    fidelity: high
+    filter: show3d == true
+    geometry: ["gltf"]
+
+  - type: Display3D
+    fidelity: low
+    filter: show3d == true
+    geometry: ["aabb"]
+    color: pink
+    opacity: 0.2
+
+  - type: Display3D
+    geometry: ["gltf"]
+    mode: hover
+    color: yellow
+    opacity: 0.5
+    depth-test: false
+```
+
+If you rely on the built-in `Highlights` style for hover/selection, make sure its feature highlight rules include `gltf` (and optionally `aabb`) in their `geometry` lists.
 
 ### Labeling
 
@@ -271,10 +326,14 @@ To control which style sheets are available in a given deployment, configure the
   ```json
   {
     "styles": [
-      { "url": "styles/default.yaml" },
-      { "url": "styles/debug.yaml" }
+      { "url": "default.yaml" },
+      { "url": "debug.yaml" }
     ]
   }
   ```
-- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`).
+- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`). Plain style names are requested from `bundle/styles/<name>`.
+- If your backend supplies `/config.erdblick`, it can provide the same `styles` list at runtime. The referenced YAML files must still be reachable through the normal style bundle routes.
+- Backends can also provide `additionalStyles` to append deployment-specific style sheets without replacing the base style list. Entries use the same string or `{ "url": "..." }` shape as `styles`, and their URLs must already be browser-reachable.
+- Additional style entries are loaded after base styles. An additional style with the same `name:` as a base style overrides the active base style. If the user modifies that additional style locally, the local modification takes precedence over the original additional style, which takes precedence over the base style.
+- Erdblick does not scan style directories or expand wildcards. If a hosting application offers wildcard or directory syntax, it must publish concrete style URLs in `config.json` or `/config.erdblick` before erdblick loads them.
 - Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.

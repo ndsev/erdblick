@@ -42,6 +42,63 @@ These scripts compile `erdblick-core` to a single-file WASM/JS bundle consumed b
 
 Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari are all supported. For serious profiling or debugging, it is worth checking problematic scenarios in Chrome once to rule out renderer-specific issues.
 
+## Playwright Integration Tests
+
+Committed browser tests live under `playwright/` and are split into two groups:
+
+- `playwright/tests/` contains behavioural end-to-end tests that assert UI and backend behaviour.
+- `playwright/snap-tests/` contains visual regression tests that store their baselines under `playwright/reference/`.
+
+The current harness does **not** drive the Angular dev server. Instead, `playwright/global-setup.ts` starts `mapget serve` with `test/mapget-integration.yaml`, serves the built UI bundle from `static/browser`, waits for `/sources`, and then runs the suite against `http://localhost:9000` by default. In practice that means:
+
+- rebuild the UI bundle with `npm run build` or `./build-ui.bash .` before running integration tests after frontend changes
+- make sure `mapget` is available in `PATH`, or override it with `MAPGET_BIN=/path/to/mapget`
+- make sure Python is available and the `mapget` Python package is installed in the interpreter used by `test/datasource.sh` (`./venv/bin/python` if present, otherwise `python3` or `python`)
+- keep `test/mapget-integration.yaml` and `test/datasource.sh` working, because many tests expect the synthetic `TestMap/WayLayer` source to appear in `/sources`
+
+The most useful commands are:
+
+```bash
+npm run test:integration:list
+npm run test:integration
+npm run test:integration -- playwright/tests/inspection-panel.spec.ts
+npm run test:integration -- --project=firefox playwright/tests/inspection-panel.spec.ts
+npm run test:integration:headed
+npm run test:integration:visual
+npm run test:integration:update-snapshots
+```
+
+If you need different startup parameters, `playwright.config.ts` and the shared helpers currently read these environment variables:
+
+- `EB_APP_PORT` or `EB_APP_URL` to change the target base URL
+- `EB_MAPGET_CONFIG` to use a different `mapget` config file
+- `EB_TEST_MAP_NAME`, `EB_TEST_LAYER_NAME`, and `EB_TEST_VIEW_POSITION` from `test/.env` to define the default map, layer, and camera tuples used by shared helpers
+- `EB_TEST_STATE_SNAPSHOT` or `test.use({ stateSnapshot: 'name' })` to preload local storage state from `test/states/*.json`
+
+When you introduce a new test, start from the shared fixture instead of `@playwright/test` directly:
+
+```ts
+import { expect, test } from '../fixtures/test';
+```
+
+`playwright/fixtures/test.ts` already applies the repo defaults used by the existing suite: deterministic viewport settings, forced dark mode, optional state snapshot hydration, a mocked `/locate` response for the Python datasource setup, and V8 coverage collection on Chromium.
+
+For new behavioural tests, follow the existing pattern in `playwright/tests/`:
+
+1. Assert that the expected backend source exists with `requireMapSource(...)` or `requireTestMapSource(...)`.
+2. Navigate with `navigateToRoot(...)` or `navigateToStateSnapshotRoot(...)` from `playwright/utils/ui-helpers.ts`.
+3. Reuse helpers such as `enableMapLayer(...)`, `openSearchPalette(...)`, or `runFeatureSearch(...)` before adding new one-off page-driving code.
+4. Prefer `getByTestId(...)` locators. If a dialog or control does not expose a stable `data-testid`, add one in the Angular template before writing a brittle selector.
+
+For new snapshot tests, mirror the files under `playwright/snap-tests/`:
+
+1. Keep the assertion at page level with `await expect(page).toHaveScreenshot(...)`.
+2. Move the mouse to `(0, 0)` immediately before the screenshot so hover state does not leak into the baseline.
+3. Reuse the same fixture and setup helpers as behavioural tests so the captured state is deterministic.
+4. Update baselines intentionally with `npm run test:integration:update-snapshots`, or narrow that command to the specific spec while iterating.
+
+Some snapshot specs also produce labelled documentation screenshots via `captureDocsScreenshotWithLabels(...)` in `playwright/utils/ui-helpers.ts`. Follow that pattern only when the visual state is meant to be reused in the docs; otherwise keep the test focused on the assertion itself.
+
 ## Component Overview
 
 At a high level, erdblick consists of an Angular shell, a deck.gl-based map view, a WebAssembly core that understands map tiles and evaluates styles and search queries, and a mapget-compatible backend plus static configuration assets:
@@ -67,7 +124,7 @@ classDiagram
     mapget-compatible HTTP + WebSocket API
   }
   class ConfigFiles {
-    config.json and extensions
+    config.json, /config.erdblick, extensions
   }
   class StyleBundles {
     YAML style sheets
@@ -99,12 +156,14 @@ classDiagram
 In code, the main responsibilities are:
 
 - `AppComponent` and the PrimeNG-based panels present the UI (maps and layers, styles, search, inspection, preferences, statistics, DataSource editor).
+- `AppConfigService` loads bundled `config/config.json`, optionally merges a public `/config.erdblick` backend section, normalizes style and `additionalStyles` entries, survey, extension-module, background-layer, and startup-state metadata, and feeds the frontend services that depend on deployment-specific configuration.
 - `MapViewComponent` and `MapView` encapsulate the deck.gl view per pane (two or more views), read camera changes, and forward interaction events to services.
-- `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding).
+- `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding). It can seed config-provided default state before local storage and URL hydration, while preserving user-owned browser state.
 - `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
-- `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
+- `StyleService` loads YAML style sheets from the normalized style URL list, loads base styles before additional styles, tracks additional/base collisions, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
+- `DeckMapView` also renders config-driven raster background layers: tiled XYZ sources for bundled or remote imagery, and experimental WMS sources for 2D-first deployments.
 - `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
-- A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
+- A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor and server-supplied UI defaults. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, bundled background imagery under `bundle/images/backgrounds`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
 
 The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
 
@@ -193,7 +252,7 @@ flowchart LR
   State[AppStateService<br>style state]
   MapSvc[MapDataService<br>tiles]
   Core[WASM core<br>FeatureLayerStyle]
-  Backend[Backend<br>config.json and styles]
+  Backend[Backend<br>config and styles]
 
   StylePanel --> StyleSvc
   StylePanel --> State
@@ -206,12 +265,12 @@ flowchart LR
 
 This group is responsible for turning YAML style sheets into runtime style objects:
 
-- `StyleService` loads style metadata from `config/config.json`, fetches YAML files, constructs `FeatureLayerStyle` instances, and exposes style options.
+- `StyleService` loads normalized style metadata from `AppConfigService`, fetches YAML files, constructs `FeatureLayerStyle` instances, and exposes style options.
 - `StyleComponent` lets users enable or disable styles, tweak options, import or export definitions, and open the embedded editor.
 - `AppStateService` tracks which styles and options are enabled so they can be restored across reloads or encoded in URLs.
 - `MapDataService` listens for style add and remove events and re-renders tiles when styles change.
 - The WASM core parses style YAML into executable style programs.
-- The backend serves `config.json` and the YAML files referenced within it.
+- The backend serves `config.json`, optional `/config.erdblick` defaults, and the YAML files referenced by the normalized style configuration.
 
 ### Search (search/*)
 
@@ -424,6 +483,47 @@ In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces
 - `coreLib.FeatureLayerVisualization` turns tile feature layers into render primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.
 - For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into render primitives held by `MergedPointsTile`.
 - When styles or view sync options change, `MapDataService.addTileFeatureLayer` clears and rebuilds `visualizationQueue` so that tiles are re-rendered with the new configuration.
+
+### GLTF Runtime Architecture
+
+GLTF-backed features add one extra layer of structure on top of the normal point/line/polygon rendering path:
+
+- The backend attaches one GLB payload to the whole tile layer, while individual features reference node subsets inside that GLB.
+- The WASM renderer therefore emits two GLTF-specific outputs:
+  - visible node references (`gltfNodes`)
+  - simplified per-node picking proxies (`gltfPickProxies`) derived from the node AABBs
+
+At runtime, `DeckTileVisualization` does **not** instantiate one deck layer per style rule for GLTF data. Instead it feeds a shared registry entry per tile/variant:
+
+- one shared visible `DeckGltfNodeLayer`
+- one shared invisible `DeckGltfPickProxyLayer`
+
+This is important for both correctness and performance:
+
+- the visible GLTF scenegraph should only be instantiated once per tile/version
+- hover and selection should restyle the same node set instead of creating duplicate model layers
+- picking should use the cheap proxy geometry instead of the real textured GLTF meshes
+
+The contribution flow looks like this:
+
+1. Each style visualization contributes visible GLTF node styling into the shared visible layer.
+2. Only the base, non-highlight pass contributes picking proxies into the shared pick layer.
+3. The visible layer resolves the contribution stack per `featureAddress/nodeIndex`.
+
+Current precedence is:
+
+- base style contributions
+- hover overrides
+- selection overrides
+
+For GLTF features, hover and selection are therefore implemented as temporary style overrides on the shared node set, not as separate model instantiations. This is why `mode: hover` / `mode: selection` GLTF rules are currently best understood as tint/depth overrides, not as full geometric restyling.
+
+The pick-proxy split is also deliberate:
+
+- the screen pass draws the visible `/gltf` layer and hides `/gltf-pick-proxy`
+- the picking pass draws `/gltf-pick-proxy` and excludes the visible `/gltf` layer
+
+Without that separation, deck's picking pass would sample the real visible GLTF meshes again, which is much slower and can also cause hover flicker when highlight overlays participate in picking.
 
 ### Staged Loading and LOD Policy
 

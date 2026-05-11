@@ -9,6 +9,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
 
+/** Shape emitted by the WASM inspection converter for one inspection subtree. */
 interface InspectionModelData {
     key: string;
     type: number;
@@ -42,6 +43,7 @@ interface InspectionModelData {
     styles: [``],
     standalone: false
 })
+/** Renders feature inspection data and keeps it in sync while staged tiles continue loading. */
 export class FeaturePanelComponent implements OnDestroy {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
@@ -85,24 +87,29 @@ export class FeaturePanelComponent implements OnDestroy {
         });
     }
 
+    /** Tears down staged-selection listeners so closed panels stop rebuilding. */
     ngOnDestroy() {
         this.destroyed = true;
         this.tileUpdateSubscription.unsubscribe();
     }
 
+    /** Rebuilds the tree immediately and refreshes the virtual scroller geometry. */
     refresh() {
         this.rebuildInspectionTree();
         this.inspectionTree?.refreshLayout();
     }
 
+    /** Forwards layout refreshes to the shared inspection tree component. */
     refreshLayout() {
         this.inspectionTree?.refreshLayout();
     }
 
+    /** Returns the current content height so docked panels can auto-expand to fit. */
     measurePreferredHeightEm(): number | undefined {
         return this.inspectionTree?.measurePreferredContentHeightEm();
     }
 
+    /** Coalesces multiple tile updates into one rebuild to avoid thrashing Angular change detection. */
     private scheduleInspectionTreeRebuild(): void {
         if (this.rebuildQueued || this.destroyed) {
             return;
@@ -120,6 +127,7 @@ export class FeaturePanelComponent implements OnDestroy {
         });
     }
 
+    /** Re-reads GeoJSON and inspection trees from the selected features when staged data changes. */
     private rebuildInspectionTree() {
         this.selectedFeatures = this.panel().features ?? [];
         if (!this.selectedFeatures.length) {
@@ -135,6 +143,9 @@ export class FeaturePanelComponent implements OnDestroy {
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
         const selectedFeatureGeoJsonTexts: string[] = [];
         this.selectedFeatures.forEach(featureWrapper => {
+            if (!this.mapService.isTileInspectionDataComplete(featureWrapper.featureTile)) {
+                return;
+            }
             try {
                 featureWrapper.peek((feature: Feature) => {
                     selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
@@ -171,6 +182,7 @@ export class FeaturePanelComponent implements OnDestroy {
         this.inspectionTree?.refreshLayout();
     }
 
+    /** Converts the WASM inspection model into PrimeNG tree nodes and annotates hover/highlight groups. */
     getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
         interface HoverAnnotationContext {
             mapTileKey: string;
@@ -180,6 +192,7 @@ export class FeaturePanelComponent implements OnDestroy {
             nodePath: string;
         }
 
+        /** Checks whether an inspection value identifies a geometry type. */
         const isGeometryTypeValue = (value: unknown): boolean => {
             if (typeof value !== "string") {
                 return false;
@@ -187,6 +200,7 @@ export class FeaturePanelComponent implements OnDestroy {
             return value === "Points" || value === "Polyline" || value === "Polygon" || value === "Mesh";
         };
 
+        /** Extracts the geometry name bubble from an inspection tree node. */
         const extractGeometryNameBubble = (children: TreeTableNode[]): string | null => {
             const nameNode = children.find(child => child.data?.["key"] === "name");
             const name = nameNode?.data?.["value"];
@@ -200,6 +214,7 @@ export class FeaturePanelComponent implements OnDestroy {
             return trimmed;
         };
 
+        /** Removes validity suffixes from displayed inspection names. */
         const stripValiditySuffix = (hoverId: string): string => {
             const validityIndex = hoverId.indexOf(":validity#");
             if (validityIndex >= 0) {
@@ -208,9 +223,11 @@ export class FeaturePanelComponent implements OnDestroy {
             return hoverId;
         };
 
+        /** Builds a stable tree node id from the current traversal path. */
         const makeNodeId = (context: HoverAnnotationContext, key: string, ordinal: number): string =>
             `${context.nodePath}/${ordinal}:${key}`;
 
+        /** Converts inspection model sections into PrimeNG tree table nodes. */
         const convertToTreeTableNodes = (
             dataNodes: Array<InspectionModelData> | undefined,
             context: HoverAnnotationContext
@@ -353,6 +370,7 @@ export class FeaturePanelComponent implements OnDestroy {
         return treeNodes;
     }
 
+    /** Column adapter used by the tree table to render the preformatted inspection fields. */
     formatData(colKey: string, rowData: any) {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";
@@ -361,6 +379,7 @@ export class FeaturePanelComponent implements OnDestroy {
         return rowData[colKey];
     }
 
+    /** Moves the camera to the first selected feature represented by this panel. */
     zoomToFeature() {
         // Currently only takes the first element for Jump to Feature functionality.
         // TODO: Allow to use the whole set for Jump to Feature.
@@ -370,26 +389,32 @@ export class FeaturePanelComponent implements OnDestroy {
         this.mapService.zoomToFeature(undefined, this.selectedFeatures[0]);
     }
 
+    /** Opens the delegated GeoJSON actions menu for the current feature selection. */
     showGeoJsonMenu(event: MouseEvent) {
         this.inspectionTree?.showGeoJsonMenu(event);
     }
 
+    /** Delegates GeoJSON viewing to the shared inspection tree implementation. */
     openGeoJsonInNewTab() {
         this.inspectionTree?.openGeoJsonInNewTab();
     }
 
+    /** Delegates GeoJSON download to the shared inspection tree implementation. */
     downloadGeoJson() {
         this.inspectionTree?.downloadGeoJson();
     }
 
+    /** Delegates GeoJSON clipboard export to the shared inspection tree implementation. */
     copyGeoJson() {
         this.inspectionTree?.copyGeoJson();
     }
 
+    /** Freezes the tree while outer drag gestures are active so PrimeNG does not relayout mid-drag. */
     freezeTree() {
         this.inspectionTree?.freeze();
     }
 
+    /** Re-enables the tree after a temporary drag freeze. */
     unfreezeTree() {
         this.inspectionTree?.unfreeze();
     }

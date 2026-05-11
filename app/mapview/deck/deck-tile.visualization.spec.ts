@@ -81,6 +81,18 @@ function emptyRenderResult(): any {
             widths: new Float32Array(),
             featureAddresses: new Uint32Array()
         },
+        gltfNodes: {
+            nodeIndices: new Uint32Array(),
+            colors: new Uint8Array(),
+            depthTests: new Uint8Array(),
+            featureAddresses: new Uint32Array()
+        },
+        gltfPickProxies: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array(),
+            nodeIndices: new Uint32Array(),
+            featureAddresses: new Uint32Array()
+        },
         coordinateOrigin: new Float64Array([0, 0, 0]),
         labelWorld: [],
         labelBillboard: [],
@@ -481,9 +493,8 @@ describe("DeckTileVisualization", () => {
 
         expect(rendered).toBe(true);
         expect((deck.commits[0][0] as any).props.parameters).toEqual({
-            depthWriteEnabled: false,
-            depthCompare: "always",
-            cullMode: "none"
+            depthTest: false,
+            depthMask: false
         });
     });
 
@@ -1040,7 +1051,7 @@ describe("DeckTileVisualization", () => {
         expect(visu.hasPendingLowFiSwitch()).toBe(true);
     });
 
-    it("does not apply a cached low-fi switch when the requested selection is empty", () => {
+    it("does not apply a cached low-fi switch when the requested selection is empty", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
         const tile = {
@@ -1075,7 +1086,7 @@ describe("DeckTileVisualization", () => {
         visu.completeRender = vi.fn();
         visu.applyLowFiBundleDataToRegistry = vi.fn();
 
-        const switched = visu.tryApplyCachedLowFiSwitch(
+        const switched = await visu.tryApplyCachedLowFiSwitch(
             {renderer: "deck", scene: {layerRegistry: registry}},
             registry,
             "low"
@@ -1309,6 +1320,7 @@ describe("DeckTileVisualization", () => {
                 "",
                 false,
                 {},
+                0,
                 relationExternalTileLoader
             ) as any;
 

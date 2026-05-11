@@ -3,11 +3,13 @@ import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {FeatureTile} from "../mapdata/features.model";
 
+/** Hover pick payload emitted by a render view after a screen-space hover query. */
 export interface HoveredFeatureIds {
     featureIds: (TileFeatureId | null)[];
     position: {x: number, y: number};
 }
 
+/** WGS84 rectangle used for fit-to-bounds navigation requests. */
 export interface RenderRectangle {
     west: number;
     south: number;
@@ -15,6 +17,7 @@ export interface RenderRectangle {
     north: number;
 }
 
+/** Generic 3D vector payload used by view-agnostic navigation topics. */
 export interface RenderVector3 {
     x: number;
     y: number;
@@ -23,15 +26,21 @@ export interface RenderVector3 {
 
 export type RenderBackend = "deck";
 
+/** Opaque handle that lets visualizations talk to the currently active renderer implementation. */
 export interface IRenderSceneHandle {
     readonly renderer: RenderBackend;
     readonly scene: unknown;
 }
 
+/**
+ * Contract implemented by tile visualizations regardless of renderer backend.
+ * Instances are long-lived and can be marked dirty multiple times as tiles or style options change.
+ */
 export interface ITileVisualization {
     readonly viewIndex: number;
     readonly styleId: string;
     readonly tile: FeatureTile;
+    styleOrder: number;
     highFidelityStage: number;
     prefersHighFidelity: boolean;
     maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
@@ -45,6 +54,10 @@ export interface ITileVisualization {
     setStyleOption(optionId: string, value: string | number | boolean): boolean;
 }
 
+/**
+ * Minimal renderer abstraction used by the rest of the frontend.
+ * Views expose picking, camera sync, and movement without leaking deck-specific details upward.
+ */
 export interface IRenderView {
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<HoveredFeatureIds | undefined>;

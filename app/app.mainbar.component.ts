@@ -1,15 +1,19 @@
 import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {MapDataService} from './mapdata/map.service';
-import {StyleService} from './styledata/style.service';
 import {
+    ABOUT_DIALOG_LAYOUT_ID,
+    DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
+    KEYBOARD_DIALOG_LAYOUT_ID,
+    LEGAL_INFO_DIALOG_LAYOUT_ID,
+    PREFERENCES_DIALOG_LAYOUT_ID,
     AppStateService,
+    STYLES_DIALOG_LAYOUT_ID,
     VIEW_SYNC_LAYERS,
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION,
     VIEW_SYNC_PROJECTION
 } from './shared/appstate.service';
-import {EditorService} from './shared/editor.service';
 import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 import {MenuItem} from "primeng/api";
@@ -25,15 +29,15 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
         '[class.main-bar-mobile-layout]': 'isMobileMenubar'
     },
     template: `
-        @if (stateService.mapsDialogVisible) {
-            <p-button class="maps-button" (click)="closeMapsPanel()" label=""
+        @if (mapsPanelOpen) {
+            <p-button class="maps-button" data-testid="maps-toggle" (click)="closeMapsPanel()" label=""
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
                       pTooltip="Close maps configuration panel">
                 <span class="material-symbols-outlined">close</span>
             </p-button>
         } @else {
-            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label=""
+            <p-button class="maps-button" data-testid="maps-toggle" (click)="showMapsPanel()" icon="" label=""
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
                       pTooltip="Open maps configuration panel">
@@ -96,20 +100,15 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
             </p-menubar>
         }
     `,
-    styles: [
-        `
-            .copyright-info {
-                width: 6.5em;
-                font-size: 0.8em;
-                word-wrap: break-word;
-                text-align: end;
-                cursor: pointer;
-                margin-right: 0.5em;
-            }
-        `
-    ],
+    styles: [``],
     standalone: false
 })
+/**
+ * Main menu bar for maps, styles, view options, diagnostics, and help actions.
+ *
+ * It adapts between desktop and mobile layouts based on both viewport width and
+ * the actual width of the viewer layout.
+ */
 export class MainBarComponent implements AfterViewInit, OnDestroy {
     private readonly subscriptions = new Subscription();
     private mediaQueryList?: MediaQueryList;
@@ -129,10 +128,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     copyright: string = '';
 
+    get mapsPanelOpen(): boolean {
+        return this.stateService.mapsOpenState.getValue();
+    }
+
     constructor(public mapService: MapDataService,
-                public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService,
                 private diagnostics: DiagnosticsFacadeService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
@@ -159,10 +160,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }));
     }
 
+    /** Starts observing the viewer layout width once the main bar is attached to the DOM. */
     ngAfterViewInit() {
         this.setupViewerLayoutTracking();
     }
 
+    /** Releases media-query, resize-observer, and tooltip-alignment resources. */
     ngOnDestroy() {
         this.teardownMobileMenuTracking();
         this.teardownViewerLayoutTracking();
@@ -174,6 +177,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.unsubscribe();
     }
 
+    /** Tracks viewport breakpoint changes for the mobile menubar mode. */
     private setupMobileMenuTracking() {
         this.mediaQueryList = window.matchMedia(MAIN_BAR_MEDIA_QUERY);
         this.viewportMobileMenubar = this.mediaQueryList.matches;
@@ -185,22 +189,27 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
+    /** Opens the preferences dialog from the menu. */
     showPreferencesDialog() {
-        this.stateService.preferencesDialogVisible = true;
+        this.stateService.openDialog(PREFERENCES_DIALOG_LAYOUT_ID);
     }
 
+    /** Opens the keyboard-help dialog from the menu. */
     showControlsDialog() {
-        this.stateService.controlsDialogVisible = true;
+        this.stateService.openDialog(KEYBOARD_DIALOG_LAYOUT_ID);
     }
 
+    /** Opens the diagnostics performance dialog from the menu. */
     openDiagnosticsPerformance() {
         this.diagnostics.openPerformanceDialog();
     }
 
+    /** Opens the diagnostics log dialog from the menu. */
     openDiagnosticsLog() {
         this.diagnostics.openLogDialog();
     }
 
+    /** Opens the diagnostics export dialog from the menu. */
     openDiagnosticsExport() {
         this.diagnostics.openExportDialog({
             includeProgress: true,
@@ -209,31 +218,37 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Opens the external user guide. */
     openHelp() {
         window.open('https://developer.nds.live/tools/mapviewer/user-guide', '_blank');
     }
 
+    /** Opens the About dialog. */
     openAboutDialog() {
-        this.stateService.aboutDialogVisible = true;
+        this.stateService.openDialog(ABOUT_DIALOG_LAYOUT_ID);
     }
 
+    /** Opens the datasource editor dialog. */
     private openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
+        this.stateService.openDialog(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID);
     }
 
+    /** Opens the styles dialog. */
     private openStylesDialog() {
-        this.styleService.stylesDialogVisible = true;
+        this.stateService.openDialog(STYLES_DIALOG_LAYOUT_ID);
     }
 
+    /** Opens the maps panel. */
     protected showMapsPanel() {
-        this.stateService.mapsDialogVisible = true;
+        this.stateService.mapsOpenState.next(true);
     }
 
+    /** Closes the maps panel. */
     protected closeMapsPanel() {
-        this.stateService.mapsDialogVisible = false;
+        this.stateService.mapsOpenState.next(false);
     }
 
+    /** Schedules tooltip alignment for the maps-panel button tooltip. */
     protected alignMapsPanelTooltip(event: MouseEvent) {
         const target = event.currentTarget as HTMLElement | null;
         if (!target) {
@@ -254,10 +269,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }, 50);
     }
 
+    /** Opens the legal-information dialog. */
     protected openLegalInfo() {
-        this.stateService.legalInfoDialogVisible = true;
+        this.stateService.openDialog(LEGAL_INFO_DIALOG_LAYOUT_ID);
     }
 
+    /** Aligns the maps-panel tooltip under the triggering button and keeps it on-screen. */
     private alignMapsPanelTooltipToTarget(target: HTMLElement) {
         const tooltip = document.querySelector<HTMLElement>('.maps-panel-button-tooltip');
         if (!tooltip) {
@@ -282,6 +299,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Cancels any queued tooltip-alignment passes. */
     private cancelMapsPanelTooltipAlignment() {
         if (this.mapsPanelTooltipAlignFrame !== undefined) {
             window.cancelAnimationFrame(this.mapsPanelTooltipAlignFrame);
@@ -293,6 +311,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Removes the viewport breakpoint listener. */
     private teardownMobileMenuTracking() {
         if (!this.mediaQueryList || !this.mediaQueryChangeListener) {
             return;
@@ -302,6 +321,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.mediaQueryList = undefined;
     }
 
+    /** Computes the initial viewer-layout-driven mobile menubar state. */
     private initializeViewerLayoutMobileState() {
         const viewerLayoutElement = this.findViewerLayoutElement();
         if (!viewerLayoutElement) {
@@ -318,6 +338,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
     }
 
+    /** Observes the viewer layout width so the menubar can collapse before it clips. */
     private setupViewerLayoutTracking() {
         const viewerLayoutElement = this.viewerLayoutElement ?? this.findViewerLayoutElement();
         if (!viewerLayoutElement) {
@@ -337,17 +358,20 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
     }
 
+    /** Releases the viewer layout resize observer. */
     private teardownViewerLayoutTracking() {
         this.viewerLayoutResizeObserver?.disconnect();
         this.viewerLayoutResizeObserver = undefined;
         this.viewerLayoutElement = undefined;
     }
 
+    /** Updates the viewer-layout contribution to the mobile menubar state. */
     private updateViewerLayoutMobileState(width: number) {
         this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
         this.scheduleMobileMenubarStateUpdate();
     }
 
+    /** Applies the effective mobile menubar state and rebuilds menu items if it changed. */
     private updateMobileMenubarState() {
         const isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
         if (this.isMobileMenubar === isMobileMenubar) {
@@ -357,6 +381,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.rebuildMenuItems();
     }
 
+    /** Coalesces mobile-menubar recalculation into a single animation-frame callback. */
     private scheduleMobileMenubarStateUpdate() {
         if (this.mobileMenubarStateFrame !== undefined) {
             return;
@@ -371,21 +396,25 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         });
     }
 
+    /** Locates the enclosing viewer layout element for width-based menu decisions. */
     private findViewerLayoutElement(): HTMLElement | undefined {
         const viewerLayoutElement = this.elementRef.nativeElement.closest('.viewer-layout');
         return viewerLayoutElement instanceof HTMLElement ? viewerLayoutElement : undefined;
     }
 
+    /** Converts the viewer-layout breakpoint from `em` to pixels. */
     private getViewerLayoutMobileBreakpointPx(): number {
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
         const effectiveRootFontSize = Number.isFinite(rootFontSize) ? rootFontSize : 16;
         return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * effectiveRootFontSize;
     }
 
+    /** Rebuilds the current menu model using the latest view count and layout mode. */
     private rebuildMenuItems(numViews: number = this.stateService.numViews): void {
         this.menuItems = this.buildMenuItems(numViews, this.isMobileMenubar);
     }
 
+    /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
         const menuItems: MenuItem[] = [
             {
@@ -403,7 +432,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         command: () => { this.openDatasources(); }
                     },
                     {
-                        name: 'Settings',
+                        name: 'Preferences',
                         icon: 'settings',
                         command: () => { this.showPreferencesDialog(); },
                     }
@@ -506,15 +535,15 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return menuItems;
     }
 
+    /** Toggles one synchronized-view option and mirrors the change into state. */
     private toggleSyncOption(code: string): void {
-        this.stateService.syncOptions.forEach(option => {
-            if (option.code === code) {
-                option.value = !option.value;
-            }
-        });
-        this.stateService.updateSelectedSyncOptions();
+        const nextSelection = this.stateService.viewSync.includes(code)
+            ? this.stateService.viewSync.filter(currentCode => currentCode !== code)
+            : [...this.stateService.viewSync, code];
+        this.stateService.updateSelectedSyncOptions(nextSelection);
     }
 
+    /** Returns whether a menu item corresponds to an active synchronized-view option. */
     protected isSyncViewOptionActive(item: MenuItem): boolean {
         const itemName = item['name'];
         switch (itemName) {

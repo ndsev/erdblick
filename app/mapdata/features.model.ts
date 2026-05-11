@@ -3,6 +3,10 @@ import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
 
+/**
+ * Normalizes feature ids for lookup against the base feature record.
+ * Attribute and relation pseudo-ids resolve through their host feature.
+ */
 function normalizeFeatureIdForLookup(featureId: string): string {
     const attributeIndex = featureId.indexOf(":attribute#");
     if (attributeIndex > -1) {
@@ -37,6 +41,12 @@ export class FeatureTile {
     private featureIdByAddressCache: Map<number, string> = new Map<number, string>();
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
     private vertexCountCache: number | null = null;
+    private glbAttachmentCacheVersion = -1;
+    private glbAttachmentCache: {
+        name: string;
+        bytes: Uint8Array;
+        center: [number, number, number];
+    } | null | undefined = undefined;
     private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
@@ -80,6 +90,10 @@ export class FeatureTile {
         }
     }
 
+    /**
+     * Updates the tile metadata and per-stage blob cache from a serialized layer payload.
+     * The highest loaded stage becomes the canonical blob for stats and placeholder metadata.
+     */
     hydrateFromBlob(tileFeatureLayerBlob: Uint8Array, stageOverride?: number) {
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return this.parser.readTileLayerMetadata(wasmBlob);
@@ -109,6 +123,8 @@ export class FeatureTile {
         this.fieldDictBlobCache = null;
         this.dataSourceInfoBlobCache = null;
         this.featureIdByAddressCache.clear();
+        this.glbAttachmentCacheVersion = -1;
+        this.glbAttachmentCache = undefined;
         this.dataVersion += 1;
 
         if (this.mapTileKey === "undefined") {
@@ -144,10 +160,12 @@ export class FeatureTile {
         }
     }
 
+    /** Returns true once at least one stage blob is cached for this tile. */
     hasData(): boolean {
         return this.tileFeatureLayerBlobsByStage.size > 0;
     }
 
+    /** Returns the cached stage payloads in ascending stage order for overlay attachment. */
     stageBlobs(): Array<{stage: number, blob: Uint8Array}> {
         const result: Array<{stage: number, blob: Uint8Array}> = [];
         for (const [stage, blob] of this.tileFeatureLayerBlobsByStage.entries()) {
@@ -157,6 +175,7 @@ export class FeatureTile {
         return result;
     }
 
+    /** Returns the highest cached stage, or null while the tile is still a placeholder. */
     highestLoadedStage(): number | null {
         let highest: number | null = null;
         for (const stage of this.tileFeatureLayerBlobsByStage.keys()) {
@@ -167,10 +186,15 @@ export class FeatureTile {
         return highest;
     }
 
+    /** Checks whether a specific stage payload has already been received. */
     hasStage(stage: number): boolean {
         return this.tileFeatureLayerBlobsByStage.has(stage);
     }
 
+    /**
+     * Returns the first missing stage below the advertised stage count.
+     * This drives inspection/render completeness checks.
+     */
     nextMissingStage(stageCount: number): number | undefined {
         const normalizedStageCount = Math.max(1, Math.floor(stageCount));
         for (let stage = 0; stage < normalizedStageCount; stage++) {
@@ -181,14 +205,17 @@ export class FeatureTile {
         return undefined;
     }
 
+    /** Returns true when every stage below the expected count is present. */
     isComplete(stageCount: number): boolean {
         return this.nextMissingStage(stageCount) === undefined;
     }
 
+    /** Stores a caller-provided vertex count estimate, usually from rendering stats. */
     setVertexCount(count: number): void {
         this.storeVertexCount(count);
     }
 
+    /** Assigns a stable render-order rank that later sorts visualizations front to back. */
     setRenderOrder(order: number): void {
         if (!Number.isFinite(order)) {
             this.renderOrderRank = FeatureTile.DEFAULT_RENDER_ORDER;
@@ -197,10 +224,15 @@ export class FeatureTile {
         this.renderOrderRank = Math.max(0, Math.floor(order));
     }
 
+    /** Returns the cached render-order rank used for visualization scheduling. */
     renderOrder(): number {
         return this.renderOrderRank;
     }
 
+    /**
+     * Returns the best-known vertex count for this tile.
+     * The value is derived lazily from tile stats until a renderer reports a more exact count.
+     */
     vertexCount(): number {
         if (this.vertexCountCache !== null) {
             return this.vertexCountCache;
@@ -213,11 +245,13 @@ export class FeatureTile {
         return 0;
     }
 
+    /** Normalizes and caches vertex counts so downstream stats stay monotonic and integral. */
     private storeVertexCount(count: number): number {
         this.vertexCountCache = Math.max(0, Math.floor(count));
         return this.vertexCountCache;
     }
 
+    /** Sums vertex-like counters from the tile stats map while skipping timing and size metrics. */
     private vertexCountFromStats(): number {
         let vertices = 0;
         for (const [key, values] of this.stats.entries()) {
@@ -239,6 +273,10 @@ export class FeatureTile {
         return vertices;
     }
 
+    /**
+     * Returns the serialized field dictionary for this datasource node.
+     * The dictionary is fetched lazily because many tiles never need search/inspection helpers.
+     */
     getFieldDictBlob(): Uint8Array | null {
         if (this.fieldDictBlobCache) {
             return this.fieldDictBlobCache;
@@ -257,6 +295,7 @@ export class FeatureTile {
         return encoded;
     }
 
+    /** Returns cached datasource metadata for the tile's map, loading it from WASM on demand. */
     getDataSourceInfoBlob(): Uint8Array | null {
         if (this.dataSourceInfoBlobCache) {
             return this.dataSourceInfoBlobCache;
@@ -275,6 +314,39 @@ export class FeatureTile {
         return encoded;
     }
 
+    /** Returns the optional tile-level GLB attachment together with the tile center anchor. */
+    async getGlbAttachmentSnapshot(): Promise<{
+        name: string;
+        bytes: Uint8Array;
+        center: [number, number, number];
+    } | null> {
+        if (this.glbAttachmentCacheVersion === this.dataVersion && this.glbAttachmentCache !== undefined) {
+            return this.glbAttachmentCache;
+        }
+        const snapshot = await this.peekAsync(async (tileFeatureLayer) => {
+            if (!tileFeatureLayer.hasGlbAttachment()) {
+                return null;
+            }
+            const bytes = uint8ArrayFromWasm((buf) => tileFeatureLayer.copyGlbAttachment(buf));
+            if (!bytes) {
+                return null;
+            }
+            const center = coreLib.getTilePosition(tileFeatureLayer.tileId());
+            return {
+                name: tileFeatureLayer.glbAttachmentName(),
+                bytes,
+                center: [center.x, center.y, center.z] as [number, number, number]
+            };
+        });
+        this.glbAttachmentCacheVersion = this.dataVersion;
+        this.glbAttachmentCache = snapshot;
+        return snapshot;
+    }
+
+    /**
+     * Reconstructs the canonical map tile key from parser metadata.
+     * This defends against placeholder keys and older payloads that omit the composed id.
+     */
     private canonicalMapTileKeyForMetadata(metadata: {
         id?: string;
         mapName?: string;
@@ -295,6 +367,7 @@ export class FeatureTile {
         return this.mapTileKey;
     }
 
+    /** Returns the highest-stage blob, which is the payload most callers want as the tile summary. */
     private highestStageBlob(): Uint8Array | null {
         const highest = this.highestLoadedStage();
         if (highest === null) {
@@ -303,14 +376,17 @@ export class FeatureTile {
         return this.tileFeatureLayerBlobsByStage.get(highest) || null;
     }
 
+    /** Builds the diagnostics key that tracks serialized tile size per stage. */
     static stageTileSizeKey(stage: number): string {
         return `${FeatureTile.statTileSizePrefix}/Stage-${stage}#kb`;
     }
 
+    /** Builds the diagnostics key that tracks parse duration per stage. */
     static stageParseTimeKey(stage: number): string {
         return `${FeatureTile.statParseTimePrefix}/Stage-${stage}#ms`;
     }
 
+    /** Appends parse timing samples to both the overall and per-stage diagnostics buckets. */
     private recordParseTime(durationMs: number, stage: number): void {
         const parseTimes = this.stats.get(FeatureTile.statParseTime);
         if (parseTimes) {
@@ -327,6 +403,7 @@ export class FeatureTile {
         }
     }
 
+    /** Deserializes a single stage payload and records the parse cost for diagnostics. */
     private deserializeTileFeatureLayer(tileBlob: Uint8Array, stage: number): TileFeatureLayer | null {
         return uint8ArrayToWasm((bufferToRead: any) => {
             const startTime = performance.now();
@@ -340,6 +417,7 @@ export class FeatureTile {
         }, tileBlob);
     }
 
+    /** Attaches later stages as overlays so the base layer exposes the merged staged view. */
     private attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLayer[]): void {
         for (const overlay of overlays) {
             baseLayer.attachOverlay(overlay);
@@ -419,6 +497,8 @@ export class FeatureTile {
         this.stageLoadStates.clear();
         this.tileFeatureLayerBlob = null;
         this.vertexCountCache = null;
+        this.glbAttachmentCacheVersion = -1;
+        this.glbAttachmentCache = undefined;
         this.renderOrderRank = FeatureTile.DEFAULT_RENDER_ORDER;
         this.disposed = true;
     }
@@ -461,10 +541,12 @@ export class FeatureTile {
         });
     }
 
+    /** Returns the tile level encoded in the low 16 bits of the NDS tile id. */
     level() {
         return Number(this.tileId & BigInt(0xffff));
     }
 
+    /** Returns true when the normalized feature id can be resolved inside this tile. */
     has(featureId: string) {
         const lookupFeatureId = normalizeFeatureIdForLookup(featureId);
         return this.peek((tileFeatureLayer: TileFeatureLayer) => {
@@ -475,6 +557,10 @@ export class FeatureTile {
         });
     }
 
+    /**
+     * Resolves a feature id by numeric address and caches the string result.
+     * Address-based lookups are common during rendering and inspection cross-links.
+     */
     featureIdByAddress(featureAddress: number): string | null {
         if (!Number.isInteger(featureAddress) || featureAddress < 0) {
             return null;
@@ -559,12 +645,14 @@ export class FeatureWrapper implements TileFeatureId {
     }
 }
 
+/** Returns true when two unordered feature-id sets contain exactly the same elements. */
 export function featureSetsEqual(rhs: TileFeatureId[], lhs: TileFeatureId[]) {
     return rhs.length === lhs.length && rhs.every(rf =>
         lhs.some(lf =>
             rf.mapTileKey === lf.mapTileKey && rf.featureId === lf.featureId));
 }
 
+/** Returns true when every requested feature id is present in the containing set. */
 export function featureSetContains(container: TileFeatureId[], maybeSubset: TileFeatureId[]) {
     if (!maybeSubset.length) {
         return false;

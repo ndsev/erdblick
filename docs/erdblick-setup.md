@@ -44,7 +44,7 @@ Erdblick obtains its list of maps, layers, and styles from the backend through t
 
 - `/sources` exposes every configured map and its layers.
 - `/tiles` streams tile payloads.
-- `/config` provides the optional schema/model JSON used by the DataSource editor.
+- `/config` provides the optional schema/model JSON used by the DataSource editor and may also contain an `erdblick` public section with server-supplied UI defaults.
 
 Configure those data sources in the backend you run. For example, if you use the PyPI mapget package, run `mapget serve --config backend.yaml` and define your sources under the `sources:` key:
 
@@ -58,17 +58,31 @@ sources:
 
 Whenever the YAML file changes, mapget applies the new sources immediately; erdblick will pick them up as soon as `/sources` reflects the update. If your backend exposes a writable `/config` endpoint, you can adjust data sources from inside erdblick via the DataSource editor—see the dedicated guide for that workflow.
 
+At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `config.json`.
+
+The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
+
+The `state` key uses the same snapshot shape exported by Advanced Preferences, not URL query parameter names. It seeds the viewer before local browser storage and URL parameters are applied.
+
 ## Customizing `config/`
 
 The `config/` directory in the erdblick source tree controls UI-side metadata:
 
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
-  - `styles`: array of `{ "id": "...", "url": "styles/<file>.yaml" }`.
+  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `bundle/styles/` and this list defines the base style set.
+  - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
+  - `backgroundLayers`: optional array of raster backgrounds shown in the Maps panel. Supported types are:
+    - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`.
+    - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, optional HTTP `headers`, optional `vendorParameters`, and `defaultOpacity`.
+  - `defaultBackgroundLayerId`: optional id of the background enabled by default for new views.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.
+- `images/backgrounds/*`: optional bundled XYZ raster tiles. The default config ships a coarse Blue Marble overview under `bundle/images/backgrounds/world-overview/...`. The `world-overview` path is kept stable for compatibility even though the user-facing layer name is now `Blue Marble`.
+
+The bundled overview layer is documented in `docs/erdblick-backgrounds.md`.
 
 Edit these files before running `build-ui.bash`, or replace them on disk after building by overlaying the `config/` directory in your deployment. For example, a Docker image might be started with:
 
@@ -81,9 +95,23 @@ docker run --rm -it -p 8089:8089 --name erdblick \
 
 Adapt the target paths (`/srv/erdblick/...`) to match the layout used by your own packaging.
 
+If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, or background assets by itself.
+
 ## Serving styles and resources
 
-Styles are resolved relative to `config/styles`. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+Style entries that do not start with `http`, `bundle`, or `/` are resolved under `bundle/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+
+Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional style URLs are loaded exactly like other browser resources: every URL must already be reachable through the web server. Erdblick itself does not expand wildcards, scan directories, mount host paths, or resolve relative filesystem paths against a backend YAML file. If a host application such as MapViewer accepts relative or absolute filesystem paths in its own YAML config, that application resolves them and publishes browser-reachable URLs before erdblick reads `/config.erdblick`.
+
+Additional styles are loaded after base styles. If an additional style has the same YAML `name:` as a base style, the additional style is active and the Styles dialog marks it with an **Additional** tag. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style. For colliding base/additional styles, the **Additional** tag opens a read-only comparison against the base style.
+
+Packaging-specific conveniences, such as MapViewer's `/custom-styles` mounts, native-host local path resolution, runtime static mount registration, and directory wildcard expansion, are implemented by the hosting application before erdblick sees the config.
+
+Background-layer URLs follow normal browser semantics. Relative and root-relative paths such as `bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg` or `/imagery/ortho/{z}/{x}/{y}.jpg` work immediately when your web server exposes those paths. Raw server filesystem paths are not supported in `config.json`; publish them through static aliases or reverse-proxy routes instead.
+
+If an XYZ or WMS background needs HTTP authentication, add a `headers` object to that background entry. Erdblick attaches those headers to tile, metadata, and WMS image requests. The remote service must still allow those custom headers via CORS if it is served from another origin.
+
+WMS backgrounds are currently marked experimental in the UI because they rely on deck.gl’s experimental `WMSLayer`. They are intended for 2D use first and may not behave correctly in pitched 3D views.
 
 _[Screenshot placeholder: Styles dialog showing built-in entries and one custom style loaded from config/styles.]_
 

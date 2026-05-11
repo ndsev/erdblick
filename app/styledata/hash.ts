@@ -1,4 +1,4 @@
-// shortId4.ts — zero-dependency, secure-context free (TypeScript)
+// Zero-dependency hashing helpers used for stable short ids and style lifecycle tracking.
 
 /** Crockford Base32 alphabet (no I, L, O, U). */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -95,6 +95,7 @@ function siphash24(msg: Uint8Array, k0: bigint, k1: bigint): bigint {
     let v2 = 0x6c7967656e657261n ^ k0;
     let v3 = 0x7465646279746573n ^ k1;
 
+    /** Rounds hash coordinates to the configured precision. */
     const round = () => {
         v0 = (v0 + v1) & MASK64; v1 = ROTL(v1, 13); v1 ^= v0; v0 = ROTL(v0, 32);
         v2 = (v2 + v3) & MASK64; v3 = ROTL(v3, 16); v3 ^= v2;

@@ -8,6 +8,7 @@
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
+#include <algorithm>
 #include <iostream>
 
 using namespace erdblick;
@@ -33,6 +34,18 @@ std::shared_ptr<mapget::LayerInfo> relationTestLayerInfo()
                     {"partId": "areaId", "datatype": "STR"},
                     {"partId": "pointId", "datatype": "U32"}
                 ]]
+            },
+            {
+                "name": "SecondaryPointOfInterest",
+                "uniqueIdCompositions": [
+                    [
+                        {"partId": "areaId", "datatype": "STR"},
+                        {"partId": "poiRef", "datatype": "U32"}
+                    ],
+                    [
+                        {"partId": "poiRef", "datatype": "U32"}
+                    ]
+                ]
             }
         ]
     })json"));
@@ -99,6 +112,90 @@ std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapge
     source->addRelation("hasPoi", "SecondaryPointOfInterest", {{"poiRef", 77}});
     return layer;
 }
+
+/** Build a minimal feature layer used to exercise detached feature references in inspection output. */
+std::shared_ptr<mapget::LayerInfo> externalReferenceInspectionLayerInfo()
+{
+    return mapget::LayerInfo::fromJson(nlohmann::json::parse(R"json(
+    {
+        "layerId": "InspectionReferenceLayer",
+        "type": "Features",
+        "featureTypes": [
+            {
+                "name": "Way",
+                "uniqueIdCompositions": [[
+                    {"partId": "wayId", "datatype": "U32"}
+                ]]
+            }
+        ]
+    })json"));
+}
+
+/** Create one feature whose relation and validity both point to a detached external-map feature id. */
+std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(mapget::TileId tileId)
+{
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        tileId,
+        "InspectionReferenceNode",
+        "InspectionReferenceMap",
+        externalReferenceInspectionLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+
+    auto const center = tileId.center();
+    auto source = layer->newFeature("Way", {{"wayId", 1}});
+    source->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+
+    source->addRelation(
+        "linkedWay",
+        layer->newFeatureId("Way", {{"wayId", 2}}, "ValidationMap"));
+
+    auto attr = source->attributeLayers()->newLayer("limits")->newAttribute("speed");
+    attr->validity()->newFeatureId(
+        layer->newFeatureId("Way", {{"wayId", 3}}, "ValidationMap"),
+        mapget::Validity::Positive);
+
+    return layer;
+}
+
+/** Recursively collect rendered FeatureId rows from the inspection tree for focused assertions. */
+void collectFeatureReferenceRows(
+    nlohmann::json const& node,
+    std::vector<std::pair<std::string, std::string>>& featureRefs)
+{
+    if (node.is_array()) {
+        for (auto const& child : node) {
+            collectFeatureReferenceRows(child, featureRefs);
+        }
+        return;
+    }
+
+    if (!node.is_object()) {
+        return;
+    }
+
+    if (node.value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId)) {
+        featureRefs.emplace_back(
+            node.value("value", std::string{}),
+            node.value("mapId", std::string{}));
+    }
+
+    if (node.contains("children")) {
+        collectFeatureReferenceRows(node.at("children"), featureRefs);
+    }
+}
+
+bool hasRenderedPathGeometry(nlohmann::json const& renderResult)
+{
+    auto const& pathWorld = renderResult["pathWorld"]["positions"];
+    if (pathWorld.is_array() && !pathWorld.empty()) {
+        return true;
+    }
+    auto const& pathBillboard = renderResult["pathBillboard"]["positions"];
+    return pathBillboard.is_array() && !pathBillboard.empty();
+}
 }
 
 TEST_CASE("DeckFeatureLayerVisualization", "[erdblick.renderer]")
@@ -128,6 +225,28 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
         }
         REQUIRE_FALSE(hasFeatureRoot);
     }
+}
+
+TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[erdblick.inspection]")
+{
+    auto tile = makeExternalReferenceInspectionTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto inspection = InspectionConverter().convert(feature);
+    std::vector<std::pair<std::string, std::string>> featureRefs;
+    collectFeatureReferenceRows(*inspection, featureRefs);
+
+    REQUIRE(
+        std::find(
+            featureRefs.begin(),
+            featureRefs.end(),
+            std::pair<std::string, std::string>{"Way.2", "ValidationMap"}) != featureRefs.end());
+    REQUIRE(
+        std::find(
+            featureRefs.begin(),
+            featureRefs.end(),
+            std::pair<std::string, std::string>{"Way.3", "ValidationMap"}) != featureRefs.end());
 }
 
 TEST_CASE("FeatureStyleRuleLodFilterParsing", "[erdblick.style]")
@@ -172,10 +291,7 @@ TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdbli
     visualization.addTileFeatureLayer(TileFeatureLayer(tile));
     visualization.run();
 
-    SharedUint8Array pathPositions;
-    visualization.pathPositionsRaw(pathPositions);
-
-    REQUIRE_FALSE(pathPositions.bytes().empty());
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }
 
 TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added auxiliary tiles", "[erdblick.renderer]")
@@ -190,10 +306,7 @@ TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added au
     visualization.addTileFeatureLayer(TileFeatureLayer(auxiliaryTile));
     visualization.run();
 
-    SharedUint8Array pathPositions;
-    visualization.pathPositionsRaw(pathPositions);
-
-    REQUIRE_FALSE(pathPositions.bytes().empty());
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }
 
 TEST_CASE("DeckFeatureLayerVisualization exposes unresolved external relation references", "[erdblick.renderer]")
@@ -234,8 +347,5 @@ TEST_CASE("DeckFeatureLayerVisualization resolves external relations with canoni
         })
     }));
 
-    SharedUint8Array pathPositions;
-    visualization.pathPositionsRaw(pathPositions);
-
-    REQUIRE_FALSE(pathPositions.bytes().empty());
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }

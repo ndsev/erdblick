@@ -16,4 +16,4 @@ sources:
   # Playwright tests that depend on this datasource will detect its absence
   # from `/sources` and skip.
   - type: DataSourceProcess
-    cmd: python test/datasource.py
+    cmd: ./test/datasource.sh

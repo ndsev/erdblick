@@ -3,10 +3,9 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle, UpdatedModifiedStyleEntry} from "./style.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
-import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
@@ -21,139 +20,247 @@ import {EditorView} from "@codemirror/view";
 import {MergeView} from "@codemirror/merge";
 import {defaultHighlightStyle, syntaxHighlighting} from "@codemirror/language";
 import {oneDark} from "@codemirror/theme-one-dark";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {StyleValidationReportService} from "./style-validation-report.service";
+import {StyleValidationIssue, StyleValidationReport} from "./style-validation.model";
 
 
 @Component({
     selector: 'style-panel',
     template: `
-        <p-dialog class="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
+        <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="stylesDialogVisible"
                   [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
+                  [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
                   (onShow)="onStylesDialogShow()">
-            @if (styleService.styleGroups | async; as styleGroups) {
-                <ng-container>
-                    @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
-                        <div>No styles loaded.</div>
-                    }
-                    <div class="styles-container">
-                        <p-tree [value]="styleGroups">
-                            <!-- Group Node Template -->
-                            <ng-template let-node pTemplate="Group">
-                            <span>
-                                <p-checkbox [ngModel]="node.visible"
-                                            (click)="$event.stopPropagation()"
-                                            (ngModelChange)="toggleStyleGroup(node.id, $event)"
-                                            [binary]="true"
-                                            [inputId]="node.id"
-                                            [name]="node.id" tabindex="0"/>
-                                <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                            </span>
-                            </ng-template>
-                            <!-- Style Node Template -->
-                            <ng-template let-node pTemplate="Style">
-                                <div class="flex-container">
-                                    <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-symbols-outlined menu-toggler"
-                                          (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
-                                        more_vert
-                                    </span>
-                                        <span>
-                                        <p-checkbox [(ngModel)]="node.visible"
+            <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
+                <p-tablist>
+                    <p-tab value="styles">Styles</p-tab>
+                    <p-tab value="errors">
+                        <span>Errors </span>
+                        @if (styleValidationReportService.reports$ | async; as styleIssues) {
+                            <p-badge [value]="styleIssueCount(styleIssues)"/>
+                        }
+                    </p-tab>
+                </p-tablist>
+                <p-tabpanels>
+                    <p-tabpanel value="styles">
+                        <div class="styles-container">
+                            @if (styleService.styleGroups | async; as styleGroups) {
+                                @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
+                                    <div class="styles-empty">No styles loaded.</div>
+                                }
+                                <p-tree [value]="styleGroups" data-testid="style-tree">
+                                    <!-- Group Node Template -->
+                                    <ng-template let-node pTemplate="Group">
+                                    <span>
+                                        <p-checkbox [ngModel]="node.visible"
                                                     (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="applyStyleConfig(node.id)"
+                                                    (ngModelChange)="toggleStyleGroup(node.id, $event)"
                                                     [binary]="true"
                                                     [inputId]="node.id"
-                                                    [name]="node.id"/>
-                                        <label [for]="node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                                        @if (node.modified && !node.imported) {
-                                            <p-tag class="modified-style-tag"
-                                                   severity="warn" value="Modified" [rounded]="true"
-                                                   (click)="openCompareFromModifiedTag($event, node.id)"/>
-                                        }
+                                                    [name]="node.id" tabindex="0"/>
+                                        <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
-                                    </div>
-                                    <div class="tree-node-controls">
-                                        @if (node.imported) {
-                                            <p-button onEnterClick (click)="removeStyle(node.id)"
-                                                      icon="pi pi-trash"
-                                                      label="" pTooltip="Remove style"
-                                                      tooltipPosition="bottom" tabindex="0">
-                                            </p-button>
-                                        } @else {
-                                            <p-button onEnterClick (click)="resetStyle(node.id)"
-                                                      icon="pi pi-refresh"
-                                                      label="" pTooltip="Reset style to server version"
-                                                      tooltipPosition="bottom" tabindex="0">
-                                            </p-button>
-                                        }
-                                        <p-button onEnterClick (click)="showStyleEditor(node.id)"
-                                                  icon="pi pi-file-edit"
-                                                  label="" pTooltip="Edit style"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
+                                    </ng-template>
+                                    <!-- Style Node Template -->
+                                    <ng-template let-node pTemplate="Style">
+                                        <div class="flex-container" [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)">
+                                            <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
+                                            <span onEnterClick class="material-symbols-outlined menu-toggler"
+                                                  [attr.data-testid]="'style-menu-button-' + styleTestIdSuffix(node.id)"
+                                                  (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
+                                                more_vert
+                                            </span>
+                                                <span>
+                                                <p-checkbox [(ngModel)]="node.visible"
+                                                            [attr.data-testid]="'style-visibility-' + styleTestIdSuffix(node.id)"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="applyStyleConfig(node.id)"
+                                                            [binary]="true"
+                                                            [inputId]="node.id"
+                                                            [name]="node.id"/>
+                                                <label [for]="node.id"
+                                                       style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                                @if (node.additional) {
+                                                    <p-tag class="additional-style-tag"
+                                                           [class.clickable-style-tag]="node.overridesBaseStyle"
+                                                           severity="info" value="Additional" [rounded]="true"
+                                                           (click)="openCompareFromAdditionalTag($event, node.id)"/>
+                                                }
+                                                @if (node.modified && !node.imported) {
+                                                    <p-tag class="modified-style-tag"
+                                                           severity="warn" value="Modified" [rounded]="true"
+                                                           (click)="openCompareFromModifiedTag($event, node.id)"/>
+                                                }
+                                                @if (styleErrorCount(node) > 0) {
+                                                    <span onEnterClick
+                                                          class="material-symbols-outlined style-validation-error-icon"
+                                                          [attr.data-testid]="'style-validation-error-button-' + styleTestIdSuffix(node.id)"
+                                                          pTooltip="Open style validation errors"
+                                                          tooltipPosition="bottom"
+                                                          tabindex="0" style="font-size: 1.5em"
+                                                          (click)="openStyleErrorsForStyle($event, node)">
+                                                        error
+                                                    </span>
+                                                }
+                                            </span>
+                                            </div>
+                                            <div class="tree-node-controls">
+                                                @if (node.imported) {
+                                                    <p-button onEnterClick (click)="removeStyle(node.id)"
+                                                              [attr.data-testid]="'style-remove-button-' + styleTestIdSuffix(node.id)"
+                                                              icon="pi pi-trash"
+                                                              label="" pTooltip="Remove style"
+                                                              tooltipPosition="bottom" tabindex="0">
+                                                    </p-button>
+                                                } @else {
+                                                    <p-button onEnterClick (click)="resetStyle(node.id)"
+                                                              [attr.data-testid]="'style-reset-button-' + styleTestIdSuffix(node.id)"
+                                                              icon="pi pi-refresh"
+                                                              label="" pTooltip="Reset style to server version"
+                                                              tooltipPosition="bottom" tabindex="0">
+                                                    </p-button>
+                                                }
+                                                <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                          [attr.data-testid]="'style-edit-button-' + styleTestIdSuffix(node.id)"
+                                                          icon="pi pi-file-edit"
+                                                          label="" pTooltip="Edit style"
+                                                          tooltipPosition="bottom" tabindex="0">
+                                                </p-button>
+                                            </div>
+                                        </div>
+                                    </ng-template>
+                                    <!-- Bool Node Template -->
+                                    <ng-template let-node pTemplate="Bool">
+                                        <div style="display: flex; align-items: center;">
+                                        <span style="font-style: oblique">
+                                            <label [for]="node.styleId + '_' + node.id"
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
+                                        </span>
+                                        </div>
+                                    </ng-template>
+                                    <ng-template let-node pTemplate="String">
+                                    </ng-template>
+                                </p-tree>
+                            }
+                            @if (styleService.erroredStyleIds.size > 0) {
+                                <div class="styles-error-list">
+                                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
+                                         class="flex-container">
+                                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
+                                            {{ message.key }}: {{ message.value }}
+                                        </span>
                                     </div>
                                 </div>
-                            </ng-template>
-                            <!-- Bool Node Template -->
-                            <ng-template let-node pTemplate="Bool">
-                                <div style="display: flex; align-items: center;">
-                                <span style="font-style: oblique">
-                                    <label [for]="node.styleId + '_' + node.id"
-                                           style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
-                                </span>
+                            }
+                        </div>
+                    </p-tabpanel>
+                    <p-tabpanel value="errors">
+                        @if (styleValidationReportService.reports$ | async; as styleIssues) {
+                            <div class="style-errors-tab">
+                                <div class="style-errors-toolbar">
+                                    <p-iconfield iconPosition="left" class="style-errors-filter">
+                                        <p-inputicon>
+                                            <i class="pi pi-filter"></i>
+                                        </p-inputicon>
+                                        <input pInputText type="text"
+                                               [ngModel]="styleIssueFilter"
+                                               (ngModelChange)="styleIssueFilter = $event"
+                                               placeholder="Filter">
+                                    </p-iconfield>
+                                    <p-checkbox inputId="style-errors-only"
+                                                [(ngModel)]="styleErrorsOnly"
+                                                [binary]="true"></p-checkbox>
+                                    <label for="style-errors-only">Errors only</label>
+                                    <p-button size="small" label="Clear duplicates"
+                                              (click)="styleValidationReportService.clearRuntimeDuplicates()"/>
                                 </div>
-                            </ng-template>
-                            <ng-template let-node pTemplate="String">
-                            </ng-template>
-                        </p-tree>
-                    </div>
-                </ng-container>
-            }
-            @if (styleService.erroredStyleIds.size > 0) {
-                <div class="styles-container">
-                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
-                         class="flex-container">
-                <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
-                    {{ message.key }}: {{ message.value }} (see console)
-                </span>
-                    </div>
-                </div>
-            }
+                                <p-table [value]="filteredStyleIssues(styleIssues)"
+                                         [scrollable]="true"
+                                         scrollHeight="flex"
+                                         class="style-errors-table"
+                                         styleClass="style-errors-table"
+                                         data-testid="style-errors-table"
+                                         [rowTrackBy]="trackByStyleIssue">
+                                    <ng-template pTemplate="header">
+                                        <tr>
+                                            <th>Time</th>
+                                            <th>Severity</th>
+                                            <th>Impact</th>
+                                            <th>Style</th>
+                                            <th>Rule</th>
+                                            <th>Property</th>
+                                            <th>Location</th>
+                                            <th>Message</th>
+                                        </tr>
+                                    </ng-template>
+                                    <ng-template pTemplate="body" let-issue>
+                                        <tr onEnterClick tabindex="0" class="style-error-row"
+                                            [ngClass]="'style-issue-' + issue.severity"
+                                            (click)="openStyleIssue(issue)">
+                                            <td>{{ formatIssueTime(issue) }}</td>
+                                            <td>{{ issue.severity }}</td>
+                                            <td>{{ issue.impact }}</td>
+                                            <td [pTooltip]="issue.source.url || issue.source.configId || ''">
+                                                {{ issue.source.styleName || issue.source.url || issue.source.configId || issue.source.sourceKind }}
+                                            </td>
+                                            <td>{{ issue.rulePath || (issue.ruleIndex !== undefined ? 'rules[' + issue.ruleIndex + ']' : '') }}</td>
+                                            <td>{{ issue.property || '' }}</td>
+                                            <td>{{ formatIssueLocation(issue) }}</td>
+                                            <td [pTooltip]="issue.detail || issue.expression || ''">{{ issue.message }}</td>
+                                        </tr>
+                                    </ng-template>
+                                    <ng-template pTemplate="emptymessage">
+                                        <tr>
+                                            <td colspan="8">
+                                                <div class="styles-empty">No style validation issues.</div>
+                                            </td>
+                                        </tr>
+                                    </ng-template>
+                                </p-table>
+                            </div>
+                        }
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
             <div class="dialog-controls">
-                <p-button (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
+                <p-button data-testid="styles-close-button" (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
                 <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
                               accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
                               customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
+                              data-testid="style-import-button"
                               class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
                               chooseLabel="Import Style" tabindex="0"/>
             </div>
-        </p-dialog>
+        </app-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
-        <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog" (onShow)="onEditorDialogShow()">
-            <editor></editor>
-            <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
+        <app-dialog header="Style Editor" [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
+                  data-testid="style-editor-dialog" class="editor-dialog"
+                  [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
+                  (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
+            <editor [sessionId]="styleEditorSessionId"></editor>
+            <div class="editor-actions style-editor-actions">
+                <div class="editor-actions-left">
+                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)"
+                    <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
-                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
+                    <div class="editor-shortcuts">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
                         <div>Press <span style="color: grey">Esc</span> to quit</div>
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
-                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export">
+                <div class="editor-actions-right">
+                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
+                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId" label="Export" icon="pi pi-file-export">
                     </p-button>
-                    <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
+                    <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
             </div>
-        </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
+        </app-dialog>
+        <app-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -161,8 +268,30 @@ import {oneDark} from "@codemirror/theme-one-dark";
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
-        </p-dialog>
-        <p-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
+        </app-dialog>
+        <app-dialog header="Style Validation Failed" [(visible)]="styleValidationDialogVisible" [modal]="true"
+                  #styleValidationDialog data-testid="style-validation-failed-dialog">
+            @if (lastEditorValidationReport) {
+                <div class="style-validation-summary">
+                    {{ lastEditorValidationReport.source.styleName || lastEditorValidationReport.source.url || 'Style' }}
+                    has {{ validationErrorCount(lastEditorValidationReport) }} validation error(s).
+                </div>
+                <div class="style-validation-details">
+                    @for (issue of firstValidationErrors(lastEditorValidationReport); track issue.id) {
+                        <div class="style-validation-issue">
+                            <span class="style-validation-location">{{ formatIssueLocation(issue) }}</span>
+                            <span class="style-validation-path">{{ issue.rulePath || issue.property || issue.impact }}</span>
+                            <span>{{ issue.message }}</span>
+                        </div>
+                    }
+                </div>
+            }
+            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                <p-button (click)="styleValidationDialog.close($event)" label="Ok"></p-button>
+                <p-button (click)="openStyleErrorsTab(); styleValidationDialog.close($event)" label="Open Errors"></p-button>
+            </div>
+        </app-dialog>
+        <app-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
                   (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
             @if (getUpdatedModifiedStyles().length > 0) {
                 <div class="updated-styles-container">
@@ -180,14 +309,14 @@ import {oneDark} from "@codemirror/theme-one-dark";
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
             </div>
-        </p-dialog>
-        <p-dialog header="Style Comparison" [(visible)]="styleCompareDialogVisible" [modal]="true"
+        </app-dialog>
+        <app-dialog header="Style Comparison" [(visible)]="styleCompareDialogVisible" [modal]="true"
                   class="style-compare-dialog" #styleCompareDialog (onShow)="onStyleCompareDialogShow()" 
                   (onHide)="onStyleCompareDialogHide()">
             @if (styleCompareStyleId) {
                 <div class="style-compare-labels">
                     <div>{{ styleCompareLeftLabel }}</div>
-                    <div>Modified Style</div>
+                    <div>{{ styleCompareRightLabel }}</div>
                 </div>
                 <div #styleCompareHost class="style-compare-host"></div>
             }
@@ -195,22 +324,24 @@ import {oneDark} from "@codemirror/theme-one-dark";
                 <p-button label="Apply" icon="pi pi-check"
                           pTooltip="Apply the current left-side style source"
                           tooltipPosition="bottom"
-                          [disabled]="!styleCompareLeftModified"
+                          [disabled]="styleCompareReadOnly || !styleCompareLeftModified"
                           (click)="applyComparedStyle()"/>
-                <p-button [label]="styleCompareLeftModified ? 'Discard' : 'Close'" icon="pi pi-times"
+                <p-button [label]="styleCompareReadOnly ? 'Close' : (styleCompareLeftModified ? 'Discard' : 'Close')" icon="pi pi-times"
                           pTooltip="Close compare or discard unsaved left-side edits"
                           tooltipPosition="bottom"
                           (click)="closeOrDiscardComparedStyle($event)"/>
                 <p-button label="Export" icon="pi pi-file-export"
                           pTooltip="Export the modified style source"
                           tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly"
                           (click)="exportComparedStyle()"/>
                 <p-button label="Reset" icon="pi pi-refresh"
                           pTooltip="Reset this modified builtin style to the server version"
                           tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly"
                           (click)="resetComparedStyle()"/>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [`
         .disabled {
@@ -218,27 +349,100 @@ import {oneDark} from "@codemirror/theme-one-dark";
             opacity: 0.5;
         }
 
+        .additional-style-tag,
+        .modified-style-tag {
+            margin-left: 0.5em;
+        }
+
+        .style-validation-error-icon {
+            color: var(--p-message-error-color, var(--p-button-danger-background));
+            cursor: pointer;
+            font-size: 1.15em;
+            margin-left: 0.35em;
+            vertical-align: middle;
+        }
+
+        .additional-style-tag.clickable-style-tag,
         .modified-style-tag {
             cursor: pointer;
-            margin-left: 0.5em;
         }
 
         .updated-modified-style-chip {
             cursor: pointer;
         }
+
+        .style-errors-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+        }
+
+        .style-errors-filter {
+            flex: 1;
+        }
+
+        .style-errors-filter input {
+            width: 100%;
+        }
+
+        .style-issue-error {
+            color: var(--p-message-error-color, var(--p-button-danger-background));
+        }
+
+        .style-issue-warning {
+            color: var(--yellow-300, #fde68a);
+        }
+
+        .style-error-row {
+            cursor: pointer;
+        }
+
+        .style-error-row:hover {
+            background: var(--p-highlight-background);
+        }
+
+        .style-validation-details {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35em;
+            margin-top: 0.75em;
+        }
+
+        .style-validation-issue {
+            display: grid;
+            grid-template-columns: 4em minmax(6em, 1fr) 2fr;
+            gap: 0.5em;
+        }
+
+        .style-validation-location,
+        .style-validation-path {
+            color: silver;
+        }
     `],
     standalone: false
 })
+/**
+ * Styles dialog, editor, and comparison workflow.
+ *
+ * This component keeps UI state for editing, importing, exporting, and comparing
+ * styles while delegating actual style parsing and lifecycle tracking to `StyleService`.
+ */
 export class StyleComponent implements OnDestroy {
+    readonly stylesDialogLayoutId = STYLES_DIALOG_LAYOUT_ID;
+    readonly styleEditorDialogLayoutId = STYLE_EDITOR_DIALOG_LAYOUT_ID;
+    readonly styleEditorSessionId = 'style-editor';
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
-    editedStyleSourceSubscription: Subscription = new Subscription();
-    savedStyleSourceSubscription: Subscription = new Subscription();
+    styleEditorSourceSubscription: Subscription = new Subscription();
+    styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
+    private styleEditorOriginalSource: string = '';
     stylesCollapsed: boolean = false;
     styleCompareDialogVisible: boolean = false;
     styleCompareLeftModified: boolean = false;
     styleCompareLeftLabel: string = "Original Style";
+    styleCompareRightLabel: string = "Modified Style";
+    styleCompareReadOnly: boolean = false;
     styleCompareStyleId: string = "";
     private styleCompareLeftSource: string = "";
     private styleCompareRightSource: string = "";
@@ -247,15 +451,21 @@ export class StyleComponent implements OnDestroy {
     private readonly compareThemeCompartmentB = new Compartment();
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
+    stylesDialogTab: 'styles' | 'errors' = 'styles';
+    styleIssueFilter: string = '';
+    styleErrorsOnly: boolean = false;
+    styleValidationDialogVisible: boolean = false;
+    lastEditorValidationReport?: StyleValidationReport;
 
     @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
-    @ViewChild('styles') stylesDialog: Dialog | undefined;
-    @ViewChild('editorDialog') editorDialog: Dialog | undefined;
-    @ViewChild('warningDialog') warningDialog: Dialog | undefined;
-    @ViewChild('styleCompareDialog') styleCompareDialog: Dialog | undefined;
+    @ViewChild('styles') stylesDialog: AppDialogComponent | undefined;
+    @ViewChild('editorDialog') editorDialog: AppDialogComponent | undefined;
+    @ViewChild('warningDialog') warningDialog: AppDialogComponent | undefined;
+    @ViewChild('styleValidationDialog') styleValidationDialog: AppDialogComponent | undefined;
+    @ViewChild('styleCompareDialog') styleCompareDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareHost') styleCompareHost?: ElementRef<HTMLDivElement>;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
@@ -263,44 +473,71 @@ export class StyleComponent implements OnDestroy {
     constructor(public mapService: MapDataService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
+                public styleValidationReportService: StyleValidationReportService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
                 private dialogStack: DialogStackService,
                 private ngZone: NgZone) {
-
-        // Group visibility is computed in the service; no local map needed.
-        this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
         this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
         });
     }
 
+    get stylesDialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.stylesDialogLayoutId);
+    }
+
+    set stylesDialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.stylesDialogLayoutId, visible);
+    }
+
+    get styleEditorVisible(): boolean {
+        return this.stateService.isDialogOpen(this.styleEditorDialogLayoutId);
+    }
+
+    set styleEditorVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.styleEditorDialogLayoutId, visible);
+    }
+
+    /** Releases the compare view and its theme observer. */
     ngOnDestroy() {
         this.compareModeObserver?.disconnect();
         this.styleCompareView?.destroy();
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.editorService.closeSession(this.styleEditorSessionId);
     }
 
+    /** Promotes the styles dialog above other overlays. */
     onStylesDialogShow() {
         this.dialogStack.bringToFront(this.stylesDialog);
     }
 
+    /** Promotes the style editor dialog above other overlays. */
     onEditorDialogShow() {
+        this.ensureStyleEditorSession();
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
+    /** Brings the compare dialog to the front and creates the merge view. */
     onStyleCompareDialogShow() {
         this.dialogStack.bringToFront(this.styleCompareDialog);
         this.setupCompareView();
     }
 
+    /** Tears down compare-view resources when the compare dialog closes. */
     onStyleCompareDialogHide() {
         this.compareModeObserver?.disconnect();
         this.compareModeObserver = undefined;
         this.styleCompareView?.destroy();
         this.styleCompareView = undefined;
         this.styleCompareLeftModified = false;
+        this.styleCompareReadOnly = false;
+        this.styleCompareLeftLabel = "Original Style";
+        this.styleCompareRightLabel = "Modified Style";
     }
 
+    /** Opens the bulk-toggle menu for one style entry. */
     showStylesToggleMenu(event: MouseEvent, styleId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
@@ -347,6 +584,7 @@ export class StyleComponent implements OnDestroy {
         ];
     }
 
+    /** Persists visibility changes for one style and optionally triggers a redraw. */
     applyStyleConfig(styleId: string, redraw: boolean=true) {
         const style = this.styleService.styles.get(styleId);
         if (style === undefined || style === null) {
@@ -358,6 +596,7 @@ export class StyleComponent implements OnDestroy {
         }
     }
 
+    /** Resets a builtin style to its baseline or reloads it from the server. */
     resetStyle(styleId: string) {
         const restoredStyleId = this.styleService.resetModifiedBuiltinStyle(styleId);
         if (restoredStyleId) {
@@ -371,12 +610,14 @@ export class StyleComponent implements OnDestroy {
         this.refreshUpdatedStylesDialogVisibility();
     }
 
+    /** Exports one style as YAML. */
     exportStyle(styleId: string) {
         if(!this.styleService.exportStyleYamlFile(styleId)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
     }
 
+    /** Imports a user-provided YAML style file. */
     importStyle(event: any) {
         if (event.files && event.files.length > 0) {
             const file: File = event.files[0];
@@ -384,7 +625,11 @@ export class StyleComponent implements OnDestroy {
             this.styleService.importStyleYamlFile(event, file, this.styleUploader)
                 .then((ok) => {
                     if (!ok) {
-                        this.messageService.showError(`Could not read empty data for: ${styleId}`);
+                        if (this.styleService.lastValidationReport && !this.styleService.lastValidationReport.valid) {
+                            this.showValidationFailure(this.styleService.lastValidationReport);
+                        } else {
+                            this.messageService.showError(`Could not read empty data for: ${styleId}`);
+                        }
                     }
                 })
                 .catch((error) => {
@@ -394,28 +639,24 @@ export class StyleComponent implements OnDestroy {
         }
     }
 
+    /** Removes an imported style. */
     removeStyle(styleId: string) {
         this.styleService.deleteStyle(styleId);
     }
 
+    /** Opens the style editor for one style and tracks dirty-state changes. */
     showStyleEditor(styleId: string) {
-        this.styleService.selectedStyleIdForEditing = styleId;
-        this.editorService.datasourcesEditorVisible = false;
-        this.editorService.editableData = `${this.styleService.styles.get(styleId)?.source!}\n\n\n\n\n`
-        this.editorService.readOnly = false;
-        this.editorService.updateEditorState.next(true);
-        this.editorService.styleEditorVisible = true;
-        this.editedStyleSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
-            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == this.editorService.editableData.replace(/\n+$/, ''));
-        });
-        this.savedStyleSourceSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
-            this.applyEditedStyle();
-        });
+        if (!this.prepareStyleEditorSession(styleId)) {
+            this.messageService.showError(`Could not load style source for ${styleId}.`);
+            return;
+        }
+        this.styleEditorVisible = true;
     }
 
+    /** Applies the current editor contents to the selected style. */
     applyEditedStyle() {
-        const styleId = this.styleService.selectedStyleIdForEditing;
-        const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
+        const styleId = this.stateService.styleEditorTargetId;
+        const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
             return;
@@ -428,16 +669,25 @@ export class StyleComponent implements OnDestroy {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return;
         }
+        const report = this.styleService.validateStyleSource(
+            styleData,
+            this.styleService.createEditorSourceRef(styleId, styleData));
+        if (!report.valid) {
+            this.showValidationFailure(report);
+            return;
+        }
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
         // If there is no style ID returned, then setStyleSource failed.
         if (newStyleId) {
-            this.styleService.selectedStyleIdForEditing = newStyleId;
+            this.stateService.styleEditorTargetId = newStyleId;
             this.sourceWasModified = false;
-            this.editorService.editableData = this.editorService.editedStateData.getValue();
+            this.styleEditorOriginalSource = styleData;
+            this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
             this.refreshUpdatedStylesDialogVisibility();
         }
     }
 
+    /** Closes the editor or opens the discard-warning dialog when unsaved edits exist. */
     closeEditorDialog(event: any) {
         event.stopPropagation();
         if (this.sourceWasModified) {
@@ -448,19 +698,19 @@ export class StyleComponent implements OnDestroy {
             this.warningDialogVisible = false;
             this.editorDialog.close(event);
         }
-        this.editedStyleSourceSubscription.unsubscribe();
-        this.savedStyleSourceSubscription.unsubscribe();
     }
 
+    /** Discards pending edits in the style editor. */
     discardStyleEdits() {
-        this.editorService.updateEditorState.next(false);
+        this.editorService.updateSessionSource(this.styleEditorSessionId, this.styleEditorOriginalSource);
         this.sourceWasModified = false;
         this.warningDialogVisible = false;
     }
 
+    /** Uses Escape to close the warning or editor dialog while the style editor is active. */
     @HostListener('window:keydown', ['$event'])
     onWindowKeydown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.editorService.styleEditorVisible) {
+        if (event.key !== 'Escape' || !this.styleEditorVisible) {
             return;
         }
         event.preventDefault();
@@ -472,14 +722,68 @@ export class StyleComponent implements OnDestroy {
         this.closeEditorDialog(event);
     }
 
+    onEditorDialogHide() {
+        this.styleEditorVisible = false;
+        this.warningDialogVisible = false;
+        this.sourceWasModified = false;
+        this.stateService.styleEditorTargetId = null;
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.editorService.closeSession(this.styleEditorSessionId);
+    }
+
+    /** Recreates the editor session when a persisted style-editor dialog is restored on startup/import. */
+    private ensureStyleEditorSession(): void {
+        const targetStyleId = this.stateService.styleEditorTargetId;
+        if (!targetStyleId || this.editorService.hasSession(this.styleEditorSessionId)) {
+            return;
+        }
+        if (!this.prepareStyleEditorSession(targetStyleId)) {
+            this.messageService.showError(`Could not restore style editor for ${targetStyleId}.`);
+            this.styleEditorVisible = false;
+            this.stateService.styleEditorTargetId = null;
+        }
+    }
+
+    /** Opens a fresh editor session for the given style and subscribes dirty/save handling to it. */
+    private prepareStyleEditorSession(styleId: string): boolean {
+        const source = this.styleService.styles.get(styleId)?.source;
+        if (source === undefined) {
+            return false;
+        }
+        this.stateService.styleEditorTargetId = styleId;
+        this.styleEditorOriginalSource = source.replace(/\n+$/, '');
+        this.editorService.createSession({
+            id: this.styleEditorSessionId,
+            source: `${source}\n\n\n\n\n`,
+            language: 'yaml',
+            readOnly: false
+        });
+        this.styleEditorSourceSubscription.unsubscribe();
+        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
+            editedStyleSource => {
+                this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
+            }
+        );
+        this.styleEditorSaveSubscription.unsubscribe();
+        this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
+            this.applyEditedStyle();
+        }) ?? new Subscription();
+        this.sourceWasModified = false;
+        return true;
+    }
+
+    /** Opens the style-definition documentation in a new browser tab. */
     openStyleHelp() {
         window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
     }
 
+    /** Keeps PrimeNG keyvalue iteration in insertion order. */
     unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
         return 0;
     }
 
+    /** Toggles visibility for every style nested under one style group. */
     toggleStyleGroup(id: string, enabled: boolean) {
         if (!id || id === 'ungrouped') {
             return;
@@ -497,10 +801,12 @@ export class StyleComponent implements OnDestroy {
         this.mapService.scheduleUpdate();
     }
 
+    /** Narrows a tree node to a style-group node. */
     private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {
         return e.type === "Group";
     }
 
+    /** Finds a style group by id inside the nested style-group tree. */
     private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | undefined {
         for (const elem of elements) {
             if (!this.checkIsStyleGroup(elem)) {
@@ -517,6 +823,7 @@ export class StyleComponent implements OnDestroy {
         return undefined;
     }
 
+    /** Collects every leaf style id reachable from a style group. */
     private collectStyleIds(group: ErdblickStyleGroup): string[] {
         const ids: string[] = [];
         for (const child of group.children) {
@@ -529,37 +836,68 @@ export class StyleComponent implements OnDestroy {
         return ids;
     }
 
+    /** Reapplies a style after one of its option controls changed. */
     toggleOption(styleId: string) {
         this.applyStyleConfig(styleId);
     }
 
+    /** Clears the updated-style flags after the user acknowledged them. */
     resetUpdatedStyleIds() {
         this.styleService.updateStyleHashes();
         this.warningDialogVisible = false;
         this.refreshUpdatedStylesDialogVisibility();
     }
 
+    /** Returns builtin styles that were modified locally and updated on the server. */
     getUpdatedModifiedStyles(): UpdatedModifiedStyleEntry[] {
         return this.styleService.getUpdatedModifiedStyles();
     }
 
+    /** Opens style comparison for the "Modified" tag next to a builtin style. */
     openCompareFromModifiedTag(event: MouseEvent, styleId: string) {
         event.stopPropagation();
         this.openStyleCompareDialog(styleId, false);
     }
 
+    /** Opens read-only comparison between an overriding additional style and its base style. */
+    openCompareFromAdditionalTag(event: MouseEvent, styleId: string) {
+        event.stopPropagation();
+        const style = this.styleService.styles.get(styleId);
+        const baseSource = this.styleService.getOverriddenBaseStyleSource(styleId);
+        if (!style || !baseSource) {
+            return;
+        }
+        this.styleCompareStyleId = style.id;
+        this.styleCompareLeftLabel = "Base Style";
+        this.styleCompareRightLabel = "Additional Style";
+        this.styleCompareLeftSource = baseSource;
+        this.styleCompareRightSource = style.source;
+        this.styleCompareLeftModified = false;
+        this.styleCompareReadOnly = true;
+        this.styleCompareDialogVisible = true;
+    }
+
+    /** Opens style comparison for an entry in the updated-styles dialog. */
     openCompareFromUpdatedChip(event: Event, styleIdOrUrl: string) {
         event.stopPropagation();
         this.openStyleCompareDialog(styleIdOrUrl, true);
     }
 
+    /** Applies edits from the compare dialog back into the selected builtin style. */
     applyComparedStyle() {
-        if (!this.styleCompareLeftModified || !this.styleCompareStyleId) {
+        if (this.styleCompareReadOnly || !this.styleCompareLeftModified || !this.styleCompareStyleId) {
             return;
         }
         const leftSource = this.getComparedLeftSource();
         if (!leftSource) {
             this.messageService.showError("Cannot apply an empty style definition.");
+            return;
+        }
+        const report = this.styleService.validateStyleSource(
+            leftSource,
+            this.styleService.createEditorSourceRef(this.styleCompareStyleId, leftSource));
+        if (!report.valid) {
+            this.showValidationFailure(report);
             return;
         }
         const newStyleId = this.styleService.setStyleSource(this.styleCompareStyleId, leftSource, true);
@@ -575,8 +913,13 @@ export class StyleComponent implements OnDestroy {
         this.setupCompareView();
     }
 
+    /** Closes the compare dialog or discards unsaved left-side edits first. */
     closeOrDiscardComparedStyle(event: MouseEvent) {
         event.stopPropagation();
+        if (this.styleCompareReadOnly) {
+            this.styleCompareDialog?.close(event);
+            return;
+        }
         if (this.styleCompareLeftModified) {
             this.discardComparedStyleEdits();
             return;
@@ -584,15 +927,17 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareDialog?.close(event);
     }
 
+    /** Exports the style currently shown in the compare dialog. */
     exportComparedStyle() {
-        if (!this.styleCompareStyleId) {
+        if (this.styleCompareReadOnly || !this.styleCompareStyleId) {
             return;
         }
         this.exportStyle(this.styleCompareStyleId);
     }
 
+    /** Resets the builtin style currently shown in the compare dialog. */
     resetComparedStyle() {
-        if (!this.styleCompareStyleId) {
+        if (this.styleCompareReadOnly || !this.styleCompareStyleId) {
             return;
         }
         const restoredStyleId = this.styleService.resetModifiedBuiltinStyle(this.styleCompareStyleId);
@@ -606,12 +951,198 @@ export class StyleComponent implements OnDestroy {
         this.mapService.scheduleUpdate();
     }
 
+    /** Returns the number of issues associated with a style. */
+    styleIssueCount(issues: StyleValidationIssue[]): number {
+        return issues.filter(issue => issue.severity === 'error').length;
+    }
+
+    /** Returns validation issues that match the active style filters. */
+    filteredStyleIssues(issues: StyleValidationIssue[]): StyleValidationIssue[] {
+        const filterText = this.styleIssueFilter.trim().toLowerCase();
+        return issues.filter(issue => {
+            if (this.styleErrorsOnly && issue.severity !== 'error') {
+                return false;
+            }
+            if (!filterText) {
+                return true;
+            }
+            const haystack = [
+                issue.severity,
+                issue.impact,
+                issue.source.styleName,
+                issue.source.url,
+                issue.source.configId,
+                issue.rulePath,
+                issue.property,
+                issue.message,
+                issue.detail,
+                issue.expression
+            ].filter(Boolean).join(' ').toLowerCase();
+            return haystack.includes(filterText);
+        });
+    }
+
+    trackByStyleIssue = (index: number, issue: StyleValidationIssue): string => {
+        return `${issue.id}:${index}`;
+    };
+
+    /** Returns the number of error-level issues for a style. */
+    styleErrorCount(style: ErdblickStyle): number {
+        let count = 0;
+        for (const issue of this.styleValidationReportService.reports$.getValue()) {
+            if (issue.severity === 'error'
+                && issue.phase !== 'runtime'
+                && this.issueMatchesStyle(issue, style, true)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    /** Formats a validation issue timestamp for display. */
+    formatIssueTime(issue: StyleValidationIssue): string {
+        return new Date(issue.at).toLocaleTimeString();
+    }
+
+    /** Formats a validation issue source location for display. */
+    formatIssueLocation(issue: StyleValidationIssue): string {
+        if (!issue.location?.line) {
+            return '';
+        }
+        return issue.location.column ? `${issue.location.line}:${issue.location.column}` : `${issue.location.line}`;
+    }
+
+    /** Returns the number of visible validation errors. */
+    validationErrorCount(report: StyleValidationReport): number {
+        return report.issues.filter(issue => issue.severity === 'error').length;
+    }
+
+    /** Returns the first visible validation errors for the dialog footer. */
+    firstValidationErrors(report: StyleValidationReport): StyleValidationIssue[] {
+        return report.issues.filter(issue => issue.severity === 'error').slice(0, 6);
+    }
+
+    /** Opens the styles dialog on the validation errors tab. */
+    openStyleErrorsTab(): void {
+        this.stylesDialogTab = 'errors';
+        this.stylesDialogVisible = true;
+    }
+
+    /** Opens validation errors filtered to a specific style. */
+    openStyleErrorsForStyle(event: MouseEvent, style: ErdblickStyle): void {
+        event.stopPropagation();
+        this.styleIssueFilter = style.id;
+        this.styleErrorsOnly = true;
+        this.openStyleErrorsTab();
+    }
+
+    /** Opens the editor at the location of a validation issue. */
+    openStyleIssue(issue: StyleValidationIssue): void {
+        const style = this.resolveStyleForIssue(issue);
+        if (!style) {
+            this.messageService.showError(`Could not find loaded style for ${this.issueSourceLabel(issue)}.`);
+            return;
+        }
+
+        const currentTargetId = this.stateService.styleEditorTargetId;
+        const sameEditorSession = this.styleEditorVisible
+            && currentTargetId === style.id
+            && this.editorService.hasSession(this.styleEditorSessionId);
+        if (!sameEditorSession) {
+            if (this.styleEditorVisible && this.sourceWasModified && currentTargetId && currentTargetId !== style.id) {
+                this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
+                return;
+            }
+            if (!this.prepareStyleEditorSession(style.id)) {
+                this.messageService.showError(`Could not load style source for ${style.id}.`);
+                return;
+            }
+        }
+
+        this.styleEditorVisible = true;
+        this.revealStyleIssueLocation(issue);
+    }
+
+    /** Shows the most relevant validation failure to the user. */
+    private showValidationFailure(report: StyleValidationReport): void {
+        this.lastEditorValidationReport = report;
+        this.styleValidationDialogVisible = true;
+        this.sourceWasModified = true;
+    }
+
+    /** Reveals a validation issue location after the editor is ready. */
+    private revealStyleIssueLocation(issue: StyleValidationIssue): void {
+        if (!issue.location?.line) {
+            this.messageService.showInfo('This style issue has no source location.');
+            return;
+        }
+        /** Moves the editor cursor to the requested validation issue. */
+        const reveal = () => this.editorService.revealLocation(this.styleEditorSessionId, {
+            line: issue.location!.line!,
+            column: issue.location!.column,
+            length: issue.location!.length
+        });
+        window.requestAnimationFrame(reveal);
+    }
+
+    /** Finds the style entry associated with a validation issue. */
+    private resolveStyleForIssue(issue: StyleValidationIssue): ErdblickStyle | undefined {
+        for (const style of this.styleService.styles.values()) {
+            if (this.issueMatchesStyle(issue, style, false)) {
+                return style;
+            }
+        }
+        return undefined;
+    }
+
+    /** Checks whether a validation issue belongs to a style. */
+    private issueMatchesStyle(issue: StyleValidationIssue, style: ErdblickStyle, currentSourceOnly: boolean): boolean {
+        const source = issue.source;
+        const sameHash = !!source.sourceHash && source.sourceHash === style.sourceRef?.sourceHash;
+        const sameName = !!source.styleName && source.styleName === style.id;
+        const sameUrl = !!source.url && !!style.url && source.url === style.url;
+        const sameConfig = !!source.configId
+            && (source.configId === style.sourceRef?.configId || source.configId === style.id);
+
+        if (!currentSourceOnly) {
+            return sameHash || sameName || sameUrl || sameConfig;
+        }
+        if (source.sourceKind === 'editor') {
+            return sameName && this.stateService.styleEditorTargetId === style.id && this.sourceWasModified;
+        }
+        if (source.sourceHash && style.sourceRef?.sourceHash) {
+            return sameHash;
+        }
+        return sameName || sameUrl || sameConfig;
+    }
+
+    /** Returns the display label for a validation issue source. */
+    private issueSourceLabel(issue: StyleValidationIssue): string {
+        return issue.source.styleName
+            || issue.source.url
+            || issue.source.configId
+            || issue.source.sourceKind
+            || 'style issue';
+    }
+
     protected readonly removeGroupPrefix = removeGroupPrefix;
 
+    /** Builds a stable test id suffix for a style entry. */
+    styleTestIdSuffix(styleId: string): string {
+        return styleId
+            .trim()
+            .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'unknown';
+    }
+
+    /** Promotes the editor discard-warning dialog above other overlays. */
     protected onWarningShow() {
         this.dialogStack.bringToFront(this.warningDialog);
     }
 
+    /** Initializes compare-dialog state from a builtin style id or builtin style URL. */
     private openStyleCompareDialog(styleIdOrUrl: string, fromUpdatedModifiedDialog: boolean) {
         const style = this.styleService.styles.get(styleIdOrUrl)
             ?? Array.from(this.styleService.styles.values()).find(
@@ -628,12 +1159,15 @@ export class StyleComponent implements OnDestroy {
         }
         this.styleCompareStyleId = style.id;
         this.styleCompareLeftLabel = fromUpdatedModifiedDialog ? "Updated Style" : "Original Style";
+        this.styleCompareRightLabel = "Modified Style";
         this.styleCompareLeftSource = baselineSource;
         this.styleCompareRightSource = style.source;
         this.styleCompareLeftModified = false;
+        this.styleCompareReadOnly = false;
         this.styleCompareDialogVisible = true;
     }
 
+    /** Creates or recreates the CodeMirror merge view used by the compare dialog. */
     private setupCompareView() {
         const host = this.styleCompareHost?.nativeElement;
         if (!host || !this.styleCompareStyleId || !this.styleCompareDialogVisible) {
@@ -644,25 +1178,31 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView = undefined;
         host.innerHTML = "";
 
+        const leftEditorExtensions = [
+            basicSetup,
+            yaml(),
+            this.compareThemeCompartmentA.of(compareTheme),
+        ];
+        if (this.styleCompareReadOnly) {
+            leftEditorExtensions.push(EditorState.readOnly.of(true));
+        } else {
+            leftEditorExtensions.push(EditorView.updateListener.of(update => {
+                if (!update.docChanged) {
+                    return;
+                }
+                this.ngZone.run(() => {
+                    this.styleCompareLeftModified = this.getComparedLeftSource() !== this.styleCompareLeftSource;
+                });
+            }));
+        }
+
         this.styleCompareView = new MergeView({
             parent: host,
             gutter: true,
-            revertControls: "b-to-a",
+            ...(this.styleCompareReadOnly ? {} : {revertControls: "b-to-a" as const}),
             a: {
                 doc: this.styleCompareLeftSource,
-                extensions: [
-                    basicSetup,
-                    yaml(),
-                    this.compareThemeCompartmentA.of(compareTheme),
-                    EditorView.updateListener.of(update => {
-                        if (!update.docChanged) {
-                            return;
-                        }
-                        this.ngZone.run(() => {
-                            this.styleCompareLeftModified = this.getComparedLeftSource() !== this.styleCompareLeftSource;
-                        });
-                    })
-                ]
+                extensions: leftEditorExtensions
             },
             b: {
                 doc: this.styleCompareRightSource,
@@ -677,6 +1217,7 @@ export class StyleComponent implements OnDestroy {
         this.observeCompareTheme();
     }
 
+    /** Restores the original left-side compare source after discard. */
     private discardComparedStyleEdits() {
         if (!this.styleCompareView) {
             this.styleCompareLeftModified = false;
@@ -693,15 +1234,18 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareLeftModified = false;
     }
 
+    /** Returns the trimmed left-side source currently shown in the compare view. */
     private getComparedLeftSource(): string {
         return this.styleCompareView?.a.state.doc.toString().replace(/\n+$/, '')
             ?? this.styleCompareLeftSource.replace(/\n+$/, '');
     }
 
+    /** Shows or hides the updated-styles dialog depending on current lifecycle state. */
     private refreshUpdatedStylesDialogVisibility() {
         this.styleUpdateDialogVisible = this.styleService.getUpdatedModifiedStyles().length > 0;
     }
 
+    /** Tracks dark-mode changes so the compare editors stay aligned with the app theme. */
     private observeCompareTheme() {
         const root = document.documentElement;
         this.compareModeObserver?.disconnect();
@@ -722,6 +1266,7 @@ export class StyleComponent implements OnDestroy {
         this.compareModeObserver.observe(root, {attributes: true, attributeFilter: ['class']});
     }
 
+    /** Returns the CodeMirror theme extension matching the current app theme. */
     private currentCodeMirrorTheme() {
         const isDark = document.documentElement.classList.contains(this.DARK_MODE_CLASS);
         const lightTheme = EditorView.theme({}, {dark: false});

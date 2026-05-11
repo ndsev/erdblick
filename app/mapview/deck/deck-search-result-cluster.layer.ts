@@ -4,6 +4,7 @@ import Supercluster from "supercluster";
 import type {PickingInfo, UpdateParameters} from "@deck.gl/core";
 import type {ClusterFeature, ClusterProperties, PointFeature} from "supercluster";
 
+/** Search-result datum consumed by the cluster layer before supercluster indexing. */
 export interface SearchResultClusterPoint {
     coordinates: [number, number];
     mapId: string;
@@ -12,10 +13,12 @@ export interface SearchResultClusterPoint {
     featureKey: string;
 }
 
+/** Public props for the search-result cluster layer, extending deck's icon-layer props. */
 export interface SearchResultClusterLayerProps extends IconLayerProps<SearchResultClusterPoint> {
     clusterMaxZoom?: number;
 }
 
+/** Picking info emitted by the cluster layer for single markers and expanded clusters. */
 export type SearchResultClusterLayerPickingInfo = PickingInfo<
     SearchResultClusterPoint | (SearchResultClusterPoint & ClusterProperties),
     {objects?: SearchResultClusterPoint[]}
@@ -31,10 +34,12 @@ function iconSizeScale(size: number): number {
     return Math.min(100, size) / 100 + 1;
 }
 
+/** Narrows a supercluster feature to an aggregated cluster entry. */
 function isClusterFeature(feature: SearchClusterFeature): feature is ClusterFeature<ClusterProperties> {
     return !!(feature.properties as ClusterProperties).cluster;
 }
 
+/** Maps a cluster size to one of the atlas icon names expected by the marker sheet. */
 function getIconName(size: number): string {
     if (size === 0) {
         return "";
@@ -61,10 +66,12 @@ export class SearchResultClusterLayer extends CompositeLayer<SearchResultCluster
         z: number;
     };
 
+    /** Any data, size, or viewport zoom change is enough to require reclustering or redraw. */
     override shouldUpdateState({changeFlags}: UpdateParameters<this>): boolean {
         return changeFlags.somethingChanged;
     }
 
+    /** Rebuilds the supercluster index when needed and refreshes the visible cluster set for the current zoom. */
     override updateState({props, oldProps, changeFlags}: UpdateParameters<this>): void {
         const rebuildIndex = changeFlags.dataChanged || props.sizeScale !== oldProps.sizeScale;
         if (rebuildIndex) {
@@ -93,6 +100,7 @@ export class SearchResultClusterLayer extends CompositeLayer<SearchResultCluster
         }
     }
 
+    /** Expands cluster picks into a small leaf sample so callers can inspect grouped search results. */
     override getPickingInfo({
         info,
         mode
@@ -112,6 +120,7 @@ export class SearchResultClusterLayer extends CompositeLayer<SearchResultCluster
         return {...info, object: undefined};
     }
 
+    /** Renders one icon sublayer with depth testing disabled so markers stay visible above map geometry. */
     override renderLayers(): IconLayer<SearchClusterFeature> {
         const data = this.state.data ?? [];
         const subLayerProps = this.getSubLayerProps({

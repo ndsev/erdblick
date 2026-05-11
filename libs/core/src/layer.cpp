@@ -7,11 +7,26 @@
 namespace
 {
 
+/** Render binary source-data blobs as readable integers when possible, hex otherwise. */
 auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
 {
     if (auto decoded = value.decodeBigEndianI64())
         return std::to_string(*decoded);
     return "0x" + value.toHex(false);
+}
+
+/** Returns the last GLB attachment found along the staged overlay chain, if any. */
+auto findGlbAttachment(std::shared_ptr<mapget::TileFeatureLayer> const& layer) -> mapget::TileGlbAttachment const*
+{
+    auto const* attachment = static_cast<mapget::TileGlbAttachment const*>(nullptr);
+    auto current = layer;
+    while (current) {
+        if (auto const* candidate = current->glbAttachment()) {
+            attachment = candidate;
+        }
+        current = current->overlay();
+    }
+    return attachment;
 }
 
 }
@@ -99,6 +114,31 @@ void TileFeatureLayer::attachOverlay(TileFeatureLayer const& overlay)
         return;
     }
     model_->attachOverlay(overlay.model_);
+}
+
+bool TileFeatureLayer::hasGlbAttachment() const
+{
+    return findGlbAttachment(model_) != nullptr;
+}
+
+std::string TileFeatureLayer::glbAttachmentName() const
+{
+    if (auto const* attachment = findGlbAttachment(model_)) {
+        return attachment->name_;
+    }
+    return {};
+}
+
+bool TileFeatureLayer::copyGlbAttachment(SharedUint8Array& output) const
+{
+    auto const* attachment = findGlbAttachment(model_);
+    if (!attachment) {
+        return false;
+    }
+    output.writeToArray(
+        reinterpret_cast<char const*>(attachment->bytes_.data()),
+        reinterpret_cast<char const*>(attachment->bytes_.data() + attachment->bytes_.size()));
+    return true;
 }
 
 /**

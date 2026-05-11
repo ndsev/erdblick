@@ -3,13 +3,14 @@ import {
     COORDINATE_SYSTEM,
     Deck as DeckGlDeck,
     type DeckProps,
+    type InteractionState,
     MapView as DeckMercatorView,
     type PickingInfo,
     WebMercatorViewport
 } from "@deck.gl/core";
-import {TileLayer, type TileLayerProps} from "@deck.gl/geo-layers";
 import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
+import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
@@ -22,6 +23,12 @@ import {
     TileFeatureId,
     TileGridMode
 } from "../../shared/appstate.service";
+import {
+    AppConfigService,
+    type BackgroundLayerConfig,
+    type WmsBackgroundLayerConfig,
+    type XyzBackgroundLayerConfig
+} from "../../shared/app-config.service";
 import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
@@ -37,7 +44,9 @@ import {
     tileGridOverlayData
 } from "./deck-tile-grid-overlay.layer";
 import {SearchResultClusterLayer, SearchResultClusterPoint} from "./deck-search-result-cluster.layer";
+import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 
+/** Internal camera state deck uses while the rest of the app still speaks Cesium-like camera values. */
 interface DeckCameraState {
     longitude: number;
     latitude: number;
@@ -47,6 +56,7 @@ interface DeckCameraState {
     maxPitch: number;
 }
 
+/** Geometry description for one tile-grid overlay level after local normalization. */
 interface TileGridOverlayGeometry {
     data: TileGridOverlayDatum[];
     localMin: [number, number];
@@ -55,11 +65,13 @@ interface TileGridOverlayGeometry {
     subdivisionY: number;
 }
 
+/** Map/layer pair used when aggregating tile-state overlays per visible feature level. */
 interface VisibleLayerRef {
     mapId: string;
     layerId: string;
 }
 
+/** Shared rectangle overlay datum for tile outlines and jump-area highlights. */
 interface DeckRectangleOverlayDatum {
     polygon: [number, number][];
     fillColor: [number, number, number, number];
@@ -67,10 +79,12 @@ interface DeckRectangleOverlayDatum {
     lineWidthPixels: number;
 }
 
+/** Single location marker datum for the search/jump marker overlay. */
 interface DeckLocationMarkerDatum {
     position: [number, number];
 }
 
+/** Extent of the visible tile-grid region for one level, including wrap-aware column bookkeeping. */
 interface TileGridLevelExtent {
     level: number;
     rowCount: number;
@@ -88,12 +102,14 @@ interface TileGridLevelExtent {
     north: number;
 }
 
+/** Metadata deck pick layers expose so `pickFeature()` can resolve addresses back to feature ids. */
 interface DeckPickLayerProps {
     tileKey?: string;
     featureAddresses?: ArrayLike<number | null>;
     featureAddressesByPath?: ArrayLike<number | null>;
 }
 
+/** Minimal event shape used by deck click callbacks. */
 interface DeckGestureEventLike {
     srcEvent?: {
         button?: number;
@@ -103,7 +119,8 @@ interface DeckGestureEventLike {
 
 /**
  * Minimal deck.gl map view scaffold used to wire renderer switching and camera-state sync.
- * Detailed deck tile rendering is introduced in later migration tasks.
+ * Besides vector and overlay rendering, it now also owns config-driven raster background
+ * layers so per-view background state stays close to the actual deck layer lifecycle.
  */
 export abstract class DeckMapView implements IRenderView {
     private static readonly EARTH_RADIUS_METERS = 6378137;
@@ -112,8 +129,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
     private static readonly MAX_VIEWPORT_LONGITUDE_SPAN = 360;
     private static readonly WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
-    private static readonly OSM_LAYER_KEY = "osm/tile-layer";
-    private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
+    private static readonly BACKGROUND_LAYER_KEY = "background/layer";
     private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
     private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
     private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
@@ -131,6 +147,8 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
+    private static readonly HOVER_PICK_THROTTLE_MS = 75;
+    private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
     // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
@@ -169,8 +187,7 @@ export abstract class DeckMapView implements IRenderView {
     private tickHandle: number | null = null;
     private deckDevice: Device | null = null;
     private canvasResizeTimer: ReturnType<typeof setTimeout> | null = null;
-    private osmLayerEnabled = false;
-    private osmLayerOpacity = -1;
+    private backgroundLayerSignature = "";
     private tileGridEnabled = false;
     private tileGridMode: TileGridMode = "nds";
     private lastTileGridDiagnosticSignature = "";
@@ -186,8 +203,35 @@ export abstract class DeckMapView implements IRenderView {
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
     private isHoveringFeature = false;
+    private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
+    private pendingHoverInfo: PickingInfo | null = null;
+    private lastProcessedHoverPickAtMs = 0;
+    private hoverPickingSuspendedUntilMs = 0;
+    private isCameraInteracting = false;
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
+    /**
+     * Separates visible GLTF rendering from the invisible GLTF pick-proxy pass.
+     *
+     * deck still draws non-pickable layers during picking unless they are filtered out explicitly,
+     * so the visible GLTF layer must be excluded there or it will overwrite the cheap proxy ids.
+     */
+    private readonly deckLayerFilter: DeckProps<DeckMercatorView>["layerFilter"] = ({layer, isPicking}) => {
+        const layerId = String(layer.id ?? "");
+        const layerPickable = Boolean((layer.props as {pickable?: boolean} | undefined)?.pickable);
+        const isGltfPickProxyLayer = layerId.includes("/gltf-pick-proxy");
+        const isVisibleGltfLayer = layerId.includes("/gltf") && !isGltfPickProxyLayer;
+        if (isPicking) {
+            if (!layerPickable) {
+                return false;
+            }
+            if (isGltfPickProxyLayer) {
+                return true;
+            }
+            return !isVisibleGltfLayer;
+        }
+        return !isGltfPickProxyLayer;
+    };
     private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
 
     get viewIndex() {
@@ -198,17 +242,20 @@ export abstract class DeckMapView implements IRenderView {
     protected abstract readonly allowPitchAndBearing: boolean;
     protected readonly useOrthographicProjection: boolean = false;
 
+    /** Creates the deck-backed view wrapper for one canvas and app-state view index. */
     constructor(id: number,
                 canvasId: string,
                 protected mapService: MapDataService,
                 protected featureSearchService: FeatureSearchService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
-                protected stateService: AppStateService) {
+                protected stateService: AppStateService,
+                protected configService: AppConfigService) {
         this._viewIndex = id;
         this.canvasId = canvasId;
     }
 
+    /** Creates the canvas, bootstraps deck, and installs all renderer-to-app subscriptions. */
     async setup(): Promise<void> {
         const container = document.getElementById(this.canvasId) as HTMLDivElement | null;
         if (!container) {
@@ -237,6 +284,7 @@ export abstract class DeckMapView implements IRenderView {
             viewState: this.viewState,
             layers: [],
             controller: this.createDeckControllerOptions(),
+            layerFilter: this.deckLayerFilter,
             onDeviceInitialized: (device) => {
                 this.deckDevice = device;
             },
@@ -247,7 +295,9 @@ export abstract class DeckMapView implements IRenderView {
                 this.scheduleCanvasResize(width, height);
             },
             getCursor: this.deckCursor,
-            onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
+            onViewStateChange: ({viewState, interactionState}) =>
+                this.onViewStateChange(viewState as DeckCameraState, interactionState),
+            onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
             onHover: (info) => this.onHover(info),
             onClick: (info, event) => this.onClick(info, event)
         };
@@ -260,6 +310,7 @@ export abstract class DeckMapView implements IRenderView {
         this.requestRender();
     }
 
+    /** Tears down deck, overlay state, and every subscription associated with this view. */
     async destroy(): Promise<void> {
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.subscriptions.length = 0;
@@ -270,7 +321,8 @@ export abstract class DeckMapView implements IRenderView {
         this.tickCallbacks.clear();
         this.setFeatureHoverState(false);
         this.hoveredFeatureIds.next(undefined);
-        this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
+        this.cancelHoverPickScheduling();
+        this.layerRegistry.remove(DeckMapView.BACKGROUND_LAYER_KEY);
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
@@ -278,8 +330,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
         this.removeTileStateLayers();
         this.stopJumpAreaHighlight();
-        this.osmLayerEnabled = false;
-        this.osmLayerOpacity = -1;
+        this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
         this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
@@ -296,10 +347,12 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Returns whether the deck renderer is currently initialized. */
     isAvailable(): boolean {
         return this.deck !== null;
     }
 
+    /** Asks deck to redraw the scene immediately. */
     requestRender(reason?: string): void {
         if (!this.deck) {
             return;
@@ -307,6 +360,7 @@ export abstract class DeckMapView implements IRenderView {
         this.deck.redraw(reason);
     }
 
+    /** Returns the current canvas client rect, or an empty rect if the renderer is unavailable. */
     getCanvasClientRect(): DOMRect {
         const canvas = this.deck?.getCanvas();
         if (!canvas) {
@@ -315,10 +369,12 @@ export abstract class DeckMapView implements IRenderView {
         return canvas.getBoundingClientRect();
     }
 
+    /** Returns the current camera bearing in degrees for the compass widget. */
     getCameraHeadingDegrees(): number {
         return this.viewState.bearing;
     }
 
+    /** Registers a per-frame callback and starts the RAF loop on demand. */
     onTick(cb: () => void): void {
         this.tickCallbacks.add(cb);
         if (this.tickHandle === null) {
@@ -326,6 +382,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Unregisters a per-frame callback and stops the RAF loop when no callbacks remain. */
     offTick(cb: () => void): void {
         this.tickCallbacks.delete(cb);
         if (this.tickCallbacks.size === 0) {
@@ -333,10 +390,12 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Returns the scene mode implemented by this concrete deck view. */
     getSceneMode(): SceneMode {
         return this.sceneMode;
     }
 
+    /** Creates the absolute-positioned canvas deck will render into. */
     private createDeckCanvas(container: HTMLDivElement): HTMLCanvasElement {
         const canvas = document.createElement("canvas");
         canvas.style.position = "absolute";
@@ -348,6 +407,7 @@ export abstract class DeckMapView implements IRenderView {
         return canvas;
     }
 
+    /** Keeps the WebGL drawing buffer in sync with the CSS size and configured device-pixel policy. */
     private setCanvasDrawingBufferSize(canvas: HTMLCanvasElement, cssWidth: number, cssHeight: number): void {
         const width = Math.max(1, Math.round(cssWidth * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
         const height = Math.max(1, Math.round(cssHeight * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
@@ -358,6 +418,7 @@ export abstract class DeckMapView implements IRenderView {
         canvas.height = height;
     }
 
+    /** Debounces drawing-buffer resizes so live DOM layout changes do not thrash WebGL state. */
     private scheduleCanvasResize(cssWidth: number, cssHeight: number): void {
         this.cancelCanvasResizeScheduling();
         this.canvasResizeTimer = setTimeout(() => {
@@ -366,6 +427,7 @@ export abstract class DeckMapView implements IRenderView {
         }, DeckMapView.CANVAS_RESIZE_DEBOUNCE_MS);
     }
 
+    /** Applies the pending drawing-buffer resize using the deck device when available. */
     private applyCanvasResize(cssWidth: number, cssHeight: number): void {
         const width = Math.max(1, Math.round(cssWidth * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
         const height = Math.max(1, Math.round(cssHeight * DeckMapView.CANVAS_USE_DEVICE_PIXELS));
@@ -387,6 +449,7 @@ export abstract class DeckMapView implements IRenderView {
         this.requestRender("Canvas resized");
     }
 
+    /** Cancels any pending debounced canvas resize. */
     private cancelCanvasResizeScheduling(): void {
         if (this.canvasResizeTimer !== null) {
             clearTimeout(this.canvasResizeTimer);
@@ -394,17 +457,23 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Returns the renderer-agnostic scene handle passed to tile visualizations. */
     getSceneHandle(): IRenderSceneHandle {
         return {
             renderer: "deck",
             scene: {
                 deck: this.deck,
                 layerRegistry: this.layerRegistry,
-                sceneMode: this.sceneMode
+                sceneMode: this.sceneMode,
+                device: this.deckDevice
             }
         };
     }
 
+    /**
+     * Resolves the feature ids at a screen position from deck picking metadata.
+     * Layers may expose either per-object addresses or per-path addresses.
+     */
     pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[] {
         if (!this.deck) {
             return [];
@@ -480,6 +549,7 @@ export abstract class DeckMapView implements IRenderView {
         return [];
     }
 
+    /** Unprojects a screen position to lon/lat and estimates altitude from the current zoom level. */
     pickCartographic(screenPos: {x: number; y: number}): { lon: number; lat: number; alt: number } | undefined {
         const viewport = this.createWebMercatorViewport();
         if (!viewport) {
@@ -489,6 +559,7 @@ export abstract class DeckMapView implements IRenderView {
         return {lon, lat, alt: this.zoomToAltitude(this.viewState.zoom, lat)};
     }
 
+    /** Maps persisted app-state camera data into the controlled deck view state. */
     setViewFromState(cameraData: CameraViewState): void {
         const maxPitch = this.allowPitchAndBearing ? Math.max(0, this.viewState.maxPitch) : 0;
         const next: DeckCameraState = {
@@ -506,10 +577,15 @@ export abstract class DeckMapView implements IRenderView {
         this.updateViewState(next, true, true);
     }
 
+    /** Returns the persisted camera state for this view. */
     getViewState(): CameraViewState {
         return this.stateService.cameraViewDataState.getValue(this._viewIndex);
     }
 
+    /**
+     * Builds the viewport rectangle expected by `MapDataService`.
+     * Longitude sampling intentionally unwraps around the current center to survive world wrap.
+     */
     computeViewport(): Viewport | undefined {
         const viewport = this.createWebMercatorViewport();
         if (!viewport) {
@@ -571,7 +647,8 @@ export abstract class DeckMapView implements IRenderView {
                 camPosLat: this.viewState.latitude,
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
             };
-            return Object.values(fullWorldViewport).every(Number.isFinite) ? fullWorldViewport : undefined;
+            const valid = Object.values(fullWorldViewport).every(Number.isFinite);
+            return valid ? fullWorldViewport : undefined;
         }
         const expandLon = sizeLon * 0.05;
         const expandLat = sizeLat * 0.05;
@@ -586,7 +663,8 @@ export abstract class DeckMapView implements IRenderView {
                 camPosLat: this.viewState.latitude,
                 orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
             };
-            return Object.values(fullWorldViewport).every(Number.isFinite) ? fullWorldViewport : undefined;
+            const valid = Object.values(fullWorldViewport).every(Number.isFinite);
+            return valid ? fullWorldViewport : undefined;
         }
         const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south - expandLat);
         const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north + expandLat);
@@ -601,25 +679,31 @@ export abstract class DeckMapView implements IRenderView {
             // Keep tile-priority orientation consistent with the legacy viewport contract.
             orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
         };
-        return Object.values(nextViewport).every(Number.isFinite) ? nextViewport : undefined;
+        const valid = Object.values(nextViewport).every(Number.isFinite);
+        return valid ? nextViewport : undefined;
     }
 
+    /** Pans north in view-local space. */
     moveUp(): void {
         this.applyPan(0, 1);
     }
 
+    /** Pans south in view-local space. */
     moveDown(): void {
         this.applyPan(0, -1);
     }
 
+    /** Pans west in view-local space. */
     moveLeft(): void {
         this.applyPan(-1, 0);
     }
 
+    /** Pans east in view-local space. */
     moveRight(): void {
         this.applyPan(1, 0);
     }
 
+    /** Zooms in by the user-configured zoom step and persists the result to app state. */
     zoomIn(): void {
         this.stateService.focusedView = this._viewIndex;
         this.updateViewState({
@@ -629,6 +713,7 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
+    /** Zooms out by the user-configured zoom step and persists the result to app state. */
     zoomOut(): void {
         this.stateService.focusedView = this._viewIndex;
         this.updateViewState({
@@ -638,6 +723,7 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
+    /** Resets pitch and bearing while preserving the current center and zoom. */
     resetOrientation(): void {
         this.stateService.focusedView = this._viewIndex;
         this.updateViewState({
@@ -648,6 +734,7 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
+    /** Pushes the currently visible viewport rectangle back into `MapDataService`. */
     protected updateViewport(): void {
         const viewport = this.computeViewport();
         if (!viewport) {
@@ -656,6 +743,10 @@ export abstract class DeckMapView implements IRenderView {
         this.mapService.setViewport(this._viewIndex, viewport);
     }
 
+    /**
+     * Installs every subscription that keeps the renderer synchronized with app state, search, and tile data.
+     * Most subscriptions only schedule overlay work so rapid bursts collapse into one frame.
+     */
     private setupSubscriptions(): void {
         this.subscriptions.push(
             this.stateService.cameraViewDataState
@@ -670,8 +761,20 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.stateService.osmState.pipe(this._viewIndex).subscribe((osmState) => {
-                this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
+            this.stateService.backgroundState.pipe(this._viewIndex).subscribe(() => {
+                this.updateBackgroundLayer();
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.mode2dState.pipe(this._viewIndex).subscribe(() => {
+                this.updateBackgroundLayer();
+            })
+        );
+
+        this.subscriptions.push(
+            this.configService.config$.subscribe(() => {
+                this.updateBackgroundLayer();
             })
         );
 
@@ -811,21 +914,60 @@ export abstract class DeckMapView implements IRenderView {
         this.scheduleSearchResultsOverlayUpdate();
     }
 
-    private onViewStateChange(rawViewState: DeckCameraState): void {
+    /** Handles deck camera updates in controlled mode and feeds the sanitized state back into app state. */
+    private onViewStateChange(rawViewState: DeckCameraState, interactionState?: InteractionState): void {
         if (this.suppressDeckViewStateEvent) {
             return;
         }
         if (this.stateService.focusedView !== this._viewIndex) {
             this.stateService.focusedView = this._viewIndex;
         }
+        this.noteCameraInteraction(interactionState);
         // Deck is wired in controlled mode (`viewState` prop). User interactions only
         // take effect if we feed the updated camera state back via `setProps`.
         this.updateViewState(rawViewState, true, true);
         this.pushViewStateToAppState();
     }
 
+    /** Tracks whether the camera is actively moving so hover picking can be suspended. */
+    private onInteractionStateChange(interactionState: InteractionState): void {
+        this.noteCameraInteraction(interactionState);
+    }
+
+    /** Records the latest camera interaction state and temporarily suppresses expensive hover picking. */
+    private noteCameraInteraction(interactionState: InteractionState | undefined): void {
+        if (!interactionState) {
+            return;
+        }
+        this.isCameraInteracting = Boolean(
+            interactionState.isDragging
+            || interactionState.isPanning
+            || interactionState.isRotating
+            || interactionState.isZooming
+            || interactionState.inTransition
+        );
+        this.hoverPickingSuspendedUntilMs = performance.now() + DeckMapView.HOVER_PICK_SUSPEND_AFTER_CAMERA_MS;
+        if (this.isCameraInteracting) {
+            this.cancelHoverPickScheduling();
+        } else if (this.pendingHoverInfo) {
+            this.scheduleHoverPickProcessing();
+        }
+    }
+
+    /** Cancels any pending deferred hover-pick work. */
+    private cancelHoverPickScheduling(): void {
+        if (!this.hoverPickTimer) {
+            return;
+        }
+        clearTimeout(this.hoverPickTimer);
+        this.hoverPickTimer = null;
+    }
+
+    /** Updates hover coordinates, hover highlights, and the hover-popover source data. */
     private onHover(info: PickingInfo): void {
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
+            this.pendingHoverInfo = null;
+            this.cancelHoverPickScheduling();
             this.setFeatureHoverState(false);
             void this.mapService.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
@@ -839,6 +981,45 @@ export abstract class DeckMapView implements IRenderView {
                 );
             }
         }
+        this.pendingHoverInfo = info;
+        this.scheduleHoverPickProcessing();
+    }
+
+    /** Schedules one throttled hover pick once the camera is idle enough for interactive picking again. */
+    private scheduleHoverPickProcessing(): void {
+        if (this.hoverPickTimer) {
+            return;
+        }
+        const now = performance.now();
+        const nextEligibleAt = Math.max(
+            this.lastProcessedHoverPickAtMs + DeckMapView.HOVER_PICK_THROTTLE_MS,
+            this.hoverPickingSuspendedUntilMs
+        );
+        const delayMs = Math.max(0, nextEligibleAt - now);
+        this.hoverPickTimer = setTimeout(() => {
+            this.hoverPickTimer = null;
+            if (this.isCameraInteracting || performance.now() < this.hoverPickingSuspendedUntilMs) {
+                if (this.pendingHoverInfo) {
+                    // Keep the newest pointer sample queued while the camera is still settling.
+                    this.scheduleHoverPickProcessing();
+                }
+                return;
+            }
+            const pendingInfo = this.pendingHoverInfo;
+            this.pendingHoverInfo = null;
+            if (!pendingInfo) {
+                return;
+            }
+            this.lastProcessedHoverPickAtMs = performance.now();
+            this.processHoverPick(pendingInfo);
+            if (this.pendingHoverInfo) {
+                this.scheduleHoverPickProcessing();
+            }
+        }, delayMs);
+    }
+
+    /** Runs the expensive deck pick once and updates hover state from the resolved feature ids. */
+    private processHoverPick(info: PickingInfo): void {
         const featureIds = this.pickFeature({x: info.x, y: info.y});
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
@@ -855,6 +1036,7 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
+    /** Tracks whether the cursor should show as a pointer over selectable geometry. */
     private setFeatureHoverState(isHoveringFeature: boolean): void {
         if (this.isHoveringFeature === isHoveringFeature) {
             return;
@@ -865,6 +1047,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Handles left-click feature selection and background deselection. */
     private onClick(info: PickingInfo, event: DeckGestureEventLike): void {
         if (environment.visualizationOnly) {
             return;
@@ -900,6 +1083,7 @@ export abstract class DeckMapView implements IRenderView {
         this.selectFeatureIds(featureIds, shouldPinPanel);
     }
 
+    /** Opens one or more inspection panels for the picked feature ids. */
     private selectFeatureIds(featureIds: TileFeatureId[], lockSelection: boolean): void {
         if (!featureIds.length) {
             return;
@@ -935,6 +1119,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Applies a sanitized camera state to deck and optionally refreshes viewport-dependent overlays. */
     private updateViewState(nextState: DeckCameraState, setDeckProps: boolean, updateViewport: boolean): void {
         const sanitized = this.sanitizeViewState(nextState);
         this.viewState = sanitized;
@@ -945,12 +1130,12 @@ export abstract class DeckMapView implements IRenderView {
         }
         if (updateViewport) {
             this.updateViewport();
-            const osmState = this.stateService.getOsmState(this._viewIndex);
-            this.updateOsmLayers(osmState.enabled, osmState.opacity / 100);
+            this.updateBackgroundLayer();
             this.scheduleTileGridOverlayUpdate();
         }
     }
 
+    /** Persists the current controlled deck view state back into `AppStateService`. */
     private pushViewStateToAppState(): void {
         this.ignoreNextCamAppStateUpdate = true;
         this.stateService.setView(
@@ -968,6 +1153,7 @@ export abstract class DeckMapView implements IRenderView {
         );
     }
 
+    /** Builds the deck controller options from the current view mode and persisted zoom-speed preference. */
     private createDeckControllerOptions(): DeckProps<DeckMercatorView>["controller"] {
         const zoomStep = this.stateService.mapZoomStep;
         const scrollZoomSpeed = DeckMapView.DEFAULT_DECK_SCROLL_ZOOM_SPEED * zoomStep / DEFAULT_MAP_ZOOM_STEP;
@@ -986,6 +1172,7 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /** Clamps and normalizes the deck camera state before it becomes authoritative. */
     private sanitizeViewState(next: DeckCameraState): DeckCameraState {
         const longitude = Number.isFinite(next.longitude) ? next.longitude : this.viewState.longitude;
         const latitude = Number.isFinite(next.latitude) ? next.latitude : this.viewState.latitude;
@@ -1003,11 +1190,12 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /** Creates a `WebMercatorViewport` for the current canvas and controlled deck camera state. */
     private createWebMercatorViewport(): WebMercatorViewport | undefined {
         const rect = this.getCanvasClientRect();
         const width = Math.max(1, Math.floor(rect.width));
         const height = Math.max(1, Math.floor(rect.height));
-        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
             return undefined;
         }
         return new WebMercatorViewport({
@@ -1022,30 +1210,118 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
-    private updateOsmLayers(enabled: boolean, opacity: number): void {
-        if (!this.deck || !enabled) {
-            this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
-            this.osmLayerEnabled = false;
-            this.osmLayerOpacity = -1;
+    /** Adds, updates, or removes the configured raster background according to the current view mode and state. */
+    private updateBackgroundLayer(): void {
+        if (!this.deck) {
+            this.removeBackgroundLayer();
             return;
         }
 
-        const clampedOpacity = Math.max(0, Math.min(1, opacity));
-        if (this.osmLayerEnabled && this.osmLayerOpacity === clampedOpacity) {
+        const backgroundLayers = this.configService.getBackgroundLayers();
+        const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
+        const backgroundState = this.stateService.resolveBackgroundState(
+            this._viewIndex,
+            backgroundLayers,
+            defaultBackgroundLayerId
+        );
+        const selectedLayer = backgroundLayers.find(layer => layer.id === backgroundState.layerId);
+        if (!selectedLayer) {
+            this.removeBackgroundLayer();
             return;
         }
 
-        const layer = new TileLayer<string>({
-            id: DeckMapView.OSM_LAYER_KEY,
-            data: DeckMapView.OSM_TILE_URL_TEMPLATE,
-            minZoom: 0,
-            maxZoom: 19,
-            tileSize: 256,
-            opacity: clampedOpacity,
+        if (!this.stateService.mode2dState.getValue(this._viewIndex) && selectedLayer.type === "wms") {
+            // WMS backgrounds remain a 2D-only option in erdblick. Dropping them here avoids
+            // carrying an unstable layer into pitched 3D views where it cannot render correctly.
+            this.removeBackgroundLayer();
+            return;
+        }
+
+        const opacity = Math.max(0, Math.min(1, backgroundState.opacity / 100));
+        const signature = JSON.stringify({
+            layerId: selectedLayer.id,
+            opacity,
+            mode2d: this.stateService.mode2dState.getValue(this._viewIndex)
+        });
+        if (signature === this.backgroundLayerSignature) {
+            // Skip deck layer churn when only unrelated state changed.
+            return;
+        }
+
+        const layer = selectedLayer.type === "xyz"
+            ? this.createXyzBackgroundLayer(selectedLayer, opacity)
+            : this.createWmsBackgroundLayer(selectedLayer, opacity);
+        this.layerRegistry.upsert(DeckMapView.BACKGROUND_LAYER_KEY, layer, -1000);
+        this.backgroundLayerSignature = signature;
+    }
+
+    /** Removes the current background layer and clears the memoized render signature. */
+    private removeBackgroundLayer(): void {
+        this.layerRegistry.remove(DeckMapView.BACKGROUND_LAYER_KEY);
+        this.backgroundLayerSignature = "";
+    }
+
+    /**
+     * Builds a fetch override for authenticated background layers while preserving deck/loaders.gl
+     * request options such as abort signals.
+     */
+    private createBackgroundFetchOverride(headers: Readonly<Record<string, string>>): typeof fetch | undefined {
+        if (Object.keys(headers).length === 0) {
+            return undefined;
+        }
+
+        return async (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+            const mergedHeaders = new Headers(init?.headers);
+            for (const [name, value] of Object.entries(headers)) {
+                mergedHeaders.set(name, value);
+            }
+
+            return fetch(input, {
+                ...init,
+                headers: mergedHeaders
+            });
+        };
+    }
+
+    /** Wraps the optional background fetch override in the deck/loaders.gl `loadOptions` structure. */
+    private createBackgroundLoadOptions(headers: Readonly<Record<string, string>>): {core: {fetch: typeof fetch}} | undefined {
+        const fetchOverride = this.createBackgroundFetchOverride(headers);
+        if (!fetchOverride) {
+            return undefined;
+        }
+
+        return {
+            core: {
+                fetch: fetchOverride
+            }
+        };
+    }
+
+    /**
+     * Creates the tiled XYZ background layer used for OSM and bundled imagery.
+     *
+     * The deck layer id includes the configured background id so switching
+     * sources forces a fresh TileLayer instance and tile selection pass.
+     * The layer also prefers deck's `best-available` refinement so panning
+     * keeps already loaded detailed tiles visible instead of collapsing to a
+     * coarse parent tile while sibling requests are still in flight. When
+     * `headers` are configured, tile requests use them for authenticated
+     * HTTP endpoints without changing local bundled backgrounds.
+     */
+    private createXyzBackgroundLayer(layerConfig: XyzBackgroundLayerConfig, opacity: number): TileLayer<string> {
+        return new TileLayer<string>({
+            id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
+            data: layerConfig.urlTemplate,
+            loadOptions: this.createBackgroundLoadOptions(layerConfig.headers),
+            minZoom: layerConfig.minZoom,
+            maxZoom: layerConfig.maxZoom,
+            tileSize: layerConfig.tileSize,
+            extent: layerConfig.extent,
+            opacity,
             pickable: false,
-            refinementStrategy: "no-overlap",
+            refinementStrategy: "best-available",
             updateTriggers: {
-                renderSubLayers: [clampedOpacity]
+                renderSubLayers: [opacity]
             },
             renderSubLayers: (
                 props: Parameters<NonNullable<TileLayerProps<string>["renderSubLayers"]>>[0]
@@ -1063,17 +1339,53 @@ export abstract class DeckMapView implements IRenderView {
                         boundingBox[1][0],
                         boundingBox[1][1]
                     ],
-                    opacity: clampedOpacity,
+                    opacity,
                     pickable: false,
                     parameters: {depthTest: false}
                 });
             }
         });
-        this.layerRegistry.upsert(DeckMapView.OSM_LAYER_KEY, layer, -1000);
-        this.osmLayerEnabled = true;
-        this.osmLayerOpacity = clampedOpacity;
     }
 
+    /**
+     * Creates the experimental WMS background layer from the config-driven service parameters.
+     *
+     * The source-specific layer id mirrors the XYZ path so deck does not reuse
+     * stale internal state when the selected background changes. WMS metadata
+     * and image requests reuse the same optional header override as XYZ tiles.
+     */
+    private createWmsBackgroundLayer(layerConfig: WmsBackgroundLayerConfig, opacity: number): WMSLayer {
+        const imageSource = new WMSImageSource(layerConfig.url, {
+            core: {
+                loadOptions: this.createBackgroundLoadOptions(layerConfig.headers) ?? {}
+            },
+            wms: {
+                wmsParameters: {
+                    layers: layerConfig.layers,
+                    version: layerConfig.version,
+                    crs: layerConfig.crs,
+                    format: layerConfig.format,
+                    transparent: layerConfig.transparent
+                },
+                vendorParameters: layerConfig.vendorParameters
+            }
+        });
+
+        return new WMSLayer({
+            id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
+            data: imageSource,
+            layers: layerConfig.layers,
+            serviceType: "wms",
+            srs: layerConfig.crs,
+            opacity,
+            pickable: false,
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS,
+            onMetadataLoadError: (error) => console.error("[DeckMapView] Failed to load WMS metadata", error),
+            onImageLoadError: (_requestId, error) => console.error("[DeckMapView] Failed to load WMS image", error)
+        });
+    }
+
+    /** Schedules one tile-grid overlay refresh on the next animation frame. */
     private scheduleTileGridOverlayUpdate(): void {
         if (this.tileGridOverlayUpdateRaf !== null) {
             return;
@@ -1084,6 +1396,7 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
+    /** Debounces tile-grid state recoloring after tile data changed. */
     private scheduleTileGridOverlayDataRefresh(): void {
         if (!this.tileGridEnabled) {
             return;
@@ -1097,6 +1410,7 @@ export abstract class DeckMapView implements IRenderView {
         }, 120);
     }
 
+    /** Cancels pending tile-grid overlay refresh work. */
     private cancelTileGridOverlayUpdateScheduling(): void {
         if (this.tileGridOverlayUpdateRaf !== null) {
             cancelAnimationFrame(this.tileGridOverlayUpdateRaf);
@@ -1108,6 +1422,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Schedules one search-result overlay refresh on the next animation frame. */
     private scheduleSearchResultsOverlayUpdate(): void {
         if (this.searchResultsOverlayUpdateRaf !== null) {
             return;
@@ -1118,6 +1433,7 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
+    /** Debounces search-result overlay rebuilds after search progress changes. */
     private scheduleSearchResultsOverlayDataRefresh(): void {
         if (this.searchResultsOverlayDataRefreshTimer !== null) {
             return;
@@ -1128,6 +1444,7 @@ export abstract class DeckMapView implements IRenderView {
         }, 120);
     }
 
+    /** Cancels pending search-result overlay refresh work. */
     private cancelSearchResultsOverlayScheduling(): void {
         if (this.searchResultsOverlayUpdateRaf !== null) {
             cancelAnimationFrame(this.searchResultsOverlayUpdateRaf);
@@ -1139,6 +1456,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
+    /** Rebuilds the clustered search-result overlay when its inputs changed. */
     private updateSearchResultsOverlay(): void {
         const pointsVersion = this.featureSearchService.searchResultPointsVersion;
         const iconAtlasUrl = this.featureSearchService.getSearchClusterIconAtlasUrl();
@@ -1231,6 +1549,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.upsert(DeckMapView.LOCATION_MARKER_LAYER_KEY, layer, 700);
     }
 
+    /** Rebuilds the tile-grid and tile-state overlays for the currently visible map layers. */
     private updateTileGridOverlay(): void {
         if (!this.deck || !this.tileGridEnabled) {
             this.removeTileGridLayers();
@@ -1260,6 +1579,7 @@ export abstract class DeckMapView implements IRenderView {
         );
     }
 
+    /** Reconciles the line-only grid overlay layers for the requested levels. */
     private updateTileGridLayers(levels: number[], viewport: Viewport): number {
         const nextLayerKeys = new Set<string>();
         levels.forEach((level, index) => {
@@ -1277,6 +1597,7 @@ export abstract class DeckMapView implements IRenderView {
         return nextLayerKeys.size;
     }
 
+    /** Creates one shader-driven tile-grid line layer for a specific level. */
     private createTileGridLayer(level: number, viewport: Viewport, layerId: string): TileGridOverlayLayer {
         const overlayGeometry = DeckMapView.TILE_GRID_DEBUG_SOLID
             ? this.tileGridDebugGeometry(level, viewport)
@@ -1305,6 +1626,7 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
+    /** Rebuilds the raster tile-state overlays that color error/empty cells behind the grid lines. */
     private updateTileStateOverlays(
         levels: number[],
         viewport: Viewport
@@ -1384,6 +1706,7 @@ export abstract class DeckMapView implements IRenderView {
         return {layerCount: nextLayerKeys.size, coloredTileCount};
     }
 
+    /** Coarsens every requested grid level until its visible cell count falls under the safety threshold. */
     private coarsenedTileGridLevels(levels: number[], viewport: Viewport): number[] {
         const effectiveLevels = new Set<number>();
         for (const level of levels) {
@@ -1392,6 +1715,7 @@ export abstract class DeckMapView implements IRenderView {
         return Array.from(effectiveLevels.values()).sort((lhs, rhs) => lhs - rhs);
     }
 
+    /** Coarsens one grid level until the number of visible cells becomes acceptable. */
     private coarsenedTileGridLevel(level: number, viewport: Viewport): number {
         let effectiveLevel = Math.max(0, Math.min(22, Math.floor(level)));
         while (effectiveLevel > 0 &&
@@ -1401,11 +1725,13 @@ export abstract class DeckMapView implements IRenderView {
         return effectiveLevel;
     }
 
+    /** Returns the number of grid cells that would be visible for a level in the current viewport. */
     private tileGridVisibleCellCount(level: number, viewport: Viewport): number {
         const extent = this.tileGridExtentForLevel(level, viewport);
         return extent ? extent.width * extent.height : 0;
     }
 
+    /** Returns the effective feature levels currently visible across all enabled map layers in this view. */
     private visibleMapLayerLevels(): number[] {
         const levels = new Set<number>();
         for (const [mapId, map] of this.mapService.maps.maps.entries()) {
@@ -1426,6 +1752,7 @@ export abstract class DeckMapView implements IRenderView {
         return Array.from(levels.values()).sort((lhs, rhs) => lhs - rhs);
     }
 
+    /** Groups visible map layers by the effective feature level they currently render at. */
     private visibleMapLayersByLevel(levels: number[]): Map<number, VisibleLayerRef[]> {
         const levelSet = new Set(levels);
         const result = new Map<number, VisibleLayerRef[]>();
@@ -1456,6 +1783,7 @@ export abstract class DeckMapView implements IRenderView {
         return result;
     }
 
+    /** Removes every tile-state overlay layer currently registered with deck. */
     private removeTileStateLayers(): void {
         for (const key of this.tileStateLayerKeys) {
             this.layerRegistry.remove(key);
@@ -1463,6 +1791,7 @@ export abstract class DeckMapView implements IRenderView {
         this.tileStateLayerKeys.clear();
     }
 
+    /** Removes every tile-grid line layer currently registered with deck. */
     private removeTileGridLayers(): void {
         for (const key of this.tileGridLayerKeys) {
             this.layerRegistry.remove(key);
@@ -1470,6 +1799,10 @@ export abstract class DeckMapView implements IRenderView {
         this.tileGridLayerKeys.clear();
     }
 
+    /**
+     * Computes the wrap-aware tile-grid extent that covers the current viewport for one level.
+     * The extent intentionally includes a small margin so fast pans do not reveal seams immediately.
+     */
     private tileGridExtentForLevel(level: number, viewport: Viewport): TileGridLevelExtent | null {
         if (!Number.isFinite(level) || level < 0) {
             return null;
@@ -1517,6 +1850,7 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /** Classifies one tile cell as error, empty, or uncolored across every visible layer at that level. */
     private tileStateKindForTile(tileId: bigint, visibleLayers: VisibleLayerRef[]): number {
         let hasParticipant = false;
         let hasPendingParticipant = false;
@@ -1553,6 +1887,7 @@ export abstract class DeckMapView implements IRenderView {
         return 0;
     }
 
+    /** Converts a tile id to its raster-cell coordinates inside the current tile-grid extent. */
     private tileGridCellForTile(tileId: bigint, extent: TileGridLevelExtent): {col: number; row: number} | null {
         const tileBox = coreLib.getTileBox(tileId) as unknown;
         if (!Array.isArray(tileBox) || tileBox.length < 4) {
@@ -1579,6 +1914,7 @@ export abstract class DeckMapView implements IRenderView {
         return {col, row: rowInExtent};
     }
 
+    /** Wraps a raw tile column into the current extent so world-wrap repeats stay contiguous. */
     private wrapColumnIntoExtent(rawCol: number, extent: TileGridLevelExtent): number {
         const normalizedCol = ((rawCol % extent.colCount) + extent.colCount) % extent.colCount;
         const repeatsToNearExtent = Math.round((extent.minCol - normalizedCol) / extent.colCount);
@@ -1592,11 +1928,13 @@ export abstract class DeckMapView implements IRenderView {
         return repeatedCol - extent.minCol;
     }
 
+    /** Returns the per-view tile budget derived from the global load limit and split-view count. */
     private tileLimitPerView(): number {
         const viewCount = Math.max(1, this.stateService.numViews);
         return Math.max(1, Math.floor(this.stateService.tilesLoadLimit / viewCount));
     }
 
+    /** Builds the small diagnostic polygon used by the grid-debug solid-fill mode. */
     private tileGridDebugPolygon(): [number, number][] {
         const halfWidth = 1.5;
         const halfHeight = 1.0;
@@ -1612,6 +1950,7 @@ export abstract class DeckMapView implements IRenderView {
         ];
     }
 
+    /** Reuses the normal grid geometry but swaps the polygon to a small debug quad near the camera. */
     private tileGridDebugGeometry(level: number, viewport: Viewport): TileGridOverlayGeometry {
         const base = this.tileGridOverlayGeometry(level, viewport);
         return {
@@ -1623,6 +1962,7 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /** Adds or removes the temporary tile-outline overlay created from context-menu interactions. */
     private updateTileOutlineLayer(payload: TileOutlinePayload | null): void {
         if (!payload) {
             this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
@@ -1652,6 +1992,7 @@ export abstract class DeckMapView implements IRenderView {
         this.upsertRectangleOverlayLayer(DeckMapView.TILE_OUTLINE_LAYER_KEY, data, 520);
     }
 
+    /** Inserts or replaces one rectangle overlay layer with depth testing disabled. */
     private upsertRectangleOverlayLayer(
         layerKey: string,
         data: DeckRectangleOverlayDatum[],
@@ -1676,6 +2017,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.upsert(layerKey, layer, order);
     }
 
+    /** Converts one rectangle into one or more overlay data records depending on world-wrap needs. */
     private rectangleOverlayData(
         west: number,
         south: number,
@@ -1693,6 +2035,7 @@ export abstract class DeckMapView implements IRenderView {
         }));
     }
 
+    /** Splits a wrapped rectangle into multiple polygons when it spans the full world. */
     private rectangleOverlayPolygons(
         west: number,
         south: number,
@@ -1723,6 +2066,7 @@ export abstract class DeckMapView implements IRenderView {
         ]];
     }
 
+    /** Starts a short-lived animated rectangle highlight for fit-to-rectangle navigation. */
     private startJumpAreaHighlight(rectangle: {west: number; south: number; east: number; north: number}): void {
         this.stopJumpAreaHighlight();
 
@@ -1754,6 +2098,7 @@ export abstract class DeckMapView implements IRenderView {
         tick();
     }
 
+    /** Stops and removes the temporary jump-area highlight overlay. */
     private stopJumpAreaHighlight(): void {
         if (this.jumpAreaHighlightTick) {
             this.offTick(this.jumpAreaHighlightTick);
@@ -1762,6 +2107,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
     }
 
+    /** Converts Cesium-style colors to deck RGBA tuples with a caller-supplied fallback. */
     private toDeckColor(
         color: Color | undefined,
         fallback: [number, number, number, number]
@@ -1777,6 +2123,7 @@ export abstract class DeckMapView implements IRenderView {
         ];
     }
 
+    /** Builds the geometry description for one tile-state overlay raster. */
     private tileStateOverlayGeometry(extent: TileGridLevelExtent): TileGridOverlayGeometry {
         const {localMin, localSize} = this.tileGridLocalBounds(extent);
         return {
@@ -1797,6 +2144,7 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /** Builds the geometry description for one tile-grid line overlay level. */
     private tileGridOverlayGeometry(level: number, viewport: Viewport): TileGridOverlayGeometry {
         if (!viewport) {
             return {
@@ -1838,6 +2186,7 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /** Returns the local normalized bounds passed to the tile-grid shader modules. */
     private tileGridLocalBounds(extent: TileGridLevelExtent): {localMin: [number, number]; localSize: [number, number]} {
         return {
             localMin: [
@@ -1851,6 +2200,10 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
+    /**
+     * Builds one or more overlay polygons covering the requested bounds.
+     * NDS mode may split the latitude range into bands so each band gets its own correction curve.
+     */
     private buildTileGridOverlayData(
         west: number,
         east: number,
@@ -1999,11 +2352,13 @@ export abstract class DeckMapView implements IRenderView {
         );
     }
 
+    /** Converts a latitude to shader-local NDS Y coordinates for one overlay extent. */
     private tileGridLocalNdsY(lat: number, localMinY: number, localSizeY: number): number {
         const ndsY = this.tileGridLatToNormY(lat, "nds");
         return (ndsY - localMinY) / Math.max(1e-6, localSizeY);
     }
 
+    /** Fits a quadratic through three samples; used for NDS-to-Mercator correction bands. */
     private tileGridQuadraticThroughPoints(
         x0: number,
         y0: number,
@@ -2027,14 +2382,17 @@ export abstract class DeckMapView implements IRenderView {
         return [constant, linear, quadratic];
     }
 
+    /** Converts longitude to the normalized X space shared by tile-grid calculations. */
     private tileGridLonToNormX(lon: number): number {
         return (lon + 180.0) / 360.0;
     }
 
+    /** Converts normalized X space back to longitude. */
     private tileGridNormXToLon(normX: number): number {
         return normX * 360.0 - 180.0;
     }
 
+    /** Converts latitude to normalized Y in either XYZ/Mercator or NDS grid space. */
     private tileGridLatToNormY(lat: number, mode: TileGridMode): number {
         if (mode === "nds") {
             const clampedLat = Math.max(-90.0, Math.min(90.0, lat));
@@ -2046,6 +2404,7 @@ export abstract class DeckMapView implements IRenderView {
         return Math.max(0, Math.min(1, mercatorY));
     }
 
+    /** Converts normalized Y back to latitude in either XYZ/Mercator or NDS grid space. */
     private tileGridNormYToLat(normY: number, mode: TileGridMode): number {
         const clampedY = Math.max(0, Math.min(1, normY));
         if (mode === "nds") {
@@ -2056,6 +2415,7 @@ export abstract class DeckMapView implements IRenderView {
         return (latRad * 180.0) / Math.PI;
     }
 
+    /** Logs tile-grid diagnostics only when the message changed, to keep the console readable. */
     private logTileGridDiagnostic(message: string): void {
         const signature = `view=${this._viewIndex} ${message}`;
         if (signature === this.lastTileGridDiagnosticSignature) {
@@ -2065,6 +2425,7 @@ export abstract class DeckMapView implements IRenderView {
         console.info(`[DeckTileGrid] ${signature}`);
     }
 
+    /** Normalizes longitude into the conventional [-180, 180] range. */
     private normalizeLongitude(lon: number): number {
         let value = lon;
         while (value < -180) {
@@ -2076,6 +2437,7 @@ export abstract class DeckMapView implements IRenderView {
         return value;
     }
 
+    /** Unwraps longitude close to a reference longitude so viewport bounds stay continuous across world wrap. */
     private unwrapLongitudeNear(referenceLon: number, lon: number): number {
         let value = lon;
         while (value - referenceLon <= -180) {
@@ -2087,10 +2449,12 @@ export abstract class DeckMapView implements IRenderView {
         return value;
     }
 
+    /** Normalizes an angle to [0, 360). */
     private normalizeDegrees(value: number): number {
         return (value % 360 + 360) % 360;
     }
 
+    /** Estimates deck zoom from altitude using the current latitude and an assumed vertical FOV. */
     private altitudeToZoom(altitude: number, latitude: number): number {
         const safeAltitude = Math.max(1, altitude);
         const viewportHeight = this.getViewportHeightPixels();
@@ -2107,6 +2471,7 @@ export abstract class DeckMapView implements IRenderView {
         );
     }
 
+    /** Estimates altitude from zoom using the current latitude and an assumed vertical FOV. */
     private zoomToAltitude(zoom: number, latitude: number = this.viewState.latitude): number {
         const viewportHeight = this.getViewportHeightPixels();
         const latitudeCos = Math.max(0.01, Math.cos(GeoMath.toRadians(latitude)));
@@ -2119,6 +2484,7 @@ export abstract class DeckMapView implements IRenderView {
         return Math.max(1, altitude);
     }
 
+    /** Returns the current viewport height in pixels, with DOM-based fallbacks during initialization. */
     private getViewportHeightPixels(): number {
         const canvasHeight = Number(this.deck?.getCanvas?.()?.clientHeight ?? 0);
         if (Number.isFinite(canvasHeight) && canvasHeight > 0) {
@@ -2132,6 +2498,7 @@ export abstract class DeckMapView implements IRenderView {
         return DeckMapView.FALLBACK_VIEWPORT_HEIGHT_PX;
     }
 
+    /** Applies a simple zoom-scaled pan step in view-local X/Y directions and persists the result. */
     private applyPan(xFactor: number, yFactor: number): void {
         this.stateService.focusedView = this._viewIndex;
         const step = 360 / Math.pow(2, this.viewState.zoom + 3);
@@ -2143,6 +2510,7 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
+    /** RAF tick loop used by compass updates and temporary overlay animations. */
     private tick = () => {
         for (const cb of this.tickCallbacks) {
             cb();
@@ -2154,6 +2522,7 @@ export abstract class DeckMapView implements IRenderView {
         this.tickHandle = requestAnimationFrame(this.tick);
     };
 
+    /** Stops the shared RAF tick loop if it is currently running. */
     private stopTickLoop(): void {
         if (this.tickHandle === null) {
             return;

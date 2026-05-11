@@ -2,12 +2,26 @@
 
 Erdblick encodes the full UI state inside the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
 
+## Startup State Precedence
+
+Erdblick combines several possible state sources during startup:
+
+1. Built-in application defaults.
+2. Bundled `config.json`.
+3. Server-supplied `/config.erdblick.state`, if the backend provides it.
+4. User-owned browser `localStorage`.
+5. URL query parameters.
+
+The server-supplied `state` object uses the same snapshot shape as Advanced Preferences export/import. It is applied before browser storage and URL hydration, so deployment defaults can guide fresh profiles without overriding a user's saved preferences or an explicit shared link.
+
+State written from server defaults is tracked as config-owned in browser storage. If the backend changes the config defaults later, config-owned values can be replaced. Once the user changes a setting, the stored value becomes user-owned and future server defaults do not overwrite it. Legacy local storage without ownership metadata is treated as user-owned.
+
 ## What Gets Stored in the URL?
 
 - Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll) for each view.
 - Number of map views, which view is focused, view sync flags (position/movement/projection/layers), and 2D/3D projection mode per view.
 - Active maps and the complete layer matrix: which layers are visible in which view and their zoom levels, plus per-view tile-border visibility.
-- Base-map settings: OpenStreetMap overlay toggles and opacity per view.
+- Background-layer settings: selected background id (or off) plus opacity per view.
 - Enabled styles plus the values of all style options per map layer and view.
 - Inspection state: open panels, locked vs. unlocked selections, panel sizes and highlight colors, and any active SourceData selection.
 - Search palette state and the last executed query.
@@ -28,14 +42,13 @@ The table below lists all query parameters used by erdblick when encoding or res
 | `m2d` | Per view | 2D projection mode flag for each view. |
 | `f` | Global | Index of the focused view (0-based), which receives keyboard focus and search-driven camera moves. |
 | `sync` | Global | Enabled view synchronisation flags. Contains a subset of `pos`, `mov`, `proj`, and `lay`. |
-| `osm` | Per view | Base map overlay enablement for each view. |
-| `osmOp` | Per view | Base map opacity (0–100), per view. |
+| `bg` | Per view | Background layer id and opacity per view, encoded as `<layerId>~<opacity>`. An empty layer id disables the background for that view. |
 | `l` | Global | Ordered list of map layer identifiers. Other layer-related parameters index into this list. |
 | `v` | Per view | Layer visibility flags per view, aligned with the `l` list. |
 | `tb` | Per view | Tile-border visibility flag per view. |
 | `z` | Per view | Per-layer zoom level configuration per view, aligned with the `l` list. |
 | `tll` | Global | Maximum number of tiles to load (Tiles to load). |
-| `s` | Global | Current search query, encoded as a view index plus query string. |
+| `s` | Global | Current search query, encoded as `[actionId, query]`. Legacy index-based payloads are still accepted for migration. |
 | `m` | Global | Coordinate marker enablement flag. |
 | `mp` | Global | Coordinate marker position when enabled (longitude and latitude). |
 | `sel` | Global | Encoded inspection panel state (panels, selections, sizes, and highlight colors). |
@@ -52,14 +65,13 @@ When running the visualization-only build or embedding erdblick without UI panel
 | --- | --- |
 | `lon`, `lat`, `alt` | Center position in degrees and altitude in meters. |
 | `h`, `p`, `r` | Camera orientation (radians: heading, pitch, roll). |
-| `osm` | Toggle the base map overlay (`true`/`false`), per view. |
-| `osmOp` | Base map opacity in percent (0–100), per view. |
+| `bg` | Background layer id and opacity, encoded as `<layerId>~<opacity>` per view. |
 | `tll` | Maximum number of tiles to load, per view. |
 
 Example:
 
 ```
-http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&osm=true&osmOp=30&tll=1024
+http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&bg=osm~30&tll=1024
 ```
 
 ## Multi-View State in Query Parameters
@@ -72,6 +84,8 @@ When you enable split view, erdblick still encodes the full layout into the quer
 - The focused view index is stored so that URL replays preserve which pane responds to keyboard shortcuts and search-based camera moves.
 
 You do not need to set these parameters manually for normal usage, but they make generated URLs stable even for complex multi-view layouts.
+
+Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
 
 ## Style Option Encoding in the URL
 
@@ -121,5 +135,5 @@ Keep a few guidelines in mind when preparing URLs for long-term use:
 If a copied URL does not restore the expected state, a few common issues are worth checking first:
 
 - If a link no longer opens correctly, verify that the map IDs and style IDs referenced in the URL still exist.
-- Clear the browser history or use an incognito window if the URL appears correct but the UI keeps loading an older state. Cached `localStorage` overrides may conflict with the encoded state.
+- Clear the browser history or use an incognito window if a link without explicit parameters keeps loading older local state. Explicit URL parameters take precedence over local storage, but values not present in the URL may still come from stored viewer state.
 - If a URL looks correct but loads an unexpected state, use the Preferences dialog to clear stored viewer properties and search history, then reload the link.

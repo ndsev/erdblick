@@ -1,5 +1,4 @@
 import {Component, effect, input, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren} from '@angular/core';
-import {Dialog} from 'primeng/dialog';
 import {ContextMenu} from 'primeng/contextmenu';
 import {MenuItem} from 'primeng/api';
 import {Subscription} from 'rxjs';
@@ -16,7 +15,9 @@ import {
 import {FeatureWrapper} from '../mapdata/features.model';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {FeaturePanelComponent} from './feature.panel.component';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
+/** View model for one comparison column in the side-by-side inspection dialog. */
 interface ComparisonColumn {
     entry: InspectionComparisonEntry;
     panel: InspectionPanelModel<FeatureWrapper>;
@@ -28,8 +29,9 @@ interface ComparisonColumn {
 @Component({
     selector: 'inspection-comparison-dialog',
     template: `
-        <p-dialog #dialog class="inspection-comparison-dialog"
+        <app-dialog #dialog class="inspection-comparison-dialog"
                   [modal]="false" [closable]="true" [(visible)]="visible"
+                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="layoutId"
                   (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()"
                   (onResizeEnd)="onDialogResizeEnd()">
             <ng-template #header>
@@ -109,15 +111,17 @@ interface ComparisonColumn {
                     </div>
                 </div>
             </ng-template>
-        </p-dialog>
+        </app-dialog>
         <p-contextMenu #columnMenu [model]="columnMenuItems" [baseZIndex]="30000" appendTo="body"
                        [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
     styles: [``],
     standalone: false
 })
+/** Floating dialog that renders multiple inspection panels side by side for manual comparison. */
 export class InspectionComparisonDialogComponent implements OnDestroy {
     comparison = input.required<InspectionComparisonModel>();
+    readonly layoutId = 'inspection-comparison';
     visible = true;
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
@@ -126,7 +130,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     heightEm = DEFAULT_EM_HEIGHT;
     comparisonFilter = '';
 
-    @ViewChild('dialog') dialog?: Dialog;
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('columnMenu') columnMenu!: ContextMenu;
     @ViewChildren(FeaturePanelComponent) featurePanels!: QueryList<FeaturePanelComponent>;
 
@@ -149,29 +153,35 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         });
     }
 
+    /** Releases transient drag listeners and cached column state. */
     ngOnDestroy() {
         this.endDrag();
         this.selectionTopicSubscription.unsubscribe();
         this.columns = [];
     }
 
+    /** Brings the dialog to the front and synchronizes column heights after PrimeNG creates the DOM. */
     onDialogShow() {
         this.dialogStack.bringToFront(this.dialog);
         this.queueHeightSync();
     }
 
+    /** Closes the comparison dialog in shared app state. */
     onDialogHide() {
         this.stateService.closeInspectionComparison();
     }
 
+    /** Ends the temporary tree freeze used while dragging the dialog around. */
     onDialogDragEnd() {
         this.endDrag();
     }
 
+    /** Recomputes the shared column height after the user resizes the dialog. */
     onDialogResizeEnd() {
         this.queueHeightSync();
     }
 
+    /** Freezes embedded trees while the dialog header is being dragged. */
     beginDrag(): void {
         this.freezeTrees();
         this.detachPointerUpListener?.();
@@ -180,12 +190,14 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         });
     }
 
+    /** Clears drag listeners and unfreezes the embedded feature panels. */
     endDrag(): void {
         this.detachPointerUpListener?.();
         this.detachPointerUpListener = undefined;
         this.unfreezeTrees();
     }
 
+    /** Normalizes the selected panel ids and rebuilds the comparison model around a stable base panel. */
     onCompareSelectionChange(selected: number[]) {
         const model = this.comparison();
         let normalized = Array.from(new Set(selected));
@@ -212,6 +224,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.stateService.inspectionComparison = nextModel;
     }
 
+    /** Drops one column from the comparison, closing the dialog if no entries remain. */
     removeFromComparison(panelId: number): void {
         const model = this.comparison();
         const remainingEntries = [model.base, ...model.others].filter(entry => entry.panelId !== panelId);
@@ -225,17 +238,20 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         };
     }
 
+    /** Persists per-column selection colors back into the underlying inspection panels. */
     onSelectionColorChange(column: ComparisonColumn, color: string): void {
         column.selectionColor = color;
         this.stateService.setInspectionPanelColor(column.entry.panelId, color);
     }
 
+    /** Opens the per-column context menu with actions bound to the clicked column. */
     openColumnMenu(event: MouseEvent, column: ComparisonColumn): void {
         event.stopPropagation();
         this.columnMenuItems = this.buildColumnMenuItems(column);
         this.columnMenu.toggle(event);
     }
 
+    /** Rebuilds the selectable panel list from the current global inspection selection. */
     refreshCompareOptions() {
         const options = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue());
         this.compareOptions = options;
@@ -275,6 +291,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.selectedCompareIds = normalizedPanelIds;
     }
 
+    /** Persists user-driven column height changes in em so they scale with the UI font size. */
     onResize(event: MouseEvent) {
         const target = event.target as HTMLElement | null;
         const container = target?.closest('.comparison-resizable') as HTMLElement | null;
@@ -292,6 +309,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.featurePanels?.forEach(panel => panel.unfreezeTree());
     }
 
+    /** Materializes comparison entries into temporary panel models that reuse feature inspection rendering. */
     private buildColumns(model: InspectionComparisonModel) {
         const entries = [model.base, ...model.others];
         const columns = entries.map((entry, index) => {
@@ -321,10 +339,12 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         });
     }
 
+    /** Defers height synchronization until PrimeNG has finished layout for the current frame. */
     private queueHeightSync() {
         setTimeout(() => this.syncComparisonHeight(), 0);
     }
 
+    /** Chooses a shared content height so all comparison columns stay aligned vertically. */
     private syncComparisonHeight() {
         const container = this.dialog?.container() ?? undefined;
         if (!container) {

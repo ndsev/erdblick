@@ -2,7 +2,7 @@ import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject, of, Subject} from 'rxjs';
 import "@angular/compiler";
 import {coreLib, initializeLibrary} from "../integrations/wasm";
-import {MapTileStreamClient} from './tilestream';
+import {MapTileRequestStatus, MapTileStreamClient} from './tilestream';
 import {LOW_FI_LOD0_TILE_COUNT_THRESHOLD} from "../mapview/view.visualization.model";
 
 beforeAll(async () => {
@@ -81,6 +81,8 @@ class AppStateServiceStub {
     deckThreadedRenderingEnabledState = new BehaviorSubject<boolean>(true);
     deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersCountState = new BehaviorSubject<number>(2);
+    debugRenderFullGltfAttachmentState = new BehaviorSubject<boolean>(false);
+    debugGltfLoggingEnabledState = new BehaviorSubject<boolean>(false);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
     cameraViewDataState = {
         getValue: vi.fn().mockReturnValue({
@@ -115,6 +117,14 @@ class AppStateServiceStub {
         return this.tilePullCompressionEnabledState.getValue();
     }
 
+    get debugRenderFullGltfAttachment() {
+        return this.debugRenderFullGltfAttachmentState.getValue();
+    }
+
+    get debugGltfLoggingEnabled() {
+        return this.debugGltfLoggingEnabledState.getValue();
+    }
+
     get pinLowFiToMaxLod() {
         return this.pinLowFiToMaxLodState.getValue();
     }
@@ -124,8 +134,8 @@ class AppStateServiceStub {
     }
 
     getLayerSyncOption = vi.fn().mockReturnValue(false);
-    getOsmState = vi.fn().mockReturnValue({enabled: false, opacity: 0});
-    setOsmState = vi.fn();
+    getBackgroundState = vi.fn().mockReturnValue({layerId: null, opacity: 0});
+    setBackgroundState = vi.fn();
     setLayerSyncOption = vi.fn();
     prune = vi.fn();
 }
@@ -411,6 +421,7 @@ describe('MapDataService', () => {
             isDirty: vi.fn().mockReturnValue(true),
             renderRank: vi.fn().mockReturnValue(0),
             updateStatus: vi.fn(),
+            setStyleOption: vi.fn(),
         } as any;
         const disabledVisu = {
             tile,
@@ -421,6 +432,7 @@ describe('MapDataService', () => {
             isDirty: vi.fn().mockReturnValue(false),
             renderRank: vi.fn().mockReturnValue(1),
             updateStatus: vi.fn(),
+            setStyleOption: vi.fn(),
         } as any;
 
         const fakeMapTree = {
@@ -809,5 +821,50 @@ describe('MapDataService', () => {
         expect(legalSpy).toHaveBeenCalledWith(true);
         const legalSet = service.legalInformationPerMap.get('m1')!;
         expect(legalSet.has('LICENSE A')).toBe(true);
+    });
+
+    it('includes noDataSourceReason in tile request failure diagnostics when present', () => {
+        const {service, infoService} = createMapDataService();
+
+        (service as any).handleTilesRequestStatus({
+            type: "mapget.tiles.status",
+            allDone: true,
+            requests: [
+                {
+                    index: 0,
+                    mapId: "MapA",
+                    layerId: "LayerA",
+                    status: MapTileRequestStatus.NoDataSource,
+                    statusText: "NoDataSource",
+                    noDataSourceReason: "allSourcesDisabled"
+                }
+            ]
+        });
+
+        expect(infoService.showError).toHaveBeenCalledWith(
+            "Tile request failed: MapA/LayerA: NoDataSource (allSourcesDisabled)"
+        );
+    });
+
+    it('keeps tile request failure diagnostics compatible when noDataSourceReason is absent', () => {
+        const {service, infoService} = createMapDataService();
+
+        (service as any).handleTilesRequestStatus({
+            type: "mapget.tiles.status",
+            allDone: true,
+            requests: [
+                {
+                    index: 0,
+                    mapId: "MapA",
+                    layerId: "LayerA",
+                    status: MapTileRequestStatus.NoDataSource,
+                    statusText: "NoDataSource"
+                }
+            ]
+        });
+
+        expect(infoService.showError).toHaveBeenCalledWith(
+            "Tile request failed: MapA/LayerA: NoDataSource"
+        );
     });
 });

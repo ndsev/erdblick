@@ -8,6 +8,7 @@ namespace erdblick
 
 namespace
 {
+/** Parse the YAML arrow keyword into the enum used by rendering code. */
 std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowStr) {
     if (arrowStr == "none") {
         return FeatureStyleRule::NoArrow;
@@ -26,6 +27,7 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
     return {};
 }
 
+/** Parse one geometry keyword from YAML into the corresponding mapget geometry enum. */
 std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "point") {
         return mapget::GeomType::Points;
@@ -38,6 +40,12 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     }
     if (enumStr == "polygon") {
         return mapget::GeomType::Polygon;
+    }
+    if (enumStr == "aabb") {
+        return mapget::GeomType::AABB;
+    }
+    if (enumStr == "gltf") {
+        return mapget::GeomType::GltfNodeIndex;
     }
 
     std::cout << "Unsupported geometry type: " << enumStr << std::endl;
@@ -163,14 +171,17 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse a CSS color
         auto colorStr = yaml["color"].as<std::string>();
         color_ = Color(colorStr).toFVec4();
+        hasExplicitColor_ = true;
     }
     if (yaml["color-expression"].IsDefined()) {
         // Set a simfil expression which returns an RGBA integer, or a parsable color.
         colorExpression_ = yaml["color-expression"].as<std::string>();
+        hasExplicitColor_ = true;
     }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
         color_.a = yaml["opacity"].as<float>();
+        hasExplicitOpacity_ = true;
     }
     if (yaml["width"].IsDefined()) {
         // Parse a line width, defaults to pixels
@@ -414,7 +425,18 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
 
     // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!evalFun.eval_(filter_).as<simfil::ValueType::Bool>()) {
+        auto filterValue = evalFun.eval_(filter_);
+        if (!filterValue.isa(simfil::ValueType::Bool)) {
+            if (evalFun.reportIssue_) {
+                evalFun.reportIssue_(
+                    "filter",
+                    filter_,
+                    "Filter expression did not evaluate to a boolean: " + filterValue.toString(),
+                    index_);
+            }
+            return nullptr;
+        }
+        if (!filterValue.as<simfil::ValueType::Bool>()) {
             return nullptr;
         }
     }
@@ -495,10 +517,29 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
             return Color(colorStr.c_str()).toFVec4(color_.a);
         }
         else
+        {
+            if (evalFun.reportIssue_) {
+                evalFun.reportIssue_(
+                    "color-expression",
+                    colorExpression_,
+                    "Color expression returned an unsupported value: " + colorVal.toString(),
+                    index_);
+            }
             std::cout << "Invalid result for color expression: " << colorExpression_
                       << ": " << colorVal.toString() << std::endl;
+        }
     }
     return color_;
+}
+
+bool FeatureStyleRule::hasExplicitColor() const
+{
+    return hasExplicitColor_;
+}
+
+bool FeatureStyleRule::hasExplicitOpacity() const
+{
+    return hasExplicitOpacity_;
 }
 
 float FeatureStyleRule::width() const
@@ -551,6 +592,13 @@ FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) con
                 return *arrowMode;
         }
 
+        if (evalFun.reportIssue_) {
+            evalFun.reportIssue_(
+                "arrow-expression",
+                arrowExpression_,
+                "Arrow expression returned an unsupported value: " + arrowVal.toString(),
+                index_);
+        }
         std::cout << "Invalid result for arrow expression: " << arrowExpression_
                   << ": " << arrowVal.toString() << std::endl;
     }
@@ -750,6 +798,13 @@ std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
         auto iconUrlVal = evalFun.eval_(iconUrlExpression_);
         if (iconUrlVal.isa(simfil::ValueType::String)) {
             return iconUrlVal.as<simfil::ValueType::String>();
+        }
+        if (evalFun.reportIssue_) {
+            evalFun.reportIssue_(
+                "icon-url-expression",
+                iconUrlExpression_,
+                "Icon URL expression returned an unsupported value: " + iconUrlVal.toString(),
+                index_);
         }
         std::cout << "Invalid result for iconUrl expression: " << iconUrlExpression_
                   << ": " << iconUrlVal.toString() << std::endl;

@@ -91,6 +91,44 @@ mapview-container {
   width: 100%;
 }
 
+legal-dialog {
+  .p-dialog-header, .p-dialog-content {
+    padding: 0.5em !important;
+  }
+
+  .stats-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+
+    button {
+      width: 100%;
+    }
+
+    .stats-table {
+      width: 100%;
+      border-collapse: collapse;
+
+      th, td {
+        border: 1px solid var(--p-content-border-color);
+        padding: 0.25em;
+        text-align: left;
+      }
+
+      th {
+        background: var(--p-highlight-background);
+        color: var(--p-treetable-row-color);
+        font-weight: bold;
+      }
+
+      tr {
+        background: var(--p-treetable-row-background);
+        color: var(--p-treetable-row-color);
+      }
+    }
+  }
+}
+
 main-bar {
   position: absolute;
   top: 0.15em;
@@ -100,6 +138,15 @@ main-bar {
   flex-direction: row;
   align-items: center;
   width: 100%;
+
+  .copyright-info {
+    width: 6.5em;
+    font-size: 0.8em;
+    word-wrap: break-word;
+    text-align: end;
+    cursor: pointer;
+    margin-right: 0.5em;
+  }
 
   .maps-button {
     button {
@@ -2845,21 +2892,26 @@ inspection-tree {
 }
 
 .feature-search-dialog {
-  .p-dialog {
+  .p-dialog.p-component {
     width: 30em;
     min-width: 25em;
+    min-height: min(32em, calc(100vh - 5em));
+    max-height: calc(100vh - 5em);
     margin: 0 !important;
-    overflow-x: hidden;
+    overflow: hidden;
   }
 
   .p-dialog-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     padding: 0 0.5em 0.5em 0.5em;
-    min-height: 30em;
-    max-height: calc(100vh - 5em);
+    min-height: 0;
     overflow: hidden;
   }
 
   .p-dialog-header {
+    flex: 0 0 2em;
     padding: 0 0 0 0.5em;
     height: 2em;
     overflow: clip;
@@ -3008,34 +3060,99 @@ inspection-tree {
   }
 }
 
-.map-config-controls {
+.tile-grid-popover,
+.background-settings-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  min-width: 13rem;
+  padding: 0.25em;
+}
+
+.tile-grid-toggle-row,
+.tile-grid-mode-row,
+.background-toggle-row,
+.background-opacity-row,
+.background-details {
   display: flex;
   align-items: center;
-  gap: 0.25em;
-  padding: 0.25em 0.25em 0 0.25em;
+  gap: 0.75em;
+}
 
-  .p-divider-vertical {
-    margin: 0;
-    padding: 0.25em 0;
+.tile-grid-toggle-row,
+.tile-grid-mode-row,
+.background-toggle-row {
+  justify-content: space-between;
+}
+
+.tile-grid-radio-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75em;
+}
+
+.tile-grid-radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
+.background-settings-popover {
+  width: 16rem;
+
+  .background-layer-select {
+    width: 100%;
   }
 
-  button {
-    width: 1.75em;
-    height: 1.75em;
-    box-shadow: none;
-  }
-
-  .osm-controls {
-    display: flex;
+  .background-opacity-row {
     align-items: center;
-    gap: 0.25em;
-
-    .slider-input {
-      width: 11em;
-      font-size: 0.9em;
-      padding: 0.25em 0.5em;
-    }
   }
+
+  .background-opacity-value {
+    min-width: 2.75rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .background-opacity-slider {
+    flex: 1 1 auto;
+  }
+
+  .background-details {
+    align-items: flex-start;
+    color: var(--p-surface-500);
+    font-size: 0.8rem;
+    line-height: 1.3;
+  }
+}
+
+.background-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  width: 100%;
+  min-width: 0;
+}
+
+.background-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  flex-shrink: 0;
+}
+
+.background-info {
+  flex-shrink: 0;
+  font-size: 1rem;
+  cursor: help;
 }
 
 .styles-dialog {
@@ -3046,32 +3163,123 @@ inspection-tree {
   .p-dialog {
     min-width: 30em;
     width: 30em;
+    min-height: 18em;
+    max-width: calc(100vw - 1em);
+    max-height: calc(100vh - 1em);
+    overflow: hidden;
   }
 
   .p-dialog-header {
     padding: 0.75em;
     height: 2.5em;
+    flex: 0 0 auto;
   }
 
   .p-dialog-content {
-    padding: 0.5em;
+    padding: 0.25em;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
 
     .dialog-controls {
+      flex: 0 0 auto;
       margin-top: 0.5em;
       display: flex;
       flex-direction: row;
-      align-content: center;
+      align-items: center;
+      gap: 0.5em;
       justify-content: space-between;
+    }
+
+    .style-sheets-tabs {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .p-tablist {
+      flex: 0 0 auto;
+    }
+
+    .p-tab {
+      padding: 0.25em 1em;
+      margin: 0;
+      font-size: 0.9em;
+    }
+
+    .p-tabpanels {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+      padding: 0.5em 0 0 0;
+      font-size: 0.9em;
+    }
+
+    .p-tabpanel {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: scroll;
+      padding: 0.5em;
+    }
+
+    .style-errors-tab {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      gap: 0.5em;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .style-errors-toolbar {
+      flex: 0 0 auto;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .style-errors-table {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .style-errors-table.p-datatable-flex-scrollable {
+      height: 100%;
+    }
+
+    .style-errors-table .p-datatable-table-container {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    table {
+      th {
+        text-align: center;
+        padding: 0.5em;
+      }
+
+      td {
+        padding: 0.5em;
+      }
     }
   }
 }
 
 .styles-container {
-  height: calc(100% - 4em);
-  max-height: calc(75vh - 2em);
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 
   .p-tree {
+    flex: 0 0 auto;
     padding: 0;
 
     .p-tree-root {
@@ -3108,23 +3316,27 @@ inspection-tree {
       }
     }
   }
+
+  .styles-error-list {
+    flex: 0 0 auto;
+  }
 }
 
 .map-tab {
   .grid-controls {
-    display: flex;
-    align-items: flex-start;
     gap: 1em;
+    display: flex;
     margin-top: 0.25em;
     flex-direction: column;
+    align-items: flex-start;
     justify-content: flex-start;
 
     & > div {
-      display: flex;
-      align-items: center;
       gap: 1em;
+      display: flex;
       margin-top: 0.25em;
       flex-direction: row;
+      align-items: center;
     }
 
     button {
@@ -3138,8 +3350,8 @@ inspection-tree {
     }
 
     .grid-level {
-      display: flex;
       gap: 0.5em;
+      display: flex;
       justify-content: flex-end;
 
       button {
@@ -3154,57 +3366,53 @@ inspection-tree {
 
       .p-inputnumber-buttons-horizontal .p-inputnumber-input {
         order: 2;
-        border-radius: 0;
         width: 3em;
-        text-align: center;
         height: 2em;
+        border-radius: 0;
+        text-align: center;
       }
     }
   }
 
-  .p-fieldset {
-    margin: 0;
+  .p-accordionheader {
+    padding: 0.25em !important;
 
-    .p-fieldset-legend {
-      padding: 0.25em;
-      margin-left: 0.25em;
-      border: 1px solid var(--p-content-border-color);
-      color: var(--p-content-color);
-      background: var(--p-content-background);
-      font-weight: 700;
-      border-radius: 6px;
-      font-size: 0.9em;
+    .maps-header {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
 
-      .p-fieldset-legend-label {
-        display: none;
-      }
-
-      div {
+      & > div {
         display: flex;
         flex-direction: row;
         gap: 0.25em;
         align-items: center
       }
 
-      .close-view-button {
-        .p-button {
-          width: 1.25em;
-          height: 1.25em;
-          background-color: var(--p-badge-danger-background);
-          border-color: var(--p-badge-danger-background);
-          margin-left: 0.25em;
+      .p-tag {
+        width: 5.5em;
+        justify-content: flex-start;
+
+        div {
+          display: flex;
+          flex-direction: row;
+          gap: 0.25em;
+          align-items: center
         }
       }
     }
 
-    .p-fieldset-content {
-      padding: 0;
-      font-size: 0.9em
+    .p-button {
+      width: 1.75em !important;
+      height: 1.75em !important;
     }
   }
 
-  .p-divider.p-divider-horizontal {
-    margin: 0.5em 0;
+  .p-accordioncontent-content {
+    padding: 0 !important;
+    font-size: 0.9em
   }
 
   .maps-container {
@@ -3330,6 +3538,12 @@ inspection-tree {
 .pref-dialog {
   margin: 0;
 
+  .p-dialog {
+    min-width: 32em;
+    width: 32em;
+    max-width: calc(100vw - 1em);
+  }
+
   .p-dialog-header {
     padding: 0.75em !important;
     height: 2.5em !important;
@@ -3360,7 +3574,7 @@ inspection-tree {
   }
 
   .button-container {
-    width: 30em;
+    width: 100%;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -3375,41 +3589,98 @@ inspection-tree {
 .editor-dialog {
   .spinner {
     display: flex;
+    flex: 1 1 auto;
     justify-content: center;
     width: 100%;
-    height: calc(100% - 4em);
+    min-height: 4em;
     align-items: center;
   }
 
   .p-dialog {
     width: 50em;
+    height: calc(75vh + 3em);
     max-width: calc(100vw - 1em);
+    max-height: calc(100vh - 1em);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 
     .p-dialog-header {
       padding: 0.75em;
       height: 2.5em;
+      flex: 0 0 auto;
     }
 
     .p-dialog-content {
       padding: 0.5em;
-      max-height: calc(75vh + 3em);
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
       min-width: 0;
+      min-height: 0;
       max-width: 100%;
-      overflow-x: hidden;
+      overflow: hidden;
     }
+  }
+
+  editor {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
   }
 
   .cm-editor {
     flex: 1 1 auto;
     width: 100%;
+    height: 100%;
     min-width: 0;
+    min-height: 0;
     max-width: 100%;
   }
 
   .cm-scroller {
     min-width: 0;
+    min-height: 0;
     max-width: 100%;
     overflow-x: auto;
+  }
+
+  .editor-actions,
+  .advanced-preferences-actions {
+    flex: 0 0 auto;
+    margin-top: 0.5em;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+  }
+
+  .editor-actions-left,
+  .editor-actions-right,
+  .advanced-preferences-actions-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5em;
+    min-width: 0;
+  }
+
+  .editor-shortcuts,
+  .editor-status {
+    display: flex;
+    flex: 0 1 18em;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    color: silver;
+    font-size: 1em;
+  }
+
+  .editor-status-warning {
+    color: orange;
   }
 }
 
@@ -3494,13 +3765,16 @@ inspection-tree {
 }
 
 .editor-container {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   width: 100%;
   max-width: 100%;
-  height: calc(100% - 4em);
-  max-height: calc(75vh - 2em);
-  overflow-x: hidden;
-  overflow-y: auto;
+  height: auto;
+  max-height: none;
+  overflow: hidden;
   border: 1px solid silver;
 }
 
@@ -3545,6 +3819,15 @@ inspection-tree {
 }
 
 .feature-search-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+
+  .p-tablist {
+    flex: 0 0 auto;
+  }
+
   .p-tab {
     padding: 0.25em 1em;
     margin: 0;
@@ -3552,6 +3835,10 @@ inspection-tree {
   }
 
   .p-tabpanels {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
     padding: 0.5em 0 0 0;
     font-size: 0.9em;
 
@@ -3560,10 +3847,21 @@ inspection-tree {
     }
   }
 
-  // Ensure results tree shows a reasonable viewport height
+  .p-tabpanel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .p-tree {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+
     .p-scroller {
-      height: calc(100vh - 23em) !important;
+      min-height: 0;
+      overflow: auto;
     }
   }
 
@@ -3822,36 +4120,63 @@ inspection-tree {
   }
 }
 
-.tilesource-options {
-  display:flex;
-  flex-direction: column;
-  gap: 0.5em;
+.tilesource-select-dialog {
+  margin: 0;
 
-  .main-dropdown {
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-    gap: 0.5em;
-
-    p-dropdown {
-      width: 100%;
-    }
-
-    .p-inputtext {
-      width: 100%;
-    }
-
-    button {
-      padding-left: 0;
-      padding-right: 0;
-      width: 2.85em;
-      height: 2.85em;
-      box-shadow: none;
-    }
+  .p-dialog {
+    min-width: 36em;
+    height: 15em;
   }
 
-  .p-dropdown {
-    width: 100%;
+  .p-dialog-header {
+    padding: 0.75em !important;
+    height: 2.5em !important;
+  }
+
+  .p-dialog-content {
+    padding: 0.5em !important;
+  }
+
+  .tilesource-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+
+    .main-dropdown {
+      width: 100%;
+      display: flex;
+      flex-direction: row;
+      gap: 0.5em;
+
+      div:first-child {
+        width: 100%;
+      }
+
+      .p-inputtext {
+        width: 100%;
+        height: 2.35em;
+      }
+
+      button {
+        padding-left: 0;
+        padding-right: 0;
+        width: 2.4em;
+        height: 2.4em;
+        box-shadow: none;
+      }
+    }
+
+    .p-dropdown {
+      width: 100%;
+    }
+
+    .p-select {
+      width: 100%;
+
+      .p-select-label {
+        height: 2.3em;
+      }
+    }
   }
 }
 
@@ -4024,12 +4349,19 @@ inspection-tree {
   .editor-dialog {
     .p-dialog {
       width: 100vw;
+      height: 100vh;
       max-width: 100vw;
     }
 
     .editor-container {
       width: 100%;
-      max-height: calc(100% - 3em);
+      height: auto;
+      max-height: none;
+    }
+
+    .editor-actions,
+    .advanced-preferences-actions {
+      flex-wrap: wrap;
     }
   }
 

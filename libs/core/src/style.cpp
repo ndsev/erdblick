@@ -12,14 +12,17 @@ namespace erdblick
 {
 
 namespace {
+/** Map highlight modes onto dense array indices for the precomputed rule caches. */
 constexpr size_t highlightModeIndex(FeatureStyleRule::HighlightMode mode) {
     return static_cast<size_t>(mode);
 }
 
+/** Collapse fidelity into the two cache buckets used by `FeatureLayerStyle`. */
 constexpr size_t fidelityIndex(FeatureStyleRule::Fidelity fidelity) {
     return fidelity == FeatureStyleRule::LowFidelity ? 1U : 0U;
 }
 
+/** Shared empty vector returned when no rule candidates apply. */
 const std::vector<uint32_t> kEmptyRuleIndices{};
 }
 
@@ -27,8 +30,25 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 {
     auto styleSpec = yamlArray.toString();
 
-    // Convert char vector to YAML node.
-    auto styleYaml = YAML::Load(styleSpec);
+    YAML::Node styleYaml;
+    try {
+        // Convert char vector to YAML node.
+        styleYaml = YAML::Load(styleSpec);
+    } catch (YAML::Exception const& e) {
+        auto location = locationFromMark(e.mark);
+        validationReport_.addIssue(
+            "error",
+            "yaml",
+            "stylesheet-failed",
+            "Could not parse style YAML: " + e.msg,
+            location);
+        validationReport_.markStylesheetFailed();
+        return;
+    }
+
+    if (!validateTopLevelStyleYaml(styleYaml, validationReport_)) {
+        return;
+    }
 
     if (auto name = styleYaml["name"]) {
         if (name.IsScalar())
@@ -36,48 +56,168 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
     }
 
     if (auto enabled = styleYaml["default"]) {
-        if (enabled.IsScalar())
+        if (!enabled.IsScalar()) {
+            validationReport_.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Style sheet default must be a scalar boolean.",
+                locationForNode(enabled));
+            validationReport_.markStylesheetFailed();
+            return;
+        }
+        try {
             enabled_ = enabled.as<bool>();
+        } catch (YAML::Exception const& e) {
+            validationReport_.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Could not parse style sheet default: " + e.msg,
+                locationFromMark(e.mark));
+            validationReport_.markStylesheetFailed();
+            return;
+        }
     }
 
     if (auto stage = styleYaml["stage"]) {
-        if (stage.IsScalar()) {
-            stage_ = static_cast<uint32_t>(std::max(0, stage.as<int>()));
+        if (!stage.IsScalar()) {
+            validationReport_.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Style sheet stage must be a scalar integer.",
+                locationForNode(stage));
+            validationReport_.markStylesheetFailed();
+            return;
+        }
+        try {
+            auto parsedStage = stage.as<int>();
+            if (parsedStage < 0) {
+                validationReport_.addIssue(
+                    "error",
+                    "schema",
+                    "stylesheet-failed",
+                    "Style sheet stage must be non-negative.",
+                    locationForNode(stage));
+                validationReport_.markStylesheetFailed();
+                return;
+            }
+            stage_ = static_cast<uint32_t>(parsedStage);
+        } catch (YAML::Exception const& e) {
+            validationReport_.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Could not parse style sheet stage: " + e.msg,
+                locationFromMark(e.mark));
+            validationReport_.markStylesheetFailed();
+            return;
         }
     }
 
     if (auto layer = styleYaml["layer"]) {
-        if (layer.IsScalar())
+        if (!layer.IsScalar()) {
+            validationReport_.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Style sheet layer affinity must be a scalar regular expression.",
+                locationForNode(layer));
+            validationReport_.markStylesheetFailed();
+            return;
+        }
+        try {
             layerAffinity_ = layer.as<std::string>();
+        } catch (std::regex_error const& e) {
+            validationReport_.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                std::string("Invalid layer affinity regular expression: ") + e.what(),
+                locationForNode(layer));
+            validationReport_.markStylesheetFailed();
+            return;
+        }
     }
 
-    if (!styleYaml["rules"] || !(styleYaml["rules"].IsSequence())) {
-        std::cout << "YAML stylesheet error: Spec does not contain any rules?" << std::endl;
-        return;
+    if (auto options = styleYaml["options"]) {
+        if (!options.IsSequence()) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "option-skipped",
+                "Style sheet options must be a YAML sequence. Ignoring options.",
+                locationForNode(options));
+        } else {
+            uint32_t optionIndex = 0;
+            for (auto const& option : options) {
+                if (!validateStyleOptionYaml(option, optionIndex++, styleSpec, validationReport_)) {
+                    continue;
+                }
+                try {
+                    // Create FeatureStyleOption object.
+                    options_.emplace_back(option);
+                } catch (YAML::Exception const& e) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "option-skipped",
+                        "Could not parse style option: " + e.msg,
+                        locationFromMark(e.mark));
+                    issue.rulePath = "options[" + std::to_string(optionIndex - 1) + "]";
+                }
+            }
+        }
     }
 
     uint32_t ruleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
-        // Create FeatureStyleRule object.
-        rules_.emplace_back(rule, ruleIndex++);
+        auto const sourceRuleIndex = ruleIndex++;
+        auto const rulePath = "rules[" + std::to_string(sourceRuleIndex) + "]";
+        if (!validateStyleRuleYaml(rule, sourceRuleIndex, rulePath, styleSpec, validationReport_)) {
+            ++validationReport_.skippedRuleCount;
+            continue;
+        }
+        try {
+            // Preserve the source rule index for diagnostics and rule-scoped runtime state.
+            rules_.emplace_back(rule, sourceRuleIndex);
+        } catch (std::exception const& e) {
+            ++validationReport_.skippedRuleCount;
+            auto& issue = validationReport_.addIssue(
+                "error",
+                "schema",
+                "rule-skipped",
+                std::string("Could not parse style rule: ") + e.what(),
+                locationForNode(rule));
+            issue.ruleIndex = sourceRuleIndex;
+            issue.rulePath = rulePath;
+        }
     }
 
-    for (auto const& option : styleYaml["options"]) {
-        // Create FeatureStyleOption object.
-        options_.emplace_back(option);
+    if (rules_.empty()) {
+        validationReport_.addIssue(
+            "error",
+            "schema",
+            "stylesheet-failed",
+            "Style sheet did not contain any usable rules.",
+            locationForNode(styleYaml["rules"]));
+        validationReport_.markStylesheetFailed();
+        return;
     }
 
-    for (auto const& rule : rules_) {
+    for (uint32_t runtimeRuleIndex = 0; runtimeRuleIndex < rules_.size(); ++runtimeRuleIndex) {
+        auto const& rule = rules_[runtimeRuleIndex];
         auto modeIndex = highlightModeIndex(rule.mode());
         auto const highFidelityIndex = fidelityIndex(FeatureStyleRule::HighFidelity);
         auto const lowFidelityIndex = fidelityIndex(FeatureStyleRule::LowFidelity);
         if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
             rule.fidelity() == FeatureStyleRule::HighFidelity) {
-            ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(rule.index());
+            ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(runtimeRuleIndex);
         }
         if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
             rule.fidelity() == FeatureStyleRule::LowFidelity) {
-            ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(rule.index());
+            ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(runtimeRuleIndex);
         }
         if (rule.fidelity() == FeatureStyleRule::LowFidelity) {
             hasExplicitLowFidelityRules_ = true;
@@ -85,12 +225,20 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         highlightModeMask_ |= (1u << modeIndex);
     }
 
+    validationReport_.loadedRuleCount = static_cast<uint32_t>(rules_.size());
+    validationReport_.loadable = true;
+    validationReport_.failedWholeStyleSheet = false;
     valid_ = true;
 }
 
 bool FeatureLayerStyle::isValid() const
 {
     return valid_;
+}
+
+NativeJsValue FeatureLayerStyle::validationReport() const
+{
+    return validationReport_.toJsValue();
 }
 
 const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const

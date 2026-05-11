@@ -1,3 +1,4 @@
+/** Minimal feature identity used by URL state and inspection panels. */
 export interface TileFeatureIdLike {
     featureId: string;
     mapTileKey: string;
@@ -10,6 +11,7 @@ interface DecodedCompactTileFeaturePayload {
     payload: string;
 }
 
+/** Decodes the internal compact `tfid:` transport format back into its two components. */
 function decodeCompactPayload(
     value: string,
     prefix: string
@@ -36,6 +38,7 @@ function decodeCompactPayload(
     };
 }
 
+/** Expands a compact tile-feature-id string when the URL uses the shortened form. */
 export function decodeCompactTileFeatureId(value: string): TileFeatureIdLike | undefined {
     const decodedFeatureId = decodeCompactPayload(value, COMPACT_TILE_FEATURE_ID_PREFIX);
     if (!decodedFeatureId) {
@@ -47,6 +50,7 @@ export function decodeCompactTileFeatureId(value: string): TileFeatureIdLike | u
     };
 }
 
+/** Normalizes a possibly compact feature identifier while leaving non-strings untouched. */
 export function normalizeTileFeatureId(value: TileFeatureIdLike | string | null | undefined): TileFeatureIdLike | string | null | undefined {
     if (typeof value !== "string") {
         return value;

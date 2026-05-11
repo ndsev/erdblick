@@ -1,4 +1,4 @@
-import {Component, ViewChild, ViewContainerRef} from "@angular/core";
+import {Component, OnDestroy, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -6,18 +6,25 @@ import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
-import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {Subscription} from "rxjs";
+
+interface FeatureSearchGroupingOption {
+    name: string;
+    value: number;
+}
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog #featureSearchDialog class="feature-search-dialog" header="Search Loaded Features"
+        <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
                   [closeOnEscape]="false"
-                  [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
+                  [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)" [draggable]="true" [resizable]="true"
+                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="featureSearchLayoutId"
                   (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
@@ -29,11 +36,12 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-progressBar>
                 </div>
                 <p-button (click)="toggleSearchPaused()"
+                          data-testid="feature-search-pause-button"
                           [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
                           label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
                           [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
-                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
+                <p-button (click)="stopSearch()" data-testid="feature-search-stop-button" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
             <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">
@@ -42,7 +50,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                     [style]="{ width: '1em', height: '1em', margin: '0' }"/>
             </div>
 
-            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
+            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" data-testid="feature-search-panel" scrollable>
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results </span>
@@ -69,7 +77,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                         <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
                             <span>Group:</span>
                             <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
-                                           [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
+                                           [showToggleAll]="false" (ngModelChange)="onGroupingOptionsChange($event)"
                                            placeholder="Select Grouping" [maxSelectedLabels]="5"
                                            display="chip" optionLabel="name">
                             </p-multiSelect>
@@ -77,7 +85,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 
                         <!-- Results Tree -->
                         <div style="height: 100%">
-                            <p-tree #tree [value]="resultsTree"
+                            <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
                                     selectionMode="single"
                                     [metaKeySelection]="false"
                                     [lazy]="true"
@@ -147,14 +155,19 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
-        </p-dialog>
+        </app-dialog>
         <div #alert></div>
     `,
     styles: [``],
     standalone: false
 })
-export class FeatureSearchComponent {
-    isPanelVisible: boolean = false;
+/**
+ * Dialog that presents long-running feature-search progress, result grouping, diagnostics, and traces.
+ */
+export class FeatureSearchComponent implements OnDestroy {
+    readonly featureSearchLayoutId = FEATURE_SEARCH_DIALOG_LAYOUT_ID;
+    private readonly subscriptions = new Subscription();
+    featureSearchDialogVisible = false;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
@@ -165,13 +178,13 @@ export class FeatureSearchComponent {
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     resultsTree: TreeNode[] = [];
-    grouping: { name: string, value: number }[] = [
+    grouping: FeatureSearchGroupingOption[] = [
         {name: 'Maps', value: 1},
         {name: 'Layers', value: 2},
         {name: 'Features', value: 3},
         {name: 'Tiles', value: 4}
     ];
-    selectedGroupingOptions: { name: string, value: number }[] = [this.grouping[0]];
+    selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
 
     // Active result panel index
     resultPanelIndex: string = "";
@@ -182,21 +195,37 @@ export class FeatureSearchComponent {
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
-    @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
+    @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
 
+    /**
+     * Subscribes to search progress and keeps the dialog state synchronized with the active search.
+     */
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapDataService,
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService) {
-        this.searchService.progress.subscribe(searchState => {
+        this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
+        this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
+            const nextOptions = this.groupingOptionsFromValues(groupingValues);
+            if (this.sameGroupingOptions(this.selectedGroupingOptions, nextOptions)) {
+                return;
+            }
+            this.selectedGroupingOptions = nextOptions;
+            this.recalculateResultsByGroups();
+        }));
+
+        this.subscriptions.add(this.searchService.progress.subscribe(searchState => {
             if (!searchState) {
                 this.awaitedTilesToLoad = 0;
                 this.resultsTree = [];
                 return;
             }
-            this.isPanelVisible = true;
+            if (searchState !== this.searchService.currentSearch) {
+                return;
+            }
+            this.featureSearchDialogVisible = true;
             this.percentDone = searchState.percentDone();
             this.totalTiles = searchState.getTaskCount();
             this.doneTiles = searchState.getCompletedCount();
@@ -208,19 +237,40 @@ export class FeatureSearchComponent {
                 this.resultsStatus = "Loading...";
                 this.canPauseStopSearch = true;
             }
-        });
-        this.searchService.diagnosticsMessages.subscribe(value => {
+        }));
+        this.subscriptions.add(this.searchService.diagnosticsMessages.subscribe(value => {
             this.diagnostics = value;
             if (this.diagnostics.length > 0 && this.results.length === 0)
                 this.resultPanelIndex = 'diagnostics';
-        })
+        }));
     }
 
+    /** Stops feature search subscriptions when the component is destroyed. */
+    ngOnDestroy() {
+        this.subscriptions.unsubscribe();
+    }
+
+    /**
+     * Recomputes the virtual tree height once the dialog becomes measurable.
+     */
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
     }
 
+    /**
+     * Terminates active search work as soon as PrimeNG starts closing the dialog.
+     */
+    onPanelVisibleChange(visible: boolean) {
+        this.featureSearchDialogVisible = visible;
+        if (!visible) {
+            this.searchService.clear();
+        }
+    }
+
+    /**
+     * Finalizes the result tabs once the active search group reports completion.
+     */
     searchResultReady() {
         const results = this.searchService.searchResults;
         const traces = this.searchService.traceResults;
@@ -247,6 +297,9 @@ export class FeatureSearchComponent {
         this.recalculateResultsByGroups();
     }
 
+    /**
+     * Highlights the selected result regardless of whether it came from the tree or a simple list event.
+     */
     selectResult(event: any) {
         // Support both listbox change and tree node select events
         const selected = event?.value || event?.node?.data || event;
@@ -256,6 +309,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Pauses or resumes worker dispatch while keeping already collected results visible.
+     */
     toggleSearchPaused() {
         if (!this.canPauseStopSearch) {
             return;
@@ -271,6 +327,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Stops the active search, freezes the partial result set, and surfaces any accumulated errors.
+     */
     stopSearch() {
         if (this.canPauseStopSearch) {
             this.searchService.stop();
@@ -287,6 +346,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Resets dialog-local state after the dialog closes.
+     */
     onHide(_: any) {
         this.traces = [];
         this.diagnostics = [];
@@ -297,16 +359,49 @@ export class FeatureSearchComponent {
         this.resultsTree = [];
         this.showFilter = false;
         this.resultsStatus = "Loading...";
-        this.searchService.clear();
-        this.isPanelVisible = false;
+        if (this.searchService.currentSearch) {
+            this.searchService.clear();
+        }
+        this.featureSearchDialogVisible = false;
     }
 
+    /**
+     * Pushes a suggested query fix back into the omnibox workflow.
+     */
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
             this.searchService.fixedDiagnosticsSearchQuery.next(message.fix);
         }
     }
 
+    /** Applies user changes to feature search grouping options. */
+    onGroupingOptionsChange(options: FeatureSearchGroupingOption[]) {
+        const groupingValues = this.groupingValuesFromOptions(options);
+        this.selectedGroupingOptions = this.groupingOptionsFromValues(groupingValues);
+        this.stateService.featureSearchGrouping = groupingValues;
+        this.recalculateResultsByGroups();
+    }
+
+    /** Converts persisted grouping values into dropdown options. */
+    private groupingOptionsFromValues(values: number[]): FeatureSearchGroupingOption[] {
+        const selected = new Set(values);
+        return this.grouping.filter(option => selected.has(option.value));
+    }
+
+    /** Converts dropdown options into persisted grouping values. */
+    private groupingValuesFromOptions(options: FeatureSearchGroupingOption[] | null | undefined): number[] {
+        const selected = new Set((options ?? []).map(option => option.value));
+        return this.grouping.filter(option => selected.has(option.value)).map(option => option.value);
+    }
+
+    /** Checks whether two grouping option lists are equivalent. */
+    private sameGroupingOptions(lhs: FeatureSearchGroupingOption[], rhs: FeatureSearchGroupingOption[]): boolean {
+        return lhs.length === rhs.length && lhs.every((option, index) => option.value === rhs[index]?.value);
+    }
+
+    /**
+     * Rebuilds the PrimeNG tree according to the currently selected grouping dimensions.
+     */
     recalculateResultsByGroups() {
         // Convert results into PrimeNG TreeNodes based on selected grouping
         const results = this.results.map(result => {
@@ -334,6 +429,7 @@ export class FeatureSearchComponent {
             4: { label: 'Tiles',    get: (r) => r.tileId }
         };
 
+        /** Builds the feature search result tree with aggregate counts. */
         const buildTreeWithCounts = (items: ResultItem[], depth: number, parentKey: string): [TreeNode[], number] => {
             if (depth >= selectedOrder.length || selectedOrder.length === 0) {
                 const leaves = items.map((it, idx) => ({
@@ -396,6 +492,9 @@ export class FeatureSearchComponent {
         }
     }
 
+    /**
+     * Derives the tree scroller height from the dialog size so virtual scrolling stays usable while resizing.
+     */
     syncTreeScrollHeight(event: MouseEvent) {
         const target = event?.target as HTMLElement | null;
         // Find the dialog container regardless of which inner element fired the event

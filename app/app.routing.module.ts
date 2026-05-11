@@ -7,4 +7,5 @@ const routes: Routes = [];
   imports: [RouterModule.forRoot(routes)],
   exports: [RouterModule]
 })
+/** Placeholder routing module; the application currently uses a single root route. */
 export class AppRoutingModule { }

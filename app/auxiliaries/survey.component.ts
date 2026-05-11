@@ -1,16 +1,5 @@
 import {Component, OnDestroy, OnInit} from '@angular/core';
-import {HttpClient} from "@angular/common/http";
-import {Subscription} from "rxjs";
-
-interface SurveyConfig {
-    id: string;
-    link: string;
-    linkHtml: string;
-    start?: string;
-    end?: string;
-    emoji?: string;
-    background?: string;
-}
+import {AppConfigService, SurveyConfig} from "../shared/app-config.service";
 
 @Component({
     selector: 'survey',
@@ -50,6 +39,12 @@ interface SurveyConfig {
     styles: [``],
     standalone: false
 })
+/**
+ * Config-driven announcement banner shown at the top of the application.
+ *
+ * The active survey is chosen by date range from `config.json`; state updates
+ * are deferred one macrotask to avoid Angular startup expression-change errors.
+ */
 export class SurveyComponent implements OnInit, OnDestroy {
     surveyEnabled: boolean = false;
     isSurveyHidden: boolean = false;
@@ -60,36 +55,31 @@ export class SurveyComponent implements OnInit, OnDestroy {
     backgroundColor: string = "blueviolet";
     private fireworksAnimating: boolean = false;
     private fireworksQueue: number = 0;
-    private configSubscription?: Subscription;
     private configApplyTimeout?: number;
 
-    constructor(private httpClient: HttpClient) {
+    constructor(private configService: AppConfigService) {
     }
 
+    /** Loads the survey configuration once the component mounts. */
     ngOnInit() {
-        this.configSubscription = this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
-            next: (data: any) => {
-                this.scheduleApplySurveyConfig(data);
-            },
-            error: error => {
-                console.error(error);
-            }
-        });
+        this.scheduleApplySurveyConfig(this.configService.snapshot);
     }
 
+    /** Cancels any deferred config-apply callback. */
     ngOnDestroy() {
-        this.configSubscription?.unsubscribe();
         if (this.configApplyTimeout !== undefined) {
             window.clearTimeout(this.configApplyTimeout);
             this.configApplyTimeout = undefined;
         }
     }
 
+    /** Hides the active survey banner for the current page session. */
     dismissSurvey(event: any) {
         event.stopPropagation();
         this.isSurveyHidden = true;
     }
 
+    /** Starts the fireworks animation, queueing a few extra clicks if needed. */
     triggerFireworks() {
         if (this.isSurveyHidden || !this.surveyEnabled) {
             return;
@@ -105,6 +95,7 @@ export class SurveyComponent implements OnInit, OnDestroy {
         this.startFireworksAnimation();
     }
 
+    /** Runs one fireworks cycle and chains queued cycles after the current one completes. */
     private startFireworksAnimation() {
         this.fireworksAnimating = true;
         this.showFireworks = true;
@@ -121,6 +112,7 @@ export class SurveyComponent implements OnInit, OnDestroy {
         }, 800);
     }
 
+    /** Defers survey-config application so startup change detection stays stable in dev mode. */
     private scheduleApplySurveyConfig(config: any) {
         if (this.configApplyTimeout !== undefined) {
             window.clearTimeout(this.configApplyTimeout);
@@ -137,6 +129,7 @@ export class SurveyComponent implements OnInit, OnDestroy {
         }, 0);
     }
 
+    /** Picks the first currently active survey entry and copies its presentation fields into state. */
     private applySurveyConfig(config: any) {
         this.surveyEnabled = false;
         this.surveyHref = "";
@@ -185,6 +178,7 @@ export class SurveyComponent implements OnInit, OnDestroy {
         this.surveyEnabled = true;
     }
 
+    /** Parses a survey date in local time, optionally expanding it to the end of that day. */
     private parseSurveyDate(dateString: string, endOfDay: boolean): Date | null {
         const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
         if (!match) {

@@ -65,12 +65,14 @@ interface ProgressBar {
     styles: [``],
     standalone: false
 })
+/** Compact progress widget used in the diagnostics popover and dialogs. */
 export class DiagnosticsProgressComponent {
     @Input({required: true}) progress!: TilePipelineProgress;
     readonly paused$ = this.mapService.tilePipelinePaused$;
 
     constructor(private readonly mapService: MapDataService) {}
 
+    /** Returns the ordered list of progress bars shown in the widget. */
     get progressBars(): ProgressBar[] {
         const stageCounters = this.progress?.stages ?? [];
         const stageBars = stageCounters.map((counter, stage) => ({
@@ -97,6 +99,7 @@ export class DiagnosticsProgressComponent {
         ];
     }
 
+    /** Returns the loading-metric bubble payload or a zeroed fallback. */
     get bubbles(): LoadingStatBubbles {
         return this.progress?.bubbles ?? {
             downstreamBytesPerSecond: 0,
@@ -115,14 +118,17 @@ export class DiagnosticsProgressComponent {
         };
     }
 
+    /** Pauses or resumes tile requesting, loading, and rendering. */
     togglePause() {
         this.mapService.toggleTilePipelinePause();
     }
 
+    /** Returns whether every tracked progress bar is complete. */
     get isProgressComplete(): boolean {
         return this.progressBars.every(bar => this.progressPercent(bar.counter) === 100);
     }
 
+    /** Converts a `done/total` counter into a capped integer percentage. */
     progressPercent(counter: ProgressCounter): number {
         if (!counter.total) {
             return 0;
@@ -134,15 +140,18 @@ export class DiagnosticsProgressComponent {
         return Math.max(0, Math.min(99, percent));
     }
 
+    /** Formats an integer bubble value with locale-aware separators. */
     formatInt(value: number): string {
         return Math.max(0, Math.floor(value || 0)).toLocaleString();
     }
 
+    /** Formats downstream throughput in MB/s. */
     formatThroughput(bytesPerSecond: number): string {
         const mbPerSecond = Math.max(0, bytesPerSecond || 0) / (1024 * 1024);
         return `${mbPerSecond.toFixed(2)} MB/s`;
     }
 
+    /** Formats the compression bubble, including coverage and known compressed bytes. */
     formatCompressionBubble(
         ratioPct: number | null,
         coveragePct: number,
@@ -158,11 +167,13 @@ export class DiagnosticsProgressComponent {
         return `Cmp ${clampedRatio.toFixed(1)}% @ ${clampedCoverage.toFixed(0)}% (${compressedMb.toFixed(1)} MB)`;
     }
 
+    /** Formats elapsed render time in seconds. */
     formatSeconds(seconds: number): string {
         const safe = Math.max(0, seconds || 0);
         return `${safe.toFixed(1)} s`;
     }
 
+    /** Formats frame time together with its derived FPS. */
     formatFrameTimeMs(frameTimeMs: number): string {
         const safeMs = Math.max(0, frameTimeMs || 0);
         if (safeMs <= 0) {

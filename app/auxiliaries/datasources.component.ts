@@ -1,53 +1,73 @@
-import {Component, HostListener, ViewChild} from "@angular/core";
-import {HttpClient} from "@angular/common/http";
-import {InfoMessageService} from "../shared/info.service";
-import {AppStateService} from "../shared/appstate.service";
-import {BehaviorSubject, Subscription} from "rxjs";
-import {Dialog} from "primeng/dialog";
-import {EditorService} from "../shared/editor.service";
-import {JSONSchema7} from "json-schema";
-import {MapDataService} from "../mapdata/map.service";
-import {DialogStackService} from "../shared/dialog-stack.service";
+import {Component, HostListener, ViewChild} from '@angular/core';
+import {HttpClient} from '@angular/common/http';
+import {Subscription} from 'rxjs';
+import {JSONSchema7} from 'json-schema';
+import {InfoMessageService} from '../shared/info.service';
+import {AppStateService, DATASOURCES_EDITOR_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
+import {EditorService} from '../shared/editor.service';
+import {MapDataService} from '../mapdata/map.service';
+import {DialogStackService} from '../shared/dialog-stack.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'datasources',
     template: `
-        <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
-                  #editorDialog (onShow)="onEditorDialogShow()" class="editor-dialog datasource-dialog"
-                  [contentStyle]="loading ? {'overflow-y': 'hidden'} : undefined"
-                  [closeOnEscape]="false">
+        <app-dialog header="DataSource Configuration Editor"
+                    [(visible)]="dialogVisible"
+                    [modal]="false"
+                    #editorDialog
+                    (onShow)="onEditorDialogShow()"
+                    (onHide)="onEditorDialogHide()"
+                    class="editor-dialog datasource-dialog"
+                    [persistLayout]="true" [layoutId]="dialogLayoutId"
+                    [contentStyle]="loading ? {'overflow-y': 'hidden'} : {}"
+                    [closeOnEscape]="false">
             @if (loading) {
                 <div class="spinner datasource-loading-spinner">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
-            } @else if (errorMessage || readOnly) {
-                <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+            } @else if (errorMessage) {
+                <div class="editor-actions datasource-message-actions">
+                    <div class="editor-actions-left">
                         <p-button (click)="closeEditorDialog($event)" label="Close" icon="pi pi-times"></p-button>
-                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
-                            <div style="color: orange">
-                                {{ errorMessage ? errorMessage : "Data Source configuration is set to read-only!" }}
+                        <div class="editor-status">
+                            <div class="editor-status-warning">
+                                {{ errorMessage }}
                             </div>
                         </div>
                     </div>
                 </div>
             } @else {
-                <editor></editor>
-                <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                        <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
-                                  [disabled]="!wasModified"></p-button>
+                <editor [sessionId]="datasourcesEditorSessionId"></editor>
+                <div class="editor-actions datasource-editor-actions">
+                    <div class="editor-actions-left">
+                        @if (!readOnly) {
+                            <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
+                                      [disabled]="!wasModified"></p-button>
+                        }
                         <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Close"'
                                   icon="pi pi-times"></p-button>
-                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
-                            <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
-                            <div>Press <span style="color: grey">Esc</span> to quit</div>
-                        </div>
+                        @if (readOnly) {
+                            <div class="editor-status">
+                                <div class="editor-status-warning">Data Source configuration is read-only.</div>
+                            </div>
+                        } @else if (datasourceModelHidden) {
+                            <div class="editor-status">
+                                <div class="editor-status-warning">
+                                    Data Source is not readable but is writable. Applying changes will overwrite the configuration.
+                                </div>
+                            </div>
+                        } @else {
+                            <div class="editor-shortcuts">
+                                <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                                <div>Press <span style="color: grey">Esc</span> to quit</div>
+                            </div>
+                        }
                     </div>
                 </div>
             }
-        </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
+        </app-dialog>
+        <app-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the datasource configuration. Do you really want to discard the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -55,87 +75,95 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="closeWarningAndEditor($event)" label="Discard"></p-button>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     standalone: false
 })
+/**
+ * Hosts the datasource configuration editor and mediates loading, editing, and applying
+ * backend datasource configuration without leaving the viewer.
+ */
 export class DatasourcesComponent {
-    warningDialogVisible: boolean = false;
-    wasModified: boolean = false;
-    dataSourcesConfig: string = "";
+    readonly dialogLayoutId = DATASOURCES_EDITOR_DIALOG_LAYOUT_ID;
+    readonly datasourcesEditorSessionId = 'datasources-editor';
+    warningDialogVisible = false;
+    wasModified = false;
+    dataSourcesConfig = '';
     model: any = {};
     schema: JSONSchema7 = {};
     loading = false;
-    errorMessage: string = "";
+    errorMessage = '';
     readOnly = true;
-    dataSourcesConfigJson: BehaviorSubject<any> = new BehaviorSubject<any>({});
+    datasourceModelHidden = false;
 
-    // @ViewChild('formElement') formElement!: HTMLFormElement;
-    @ViewChild('editorDialog') editorDialog: Dialog | undefined;
-    @ViewChild('warningDialog') warningDialog: Dialog | undefined;
+    @ViewChild('editorDialog') editorDialog: AppDialogComponent | undefined;
+    @ViewChild('warningDialog') warningDialog: AppDialogComponent | undefined;
 
     private editedConfigSourceSubscription: Subscription = new Subscription();
-    private savedConfigSourceSubscription: Subscription = new Subscription();
-    constructor(private messageService: InfoMessageService,
-                public stateService: AppStateService,
-                public editorService: EditorService,
-                private http: HttpClient,
-                private mapService: MapDataService,
-                private dialogStack: DialogStackService) {
-        this.dataSourcesConfigJson.subscribe((config: any) => {
-            if (config && config["schema"] && config["model"]) {
-                this.schema = config["schema"];
-                this.model = config["model"];
-                this.dataSourcesConfig = JSON.stringify(this.model, null, 2);
-                this.editorService.styleEditorVisible = false;
-                this.editorService.readOnly = config.hasOwnProperty("readOnly") ? config["readOnly"] : true;
-                this.editorService.editableData = `${this.dataSourcesConfig}\n\n\n\n\n`;
-                this.editorService.datasourcesEditorVisible = true;
-                this.loading = false;
-                this.editorService.updateEditorState.next(true);
-            }
-        });
+    private saveRequestedSubscription: Subscription = new Subscription();
 
+    /** Wires shared dialog, editor, and map services used by the datasource editor. */
+    constructor(private readonly messageService: InfoMessageService,
+                public readonly stateService: AppStateService,
+                public readonly editorService: EditorService,
+                private readonly http: HttpClient,
+                private readonly mapService: MapDataService,
+                private readonly dialogStack: DialogStackService) {}
+
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.dialogLayoutId);
     }
 
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+    }
+
+    /** Initializes the editor session whenever the datasource dialog becomes visible. */
     onEditorDialogShow() {
         this.loadConfigEditor();
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
-    loadConfigEditor() {
-        // this.datasourcesEditorDialogVisible = true;
-        // this.editorService.updateEditorState.next(true);
-        this.getConfig();
-        this.editedConfigSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
-            this.wasModified = editedStyleSource.replace(/\n+$/, '') !== this.dataSourcesConfig.replace(/\n+$/, '');
-        });
-        this.savedConfigSourceSubscription = this.editorService.editedSaveTriggered.subscribe(_ => {
-            this.applyEditedDatasourceConfig();
-        });
+    /** Tears down editor state when the dialog closes so stale subscriptions do not linger. */
+    onEditorDialogHide() {
+        this.cleanupEditorSubscriptions();
+        this.editorService.closeSession(this.datasourcesEditorSessionId);
+        this.warningDialogVisible = false;
+        this.wasModified = false;
     }
 
+    /** Reloads the datasource configuration into a fresh editor session. */
+    loadConfigEditor() {
+        this.cleanupEditorSubscriptions();
+        this.getConfig();
+    }
+
+    /** Validates and posts the edited datasource configuration back to the backend. */
     applyEditedDatasourceConfig() {
-        this.editorService.editableData = this.editorService.editedStateData.getValue();
-        const configData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
+        if (this.readOnly) {
+            return;
+        }
+        const configData = this.editorService.getSessionSource(this.datasourcesEditorSessionId).replace(/\n+$/, '');
         if (!configData) {
-            this.messageService.showError(`Cannot apply an empty configuration definition!`);
+            this.messageService.showError('Cannot apply an empty configuration definition!');
             return;
         }
         this.postConfig(configData);
         this.dataSourcesConfig = configData;
         this.wasModified = false;
         this.warningDialogVisible = false;
+        this.editorService.updateSessionSource(this.datasourcesEditorSessionId, configData);
     }
 
+    /** Persists datasource configuration changes and refreshes map content after the backend accepts them. */
     private postConfig(config: string) {
         this.loading = true;
-        this.http.post("config", config, {observe: 'response', responseType: 'text'}).subscribe({
+        this.http.post('config', config, {observe: 'response', responseType: 'text'}).subscribe({
             next: (data: any) => {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {
                     this.loading = false;
-                    this.mapService.reloadDataSources().then(_ => this.mapService.scheduleUpdate());
+                    this.mapService.reloadDataSources().then(() => this.mapService.scheduleUpdate());
                 }, 2000);
             },
             error: error => {
@@ -145,32 +173,59 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Fetches the current datasource configuration and opens it in the shared JSON editor. */
     private getConfig() {
         this.readOnly = true;
-        this.errorMessage = "";
+        this.datasourceModelHidden = false;
+        this.errorMessage = '';
         this.loading = true;
-        this.http.get("config").subscribe({
+        this.http.get('config').subscribe({
             next: (data: any) => {
                 if (!data) {
-                    this.errorMessage = "Unknown error: DataSources configuration data is missing!";
+                    this.errorMessage = 'Unknown error: DataSources configuration data is missing!';
                     this.loading = false;
-                    this.dataSourcesConfigJson.next({});
                     return;
                 }
-                if (!data["model"]) {
-                    this.errorMessage = "Unknown error: DataSources config file data is missing!";
+                if (!data['model']) {
+                    this.errorMessage = 'Unknown error: DataSources config file data is missing!';
                     this.loading = false;
-                    this.dataSourcesConfigJson.next({});
                     return;
                 }
-                if (!data["schema"]) {
-                    this.errorMessage = "Unknown error: DataSources schema file data is missing!";
+                if (!data['schema']) {
+                    this.errorMessage = 'Unknown error: DataSources schema file data is missing!';
                     this.loading = false;
-                    this.dataSourcesConfigJson.next({});
                     return;
                 }
-                this.readOnly = data["readOnly"];
-                this.dataSourcesConfigJson.next(data);
+                this.readOnly = data['readOnly'] ?? true;
+                this.datasourceModelHidden = data['datasourceConfigUnavailable'] === true;
+                if (this.datasourceModelHidden && this.readOnly) {
+                    const reason = data['datasourceConfigUnavailableReason'] ?? 'unknown';
+                    this.errorMessage = reason === 'getConfigDisabled'
+                        ? 'Data Source configuration is disabled: GET and POST are disabled.'
+                        : `Data Source configuration is unavailable: ${reason}`;
+                    this.loading = false;
+                    return;
+                }
+                this.schema = data['schema'];
+                this.model = data['model'];
+                this.dataSourcesConfig = JSON.stringify(this.model, null, 2);
+                this.loading = false;
+                this.editorService.createSession({
+                    id: this.datasourcesEditorSessionId,
+                    source: `${this.dataSourcesConfig}\n\n\n\n\n`,
+                    language: 'json',
+                    readOnly: this.readOnly
+                });
+                const session = this.editorService.getSession(this.datasourcesEditorSessionId);
+                if (!session) {
+                    return;
+                }
+                this.editedConfigSourceSubscription = session.source$.subscribe(editedStyleSource => {
+                    this.wasModified = editedStyleSource.replace(/\n+$/, '') !== this.dataSourcesConfig.replace(/\n+$/, '');
+                });
+                this.saveRequestedSubscription = this.editorService.onSaveRequested(this.datasourcesEditorSessionId)?.subscribe(() => {
+                    this.applyEditedDatasourceConfig();
+                }) ?? new Subscription();
             },
             error: error => {
                 this.loading = false;
@@ -179,28 +234,27 @@ export class DatasourcesComponent {
         });
     }
 
+    /** Closes the editor or opens the discard warning when unsaved changes are present. */
     closeEditorDialog(event: any) {
         event.stopPropagation();
         if (this.wasModified) {
             this.warningDialogVisible = true;
             return;
         }
-        if (this.editorDialog !== undefined) {
-            this.warningDialogVisible = false;
-            this.editorDialog.close(event);
-        }
-        this.editedConfigSourceSubscription.unsubscribe();
-        this.savedConfigSourceSubscription.unsubscribe();
+        this.warningDialogVisible = false;
+        this.dialogVisible = false;
     }
 
+    /** Discards pending edits and then closes the editor dialog. */
     closeWarningAndEditor(event: any) {
         this.wasModified = false;
         this.closeEditorDialog(event);
     }
 
     @HostListener('window:keydown', ['$event'])
+    /** Handles the shared Escape behavior for the datasource editor and its discard warning. */
     onWindowKeydown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.editorService.datasourcesEditorVisible) {
+        if (event.key !== 'Escape' || !this.dialogVisible) {
             return;
         }
         event.preventDefault();
@@ -212,7 +266,16 @@ export class DatasourcesComponent {
         this.closeEditorDialog(event);
     }
 
+    /** Keeps the warning dialog above other floating dialogs when it opens. */
     protected onWarningShow() {
         this.dialogStack.bringToFront(this.warningDialog);
+    }
+
+    /** Resets editor-related subscriptions before a fresh session is created. */
+    private cleanupEditorSubscriptions() {
+        this.editedConfigSourceSubscription.unsubscribe();
+        this.saveRequestedSubscription.unsubscribe();
+        this.editedConfigSourceSubscription = new Subscription();
+        this.saveRequestedSubscription = new Subscription();
     }
 }

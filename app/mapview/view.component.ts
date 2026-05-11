@@ -30,6 +30,7 @@ import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
 import {Popover} from "primeng/popover";
 import {coreLib} from "../integrations/wasm";
+import {AppConfigService} from "../shared/app-config.service";
 
 
 
@@ -39,13 +40,16 @@ import {coreLib} from "../integrations/wasm";
         <div #viewer
              [ngClass]="{'border': outlined}"
              [id]="canvasId"
+             [attr.data-testid]="canvasId"
              class="mapviewer-renderlayer"
              style="z-index: 0"></div>
         @if (!environment.visualizationOnly && showSyncMenu) {
-            <p-buttonGroup class="viewsync-select">
-                @for (option of stateService.syncOptions; track $index) {
-                    <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
-                                    [(ngModel)]="option.value" (ngModelChange)="stateService.updateSelectedSyncOptions()"
+            <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
+                @for (option of stateService.syncOptions; track option.code) {
+                    <p-toggleButton onIcon="" offIcon=""
+                                    [ngModel]="isSyncOptionSelected(option.code)"
+                                    [ngClass]="{'green': isSyncOptionSelected(option.code)}"
+                                    (ngModelChange)="onSyncOptionToggle(option.code, $event)"
                                     onLabel="" offLabel="" pTooltip="{{option.tooltip}}" tooltipPosition="bottom">
                         <ng-template #icon>
                             <span class="material-symbols-outlined">{{ option.icon }}</span>
@@ -83,9 +87,14 @@ import {coreLib} from "../integrations/wasm";
     `],
     standalone: false
 })
+/**
+ * Host component for one interactive map view.
+ * It owns renderer creation, hover popovers, right-click context-menu preparation, and view-local mode toggles.
+ */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
+    protected readonly isSyncOptionSelected = (code: string) => this.stateService.viewSync.includes(code);
 
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
@@ -117,16 +126,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     featureIdsContent: string[] = [];
 
     /**
-     * Construct a map view component with deck-backed rendering.
-     * @param mapService The map model service providing access to data
-     * @param featureSearchService
-     * @param stateService The parameter service, used to update
-     * @param jumpService
-     * @param keyboardService
-     * @param menuService
-     * @param coordinatesService Necessary to pass mouse events to the coordinates panel
-     * @param appModeService
-     * @param cdr
+     * Constructs the host component for one deck-backed view, wiring in the shared
+     * map, search, config, and input services the renderer depends on.
      */
     constructor(public mapService: MapDataService,
                 public featureSearchService: FeatureSearchService,
@@ -136,6 +137,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService,
+                public configService: AppConfigService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone
     ) {
@@ -146,6 +148,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         );
     }
 
+    /** Mirrors one sync toggle button back into the canonical view-sync selection. */
+    onSyncOptionToggle(code: string, enabled: boolean): void {
+        const nextSelection = enabled
+            ? [...this.stateService.viewSync, code]
+            : this.stateService.viewSync.filter(currentCode => currentCode !== code);
+        this.stateService.updateSelectedSyncOptions(nextSelection);
+    }
+
+    /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
     ngOnInit() {
         this.subscriptions.push(
             this.menuService.menuItems.subscribe(items => {
@@ -179,6 +190,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
+    /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
     ngAfterViewInit() {
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
@@ -194,6 +206,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         });
     }
 
+    /** Handles context-menu teardown and queued reopen requests when the menu is toggled while already open. */
     onContextMenuHide() {
         this.contextMenuVisible = false;
         if (this.pendingContextMenuOpenEvent && this.viewerContextMenu) {
@@ -203,11 +216,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             return;
         }
         this.resetPreparedSourceData(false, false);
-        if (!this.menuService.tileSourceDataDialogVisible) {
+        if (!this.menuService.isSourceDataDialogOpen()) {
             this.menuService.tileOutline.next(null);
         }
     }
 
+    /** Tracks whether the PrimeNG context menu is currently visible. */
     onContextMenuShow() {
         this.contextMenuVisible = true;
     }
@@ -224,11 +238,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService
+                this.menuService, this.coordinatesService, this.stateService, this.configService
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService
+                this.menuService, this.coordinatesService, this.stateService, this.configService
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
@@ -250,6 +264,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
+    /**
+     * Rebuilds view-local UI bindings after the renderer instance changed.
+     * This includes hover popovers, sync toggles, and the initial viewport refresh.
+     */
     private initializeViewer(mode2d: boolean) {
         this.createViewerForMode(mode2d).catch((error) => {
             console.error('Failed to initialize viewer:', error);
@@ -267,8 +285,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 return;
             }
             this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
-            const currentSyncState = new Set(this.stateService.viewSync);
-            this.stateService.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
             this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
                 this.featureIdsContent = [];
                 if (!result || !result.featureIds.length) {
@@ -320,15 +336,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         });
     }
 
+    /** Returns the DOM id used for this map view canvas. */
     get canvasId(): string {
         return `mapViewContainer-${this.viewIndex()}`;
     }
 
+    /** Clears the transient state used to distinguish a right-click from a right-drag gesture. */
     private resetRightPressTracking(): void {
         this.rightPressStart = null;
         this.rightPressMoved = false;
     }
 
+    /**
+     * Installs capturing pointer listeners directly on the viewer DOM element.
+     * This avoids PrimeNG/Cesium/deck interaction quirks and lets us suppress context menus after drags.
+     */
     private setupViewerContextMenuHandling(): void {
         const viewer = this.viewerElement?.nativeElement;
         if (!viewer) {
@@ -399,6 +421,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         });
     }
 
+    /** Removes the custom pointer/context-menu handlers installed on the viewer element. */
     private teardownViewerContextMenuHandling(): void {
         const viewer = this.viewerElement?.nativeElement;
         if (!viewer) {
@@ -429,6 +452,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.resetRightPressTracking();
     }
 
+    /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
     private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
         try {
             this.prepareSourceDataContextMenu(event);
@@ -439,6 +463,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         menu.show(this.contextMenuShowEvent(event) as MouseEvent);
     }
 
+    /** Copies the event coordinates we need because the original pointer event may no longer be usable later. */
     private copyContextMenuEvent(event: MouseEvent | PointerEvent): {clientX: number; clientY: number; pageX: number; pageY: number} {
         return {
             clientX: event.clientX,
@@ -448,6 +473,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         };
     }
 
+    /** Creates the minimal event-like object PrimeNG needs to position a context menu. */
     private contextMenuShowEvent(event: {pageX: number; pageY: number}): {pageX: number; pageY: number; preventDefault: () => void; stopPropagation: () => void} {
         return {
             pageX: event.pageX,
@@ -457,6 +483,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         };
     }
 
+    /**
+     * Derives source-data tile choices from the clicked world position and updates the menu service.
+     * The preferred tile tries to match picked feature tiles first, then visible feature levels.
+     */
     private prepareSourceDataContextMenu(event: {clientX: number; clientY: number}): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
             this.resetPreparedSourceData(true);
@@ -499,6 +529,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
+    /** Chooses the deepest available source-data tile among the features picked under the cursor. */
     private preferredPickedTileId(
         screenPos: {x: number; y: number},
         tileIds: SourceDataDropdownOption[]
@@ -527,6 +558,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return bestTileId;
     }
 
+    /** Falls back to the deepest source-data tile whose level matches currently visible feature data. */
     private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): bigint | null {
         const visibleLevels = this.mapService.visibleFeatureLevelsInView(this.viewIndex());
         const preferredTile = [...tileIds]
@@ -535,6 +567,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return preferredTile?.id as bigint | undefined ?? null;
     }
 
+    /** Clears the transient source-data context prepared for the right-click menu. */
     private resetPreparedSourceData(clearTileIds: boolean = false, clearOutline: boolean = true): void {
         this.menuService.preferredTileIdForSourceData = null;
         if (clearOutline) {

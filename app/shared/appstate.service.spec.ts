@@ -1,3 +1,4 @@
+import "@angular/compiler";
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
@@ -104,6 +105,44 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('serializes active search state URLs as compact action tuples', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+
+        service.searchState.next({
+            version: 2,
+            actionId: 'features',
+            input: '**.speed > 80',
+            actionName: 'Search Loaded Features',
+            savedAt: 42,
+        });
+        await flushMicrotasks();
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({
+                s: JSON.stringify(['features', '**.speed > 80']),
+            }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('cancels pending URL sync before popstate hydration', async () => {
         vi.useFakeTimers();
         const routerStub = createRouterStub({ m: '0' });
@@ -184,22 +223,22 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('hydrates OSM settings from combined query params', async () => {
-        const routerStub = createRouterStub({ n: '2', osm: '1~50,0~30' });
+    it('hydrates background-layer settings from combined query params', async () => {
+        const routerStub = createRouterStub({ n: '2', bg: 'osm~50,world-overview~30' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.getOsmState(0)).toEqual({ enabled: true, opacity: 50 });
-        expect(service.getOsmState(1)).toEqual({ enabled: false, opacity: 30 });
+        expect(service.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
+        expect(service.getBackgroundState(1)).toEqual({ layerId: 'world-overview', opacity: 30 });
 
         service.ngOnDestroy();
         routerStub.events.complete();
     });
 
-    it('serializes OSM settings into a single osm query param', async () => {
+    it('serializes background-layer settings into a single bg query param', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
@@ -210,18 +249,131 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.setOsmState(0, true, 50);
+        service.setBackgroundState(0, 'osm', 50);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
-                osm: '1~50',
+                bg: 'osm~50',
             }),
             queryParamsHandling: 'merge',
             replaceUrl: true,
         }));
-        const lastCall = (routerStub.navigate as any).mock.calls.at(-1)?.[1];
-        expect(lastCall?.queryParams?.osmOp).toBeUndefined();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('migrates legacy osm query params into the new background-layer state', async () => {
+        const routerStub = createRouterStub({ n: '2', osm: '1~50,0~30' });
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
+        expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 30 });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('seeds the second view from the primary view when split view is opened', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const destination = Cartographic.fromDegrees(11.25, 48.5, 987654);
+        const orientation = { heading: 1.25, pitch: -0.75, roll: 0.125 };
+
+        service.setView(0, destination, orientation);
+        service.setProjectionMode(0, true);
+        service.setLayerSyncOption(0, true);
+        service.setBackgroundState(0, null, 42);
+        service.viewTileBordersState.next(0, false);
+        service.viewTileGridModeState.next(0, 'xyz');
+        service.mapLayerConfig('m1', 'layerA', false, 9);
+        service.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
+
+        service.numViews = 2;
+
+        expect(service.numViews).toBe(2);
+        expect(service.cameraViewDataState.getValue(1)).toEqual(service.cameraViewDataState.getValue(0));
+        expect(service.cameraViewDataState.getValue(1)).not.toBe(service.cameraViewDataState.getValue(0));
+        expect(service.mode2dState.getValue(1)).toBe(true);
+        expect(service.getLayerSyncOption(1)).toBe(true);
+        expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 42 });
+        expect(service.viewTileBordersState.getValue(1)).toBe(false);
+        expect(service.viewTileGridModeState.getValue(1)).toBe('xyz');
+        expect(service.layerVisibilityState.getValue(1)).toEqual([true]);
+        expect(service.layerVisibilityState.getValue(1)).not.toBe(service.layerVisibilityState.getValue(0));
+        expect(service.layerZoomLevelState.getValue(1)).toEqual([7]);
+        expect(service.layerAutoZoomLevelState.getValue(1)).toEqual([false]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('copies style option values into the second view when split view is opened', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.layerNamesState.next(['m1/layerA']);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [true]);
+
+        service.numViews = 2;
+
+        const stylesMap = service.stylesState.getValue();
+        expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.5]);
+        expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([true, true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('seeds each newly added view from the previous view when the view count keeps increasing', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.layerNamesState.next(['m1/layerA']);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+
+        service.numViews = 2;
+
+        const destination = Cartographic.fromDegrees(7.75, 50.2, 123456);
+        const orientation = { heading: 0.5, pitch: -0.4, roll: 0.3 };
+
+        service.setView(1, destination, orientation);
+        service.setProjectionMode(1, true);
+        service.setLayerSyncOption(1, true);
+        service.setBackgroundState(1, null, 17);
+        service.viewTileBordersState.next(1, false);
+        service.viewTileGridModeState.next(1, 'xyz');
+        service.setMapLayerConfig('m1', 'layerA', [
+            { autoLevel: true, visible: true, level: 13 },
+            { autoLevel: false, visible: false, level: 5 }
+        ]);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5, 0.25]);
+
+        service.numViews = 3;
+
+        expect(service.numViews).toBe(3);
+        expect(service.cameraViewDataState.getValue(2)).toEqual(service.cameraViewDataState.getValue(1));
+        expect(service.cameraViewDataState.getValue(2)).not.toBe(service.cameraViewDataState.getValue(1));
+        expect(service.mode2dState.getValue(2)).toBe(true);
+        expect(service.getLayerSyncOption(2)).toBe(true);
+        expect(service.getBackgroundState(2)).toEqual({ layerId: null, opacity: 17 });
+        expect(service.viewTileBordersState.getValue(2)).toBe(false);
+        expect(service.viewTileGridModeState.getValue(2)).toBe('xyz');
+        expect(service.layerVisibilityState.getValue(2)).toEqual([false]);
+        expect(service.layerVisibilityState.getValue(2)).not.toBe(service.layerVisibilityState.getValue(1));
+        expect(service.layerZoomLevelState.getValue(2)).toEqual([5]);
+        expect(service.layerAutoZoomLevelState.getValue(2)).toEqual([false]);
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.25, 0.25]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -353,6 +505,8 @@ describe('AppStateService', () => {
         const stylesMap = service.stylesState.getValue();
         expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5]);
         expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([false]);
+        expect(localStorage.getItem('overlay~0~opacity~debug')).toBe('0.5~0');
+        expect(localStorage.getItem('styleOptions')).toBeNull();
 
         // Expect URL sync to use compact style option encoding
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
@@ -362,6 +516,23 @@ describe('AppStateService', () => {
             queryParamsHandling: 'merge',
             replaceUrl: true,
         }));
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates compact style option entries from localStorage', async () => {
+        localStorage.setItem('layerNames', JSON.stringify(['m1/layerA']));
+        localStorage.setItem('overlay~0~opacity', '0.5');
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -713,7 +884,7 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('stores inspection dialog layout directly on selection panels', () => {
+    it('stores inspection dialog layout in dialogLayouts state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
@@ -726,17 +897,17 @@ describe('AppStateService', () => {
         service.setInspectionDialogPosition(11, { left: 10, top: 20 }, 0);
         service.setInspectionDialogPosition(22, { left: 30, top: 40 }, 0);
 
-        const first = service.getInspectionDialogLayoutEntry(11);
-        const second = service.getInspectionDialogLayoutEntry(22);
+        const first = service.getInspectionDialogLayout(11);
+        const second = service.getInspectionDialogLayout(22);
         expect(first?.slot).toBe(0);
         expect(second?.slot).toBe(0);
 
         service.setInspectionDialogPosition(11, { left: 12, top: 24 }, 9);
-        expect(service.getInspectionDialogLayoutEntry(11)?.slot).toBe(0);
+        expect(service.getInspectionDialogLayout(11)?.slot).toBe(0);
 
         service.pruneInspectionDialogLayout([22]);
-        expect(service.getInspectionDialogLayoutEntry(11)?.position).toEqual({ left: 12, top: 24 });
-        expect(service.getInspectionDialogLayoutEntry(22)?.position).toEqual({ left: 30, top: 40 });
+        expect(service.getInspectionDialogLayout(11)).toBeUndefined();
+        expect(service.getInspectionDialogLayout(22)?.position).toEqual({ left: 30, top: 40 });
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -768,8 +939,9 @@ describe('AppStateService', () => {
         const persistedSelection = localStorage.getItem('selected') ?? '';
         expect(persistedSelection).toContain('~555555~');
         expect(persistedSelection).not.toContain('#555555');
-        expect(localStorage.getItem('selected')).toContain('3:100:200');
-        expect(localStorage.getItem('inspectionDialogLayoutState')).toBeNull();
+        expect(localStorage.getItem('selected')).not.toContain('3:100:200');
+        expect(localStorage.getItem('dialogLayouts')).toContain('"inspection:5"');
+        expect(localStorage.getItem('dialogLayouts')).toContain('"slot":3');
         expect(localStorage.getItem('inspectionComparisonState')).toContain('"panelId":5');
 
         service.closeInspectionComparison();
@@ -911,6 +1083,405 @@ describe('AppStateService', () => {
             },
             others: []
         });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('exports app state entries with compact style option storage keys', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.markerState.next(true);
+        service.layerNamesState.next(['m1/layerA']);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        const snapshot = service.exportSnapshot();
+
+        expect(snapshot).toHaveProperty('marker');
+        expect(snapshot).toHaveProperty('numberOfViews');
+        expect(snapshot).not.toHaveProperty('styleOptions');
+        expect(snapshot).toHaveProperty('overlay~0~opacity', '0.5');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('omits transient dialog visibility flags from exported snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.openDialog('advanced-preferences-dialog');
+        const snapshot = service.exportSnapshot();
+
+        expect(snapshot).not.toHaveProperty('advancedPreferencesDialogVisible');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('restores dialog visibility from dialogLayouts snapshot state', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            dialogLayouts: {
+                "advanced-preferences-dialog": {
+                    position: {left: 10, top: 20},
+                    size: {width: 400, height: 300},
+                    open: true
+                }
+            }
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.isDialogOpen('advanced-preferences-dialog')).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('restores style dialog state from snapshot data', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            styleEditorTarget: 'generic',
+            dialogLayouts: {
+                "styles-dialog": {
+                    position: {left: 10, top: 20},
+                    size: {width: 500, height: 400},
+                    open: true
+                },
+                "style-editor-dialog": {
+                    position: {left: 30, top: 40},
+                    size: {width: 600, height: 500},
+                    open: true
+                }
+            }
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.isDialogOpen('styles-dialog')).toBe(true);
+        expect(service.isDialogOpen('style-editor-dialog')).toBe(true);
+        expect(service.styleEditorTargetId).toBe('generic');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects snapshot imports with unknown top-level keys and applies nothing', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.markerState.next(false);
+        const errors = service.importSnapshot({
+            marker: true,
+            unknownState: 1
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('imports valid partial snapshots and keeps missing states unchanged', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.markerState.next(false);
+
+        const errors = service.importSnapshot({
+            marker: true
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.markerState.getValue()).toBe(true);
+        expect(service.isDialogOpen('preferences-dialog')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('imports compact style option entries after applying layer state', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            layerNames: ['m1/layerA'],
+            'overlay~0~opacity~debug': '0.5~1'
+        });
+
+        expect(errors).toEqual([]);
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
+        expect(service.stylesState.getValue().get('m1/layerA/overlay/debug')).toEqual(['1']);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects non-string compact style option snapshot values before mutation', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.importSnapshot({
+            marker: true,
+            'overlay~0~opacity': [0.5]
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(service.stylesState.getValue().size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects prototype-pollution keys in snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const payload = JSON.parse('{"marker": true, "__proto__": {"polluted": true}}');
+        const errors = service.importSnapshot(payload);
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(({} as any).polluted).toBeUndefined();
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects nested __proto__ keys in snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const payload = JSON.parse('{"styleOptions": {"valid/key": [true], "__proto__": {"polluted": true}}}');
+        const errors = service.importSnapshot(payload);
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(({} as any).polluted).toBeUndefined();
+        expect(service.stylesState.getValue().size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects constructor.prototype payloads in snapshots', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const payload = JSON.parse('{"styleOptions": {"constructor": {"prototype": {"polluted": true}}}}');
+        const errors = service.importSnapshot(payload);
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(({} as any).polluted).toBeUndefined();
+        expect(service.stylesState.getValue().size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects oversized snapshot strings before state mutation', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const limits = service.getSnapshotImportLimits();
+
+        const errors = service.importSnapshot({
+            erdblickVersion: 'x'.repeat(limits.maxStringLength + 1)
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.erdblickVersion.getValue()).toBe('');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects snapshots that exceed the max nesting depth', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const limits = service.getSnapshotImportLimits();
+
+        const deepValue: Record<string, unknown> = {};
+        let cursor: Record<string, unknown> = deepValue;
+        for (let index = 0; index < limits.maxNestingDepth + 1; index++) {
+            cursor['next'] = {};
+            cursor = cursor['next'] as Record<string, unknown>;
+        }
+
+        const errors = service.importSnapshot({
+            styleOptions: deepValue
+        });
+
+        expect(errors.length).toBeGreaterThan(0);
+        expect(service.stylesState.getValue().size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('applies config default state for a fresh profile before hydration', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.seedConfigDefaultState({marker: true}, "cfg-hash-1");
+        expect(errors).toEqual([]);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps legacy localStorage values without metadata over seeded config defaults', async () => {
+        localStorage.setItem('marker', '0');
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: true}, "cfg-hash-2");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces config-owned localStorage values with current config defaults', async () => {
+        localStorage.setItem('marker', '0');
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'old-cfg',
+            entries: {
+                marker: {
+                    owner: 'config',
+                    valueHash: 'old'
+                }
+            }
+        }));
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: true}, "cfg-hash-3");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps user-owned localStorage values over seeded config defaults', async () => {
+        localStorage.setItem('marker', '0');
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'cfg',
+            entries: {
+                marker: {
+                    owner: 'user',
+                    valueHash: 'user'
+                }
+            }
+        }));
+
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: true}, "cfg-hash-4");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps URL parameters as highest precedence over config and localStorage', async () => {
+        localStorage.setItem('marker', '0');
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'cfg',
+            entries: {
+                marker: {
+                    owner: 'user',
+                    valueHash: 'user'
+                }
+            }
+        }));
+
+        const routerStub = createRouterStub({m: '1'});
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.seedConfigDefaultState({marker: false}, "cfg-hash-5");
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('returns validation errors for invalid config default snapshots and leaves defaults unchanged', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.seedConfigDefaultState({marker: ["bad"]}, "cfg-hash-6");
+        expect(errors.length).toBeGreaterThan(0);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
+        expect(warnSpy).toHaveBeenCalled();
+
+        warnSpy.mockRestore();
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('ignores empty config default snapshots', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const errors = service.seedConfigDefaultState({}, "cfg-hash-empty");
+        expect(errors).toEqual([]);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.markerState.getValue()).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();

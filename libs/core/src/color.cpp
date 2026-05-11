@@ -66,6 +66,7 @@ Color::Color(uint8_t r, uint8_t g, uint8_t b) : glm::u8vec3(r, g, b) {
 
 namespace {
 
+/** Clamp a normalized float component and map it into 8-bit RGB space. */
 uint8_t mapToIntColorSpace(float val){
     return static_cast<uint8_t>(std::max(0.f, std::min(val, 1.f)) * 255);
 }

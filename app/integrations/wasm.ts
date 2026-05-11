@@ -1,5 +1,6 @@
 import MainModuleFactory, {MainModule as ErdblickCore, SharedUint8Array} from '../../build/libs/core/erdblick-core';
 
+/** Emscripten module surface used directly by the frontend. */
 export interface ErdblickCore_ extends ErdblickCore {
     HEAPU8: Uint8Array
 }
@@ -10,6 +11,7 @@ export let coreLib: any;
 let __initializingPromise: Promise<void> | null = null;
 
 // Served by Angular as a static asset; see angular.json assets (/bundle/wasm).
+/** Initializes the shared WASM module singleton exactly once. */
 export async function initializeLibrary(): Promise<void> {
     // If the real library has already been initialized, simply reuse the existing instance.
     if (coreLib) {
@@ -60,6 +62,7 @@ export function uint8ArrayFromWasm<T>(fun: (data: SharedUint8Array) => T | false
  */
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T, inputData: Uint8Array): T;
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null;
+/** Copies a JS byte array into WASM memory, runs a callback, and cleans up the shared buffer. */
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null {
     let sharedGlbArray: SharedUint8Array | null = null;
     try {
@@ -85,6 +88,7 @@ export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inp
  */
 export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T> | T, inputData: Uint8Array): Promise<T>;
 export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null>;
+/** Async variant of `uint8ArrayToWasm` for callbacks that await additional work. */
 export async function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null> {
     let sharedGlbArray: SharedUint8Array | null = null;
     try {
@@ -99,7 +103,7 @@ export async function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Pro
     }
 }
 
-/** Memory usage log. */
+/** Logs the current WASM heap usage for ad-hoc debugging. */
 export function logFreeMemory() {
     let avail = coreLib!.getFreeMemory()/1024/1024;
     let total = coreLib!.getTotalMemory()/1024/1024;

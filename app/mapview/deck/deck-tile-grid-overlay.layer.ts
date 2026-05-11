@@ -16,6 +16,7 @@ export const TILE_STATE_KIND_NONE = 0;
 export const TILE_STATE_KIND_ERROR = 1;
 export const TILE_STATE_KIND_EMPTY = 2;
 
+/** Uniform payload for the line-only tile-grid shader module. */
 interface TileGridShaderModuleProps {
     localMin?: [number, number];
     localSize?: [number, number];
@@ -27,6 +28,7 @@ interface TileGridShaderModuleProps {
     gridMode?: number;
 }
 
+/** Uniform payload for the tile-state raster sampling shader module. */
 interface TileStateShaderModuleProps {
     localMin?: [number, number];
     localSize?: [number, number];
@@ -35,6 +37,7 @@ interface TileStateShaderModuleProps {
     tileStateTexture?: Texture;
 }
 
+/** Small numeric clamp helper used while normalizing shader uniforms. */
 function clamp(value: number, minValue: number, maxValue: number): number {
     return Math.max(minValue, Math.min(maxValue, value));
 }
@@ -44,6 +47,7 @@ in vec3 tileGridNdsCorrectionCoefficients;
 out vec2 tileGridLocal01;
 out vec3 tileGridNdsCorrection;`;
 
+/** Generates the shared vertex-stage projection code used by both grid and tile-state overlays. */
 function tileGridCommonVertexFilter(uniformName: string): string {
     return `vec2 projectedCoords = (geometry.position.xy + project.commonOrigin.xy) / TILE_GRID_WORLD_SIZE;
 if (${uniformName}.gridMode > 0.5) {
@@ -58,6 +62,7 @@ if (${uniformName}.gridMode > 0.5) {
 tileGridNdsCorrection = tileGridNdsCorrectionCoefficients;`;
 }
 
+/** Generates the shared fragment helper that remaps interpolated local coordinates for NDS mode. */
 function tileGridCommonFragmentDecl(uniformName: string): string {
     return `in vec2 tileGridLocal01;
 in vec3 tileGridNdsCorrection;
@@ -78,6 +83,7 @@ vec2 tile_grid_local_coords() {
 }`;
 }
 
+/** Shader module that draws grid lines directly in fragment space over a single quad. */
 const tileGridOverlayShaderModule: ShaderModule = {
     name: "tileGridOverlay",
     vs: `\
@@ -143,6 +149,7 @@ uniform tileGridOverlayUniforms {
     }
 };
 
+/** Shader module that samples a tile-state raster texture using the same local coordinate remap as the grid. */
 const tileGridStateOverlayShaderModule: ShaderModule = {
     name: "tileGridStateOverlay",
     vs: `\
@@ -191,10 +198,12 @@ uniform sampler2D tileGridStateOverlayTexture;
     }
 };
 
+/** Returns the per-datum NDS quadratic correction, defaulting to the identity mapping. */
 function tileGridDatumCorrection(datum: TileGridOverlayDatum): [number, number, number] {
     return datum.ndsYCorrection ?? TILE_GRID_IDENTITY_CORRECTION;
 }
 
+/** Adds the custom per-datum NDS correction attribute required by both overlay layers. */
 function addTileGridCorrectionAttribute(layer: SolidPolygonLayer<TileGridOverlayDatum, any>): void {
     layer.getAttributeManager()?.add({
         tileGridNdsCorrectionCoefficients: {
@@ -205,6 +214,7 @@ function addTileGridCorrectionAttribute(layer: SolidPolygonLayer<TileGridOverlay
     });
 }
 
+/** Creates the texture that backs the tile-state overlay, falling back to a transparent 1x1 texel. */
 function createTileStateTexture(device: any, imageData: ImageData | null): Texture {
     if (!imageData) {
         return device.createTexture({
@@ -236,11 +246,13 @@ function createTileStateTexture(device: any, imageData: ImageData | null): Textu
     });
 }
 
+/** Single overlay polygon plus its optional per-band NDS correction coefficients. */
 export interface TileGridOverlayDatum {
     polygon: [number, number][];
     ndsYCorrection?: [number, number, number];
 }
 
+/** Props for the shader-driven tile-grid line overlay. */
 export interface TileGridOverlayLayerProps extends SolidPolygonLayerProps<TileGridOverlayDatum> {
     gridMode: "xyz" | "nds";
     localMin: [number, number];
@@ -252,6 +264,7 @@ export interface TileGridOverlayLayerProps extends SolidPolygonLayerProps<TileGr
     debugSolid: boolean;
 }
 
+/** Props for the shader-driven tile-state raster overlay. */
 export interface TileGridStateOverlayLayerProps extends SolidPolygonLayerProps<TileGridOverlayDatum> {
     gridMode: "xyz" | "nds";
     localMin: [number, number];
@@ -271,11 +284,13 @@ interface TileGridStateOverlayLayerState {
 export class TileGridOverlayLayer extends SolidPolygonLayer<TileGridOverlayDatum, TileGridOverlayLayerProps> {
     static override layerName = "TileGridOverlayLayer";
 
+    /** Installs the custom attribute that carries the NDS correction coefficients per polygon. */
     override initializeState(): void {
         super.initializeState();
         addTileGridCorrectionAttribute(this);
     }
 
+    /** Injects the custom shader modules and fragment logic that renders the grid in screen space. */
     override getShaders(type: any): any {
         const baseShaders = super.getShaders(type);
         const existingVsDecl = baseShaders.inject?.["vs:#decl"] ?? "";
@@ -332,6 +347,7 @@ if (tileGridOverlay.debugSolid > 0.5) {
         };
     }
 
+    /** Normalizes the public props into shader-module uniforms before delegating to deck. */
     override draw(params: any): void {
         const lineColor = this.props.lineColor ?? [255, 255, 255, 255];
         this.setShaderModuleProps({
@@ -364,12 +380,14 @@ export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlay
 
     declare state: SolidPolygonLayer<TileGridOverlayDatum, TileGridStateOverlayLayerProps>["state"] & TileGridStateOverlayLayerState;
 
+    /** Creates the initial empty texture and installs the shared NDS correction attribute. */
     override initializeState(): void {
         super.initializeState();
         addTileGridCorrectionAttribute(this);
         this.state.tileStateTexture = createTileStateTexture(this.context.device, null);
     }
 
+    /** Rebuilds the backing texture only when the caller supplied new image data. */
     override updateState(params: any): void {
         super.updateState(params);
         if (params.props.imageData === params.oldProps.imageData) {
@@ -379,11 +397,13 @@ export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlay
         this.state.tileStateTexture = createTileStateTexture(this.context.device, params.props.imageData);
     }
 
+    /** Releases the backing texture before the layer is finalized. */
     override finalizeState(context: any): void {
         this.state.tileStateTexture?.delete();
         super.finalizeState(context);
     }
 
+    /** Injects the shader logic that samples the tile-state raster in local tile-grid coordinates. */
     override getShaders(type: any): any {
         const baseShaders = super.getShaders(type);
         const existingVsDecl = baseShaders.inject?.["vs:#decl"] ?? "";
@@ -416,6 +436,7 @@ color = vec4(stateColor.rgb, stateColor.a * layer.opacity);`
         };
     }
 
+    /** Normalizes the public props into shader-module uniforms before delegating to deck. */
     override draw(params: any): void {
         this.setShaderModuleProps({
             tileGridStateOverlay: {
@@ -433,6 +454,7 @@ color = vec4(stateColor.rgb, stateColor.a * layer.opacity);`
     }
 }
 
+/** Returns the default full-world quad used when callers need a single overlay datum. */
 export function tileGridOverlayData(): TileGridOverlayDatum[] {
     return [{polygon: TILE_GRID_WORLD_RING, ndsYCorrection: TILE_GRID_IDENTITY_CORRECTION}];
 }

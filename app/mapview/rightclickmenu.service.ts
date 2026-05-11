@@ -5,6 +5,7 @@ import {Color, HeightReference, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 
+/** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
     id: bigint | string,
     name: string,
@@ -12,6 +13,7 @@ export interface SourceDataDropdownOption {
     tileLevel?: number;
 }
 
+/** Rectangle payload that the views use to render a temporary tile outline. */
 export interface TileOutlinePayload {
     rectangle: {
         coordinates: {
@@ -25,23 +27,28 @@ export interface TileOutlinePayload {
 }
 
 @Injectable()
+/**
+ * Owns the dynamic right-click menu content for the map view.
+ * The service tracks source-data context so the menu can offer quick repeat actions across tiles.
+ */
 export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
-    tileSourceDataDialogVisible: boolean = false;
     preferredTileIdForSourceData: bigint | null = null;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
+    private sourceDataDialogVisible = false;
 
+    /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService) {
         this.menuItems.next([{
             label: 'Inspect Source Data for Tile',
             icon: 'pi pi-database',
             command: () => {
-                this.tileSourceDataDialogVisible = true;
+                this.openTileSourceDataDialog();
             }
         }]);
 
@@ -67,6 +74,25 @@ export class RightClickMenuService {
         });
     }
 
+    /** Returns whether the source-data picker dialog is currently visible. */
+    isSourceDataDialogOpen(): boolean {
+        return this.sourceDataDialogVisible;
+    }
+
+    /** Opens the source-data picker dialog. */
+    openTileSourceDataDialog(): void {
+        this.sourceDataDialogVisible = true;
+    }
+
+    /** Closes the source-data picker dialog. */
+    closeTileSourceDataDialog(): void {
+        this.sourceDataDialogVisible = false;
+    }
+
+    /**
+     * Chooses the best source-data tile candidate for the current context.
+     * Preference is: explicit user choice, last inspected level, then deepest enabled tile.
+     */
     preferredSourceDataTile(tileIds: SourceDataDropdownOption[]): SourceDataDropdownOption | undefined {
         if (this.preferredTileIdForSourceData !== null) {
             const preferredTile = tileIds.find(tileId => tileId.id === this.preferredTileIdForSourceData && !tileId.disabled);
@@ -93,6 +119,7 @@ export class RightClickMenuService {
         return undefined;
     }
 
+    /** Publishes a temporary outline rectangle for a tile id, mainly for source-data picking. */
     outlineTile(tileId: bigint, color: Color = Color.HOTPINK) {
         const tileBox = coreLib.getTileBox(tileId);
         this.tileOutline.next({
@@ -107,6 +134,7 @@ export class RightClickMenuService {
         });
     }
 
+    /** Replaces the leading menu item with a shortcut that reuses the last inspected source-data layer. */
     private updateMenuForLastInspectedSourceData(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}) {
         const menuItem = {
             label: 'Inspect Source Data with Last Layer',

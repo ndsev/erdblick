@@ -26,6 +26,7 @@ export interface MapTileStreamStatusRequest {
     layerId: string;
     status: MapTileRequestStatus;
     statusText: string;
+    noDataSourceReason?: string;
 }
 
 export interface MapTileStreamStatusPayload {
@@ -75,6 +76,30 @@ export interface MapTileStreamTransportCompressionStats {
     knownCompressedCoveragePct: number;
 }
 
+export interface MapTileStreamDebugState {
+    isOpen: boolean;
+    awaitingCompletion: boolean;
+    latestRequestedRequestId: number | null;
+    incomingRequestId: number | null;
+    supportsRequestContextFrames: boolean;
+    pullClientId: number | null;
+    pendingFrameQueueSize: number;
+    frameProcessingPaused: boolean;
+    pullCompressionEnabled: boolean;
+    pullBatchMaxBytesBudget: number;
+    downstreamBytesPerSecondEwma: number;
+    totalPullResponses: number;
+    totalPullGzipResponses: number;
+    lastStatusPayload: Pick<MapTileStreamStatusPayload, 'requestId' | 'allDone' | 'message'> & {
+        requestCount: number;
+    } | null;
+}
+
+/**
+ * WebSocket client for `/tiles` plus the optional `/tiles/next` pull loop.
+ * It hides frame parsing, request chunking, status tracking, and adaptive pull budgeting
+ * behind callback-style hooks that `MapDataService` can consume from outside Angular.
+ */
 export class MapTileStreamClient {
     private socket: WebSocket | null = null;
     private connecting: Promise<void> | null = null;
@@ -123,45 +148,54 @@ export class MapTileStreamClient {
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
+    /** Creates the parser and remembers the relative backend path for websocket and pull calls. */
     constructor(private path: string = "tiles") {
         this.parser = new coreLib.TileLayerParser();
     }
 
+    /** Registers the callback that receives feature payload frames without the transport header. */
     withFeaturesCallback(callback: (payload: Uint8Array) => void) {
         this.onFeatures = callback;
         return this;
     }
 
+    /** Registers the callback that receives source-data payload frames without the transport header. */
     withSourceDataCallback(callback: (payload: Uint8Array) => void) {
         this.onSourceData = callback;
         return this;
     }
 
+    /** Registers the callback that receives field-dictionary update frames. */
     withFieldsCallback(callback: (frame: Uint8Array) => void) {
         this.onFields = callback;
         return this;
     }
 
+    /** Registers the callback that receives parsed `/tiles` status payloads. */
     withStatusCallback(callback: (status: MapTileStreamStatusPayload) => void) {
         this.onStatus = callback;
         return this;
     }
 
+    /** Registers a websocket error callback. */
     withErrorCallback(callback: (event: Event) => void) {
         this.onError = callback;
         return this;
     }
 
+    /** Registers a websocket close callback. */
     withCloseCallback(callback: (event: CloseEvent) => void) {
         this.onClose = callback;
         return this;
     }
 
+    /** Seeds the parser with datasource info from JSON text. */
     setDataSourceInfoJson(json: string) {
         const buffer = new TextEncoder().encode(json);
         return this.setDataSourceInfoBuffer(buffer);
     }
 
+    /** Seeds the parser with datasource info from a serialized buffer. */
     setDataSourceInfoBuffer(buffer: Uint8Array) {
         uint8ArrayToWasm((wasmBuffer: any) => {
             this.parser.setDataSourceInfo(wasmBuffer);
@@ -169,10 +203,12 @@ export class MapTileStreamClient {
         return this;
     }
 
+    /** Returns true while the websocket connection is open. */
     isOpen(): boolean {
         return this.socket?.readyState === WebSocket.OPEN;
     }
 
+    /** Closes the websocket, ignoring close failures from already-dead sockets. */
     close(code?: number, reason?: string) {
         if (!this.socket) {
             return;
@@ -184,6 +220,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Tears down websocket, pull loops, parser state, and any pending completion promise. */
     destroy() {
         this.close(1000, "done");
         this.awaitingCompletion = false;
@@ -201,11 +238,13 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Drops queued frames that have not yet been handed to the parser or render pipeline. */
     clearPendingFrames() {
         console.log(`Clearing ${this.frameQueue.length} frames.`)
         this.frameQueue = [];
     }
 
+    /** Pauses or resumes frame handling so the rest of the app can shed load temporarily. */
     setFrameProcessingPaused(paused: boolean) {
         this.frameProcessingPaused = paused;
         if (!paused && this.frameQueue.length) {
@@ -213,22 +252,27 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Enables or disables gzip-aware `/tiles/next` pull requests. */
     setPullCompressionEnabled(enabled: boolean) {
         this.pullCompressionEnabled = !!enabled;
     }
 
+    /** Exposes whether queued websocket frames are currently held back. */
     get isFrameProcessingPaused(): boolean {
         return this.frameProcessingPaused;
     }
 
+    /** Returns the EWMA downstream throughput used to size future pull batches. */
     getDownstreamBytesPerSecond(): number {
         return this.downstreamBytesPerSecondEwma;
     }
 
+    /** Returns the number of queued websocket frames waiting to be processed. */
     getPendingFrameQueueSize(): number {
         return this.frameQueue.length;
     }
 
+    /** Returns aggregated compression metrics for `/tiles/next` responses. */
     getTransportCompressionStats(): MapTileStreamTransportCompressionStats {
         const ratioPct = this.knownCompressedUncompressedBytes > 0
             ? (this.knownCompressedBytes / this.knownCompressedUncompressedBytes) * 100
@@ -250,11 +294,40 @@ export class MapTileStreamClient {
         };
     }
 
+    /** Returns a compact snapshot of pull-loop and websocket state for CI diagnostics. */
+    getDebugState(): MapTileStreamDebugState {
+        return {
+            isOpen: this.isOpen(),
+            awaitingCompletion: this.awaitingCompletion,
+            latestRequestedRequestId: this.latestRequestedRequestId,
+            incomingRequestId: this.incomingRequestId,
+            supportsRequestContextFrames: this.supportsRequestContextFrames,
+            pullClientId: this.pullClientId,
+            pendingFrameQueueSize: this.frameQueue.length,
+            frameProcessingPaused: this.frameProcessingPaused,
+            pullCompressionEnabled: this.pullCompressionEnabled,
+            pullBatchMaxBytesBudget: this.pullBatchMaxBytesBudget,
+            downstreamBytesPerSecondEwma: this.downstreamBytesPerSecondEwma,
+            totalPullResponses: this.totalPullResponses,
+            totalPullGzipResponses: this.totalPullGzipResponses,
+            lastStatusPayload: this.lastStatusPayload
+                ? {
+                    requestId: this.lastStatusPayload.requestId,
+                    allDone: this.lastStatusPayload.allDone,
+                    message: this.lastStatusPayload.message,
+                    requestCount: this.lastStatusPayload.requests.length
+                }
+                : null
+        };
+    }
+
+    /** Sends an arbitrary JSON-compatible request body, mostly for tests and auxiliary calls. */
     sendRequest(body: object | string) {
         const payload = typeof body === "string" ? body : JSON.stringify(body);
         return this.sendSerializedRequests([payload]);
     }
 
+    /** Sends one or more pre-serialized request payloads and resets completion tracking. */
     private sendSerializedRequests(payloads: string[]) {
         this.awaitingCompletion = true;
         this.lastStatusPayload = null;
@@ -275,6 +348,10 @@ export class MapTileStreamClient {
         return this;
     }
 
+    /**
+     * Sends the current logical `/tiles` request if it differs from the last one.
+     * Large requests are chunked across multiple websocket messages but still share one request id.
+     */
     async updateRequest(tileLayerRequests: any[]) {
         const stringPoolOffsets = this.parser!.getFieldDictOffsets();
         const requestBodyBase = {
@@ -308,6 +385,10 @@ export class MapTileStreamClient {
         }
     }
 
+    /**
+     * Splits oversized `/tiles` requests at request-group boundaries so the backend can process
+     * each map/layer/level group independently without reassembly.
+     */
     private buildRequestPayloads(
         tileLayerRequests: any[],
         stringPoolOffsets: unknown,
@@ -371,16 +452,19 @@ export class MapTileStreamClient {
         return chunks.map(chunk => JSON.stringify(chunk));
     }
 
+    /** Measures the UTF-8 payload size that matters for websocket message limits. */
     private byteLength(payload: string): number {
         return this.encoder.encode(payload).byteLength;
     }
 
+    /** Waits until the most recent send attempt either completed or failed. */
     async waitForSend(): Promise<void> {
         if (this.lastRequestPromise) {
             await this.lastRequestPromise;
         }
     }
 
+    /** Waits for the backend to report completion of the latest logical `/tiles` request. */
     async waitForCompletion(): Promise<MapTileStreamStatusPayload> {
         if (this.lastRequestPromise) {
             await this.lastRequestPromise;
@@ -395,6 +479,7 @@ export class MapTileStreamClient {
         return this.ensureCompletionPromise();
     }
 
+    /** Convenience wrapper that waits for completion and then destroys the transport. */
     async waitAndDestroy(): Promise<MapTileStreamStatusPayload> {
         try {
             return await this.waitForCompletion();
@@ -403,6 +488,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Opens the websocket once and reuses an in-flight connection attempt for concurrent callers. */
     async connect(): Promise<void> {
         if (this.socket?.readyState === WebSocket.OPEN) {
             return;
@@ -467,6 +553,7 @@ export class MapTileStreamClient {
         return this.connecting;
     }
 
+    /** Lazily allocates the promise resolved by the final `/tiles` status frame. */
     private ensureCompletionPromise(): Promise<MapTileStreamStatusPayload> {
         if (!this.completionPromise) {
             this.completionPromise = new Promise((resolve, reject) => {
@@ -477,12 +564,14 @@ export class MapTileStreamClient {
         return this.completionPromise;
     }
 
+    /** Clears the cached completion promise and its resolve/reject callbacks. */
     private resetCompletionPromise() {
         this.completionPromise = null;
         this.completionResolve = null;
         this.completionReject = null;
     }
 
+    /** Resolves the outstanding completion promise and caches the terminal status payload. */
     private resolveCompletion(payload: MapTileStreamStatusPayload) {
         this.awaitingCompletion = false;
         this.lastStatusPayload = payload;
@@ -492,6 +581,7 @@ export class MapTileStreamClient {
         this.resetCompletionPromise();
     }
 
+    /** Rejects the outstanding completion promise after a transport-level failure. */
     private rejectCompletion(error: unknown) {
         this.awaitingCompletion = false;
         if (this.completionReject) {
@@ -500,6 +590,7 @@ export class MapTileStreamClient {
         this.resetCompletionPromise();
     }
 
+    /** Resolves the websocket URL relative to the current document and upgrades HTTP to WS. */
     private resolveUrl(): string {
         const url = new URL(this.path, document.baseURI);
         if (url.protocol === "http:") {
@@ -510,6 +601,7 @@ export class MapTileStreamClient {
         return url.toString();
     }
 
+    /** Queues a raw websocket message for budgeted processing on the next timer tick. */
     private enqueueFrame(data: ArrayBuffer | Blob) {
         this.frameQueue.push(data);
         if (this.frameProcessingPaused) {
@@ -518,6 +610,7 @@ export class MapTileStreamClient {
         this.scheduleFrameProcessing(0);
     }
 
+    /** Schedules frame processing if no timer is already pending. */
     private scheduleFrameProcessing(delayMs: number) {
         if (this.frameProcessingPaused) {
             return;
@@ -533,6 +626,7 @@ export class MapTileStreamClient {
         }, delayMs);
     }
 
+    /** Drains queued websocket messages until the per-tick frame budget is exhausted. */
     private async processFrameQueue() {
         if (this.processingFrameQueue || this.frameProcessingPaused) {
             return;
@@ -562,6 +656,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Normalizes websocket messages to byte arrays and iterates over packed transport frames. */
     private async handleMessage(data: ArrayBuffer | Blob): Promise<void> {
         let bytes: Uint8Array;
 
@@ -602,6 +697,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
     private async handleFrame(bytes: Uint8Array, type: number): Promise<void> {
         if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
             return;
@@ -685,6 +781,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Filters stale status/context frames that belong to an older logical request id. */
     private matchesCurrentRequest(requestId: number | undefined): boolean {
         if (this.latestRequestedRequestId === null) {
             return true;
@@ -695,6 +792,7 @@ export class MapTileStreamClient {
         return requestId === this.latestRequestedRequestId;
     }
 
+    /** Restarts the background pull loops when the server advertises pull-based delivery. */
     private startPullLoops() {
         this.stopPullLoops();
         if (this.pullClientId === null) {
@@ -711,6 +809,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Aborts every active `/tiles/next` pull loop. */
     private stopPullLoops() {
         for (const controller of this.pullControllers) {
             controller.abort();
@@ -718,6 +817,7 @@ export class MapTileStreamClient {
         this.pullControllers = [];
     }
 
+    /** Long-polls `/tiles/next` until the server reports the request is gone or the controller aborts. */
     private async runPullLoop(controller: AbortController) {
         while (!controller.signal.aborted) {
             const clientId = this.pullClientId;
@@ -770,6 +870,7 @@ export class MapTileStreamClient {
         }
     }
 
+    /** Builds the `/tiles/next` URL with the current adaptive batch size and compression flags. */
     private resolvePullUrl(clientId: number): string {
         const normalizedPath = this.path.replace(/\/+$/, "");
         const pullUrl = new URL(`${normalizedPath}/next`, document.baseURI);
@@ -780,10 +881,12 @@ export class MapTileStreamClient {
         return pullUrl.toString();
     }
 
+    /** Returns the currently advertised `maxBytes` budget for the next pull response. */
     private currentPullMaxBytes(): number {
         return this.pullBatchMaxBytesBudget;
     }
 
+    /** Monotonically raises the pull batch budget toward the observed downstream throughput. */
     private updatePullMaxBytes(estimatedBytesPerSecond: number) {
         const estimated = Math.max(this.pullBatchMinBytes, Math.floor(estimatedBytesPerSecond));
         this.pullBatchMaxBytesBudget = Math.min(
@@ -791,6 +894,7 @@ export class MapTileStreamClient {
             Math.max(this.pullBatchMaxBytesBudget, estimated));
     }
 
+    /** Feeds an EWMA throughput estimate from observed pull response sizes and durations. */
     private recordDownstreamSample(bytes: number, elapsedMs: number) {
         if (bytes <= 0 || elapsedMs <= 0) {
             return;
@@ -804,6 +908,7 @@ export class MapTileStreamClient {
         this.updatePullMaxBytes(this.downstreamBytesPerSecondEwma);
     }
 
+    /** Updates aggregate compression counters from a completed pull response. */
     private recordPullTransportSample(response: Response, uncompressedBytes: number) {
         this.totalPullResponses += 1;
         this.totalUncompressedBytes += Math.max(0, uncompressedBytes);
@@ -820,6 +925,7 @@ export class MapTileStreamClient {
         this.knownCompressedUncompressedBytes += Math.max(0, uncompressedBytes);
     }
 
+    /** Returns true when the response body was transferred with gzip content encoding. */
     private hasGzipContentEncoding(response: Response): boolean {
         const header = response.headers.get("content-encoding");
         if (!header) {
@@ -828,6 +934,7 @@ export class MapTileStreamClient {
         return header.toLowerCase().includes("gzip");
     }
 
+    /** Extracts the compressed transfer size from preferred custom headers or `content-length`. */
     private extractCompressedBodyBytes(response: Response): number | null {
         const preferredHeader = this.parseNonNegativeIntegerHeader(response.headers.get("x-mapget-compressed-bytes"));
         if (preferredHeader !== null) {
@@ -836,6 +943,7 @@ export class MapTileStreamClient {
         return this.parseNonNegativeIntegerHeader(response.headers.get("content-length"));
     }
 
+    /** Parses integer response headers while rejecting negative and malformed values. */
     private parseNonNegativeIntegerHeader(rawValue: string | null): number | null {
         if (!rawValue) {
             return null;
@@ -847,6 +955,7 @@ export class MapTileStreamClient {
         return parsed;
     }
 
+    /** Abort-aware timeout used by the pull loop retry path. */
     private async delay(ms: number, signal: AbortSignal): Promise<void> {
         if (signal.aborted || ms <= 0) {
             return;

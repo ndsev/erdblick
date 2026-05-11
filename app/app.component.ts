@@ -1,13 +1,20 @@
 import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "./mapdata/map.service";
-import {AppStateService, Versions} from "./shared/appstate.service";
+import {
+    AppStateService,
+    DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
+    Versions
+} from "./shared/appstate.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
 import {DialogStackService} from "./shared/dialog-stack.service";
 import {Title} from "@angular/platform-browser";
 import {KeyboardService} from "./shared/keyboard.service";
+import {AppConfigService} from "./shared/app-config.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -18,14 +25,15 @@ declare let window: DebugWindow;
         <dockable-layout></dockable-layout>
         @if (!environment.visualizationOnly) {
             <datasources></datasources>
+            <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
-            @if (stateService.diagnosticsPerformanceDialogVisible) {
+            @if (stateService.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
-            @if (stateService.diagnosticsLogDialogVisible) {
+            @if (stateService.isDialogOpen(diagnosticsLogDialogLayoutId)) {
                 <diagnostics-log-dialog></diagnostics-log-dialog>
             }
-            @if (stateService.diagnosticsExportDialogVisible) {
+            @if (stateService.isDialogOpen(diagnosticsExportDialogLayoutId)) {
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
@@ -53,7 +61,17 @@ declare let window: DebugWindow;
     `],
     standalone: false
 })
+/**
+ * Root application component.
+ *
+ * Besides rendering the top-level dialogs and panels, it wires up global
+ * behaviors such as dialog stacking, drag-selection suppression, debug helpers,
+ * and startup version loading.
+ */
 export class AppComponent implements OnDestroy {
+    protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
+    protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
+    protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
 
     title: string = "erdblick";
     private detachDialogFocusListener?: () => void;
@@ -68,6 +86,7 @@ export class AppComponent implements OnDestroy {
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
+                private configService: AppConfigService,
                 private titleService: Title) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
@@ -79,55 +98,19 @@ export class AppComponent implements OnDestroy {
             this.stateService
         );
 
-        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
-            next: (data: any) => {
-                try {
-                    if (data && data["extensionModules"] && data["extensionModules"]["distribVersions"]) {
-                        let distribVersions = data["extensionModules"]["distribVersions"];
-                        if (distribVersions !== undefined) {
-                            const distribVersionsPath = `/config/${distribVersions}.js`;
-                            // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
-                            import(/* @vite-ignore */ distribVersionsPath)
-                                .then((plugin) => plugin.default() as Array<Versions>)
-                                .then((versions: Array<Versions>) => {
-                                    this.stateService.distributionVersions.next(versions);
-                                    if (versions[0].name.trim()) {
-                                        this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
-                                    } else {
-                                        this.titleService.setTitle(this.capitalizeTitle(this.title));
-                                    }
-                                })
-                                .catch((error) => {
-                                    console.error(error);
-                                    this.getBasicVersion();
-                                });
-                            return;
-                        } else {
-                            this.getBasicVersion();
-                        }
-                    } else {
-                        this.getBasicVersion();
-                    }
-                } catch (error) {
-                    console.error(error);
-                    this.getBasicVersion();
-                }
-            },
-            error: error => {
-                console.error(error);
-                this.getBasicVersion();
-            }
-        });
+        this.loadDistributionVersions();
 
         this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
     }
 
+    /** Removes global dialog listeners installed during startup. */
     ngOnDestroy() {
         this.detachDialogFocusListener?.();
         this.detachDialogDragStartListener?.();
         this.detachDialogDragEndListener?.();
     }
 
+    /** Keeps dialogs and the search wrapper in a deterministic z-order based on focus clicks. */
     private bindDialogFocusStacking() {
         const handler = (event: MouseEvent) => {
             const target = event.target as HTMLElement | null;
@@ -164,6 +147,32 @@ export class AppComponent implements OnDestroy {
         };
     }
 
+    /** Loads optional distribution-version metadata from the config-driven extension module. */
+    private loadDistributionVersions() {
+        const distribVersions = this.configService.getExtensionModuleId("distribVersions");
+        if (!distribVersions) {
+            this.getBasicVersion();
+            return;
+        }
+
+        const distribVersionsPath = `/config/${distribVersions}.js`;
+        import(/* @vite-ignore */ distribVersionsPath)
+            .then((plugin) => plugin.default() as Array<Versions>)
+            .then((versions: Array<Versions>) => {
+                this.stateService.distributionVersions.next(versions);
+                if (versions[0]?.name.trim()) {
+                    this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
+                } else {
+                    this.titleService.setTitle(this.capitalizeTitle(this.title));
+                }
+            })
+            .catch((error) => {
+                console.error(error);
+                this.getBasicVersion();
+            });
+    }
+
+    /** Prevents accidental text selection while PrimeNG dialogs are dragged or resized. */
     private bindDialogDragSelectionGuard() {
         const handlePointerDown = (event: PointerEvent) => {
             if (event.button !== 0) {
@@ -204,6 +213,7 @@ export class AppComponent implements OnDestroy {
         };
     }
 
+    /** Applies or clears the global CSS state used while a dialog drag is active. */
     private setDialogDragSelection(active: boolean) {
         if (this.dialogDragActive === active) {
             return;
@@ -217,6 +227,7 @@ export class AppComponent implements OnDestroy {
         document.body?.classList.remove('dialog-dragging');
     }
 
+    /** Loads the bundled fallback version string when distribution metadata is unavailable. */
     getBasicVersion() {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
@@ -225,12 +236,14 @@ export class AppComponent implements OnDestroy {
             });
     }
 
+    /** Capitalizes the application title for use in the browser tab. */
     private capitalizeTitle(title: string) {
         return `${title.charAt(0).toUpperCase()}${title.slice(1)}`;
     }
 
+    /** Opens the diagnostics performance dialog from the global keyboard shortcut. */
     private openStatistics() {
-        this.stateService.diagnosticsPerformanceDialogVisible = true;
+        this.stateService.openDialog(this.diagnosticsPerformanceDialogLayoutId);
     }
 
     protected readonly environment = environment;

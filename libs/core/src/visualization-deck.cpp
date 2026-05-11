@@ -29,6 +29,7 @@ constexpr double kArrowHeadLengthFraction = 0.35;
 constexpr double kArrowHeadWidthFraction = 0.55;
 constexpr double kArrowSegmentEpsilonMeters = 1e-6;
 
+/** Convert the JS `{x,y,z}` point payload emitted by the base class back into `mapget::Point`. */
 mapget::Point pointFromJsValue(JsValue const& xyzPos)
 {
     return {
@@ -38,6 +39,7 @@ mapget::Point pointFromJsValue(JsValue const& xyzPos)
     };
 }
 
+/** Convert normalized float RGBA colors into the byte array shape used by deck labels/icons. */
 JsValue rgbaBytesFromColor(glm::fvec4 const& color)
 {
     auto toByte = [](float value) {
@@ -52,11 +54,28 @@ JsValue rgbaBytesFromColor(glm::fvec4 const& color)
     });
 }
 
+/** Resolve the GLTF tint color without forcing untinted base rendering to black. */
+glm::fvec4 resolvedGltfTintColor(
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun)
+{
+    if (rule.hasExplicitColor()) {
+        return rule.color(evalFun);
+    }
+    if (rule.hasExplicitOpacity()) {
+        auto const alpha = std::clamp(rule.color(evalFun).a, 0.0f, 1.0f);
+        return {1.0f, 1.0f, 1.0f, alpha};
+    }
+    return {1.0f, 1.0f, 1.0f, 1.0f};
+}
+
+/** Convert longitude to deck/math.gl world X units at the canonical 512-tile scale. */
 double mercatorWorldX(double longitudeDeg)
 {
     return (kMercatorTileSize * ((longitudeDeg * kDegToRad) + kPi)) / (2.0 * kPi);
 }
 
+/** Convert latitude to deck/math.gl world Y units at the canonical 512-tile scale. */
 double mercatorWorldY(double latitudeDeg)
 {
     auto const latitudeRad = latitudeDeg * kDegToRad;
@@ -64,6 +83,12 @@ double mercatorWorldY(double latitudeDeg)
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
 }
 
+/**
+ * Reproduce math.gl distance scales for the coordinate origin used by path buffers.
+ *
+ * Deck's `PathLayer` needs both the first-order units-per-meter scale and the
+ * second-order correction term so large world-coordinate paths stay stable.
+ */
 bool distanceScalesAt(
     double latitudeDeg,
     double& unitsPerMeter,
@@ -123,12 +148,14 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
     aggregateBuffers_.pathBillboard.startIndices.push_back(0);
     aggregateBuffers_.arrowWorld.startIndices.push_back(0);
     aggregateBuffers_.arrowBillboard.startIndices.push_back(0);
+    aggregateBuffers_.gltfPickProxies.startIndices.push_back(0);
     for (auto& lowFiLodBuffer : lowFiLodBuffers_) {
         lowFiLodBuffer.surfaces.surfaceStartIndices.push_back(0);
         lowFiLodBuffer.pathWorld.startIndices.push_back(0);
         lowFiLodBuffer.pathBillboard.startIndices.push_back(0);
         lowFiLodBuffer.arrowWorld.startIndices.push_back(0);
         lowFiLodBuffer.arrowBillboard.startIndices.push_back(0);
+        lowFiLodBuffer.gltfPickProxies.startIndices.push_back(0);
     }
 }
 
@@ -198,6 +225,26 @@ JsValue DeckFeatureLayerVisualization::pathBuffersToJs(PathBuffers const& buffer
     return result;
 }
 
+JsValue DeckFeatureLayerVisualization::gltfBuffersToJs(GltfBuffers const& buffers)
+{
+    return JsValue::Dict({
+        {"nodeIndices", JsValue::Uint32Array(buffers.nodeIndices)},
+        {"colors", JsValue::Uint8Array(buffers.colors)},
+        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
+        {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
+    });
+}
+
+JsValue DeckFeatureLayerVisualization::gltfPickProxyBuffersToJs(GltfPickProxyBuffers const& buffers)
+{
+    return JsValue::Dict({
+        {"positions", JsValue::Float32Array(buffers.positions)},
+        {"startIndices", JsValue::Uint32Array(buffers.startIndices)},
+        {"nodeIndices", JsValue::Uint32Array(buffers.nodeIndices)},
+        {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
+    });
+}
+
 JsValue DeckFeatureLayerVisualization::geometryBuffersToJs(GeometryBuffers const& buffers)
 {
     auto labelWorld = JsValue::List();
@@ -218,6 +265,8 @@ JsValue DeckFeatureLayerVisualization::geometryBuffersToJs(GeometryBuffers const
         {"pathBillboard", pathBuffersToJs(buffers.pathBillboard, true)},
         {"arrowWorld", pathBuffersToJs(buffers.arrowWorld, false)},
         {"arrowBillboard", pathBuffersToJs(buffers.arrowBillboard, false)},
+        {"gltfNodes", gltfBuffersToJs(buffers.gltfNodes)},
+        {"gltfPickProxies", gltfPickProxyBuffersToJs(buffers.gltfPickProxies)},
     });
 }
 
@@ -345,6 +394,16 @@ bool DeckFeatureLayerVisualization::hasGeometry(PathBuffers const& buffers)
     return buffers.startIndices.size() > 1;
 }
 
+bool DeckFeatureLayerVisualization::hasGeometry(GltfBuffers const& buffers)
+{
+    return !buffers.nodeIndices.empty();
+}
+
+bool DeckFeatureLayerVisualization::hasGeometry(GltfPickProxyBuffers const& buffers)
+{
+    return buffers.startIndices.size() > 1;
+}
+
 bool DeckFeatureLayerVisualization::hasGeometry(GeometryBuffers const& buffers)
 {
     return hasGeometry(buffers.pointWorld)
@@ -355,7 +414,9 @@ bool DeckFeatureLayerVisualization::hasGeometry(GeometryBuffers const& buffers)
         || hasGeometry(buffers.pathWorld)
         || hasGeometry(buffers.pathBillboard)
         || hasGeometry(buffers.arrowWorld)
-        || hasGeometry(buffers.arrowBillboard);
+        || hasGeometry(buffers.arrowBillboard)
+        || hasGeometry(buffers.gltfNodes)
+        || hasGeometry(buffers.gltfPickProxies);
 }
 
 bool DeckFeatureLayerVisualization::hasLowFiGeometryForLod(size_t lod) const
@@ -474,6 +535,98 @@ void DeckFeatureLayerVisualization::emitMesh(
             tileFeatureId,
             evalFun);
     }
+}
+
+void DeckFeatureLayerVisualization::emitGltfNode(
+    uint32_t nodeIndex,
+    mapget::Point const& aabbOriginWgs,
+    mapget::Point const& aabbSizeWgs,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    auto const color = resolvedGltfTintColor(rule, evalFun);
+    auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
+
+    auto appendToBuffers = [&](GltfBuffers& buffers)
+    {
+        buffers.nodeIndices.push_back(nodeIndex);
+        buffers.colors.push_back(toColorByte(color.r));
+        buffers.colors.push_back(toColorByte(color.g));
+        buffers.colors.push_back(toColorByte(color.b));
+        buffers.colors.push_back(toColorByte(color.a));
+        buffers.depthTests.push_back(rule.depthTest() ? 1 : 0);
+        buffers.featureAddresses.push_back(selectableFeatureId);
+    };
+
+    if (emitToAggregateForCurrentFeatureLod()) {
+        appendToBuffers(aggregateBuffers_.gltfNodes);
+    }
+    if (lowFiBundleModeEnabled()) {
+        auto const featureLod = static_cast<size_t>(activeLodBucket());
+        appendToBuffers(lowFiBuffersForLod(featureLod).gltfNodes);
+    }
+    if (selectableFeatureId != kUnselectableFeatureIndex) {
+        auto const p000 = aabbOriginWgs;
+        auto const p100 = mapget::Point{aabbOriginWgs.x + aabbSizeWgs.x, aabbOriginWgs.y, aabbOriginWgs.z};
+        auto const p010 = mapget::Point{aabbOriginWgs.x, aabbOriginWgs.y + aabbSizeWgs.y, aabbOriginWgs.z};
+        auto const p110 = mapget::Point{aabbOriginWgs.x + aabbSizeWgs.x, aabbOriginWgs.y + aabbSizeWgs.y, aabbOriginWgs.z};
+        auto const p001 = mapget::Point{aabbOriginWgs.x, aabbOriginWgs.y, aabbOriginWgs.z + aabbSizeWgs.z};
+        auto const p101 = mapget::Point{aabbOriginWgs.x + aabbSizeWgs.x, aabbOriginWgs.y, aabbOriginWgs.z + aabbSizeWgs.z};
+        auto const p011 = mapget::Point{aabbOriginWgs.x, aabbOriginWgs.y + aabbSizeWgs.y, aabbOriginWgs.z + aabbSizeWgs.z};
+        auto const p111 = mapget::Point{aabbOriginWgs.x + aabbSizeWgs.x, aabbOriginWgs.y + aabbSizeWgs.y, aabbOriginWgs.z + aabbSizeWgs.z};
+
+        auto const projected = std::array<mapget::Point, 8>{
+            projectWgsPoint(p000),
+            projectWgsPoint(p100),
+            projectWgsPoint(p010),
+            projectWgsPoint(p110),
+            projectWgsPoint(p001),
+            projectWgsPoint(p101),
+            projectWgsPoint(p011),
+            projectWgsPoint(p111)
+        };
+
+        auto appendPickProxyToBuffers = [&](GltfPickProxyBuffers& buffers)
+        {
+            auto appendPoint = [&](mapget::Point const& point) {
+                buffers.positions.push_back(static_cast<float>(point.x));
+                buffers.positions.push_back(static_cast<float>(point.y));
+                buffers.positions.push_back(static_cast<float>(point.z));
+            };
+            auto appendTriangle = [&](size_t a, size_t b, size_t c) {
+                appendPoint(projected[a]);
+                appendPoint(projected[b]);
+                appendPoint(projected[c]);
+            };
+
+            auto const startVertex = static_cast<uint32_t>(buffers.positions.size() / 3);
+            appendTriangle(0, 1, 3);
+            appendTriangle(0, 3, 2);
+            appendTriangle(4, 6, 7);
+            appendTriangle(4, 7, 5);
+            appendTriangle(0, 4, 5);
+            appendTriangle(0, 5, 1);
+            appendTriangle(2, 3, 7);
+            appendTriangle(2, 7, 6);
+            appendTriangle(0, 2, 6);
+            appendTriangle(0, 6, 4);
+            appendTriangle(1, 5, 7);
+            appendTriangle(1, 7, 3);
+            buffers.startIndices.push_back(startVertex + 36);
+            buffers.nodeIndices.push_back(nodeIndex);
+            buffers.featureAddresses.push_back(selectableFeatureId);
+        };
+
+        if (emitToAggregateForCurrentFeatureLod()) {
+            appendPickProxyToBuffers(aggregateBuffers_.gltfPickProxies);
+        }
+        if (lowFiBundleModeEnabled()) {
+            auto const featureLod = static_cast<size_t>(activeLodBucket());
+            appendPickProxyToBuffers(lowFiBuffersForLod(featureLod).gltfPickProxies);
+        }
+    }
+    featuresAdded_ = true;
 }
 
 void DeckFeatureLayerVisualization::emitIcon(

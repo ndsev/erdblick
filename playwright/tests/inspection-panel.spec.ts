@@ -1,5 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS } from '../utils/test-params';
 import {
     clickSearchResultLeaf,
     enableMapLayer,
@@ -23,15 +24,15 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await requireTestMapSource(request);
 
         await navigateToRoot(page);
-        await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.615, 13);
+        await enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
+        await navigateToArea(page, ...TEST_VIEW_POSITIONS[0]);
 
         // Run a feature search and select the first result.
         await runFeatureSearch(page, '**.name');
         await clickSearchResultLeaf(page, 0);
 
         // An inspection panel should appear for the selected feature.
-        const panel = page.locator('.inspection-container .inspect-panel').first();
+        const panel = page.getByTestId('inspection-container').getByTestId('inspection-panel').first();
         await expect(panel).toBeVisible();
 
         const treeBody = panel.locator('.p-treetable-tbody');
@@ -39,24 +40,24 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
 
         // Validate that the inspected feature belongs to TestMap / WayLayer.
         const mapIdRow = treeBody.locator('tr', {
-            hasText: 'TestMap'
+            hasText: TEST_MAP_NAMES[0]
         }).first();
         await expect(mapIdRow).toHaveCount(1);
         const layerIdRow = treeBody.locator('tr', {
-            hasText: 'WayLayer'
+            hasText: TEST_LAYER_NAMES[0]
         }).first();
         await expect(layerIdRow).toHaveCount(1);
 
-        // const pinIcon = panel.locator('.material-symbols-outlined', {
-        //     hasText: 'keep_off'
-        // }).first();
-        // Pin the first panel so the next selection opens a second panel.
-        // await expect(pinIcon).toBeVisible();
-        // await pinIcon.click();
+        const lockToggle = panel.locator('.title .material-symbols-outlined', {
+            hasText: 'lock_open_right'
+        }).first();
+        // Lock the first panel so the next selection opens a second panel.
+        await expect(lockToggle).toBeVisible();
+        await lockToggle.click();
 
         // Selecting another result should open a second inspection panel.
         await clickSearchResultLeaf(page, 1);
-        const panels = page.locator('.inspection-container .inspect-panel');
+        const panels = page.getByTestId('inspection-container').getByTestId('inspection-panel');
         await expect(panels).toHaveCount(2);
     });
 
@@ -70,7 +71,7 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await runFeatureSearch(page, '**.name');
         await clickSearchResultLeaf(page, 0);
 
-        const panel = page.locator('.inspection-container .inspect-panel').first();
+        const panel = page.getByTestId('inspection-container').getByTestId('inspection-panel').first();
         await expect(panel).toBeVisible();
 
         const accordionPanel = panel.locator('.p-accordionpanel').first();
@@ -80,12 +81,20 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await expect(treeTable).toBeVisible();
 
         const header = panel.locator('.p-accordionheader').first();
-        await header.click();
+        const headerBox = await header.boundingBox();
+        if (!headerBox) {
+            throw new Error('Expected docked inspection header to have a bounding box');
+        }
+        const toggleClickPosition = {
+            x: Math.max(headerBox.width - 16, 4),
+            y: headerBox.height / 2
+        };
+        await header.click({ position: toggleClickPosition });
 
         await expect(accordionPanel).not.toHaveClass(/p-accordionpanel-active/);
         await expect(treeTable).not.toBeVisible();
 
-        await header.click();
+        await header.click({ position: toggleClickPosition });
 
         await expect(accordionPanel).toHaveClass(/p-accordionpanel-active/);
         await expect(treeTable).toBeVisible();

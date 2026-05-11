@@ -15,16 +15,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        submodules: recursive
+        with:
+          submodules: recursive
 
       - name: Configure Git authentication for GitHub
         run: |
           git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Install build dependencies (ninja, git-lfs)
+      - name: Install build dependencies (ninja, git-lfs, mesa software rendering, xvfb)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build git-lfs
+          sudo apt-get install -y ninja-build git-lfs libgl1-mesa-dri mesa-vulkan-drivers xvfb
 
       - name: Initialize Git LFS
         run: git lfs install
@@ -34,14 +35,30 @@ jobs:
         with:
           node-version: "24.x"
           cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install UI dependencies
+        run: npm ci
+
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
 
       - name: Build with Emscripten
         run: |
           $GITHUB_WORKSPACE/ci/00_linux_setup.bash
           $GITHUB_WORKSPACE/ci/10_linux_build.bash
 
-      - name: Install UI dependencies
-        run: npm ci
+      - name: Build frontend bundle with hidden source maps for coverage
+        run: npm run build:integration-coverage
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -51,7 +68,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up  mapget
+      - name: Set up mapget
         run: |
           python3 -m venv venv
           ./venv/bin/pip install mapget
@@ -59,7 +76,7 @@ jobs:
       - name: Run Playwright integration tests (with coverage)
         run: |
           source ./venv/bin/activate
-          $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
+          EB_FIREFOX_HEADED=1 xvfb-run -a $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
 
       - name: Upload Playwright test result artifact
         if: failure()

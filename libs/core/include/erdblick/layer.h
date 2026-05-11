@@ -3,6 +3,7 @@
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "interop/js-object.h"
+#include "buffer.h"
 #include "mapget/model/sourcedata.h"
 
 namespace erdblick
@@ -71,6 +72,15 @@ struct TileFeatureLayer
      */
     void attachOverlay(TileFeatureLayer const& overlay);
 
+    /** Report whether the tile exposes a tile-level GLB attachment. */
+    [[nodiscard]] bool hasGlbAttachment() const;
+
+    /** Return the attachment name for the tile-level GLB, or empty string when absent. */
+    [[nodiscard]] std::string glbAttachmentName() const;
+
+    /** Copy the tile-level GLB bytes into a JS-visible buffer. */
+    bool copyGlbAttachment(SharedUint8Array& output) const;
+
     /**
      * Finds the index of a feature based on its type and ID parts.
      * @param type The type of the feature.
@@ -93,6 +103,7 @@ struct TileFeatureLayer
      */
     mapget::model_ptr<mapget::Feature> featureByAddress(uint32_t address) const;
 
+    /** Release the wrapped smart pointer. */
     ~TileFeatureLayer();
 
     /** Shared pointer to the underlying `mapget::TileFeatureLayer`. */

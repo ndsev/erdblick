@@ -12,9 +12,16 @@ namespace erdblick
  */
 std::string anyWrap(std::string_view const& q);
 
+/**
+ * Simfil-backed search and completion helper for one parsed feature tile.
+ *
+ * The class is intentionally tile-scoped; higher-level orchestration decides
+ * which tiles participate and when partial results are acceptable.
+ */
 class FeatureLayerSearch
 {
 public:
+    /** Bind a search helper to one parsed tile layer. */
     explicit FeatureLayerSearch(TileFeatureLayer& tfl);
 
     /** Returns a resuct dictionary of the following structure:

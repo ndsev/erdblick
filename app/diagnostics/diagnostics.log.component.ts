@@ -2,16 +2,17 @@ import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {BehaviorSubject, combineLatest, map, Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import type {DiagnosticsLogFilter} from './diagnostics.model';
-import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppStateService} from '../shared/appstate.service';
+import {AppStateService, DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
+import {AppDialogComponent} from '../shared/app-dialog.component';
 
 @Component({
     selector: 'diagnostics-log-dialog',
     template: `
-        <p-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
-                  [(visible)]="stateService.diagnosticsLogDialogVisible"
+        <app-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
+                  [(visible)]="dialogVisible"
                   [modal]="false"
+                  [persistLayout]="true" [layoutId]="layoutId"
                   [style]="dialogStyle"
                   (onShow)="onDialogShow()">
             <div class="diagnostics-log-controls">
@@ -94,13 +95,15 @@ import {AppStateService} from '../shared/appstate.service';
             <div class="diagnostics-log-footer">
                 <p-button size="small" label="Export" (click)="openExport()"/>
             </div>
-        </p-dialog>
+        </app-dialog>
     `,
     styles: [``],
     standalone: false
 })
+/** Dialog that filters, sorts, and exports captured diagnostics log entries. */
 export class DiagnosticsLogDialogComponent implements OnDestroy {
-    @ViewChild('dialog') dialog?: Dialog;
+    readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
+    @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
         height: '75vh'
     };
@@ -139,32 +142,47 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
         );
     }
 
+    get dialogVisible(): boolean {
+        return this.stateService.isDialogOpen(this.layoutId);
+    }
+
+    set dialogVisible(visible: boolean) {
+        this.stateService.setDialogOpen(this.layoutId, visible);
+    }
+
+    /** Releases dialog-local subscriptions. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
+    /** Refreshes logs and promotes the dialog above other overlays. */
     onDialogShow() {
         this.diagnostics.refreshLogs();
         this.dialogStack.bringToFront(this.dialog);
     }
 
+    /** Persists the log-level filter toggles. */
     updateFilter() {
         this.stateService.diagnosticsLogFilter = {...this.logFilter};
     }
 
+    /** Updates the sort order used by the reactive filtered-log stream. */
     setSortOrder(order: 'asc' | 'desc') {
         this.sortOrder = order;
         this.sortOrder$.next(order);
     }
 
+    /** Stable row key for PrimeNG table rendering. */
     trackByLogRow = (index: number, entry: {at: number; level: string; message: string}): string => {
         return `${entry.at}:${entry.level}:${entry.message}:${index}`;
     };
 
+    /** Convenience action that leaves only error logs enabled. */
     setErrorsOnly() {
         this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
     }
 
+    /** Opens the export dialog preconfigured to export only the visible logs. */
     openExport() {
         this.diagnostics.openExportDialog({
             includeProgress: false,
@@ -174,6 +192,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
         });
     }
 
+    /** Restores all log levels in the filter. */
     unsetAllFilter() {
         this.stateService.diagnosticsLogFilter = {info: true, warn: true, error: true};
     }

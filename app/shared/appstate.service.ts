@@ -11,14 +11,32 @@ import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
 import type {FeatureWrapper} from "../mapdata/features.model";
 import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
+import {
+    BackgroundLayerConfig,
+    clampBackgroundOpacity,
+    DEFAULT_BACKGROUND_LAYER_ID
+} from "./app-config.service";
+import {
+    historyEntryDedupeKey,
+    normalizeResolvedSearchHistoryEntry,
+    normalizeSearchHistoryEntry,
+    normalizeSearchStateValue,
+    SearchHistoryEntry,
+    SearchHistoryStateEntry,
+    SearchStateSchema,
+    SearchStateValue,
+    SearchHistoryStateEntrySchema,
+    serializeSearchStateValue
+} from "./search-history";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
+const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
+const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
-export const DEFAULT_NUM_TILES_TO_LOAD = 512;
-export const MAX_NUM_TILES_TO_LOAD = 512 * 1024;
+export const MAX_NUM_TILES_TO_LOAD = 512;
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 export const MIN_MAP_ZOOM_STEP = 0.001;
 export const MAX_MAP_ZOOM_STEP = 1.0;
@@ -31,6 +49,19 @@ export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const MAX_DECK_STYLE_WORKERS = 32;
 export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
+export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
+export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
+export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
+export const KEYBOARD_DIALOG_LAYOUT_ID = 'keyboard-dialog';
+export const DATASOURCES_EDITOR_DIALOG_LAYOUT_ID = 'datasources-editor-dialog';
+export const ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID = 'advanced-preferences-dialog';
+export const DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID = 'diagnostics-performance';
+export const DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID = 'diagnostics-log';
+export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
+export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
+export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
+export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
+export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -44,36 +75,43 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#58cf08"
 ]
 
-export function clampTilesLoadLimit(value: number): number {
-    if (!Number.isFinite(value)) {
-        return DEFAULT_NUM_TILES_TO_LOAD;
+/** Normalizes feature search grouping values from persisted state. */
+function normalizeFeatureSearchGrouping(value: unknown): number[] {
+    if (!Array.isArray(value)) {
+        return [];
     }
-    return Math.min(MAX_NUM_TILES_TO_LOAD, Math.max(0, Math.floor(value)));
+
+    const result: number[] = [];
+    for (const item of value) {
+        const numeric = Number(item);
+        if (!Number.isInteger(numeric) || !FEATURE_SEARCH_GROUPING_OPTION_IDS.has(numeric) || result.includes(numeric)) {
+            continue;
+        }
+        result.push(numeric);
+    }
+    return result;
 }
 
-export function clampMapZoomStep(value: number): number {
-    if (!Number.isFinite(value)) {
-        return DEFAULT_MAP_ZOOM_STEP;
-    }
-    return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
-}
-
+/** Version information shown in diagnostics and about dialogs. */
 export interface Versions {
     name: string;
     tag: string;
     whatsnew?: string;
 }
 
+/** Canonical frontend selection identity for one feature inside one map tile. */
 export interface TileFeatureId {
     featureId: string;
     mapTileKey: string;
 }
 
+/** Selection payload used for source-data/meta-data rows that are not regular features. */
 export interface SelectedSourceData {
     mapTileKey: string;
     address?: bigint;
 }
 
+/** Runtime model for one inspection panel, docked or floating. */
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
@@ -82,20 +120,34 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
-    inspectionDialogLayoutEntry?: InspectionDialogLayoutEntry;
 }
 
-export interface InspectionDialogPosition {
+/** Persisted top-left dialog position in viewport pixels. */
+export interface AppDialogPosition {
     left: number;
     top: number;
 }
 
-export interface InspectionDialogLayoutEntry {
-    panelId: number;
-    slot: number;
-    position: InspectionDialogPosition;
+/** Persisted dialog size in viewport pixels. */
+export interface AppDialogSize {
+    width: number;
+    height: number;
 }
 
+/** Generic persisted dialog layout record. */
+export interface AppDialogLayout {
+    position: AppDialogPosition;
+    size: AppDialogSize;
+    open?: boolean;
+}
+
+/** Persisted layout for floating inspection dialogs, including dock preference. */
+export interface InspectionDialogLayout extends AppDialogLayout {
+    panelId: number;
+    slot: number;
+}
+
+/** One selectable comparison candidate for the inspection comparison dialog. */
 export interface InspectionComparisonEntry {
     panelId: number;
     mapId: string;
@@ -103,47 +155,81 @@ export interface InspectionComparisonEntry {
     featureIds: TileFeatureId[];
 }
 
+/** Complete model for the inspection comparison dialog. */
 export interface InspectionComparisonModel {
     base: InspectionComparisonEntry;
     others: InspectionComparisonEntry[];
 }
 
+/** Command-style option that can populate an inspection comparison slot. */
 export interface InspectionComparisonOption {
     label: string;
     value: number;
 }
 
+/** Minimal persisted camera state shared between 2D and 3D views. */
 export interface CameraViewState {
     destination: { lon: number, lat: number, alt: number };
     orientation: { heading: number, pitch: number, roll: number };
 }
 
-export interface OsmViewState {
-    enabled: boolean;
+/** Persisted selected background-layer id plus per-view opacity. */
+export interface BackgroundLayerViewState {
+    layerId: string | null;
     opacity: number;
 }
 
+/** Per-view configuration entry for one map/layer selection. */
 export interface LayerViewConfig {
     autoLevel: boolean;
     level: number;
     visible: boolean;
 }
 
-export interface ViewSyncOption {
+/** Enumerates view properties that can be synchronized across split views. */
+export interface ViewSyncOptionDescriptor {
     name: string;
     code: string;
-    value: boolean;
     icon: string;
     tooltip: string;
 }
 
+/** Tile-grid overlay labeling mode used by the map panel and Deck overlay. */
 export type TileGridMode = "xyz" | "nds";
 
+/** Limits used while validating imported viewer snapshots. */
+interface SnapshotImportLimits {
+    maxFileSizeBytes: number;
+    maxTopLevelEntries: number;
+    maxNestingDepth: number;
+    maxCollectionEntries: number;
+    maxStringLength: number;
+}
+
+/** Result of snapshot normalization before schema validation is applied. */
+interface SnapshotNormalizationResult {
+    normalized?: Record<string, unknown>;
+    errors: string[];
+}
+
+interface ConfigDefaultStateMetaEntry {
+    owner: "config" | "user";
+    valueHash: string;
+}
+
+interface ConfigDefaultStateMeta {
+    version: 1;
+    sourceHash: string;
+    entries: Record<string, ConfigDefaultStateMetaEntry>;
+}
+
+/** Returns whether the layer id refers to source or meta-data rather than a feature layer. */
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
 }
 
+/** Rounds persisted coordinates so URLs remain stable and reasonably short. */
 function roundCoordinateStateValue(value: number): number {
     if (!Number.isFinite(value)) {
         return value;
@@ -151,25 +237,77 @@ function roundCoordinateStateValue(value: number): number {
     return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
 }
 
-function clampOsmOpacity(value: number): number {
+/** Clamps persisted zoom-step settings to the supported deck interaction range. */
+export function clampMapZoomStep(value: number): number {
     if (!Number.isFinite(value)) {
-        return 30;
+        return DEFAULT_MAP_ZOOM_STEP;
     }
-    const rounded = Math.round(value);
-    return Math.max(0, Math.min(100, rounded));
+    return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
+}
+
+/** Produces a detached clone suitable for app-state snapshots and comparisons. */
+function cloneStateValue<T>(value: T): T {
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    if (value instanceof Date) {
+        return new Date(value.getTime()) as unknown as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map(entry => cloneStateValue(entry)) as unknown as T;
+    }
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        result[key] = cloneStateValue(entry);
+    }
+    return result as T;
+}
+
+/** Serializes state values with deterministic key ordering. */
+function stableSerializeStateValue(value: unknown): string {
+    if (value === null) {
+        return "null";
+    }
+    if (value === undefined) {
+        return "undefined";
+    }
+    if (typeof value === "string") {
+        return JSON.stringify(value);
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map(entry => stableSerializeStateValue(entry)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+        const objectValue = value as Record<string, unknown>;
+        const keys = Object.keys(objectValue).sort();
+        return `{${keys.map(key => `${JSON.stringify(key)}:${stableSerializeStateValue(objectValue[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+}
+
+/** Computes a stable hash for a state value. */
+function hashStateValue(value: unknown): string {
+    const serialized = stableSerializeStateValue(value);
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < serialized.length; i++) {
+        hash ^= serialized.charCodeAt(i);
+        hash = (hash * 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
 }
 
 @Injectable({providedIn: 'root'})
 /**
- * Central application state coordinator.
- *
- * Responsibilities:
- * - hydrate from local storage + URL,
- * - serialize state changes back to storage/URL.
+ * Centralizes persisted viewer state, URL/storage hydration, dialog layout, selection state,
+ * and cross-view synchronization.
  */
 export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
+    private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -177,10 +315,13 @@ export class AppStateService implements OnDestroy {
     private _replaceUrl = true;
 
     private isHydrating = false;
+    private isSeedingConfigDefaults = false;
+    private isSystemStateMutation = false;
     private isReady = false;
     private subscriptionsSetup = false;
     private pendingUrlSyncStates = new Set<AppState<any>>;
     private pendingStorageSyncStates = new Set<AppState<any>>;
+    private pendingUserOwnershipStates = new Set<string>();
     private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
     private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
@@ -188,12 +329,23 @@ export class AppStateService implements OnDestroy {
     // One-shot guard used to keep inbound v1 links stable during passive startup.
     private skipNextUrlSync = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
+    private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
+    private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
+    private configDefaultStateMeta: ConfigDefaultStateMeta = {
+        version: 1,
+        sourceHash: "",
+        entries: Object.create(null)
+    };
+    private configDefaultValueHashes = new Map<string, string>();
+    private currentConfigDefaultKeys = new Set<string>();
 
     // Base UI metrics
+    /** Returns the configured base font size. */
     get baseFontSize(): number {
         return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
     }
+    /** Returns the default inspection panel size. */
     get defaultInspectionPanelSize(): [number, number] {
         return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
     }
@@ -205,13 +357,12 @@ export class AppStateService implements OnDestroy {
         urlParamName: "n"
     });
 
-    readonly searchState = this.createState<[number, string] | []>({
+    readonly searchState = this.createState<SearchStateValue>({
         name: 'search',
         defaultValue: [],
-        schema: z.union([
-            z.tuple([]),
-            z.tuple([z.coerce.number(), z.string()]),
-        ]),
+        schema: SearchStateSchema,
+        toStorage: (value: SearchStateValue) => serializeSearchStateValue(value),
+        fromStorage: (payload: any): SearchStateValue => normalizeSearchStateValue(payload),
         urlParamName: 's',
         urlIncludeInVisualizationOnly: false
     });
@@ -250,13 +401,7 @@ export class AppStateService implements OnDestroy {
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
                 // Remove # character from hex color
                 const color = state.color.startsWith('#') ? state.color.slice(1) : state.color;
-                // size ~ [optional layout slot:left:top] ~ color ~ undockedFlag
-                if (state.inspectionDialogLayoutEntry) {
-                    const entry = state.inspectionDialogLayoutEntry;
-                    s += `${state.size[0]}:${state.size[1]}~${entry.slot}:${entry.position.left}:${entry.position.top}~${color}~${state.undocked ? 1 : 0}`;
-                } else {
-                    s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
-                }
+                s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
                 return s;
             });
         },
@@ -275,17 +420,7 @@ export class AppStateService implements OnDestroy {
                 const undocked = parts.pop()! === "1";
                 const colorToken = parts.pop()!;
                 const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
-                let sizeToken = parts.pop()!;
-                let inspectionDialogLayoutEntry: InspectionDialogLayoutEntry | undefined;
-                if (sizeToken.split(':').length === 3) {
-                    const [slot, left, top] = sizeToken.split(':').map(Number);
-                    inspectionDialogLayoutEntry = {
-                        panelId: id,
-                        slot,
-                        position: {left, top}
-                    };
-                    sizeToken = parts.pop() ?? '';
-                }
+                const sizeToken = parts.pop()!;
                 const sizeParts = sizeToken.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
 
@@ -295,8 +430,7 @@ export class AppStateService implements OnDestroy {
                     locked: lockState || !undocked,
                     size: size as [number, number],
                     color: color,
-                    undocked: undocked,
-                    inspectionDialogLayoutEntry
+                    undocked: undocked
                 };
 
                 // Check if the first MapTileKey is for SourceData.
@@ -436,21 +570,21 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly osmState = this.createMapViewState<OsmViewState>({
-        name: 'osm',
+    readonly backgroundState = this.createMapViewState<BackgroundLayerViewState>({
+        name: 'background',
         defaultValue: {
-            enabled: true,
-            opacity: 6,
+            layerId: DEFAULT_BACKGROUND_LAYER_ID,
+            opacity: 100,
         },
         schema: z.string(),
-        toStorage: (value: OsmViewState) => `${value.enabled ? 1 : 0}~${clampOsmOpacity(value.opacity)}`,
-        fromStorage: (payload: any, currentValue: OsmViewState): OsmViewState => {
+        toStorage: (value: BackgroundLayerViewState) => `${encodeURIComponent(value.layerId ?? '')}~${clampBackgroundOpacity(value.opacity)}`,
+        fromStorage: (payload: any, currentValue: BackgroundLayerViewState): BackgroundLayerViewState => {
             const parts = String(payload).split('~');
-            const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
-            const opacity = parts[1] === undefined ? currentValue.opacity : clampOsmOpacity(Number(parts[1]));
-            return {enabled, opacity};
+            const layerId = parts[0] ? decodeURIComponent(parts[0]) : null;
+            const opacity = parts[1] === undefined ? currentValue.opacity : clampBackgroundOpacity(Number(parts[1]));
+            return {layerId, opacity};
         },
-        urlParamName: 'osm'
+        urlParamName: 'bg'
     });
 
     readonly layerNamesState = this.createState<Array<string>>({
@@ -505,9 +639,8 @@ export class AppStateService implements OnDestroy {
 
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
-        defaultValue: DEFAULT_NUM_TILES_TO_LOAD,
+        defaultValue: MAX_NUM_TILES_TO_LOAD,
         schema: z.coerce.number().nonnegative(),
-        fromStorage: value => clampTilesLoadLimit(Number(value)),
         urlParamName: 'tll'
     });
 
@@ -515,48 +648,6 @@ export class AppStateService implements OnDestroy {
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
         schema: z.array(z.string())
-    });
-
-    readonly legalInfoDialogVisibleState = this.createState<boolean>({
-        name: 'legalInfoDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly aboutDialogVisibleState = this.createState<boolean>({
-        name: 'aboutDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly preferencesDialogVisibleState = this.createState<boolean>({
-        name: 'preferencesDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly controlsDialogVisibleState = this.createState<boolean>({
-        name: 'controlsDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly diagnosticsPerformanceDialogVisibleState = this.createState<boolean>({
-        name: 'diagnosticsPerformanceDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly diagnosticsLogDialogVisibleState = this.createState<boolean>({
-        name: 'diagnosticsLogDialogVisible',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly diagnosticsExportDialogVisibleState = this.createState<boolean>({
-        name: 'diagnosticsExportDialogVisible',
-        defaultValue: false,
-        schema: Boolish
     });
 
     readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
@@ -597,19 +688,40 @@ export class AppStateService implements OnDestroy {
         })
     });
 
-    readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
+    readonly featureSearchGroupingState = this.createState<number[]>({
+        name: 'featureSearchGrouping',
+        defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
+        schema: z.array(z.coerce.number()),
+        toStorage: (value: number[]) => normalizeFeatureSearchGrouping(value),
+        fromStorage: (payload: any): number[] => normalizeFeatureSearchGrouping(payload),
+        snapshotPersist: false
+    });
+
+    readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
         schema: z.union([
             z.null(),
-            z.tuple([z.coerce.number(), z.string()]),
-        ])
+            SearchHistoryStateEntrySchema,
+        ]),
+        fromStorage: (payload: any): SearchHistoryStateEntry | null => {
+            if (payload === null) {
+                return null;
+            }
+            return normalizeSearchHistoryEntry(payload);
+        }
     });
 
     readonly mapsOpenState = this.createState<boolean>({
         name: 'mapsOpenState',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly styleEditorTargetState = this.createState<string | null>({
+        name: 'styleEditorTarget',
+        defaultValue: null,
+        schema: z.string().nullable()
     });
 
     readonly dockOpenState = this.createState<boolean>({
@@ -670,14 +782,35 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
-    // TODO: merge this functionality with the state?
-    readonly syncOptions: ViewSyncOption[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
+    readonly dialogLayoutsState = this.createState<Record<string, AppDialogLayout | InspectionDialogLayout>>({
+        name: 'dialogLayouts',
+        defaultValue: {},
+        schema: z.record(z.string(), z.object({
+            position: z.object({
+                left: z.coerce.number(),
+                top: z.coerce.number()
+            }),
+            size: z.object({
+                width: z.coerce.number().positive(),
+                height: z.coerce.number().positive()
+            }),
+            open: Boolish.optional(),
+            panelId: z.coerce.number().optional(),
+            slot: z.coerce.number().optional()
+        }))
+    });
+
+    private readonly pendingOpenDialogs = new Set<string>();
+
+    /** Immutable view-sync option descriptors consumed by the split-view UI. */
+    readonly syncOptions: readonly ViewSyncOptionDescriptor[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/background settings across views"},
     ];
 
+    /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
@@ -685,6 +818,7 @@ export class AppStateService implements OnDestroy {
             this.setupStateSubscriptions();
             this.hydrateFromStorage();
             this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+            this.migrateLegacyOsmState(this.router.routerState.snapshot.root?.queryParams ?? {});
             this.isHydrating = false;
             // Keep inbound links stable during passive startup hydration.
             this.skipNextUrlSync = true;
@@ -718,12 +852,18 @@ export class AppStateService implements OnDestroy {
                 });
             }
         });
+
+        this.selectionState.subscribe(panels => {
+            this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+        });
     }
 
+    /** Flushes all state slots to storage and URL after a batch update. */
     private syncAllStates() {
         this.statePool.values().forEach(state => this.onStateChanged(state, true));
     }
 
+    /** Copies synchronized view properties from the focused view to the others. */
     syncViews(): void {
         if (this.numViews < 2) {
             return;
@@ -738,6 +878,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Cancels pending persistence work when the service is destroyed. */
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
         if (this.urlSyncHandle !== null) {
@@ -746,20 +887,59 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns whether state updates should replace the current URL. */
     get replaceUrl() {
         const currentValue = this._replaceUrl;
         this._replaceUrl = true;
         return currentValue;
     }
 
+    /** Creates an application state entry and registers it for persistence. */
     private createState<T>(options: AppStateOptions<T>): AppState<T> {
         return new AppState<T>(this.statePool, options);
     }
 
+    /** Creates a state entry scoped to each map view. */
     private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
-        return new MapViewState<T>(this.statePool, options);
+        const state = new MapViewState<T>(this.statePool, options);
+        this.mapViewStates.push(state as MapViewState<unknown>);
+        return state;
     }
 
+    /** Seeds newly created views with defaults copied from the first view. */
+    private seedAdditionalViews(previousViewCount: number, nextViewCount: number): void {
+        if (nextViewCount <= previousViewCount) {
+            return;
+        }
+
+        for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
+            const sourceViewIndex = Math.max(0, targetViewIndex - 1);
+            for (const state of this.mapViewStates) {
+                state.next(targetViewIndex, cloneStateValue(state.getValue(sourceViewIndex)));
+            }
+        }
+
+        if (this.styles.size === 0) {
+            return;
+        }
+
+        const nextStyles = new Map<string, (string|number|boolean)[]>();
+        for (const [key, values] of this.styles.entries()) {
+            const nextValues = [...values];
+            for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
+                const sourceViewIndex = Math.max(0, targetViewIndex - 1);
+                const sourceValue = nextValues[sourceViewIndex];
+                if (sourceValue === undefined) {
+                    continue;
+                }
+                nextValues[targetViewIndex] = cloneStateValue(sourceValue);
+            }
+            nextStyles.set(key, nextValues);
+        }
+        this.stylesState.next(nextStyles);
+    }
+
+    /** Subscribes to all persisted state slots so storage and URL remain in sync. */
     private setupStateSubscriptions() {
         if (this.subscriptionsSetup) return;
         // NOTE: Is this the best way to implement the internal subscription mechanism?
@@ -772,8 +952,18 @@ export class AppStateService implements OnDestroy {
         this.subscriptionsSetup = true;
     }
 
+    /** Handles one state-slot change and schedules the required persistence work. */
     private onStateChanged(state: AppState<any>, force: boolean = false): void {
-        if (!force && (this.isHydrating || !this.isReady)) {
+        const markUserOwned = !force
+            && this.isReady
+            && !this.isHydrating
+            && !this.isSeedingConfigDefaults
+            && !this.isSystemStateMutation;
+        if (markUserOwned) {
+            this.pendingUserOwnershipStates.add(state.name);
+        }
+
+        if (!force && (this.isHydrating || !this.isReady || this.isSeedingConfigDefaults)) {
             return;
         }
 
@@ -785,6 +975,7 @@ export class AppStateService implements OnDestroy {
         this.scheduleFlush();
     }
 
+    /** Schedules the batched storage flush used after state changes. */
     private scheduleFlush(): void {
         if (this.flushHandle) {
             return;
@@ -801,6 +992,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Cancels any pending batched URL/storage synchronization timers. */
     private cancelPendingStateSync(): void {
         // Prevent stale, queued writes from a previous URL hydration cycle.
         this.pendingStorageSyncStates.clear();
@@ -811,23 +1003,68 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Writes all storage-backed state slots to local storage. */
     private syncStorage(): void {
         for (const state of this.pendingStorageSyncStates) {
+            const markUserOwned = this.pendingUserOwnershipStates.has(state.name);
             try {
                 const serialized = state.serialize(false);
                 if (serialized === undefined) {
                     continue;
                 }
+                if (state === this.stylesState) {
+                    localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
+                    this.clearStyleOptionStorageEntries();
+                }
                 for (const [k, v] of Object.entries(serialized)) {
                     localStorage.setItem(k, v);
+                }
+
+                const stateHash = this.stateValueHashForMeta(state);
+                const expectedConfigHash = this.configDefaultValueHashes.get(state.name);
+                if (expectedConfigHash && expectedConfigHash === stateHash) {
+                    this.setMetaOwner(state.name, "config", stateHash);
+                } else if (markUserOwned) {
+                    this.setMetaOwner(state.name, "user", stateHash);
+                } else if (this.configDefaultStateMeta.entries[state.name]) {
+                    this.configDefaultStateMeta.entries[state.name].valueHash = stateHash;
+                }
+
+                if (state === this.stylesState) {
+                    const serializedStyleEntries = this.stylesState.serialize(false) ?? {};
+                    const serializedStyleKeys = new Set(
+                        Object.keys(serializedStyleEntries).filter(key =>
+                            this.stylesState.isStyleOptionUrlParamKey(key)));
+                    for (const key of Object.keys(this.configDefaultStateMeta.entries)) {
+                        if (this.stylesState.isStyleOptionUrlParamKey(key) && !serializedStyleKeys.has(key)) {
+                            delete this.configDefaultStateMeta.entries[key];
+                        }
+                    }
+                    for (const [key, value] of Object.entries(serializedStyleEntries)) {
+                        if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+                            continue;
+                        }
+                        const valueHash = hashStateValue(value);
+                        const expectedStyleConfigHash = this.configDefaultValueHashes.get(key);
+                        if (expectedStyleConfigHash && expectedStyleConfigHash === valueHash) {
+                            this.setMetaOwner(key, "config", valueHash);
+                        } else if (markUserOwned) {
+                            this.setMetaOwner(key, "user", valueHash);
+                        } else if (this.configDefaultStateMeta.entries[key]) {
+                            this.configDefaultStateMeta.entries[key].valueHash = valueHash;
+                        }
+                    }
                 }
             } catch (error) {
                 console.error(`[AppStateService] Failed to persist state '${state.name}'`, error);
             }
+            this.pendingUserOwnershipStates.delete(state.name);
         }
+        this.persistConfigDefaultStateMeta();
         this.pendingStorageSyncStates.clear();
     }
 
+    /** Schedules debounced URL synchronization after state changes. */
     private scheduleUrlSync(): void {
         if (!this.pendingUrlSyncStates.size) {
             return;
@@ -848,6 +1085,7 @@ export class AppStateService implements OnDestroy {
         }, delay);
     }
 
+    /** Executes the debounced URL synchronization immediately. */
     private flushUrlSync(): void {
         if (this.isHydrating) {
             this.pendingUrlSyncStates.clear();
@@ -870,6 +1108,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Serializes URL-backed state and updates router query params accordingly. */
     private syncUrl(): 'replace' | 'merge' {
         // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
         const params: Record<string, string> = {};
@@ -899,17 +1138,59 @@ export class AppStateService implements OnDestroy {
         return queryParamsHandling;
     }
 
+    /** Restores storage-backed state slots from local storage during startup. */
     private hydrateFromStorage(): void {
         this.withHydration(() => {
+            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
             for (const state of this.statePool.values()) {
-                const raw = localStorage.getItem(state.name);
-                if (raw) {
-                    state.deserialize(raw);
+                if (state === this.stylesState) {
+                    continue;
                 }
+                const raw = localStorage.getItem(state.name);
+                if (raw === null) {
+                    continue;
+                }
+
+                const metaEntry = this.configDefaultStateMeta.entries[state.name];
+                if (metaEntry?.owner === "config") {
+                    if (this.currentConfigDefaultKeys.has(state.name)) {
+                        // Keep freshly seeded config default in-memory values.
+                        continue;
+                    }
+
+                    // Config-owned storage without current config default should be dropped.
+                    state.resetToDefault();
+                    localStorage.removeItem(state.name);
+                    delete this.configDefaultStateMeta.entries[state.name];
+                    continue;
+                }
+
+                state.deserialize(raw);
             }
+
+            const styleOptionEntries = this.collectStyleOptionStorageEntries();
+            const filteredStyleOptionEntries: Record<string, string> = Object.create(null);
+            for (const [key, value] of Object.entries(styleOptionEntries)) {
+                const metaEntry = this.configDefaultStateMeta.entries[key];
+                if (metaEntry?.owner === "config") {
+                    if (this.currentConfigDefaultKeys.has(key)) {
+                        continue;
+                    }
+                    localStorage.removeItem(key);
+                    delete this.configDefaultStateMeta.entries[key];
+                    continue;
+                }
+                filteredStyleOptionEntries[key] = value;
+            }
+
+            if (Object.keys(filteredStyleOptionEntries).length) {
+                this.stylesState.deserialize(filteredStyleOptionEntries);
+            }
+            this.persistConfigDefaultStateMeta();
         });
     }
 
+    /** Restores URL-backed state slots from the current route query params. */
     private hydrateFromUrl(params: Params): void {
         this.withHydration(() => {
             if (Object.keys(params).length === 0) {
@@ -922,6 +1203,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Runs a callback while suppressing persistence side effects during hydration. */
     private withHydration(callback: () => void): void {
         const previous = this.isHydrating;
         this.isHydrating = true;
@@ -932,12 +1214,437 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns the current limits applied when importing a snapshot. */
+    getSnapshotImportLimits(): SnapshotImportLimits {
+        const stateCount = this.statePool.size;
+        const maxCollectionEntries = Math.max(1024, stateCount * 512);
+        return {
+            // Keep an upper bound aligned with practical browser localStorage budgets.
+            maxFileSizeBytes: 5 * 1024 * 1024,
+            // Snapshot top-level keys are AppState names plus compact style-option storage keys.
+            maxTopLevelEntries: maxCollectionEntries,
+            // AppState payloads are shallow-to-moderately nested; reject pathological depth.
+            maxNestingDepth: 16,
+            // Derive broad collection limits from the number of registered states.
+            maxCollectionEntries,
+            maxStringLength: 1024 * 1024
+        };
+    }
+
+    /** Exports the current persisted state into a snapshot object. */
+    exportSnapshot(): Record<string, unknown> {
+        const snapshot: Record<string, unknown> = Object.create(null);
+        for (const [name, state] of this.statePool.entries()) {
+            if (!state.isSnapshotState()) {
+                continue;
+            }
+            snapshot[name] = state.toSnapshotValue();
+        }
+        for (const [name, value] of Object.entries(this.stylesState.serialize(false) ?? {})) {
+            snapshot[name] = value;
+        }
+        return snapshot;
+    }
+
+    /** Validates a snapshot without mutating the current application state. */
+    validateSnapshot(snapshot: unknown): string[] {
+        return this.normalizeSnapshot(snapshot).errors;
+    }
+
+    /** Seeds config-provided default snapshot values before storage and URL hydration. */
+    seedConfigDefaultState(snapshot: unknown, sourceHash: string): string[] {
+        if (snapshot === null || snapshot === undefined) {
+            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+            this.configDefaultStateMeta.sourceHash = sourceHash || "";
+            this.configDefaultValueHashes.clear();
+            this.currentConfigDefaultKeys.clear();
+            this.persistConfigDefaultStateMeta();
+            return [];
+        }
+        if (typeof snapshot === "object" && !Array.isArray(snapshot) && Object.keys(snapshot as Record<string, unknown>).length === 0) {
+            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+            this.configDefaultStateMeta.sourceHash = sourceHash || "";
+            this.configDefaultValueHashes.clear();
+            this.currentConfigDefaultKeys.clear();
+            this.persistConfigDefaultStateMeta();
+            return [];
+        }
+
+        const normalizedResult = this.normalizeSnapshot(snapshot);
+        if (normalizedResult.errors.length) {
+            normalizedResult.errors.forEach(error =>
+                console.warn(`[AppStateService] Ignoring invalid config state: ${error}`));
+            return normalizedResult.errors;
+        }
+
+        const normalized = normalizedResult.normalized ?? {};
+        const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        const appliedStateKeys = new Set<string>();
+
+        this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+        this.configDefaultStateMeta.sourceHash = sourceHash || "";
+        this.configDefaultValueHashes.clear();
+        this.currentConfigDefaultKeys.clear();
+
+        this.isSeedingConfigDefaults = true;
+        try {
+            for (const [key, value] of Object.entries(normalized)) {
+                const state = this.statePool.get(key);
+                if (!state || !state.isSnapshotState()) {
+                    continue;
+                }
+                state.applySnapshotValue(value);
+                appliedStateKeys.add(key);
+            }
+
+            if (Object.keys(styleOptionEntries).length) {
+                this.stylesState.deserialize(styleOptionEntries);
+                this.stylesState.next(new Map(this.stylesState.getValue()));
+            }
+        } finally {
+            this.isSeedingConfigDefaults = false;
+        }
+
+        for (const key of appliedStateKeys) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                continue;
+            }
+            const valueHash = this.stateValueHashForMeta(state);
+            this.currentConfigDefaultKeys.add(key);
+            this.configDefaultValueHashes.set(key, valueHash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", valueHash);
+            }
+        }
+
+        const serializedStyleOptions = this.stylesState.serialize(false) ?? {};
+        for (const [key, serializedValue] of Object.entries(serializedStyleOptions)) {
+            if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            if (!Object.prototype.hasOwnProperty.call(styleOptionEntries, key)) {
+                continue;
+            }
+            const valueHash = hashStateValue(serializedValue);
+            this.currentConfigDefaultKeys.add(key);
+            this.configDefaultValueHashes.set(key, valueHash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", valueHash);
+            }
+        }
+
+        this.persistConfigDefaultStateMeta();
+        return [];
+    }
+
+    /** Normalizes, validates, and applies a snapshot import. */
+    importSnapshot(snapshot: unknown): string[] {
+        const normalizedResult = this.normalizeSnapshot(snapshot);
+        if (normalizedResult.errors.length) {
+            return normalizedResult.errors;
+        }
+        const normalized = normalizedResult.normalized!;
+        const keys = Object.keys(normalized);
+        const errors: string[] = [];
+
+        for (const key of keys) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
+                    continue;
+                }
+                errors.push(`Unknown snapshot state '${key}'.`);
+                continue;
+            }
+            if (!state.isSnapshotState()) {
+                continue;
+            }
+            try {
+                state.validateSnapshotValue(normalized[key]);
+            } catch (error: any) {
+                errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
+            }
+        }
+        if (errors.length) {
+            return errors;
+        }
+
+        for (const key of keys) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                continue;
+            }
+            if (!state.isSnapshotState()) {
+                continue;
+            }
+            state.applySnapshotValue(normalized[key]);
+        }
+        const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        if (Object.keys(styleOptionEntries).length) {
+            this.stylesState.deserialize(styleOptionEntries);
+            this.stylesState.next(new Map(this.stylesState.getValue()));
+        }
+        this.pendingOpenDialogs.clear();
+        return [];
+    }
+
+    /** Normalizes legacy snapshot shapes before schema validation is applied. */
+    private normalizeSnapshot(snapshot: unknown): SnapshotNormalizationResult {
+        const limits = this.getSnapshotImportLimits();
+        const errors: string[] = [];
+        let serialized: string;
+        try {
+            serialized = JSON.stringify(snapshot);
+        } catch {
+            return { errors: ['Snapshot payload is not serializable JSON.'] };
+        }
+        if (serialized.length > limits.maxFileSizeBytes) {
+            return { errors: [`Snapshot payload exceeds ${limits.maxFileSizeBytes} bytes.`] };
+        }
+
+        const normalizedRoot = this.normalizeSnapshotNode(snapshot, '$', 0, limits, errors);
+        if (errors.length) {
+            return {errors};
+        }
+        if (!normalizedRoot || Array.isArray(normalizedRoot) || typeof normalizedRoot !== 'object') {
+            return {errors: ['Snapshot payload must be a JSON object.']};
+        }
+        const normalized = normalizedRoot as Record<string, unknown>;
+        const keys = Object.keys(normalized);
+        if (keys.length > limits.maxTopLevelEntries) {
+            return {errors: ['Snapshot payload contains too many top-level entries.']};
+        }
+
+        for (const key of keys) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
+                    continue;
+                }
+                errors.push(`Unknown snapshot state '${key}'.`);
+                continue;
+            }
+            if (!state.isSnapshotState()) {
+                delete normalized[key];
+            }
+        }
+        if (errors.length) {
+            return {errors};
+        }
+
+        // Validate all present entries before import to keep mutation transactional.
+        for (const key of Object.keys(normalized)) {
+            const state = this.statePool.get(key);
+            if (!state) {
+                continue;
+            }
+            if (!state.isSnapshotState()) {
+                continue;
+            }
+            try {
+                state.validateSnapshotValue(normalized[key]);
+            } catch (error: any) {
+                errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
+            }
+        }
+        return errors.length ? {errors} : {normalized, errors: []};
+    }
+
+    /** Returns whether a snapshot key is a compact style-option storage key. */
+    private validateStyleOptionSnapshotEntry(key: string, value: unknown, errors: string[]): boolean {
+        if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+            return false;
+        }
+        if (typeof value !== 'string') {
+            errors.push(`Invalid value for '${key}': expected string style option payload.`);
+        }
+        return true;
+    }
+
+    /** Extracts compact style-option entries from a normalized snapshot. */
+    private extractStyleOptionSnapshotEntries(snapshot: Record<string, unknown>): Record<string, string> {
+        const entries: Record<string, string> = Object.create(null);
+        for (const [key, value] of Object.entries(snapshot)) {
+            if (this.stylesState.isStyleOptionUrlParamKey(key) && typeof value === 'string') {
+                entries[key] = value;
+            }
+        }
+        return entries;
+    }
+
+    /** Reads compact style-option entries from browser local storage. */
+    private collectStyleOptionStorageEntries(): Record<string, string> {
+        const entries: Record<string, string> = Object.create(null);
+        for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (!key || !this.stylesState.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            const value = localStorage.getItem(key);
+            if (value !== null) {
+                entries[key] = value;
+            }
+        }
+        return entries;
+    }
+
+    /** Removes compact style-option entries from browser local storage. */
+    private clearStyleOptionStorageEntries(): void {
+        const keys: string[] = [];
+        for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (key && this.stylesState.isStyleOptionUrlParamKey(key)) {
+                keys.push(key);
+            }
+        }
+        for (const key of keys) {
+            localStorage.removeItem(key);
+        }
+    }
+
+    /** Loads metadata describing the configured default state. */
+    private loadConfigDefaultStateMeta(): ConfigDefaultStateMeta {
+        const emptyMeta: ConfigDefaultStateMeta = {
+            version: 1,
+            sourceHash: "",
+            entries: Object.create(null)
+        };
+
+        const raw = localStorage.getItem(this.CONFIG_DEFAULT_STATE_META_KEY);
+        if (!raw) {
+            return emptyMeta;
+        }
+
+        try {
+            const parsed = JSON.parse(raw) as Partial<ConfigDefaultStateMeta>;
+            if (parsed.version !== 1 || !parsed.entries || typeof parsed.entries !== "object") {
+                return emptyMeta;
+            }
+
+            const entries: Record<string, ConfigDefaultStateMetaEntry> = Object.create(null);
+            for (const [key, entry] of Object.entries(parsed.entries)) {
+                if (!entry || typeof entry !== "object") {
+                    continue;
+                }
+                const owner = (entry as ConfigDefaultStateMetaEntry).owner;
+                const valueHash = (entry as ConfigDefaultStateMetaEntry).valueHash;
+                if ((owner !== "config" && owner !== "user") || typeof valueHash !== "string") {
+                    continue;
+                }
+                entries[key] = {owner, valueHash};
+            }
+
+            return {
+                version: 1,
+                sourceHash: typeof parsed.sourceHash === "string" ? parsed.sourceHash : "",
+                entries
+            };
+        } catch {
+            return emptyMeta;
+        }
+    }
+
+    /** Persists metadata for the configured default state. */
+    private persistConfigDefaultStateMeta(): void {
+        localStorage.setItem(this.CONFIG_DEFAULT_STATE_META_KEY, JSON.stringify(this.configDefaultStateMeta));
+    }
+
+    /** Assigns ownership metadata to a state entry. */
+    private setMetaOwner(key: string, owner: "config" | "user", valueHash: string): void {
+        this.configDefaultStateMeta.entries[key] = {owner, valueHash};
+    }
+
+    /**
+     * Returns whether a freshly seeded config default may claim the persisted
+     * slot instead of preserving an existing user or legacy local override.
+     */
+    private configDefaultMayOwnStorageKey(key: string): boolean {
+        const metaEntry = this.configDefaultStateMeta.entries[key];
+        return metaEntry?.owner === "config" || localStorage.getItem(key) === null;
+    }
+
+    /** Computes the hash stored in state metadata. */
+    private stateValueHashForMeta(state: AppState<unknown>): string {
+        return hashStateValue(state.toSnapshotValue());
+    }
+
+    /** Runs a state mutation without marking user-owned metadata. */
+    private withSystemStateMutation(action: () => void): void {
+        const previous = this.isSystemStateMutation;
+        this.isSystemStateMutation = true;
+        try {
+            action();
+        } finally {
+            this.isSystemStateMutation = previous;
+        }
+    }
+
+    /** Recursively normalizes one snapshot subtree while collecting validation issues. */
+    private normalizeSnapshotNode(
+        value: unknown,
+        path: string,
+        depth: number,
+        limits: SnapshotImportLimits,
+        errors: string[]
+    ): unknown {
+        if (depth > limits.maxNestingDepth) {
+            errors.push(`Snapshot payload exceeds max depth at '${path}'.`);
+            return undefined;
+        }
+
+        if (Array.isArray(value)) {
+            if (value.length > limits.maxCollectionEntries) {
+                errors.push(`Snapshot array '${path}' exceeds max length.`);
+                return undefined;
+            }
+            return value.map((entry, index) =>
+                this.normalizeSnapshotNode(entry, `${path}[${index}]`, depth + 1, limits, errors)
+            );
+        }
+
+        if (value && typeof value === 'object') {
+            const proto = Object.getPrototypeOf(value);
+            if (proto !== Object.prototype && proto !== null) {
+                errors.push(`Snapshot object '${path}' has an unsupported prototype.`);
+                return undefined;
+            }
+            const entries = Object.entries(value as Record<string, unknown>);
+            if (entries.length > limits.maxCollectionEntries) {
+                errors.push(`Snapshot object '${path}' exceeds max key count.`);
+                return undefined;
+            }
+            const normalized: Record<string, unknown> = Object.create(null);
+            for (const [key, entry] of entries) {
+                if (this.SNAPSHOT_UNSAFE_KEYS.has(key)) {
+                    errors.push(`Snapshot payload contains unsafe key '${key}' at '${path}'.`);
+                    return undefined;
+                }
+                normalized[key] = this.normalizeSnapshotNode(entry, `${path}.${key}`, depth + 1, limits, errors);
+            }
+            return normalized;
+        }
+
+        if (typeof value === 'string' && value.length > limits.maxStringLength) {
+            errors.push(`Snapshot string at '${path}' exceeds max length.`);
+            return undefined;
+        }
+        return value;
+    }
+
     // -----------------
     // Public API below
     // -----------------
 
     get numViews() {return this.numViewsState.getValue();}
-    set numViews(val: number) {this.numViewsState.next(val);};
+    set numViews(val: number) {
+        const previousViewCount = this.numViewsState.getValue();
+        if (val === previousViewCount) {
+            return;
+        }
+        this.seedAdditionalViews(previousViewCount, val);
+        this.numViewsState.next(val);
+    };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
@@ -951,7 +1658,7 @@ export class AppStateService implements OnDestroy {
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get search() {return this.searchState.getValue();}
-    set search(val: [number, string] | []) {this.searchState.next(val);};
+    set search(val: SearchStateValue) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
@@ -966,7 +1673,7 @@ export class AppStateService implements OnDestroy {
     get styleVisibility() {return this.styleVisibilityState.getValue();}
     set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
-    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(clampTilesLoadLimit(Number(val)));};
+    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {
         const numeric = Number(val);
@@ -984,22 +1691,8 @@ export class AppStateService implements OnDestroy {
     set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
-    get mapsDialogVisible() {return this.mapsOpenState.getValue();};
-    set mapsDialogVisible(val: boolean) {this.mapsOpenState.next(val);};
-    get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
-    set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
-    get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
-    set aboutDialogVisible(val: boolean) {this.aboutDialogVisibleState.next(val);};
-    get preferencesDialogVisible() {return this.preferencesDialogVisibleState.getValue();}
-    set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
-    get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
-    set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
-    get diagnosticsPerformanceDialogVisible() {return this.diagnosticsPerformanceDialogVisibleState.getValue();}
-    set diagnosticsPerformanceDialogVisible(val: boolean) {this.diagnosticsPerformanceDialogVisibleState.next(val);};
-    get diagnosticsLogDialogVisible() {return this.diagnosticsLogDialogVisibleState.getValue();}
-    set diagnosticsLogDialogVisible(val: boolean) {this.diagnosticsLogDialogVisibleState.next(val);};
-    get diagnosticsExportDialogVisible() {return this.diagnosticsExportDialogVisibleState.getValue();}
-    set diagnosticsExportDialogVisible(val: boolean) {this.diagnosticsExportDialogVisibleState.next(val);};
+    get styleEditorTargetId() {return this.styleEditorTargetState.getValue();}
+    set styleEditorTargetId(val: string | null) {this.styleEditorTargetState.next(val);};
     get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
     set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
         this.diagnosticsLogFilterState.next({...val});
@@ -1011,8 +1704,10 @@ export class AppStateService implements OnDestroy {
             logFilter: {...val.logFilter}
         });
     };
+    get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
+    set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
-    set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
+    set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -1034,56 +1729,77 @@ export class AppStateService implements OnDestroy {
         this.viewSyncState.next(sanitized);
     };
 
+    /** Returns whether layer visibility/options sync is enabled for the given view. */
     getLayerSyncOption(viewIndex: number): boolean {
         return this.layerSyncOptionsState.getValue(viewIndex);
     }
 
+    /** Sets whether layer visibility/options sync is enabled for the given view. */
     setLayerSyncOption(viewIndex: number, enabled: boolean): void {
         this.layerSyncOptionsState.next(viewIndex, enabled);
     }
 
-    getOsmState(viewIndex: number): OsmViewState {
-        const value = this.osmState.getValue(viewIndex);
+    /** Returns the persisted background-layer state for the given view. */
+    getBackgroundState(viewIndex: number): BackgroundLayerViewState {
+        const value = this.backgroundState.getValue(viewIndex);
         return {
-            enabled: value.enabled,
-            opacity: clampOsmOpacity(value.opacity),
+            layerId: value.layerId,
+            opacity: clampBackgroundOpacity(value.opacity),
         };
     }
 
-    setOsmState(viewIndex: number, enabled: boolean, opacity: number): void {
-        this.osmState.next(viewIndex, {
-            enabled,
-            opacity: clampOsmOpacity(opacity),
+    /** Returns the effective background-layer state after missing ids are mapped to the configured default. */
+    resolveBackgroundState(viewIndex: number,
+                           availableLayers: readonly BackgroundLayerConfig[],
+                           defaultBackgroundLayerId: string | null): BackgroundLayerViewState {
+        const rawState = this.getBackgroundState(viewIndex);
+        if (rawState.layerId === null) {
+            return rawState;
+        }
+
+        const availableLayerIds = new Set(availableLayers.map(layer => layer.id));
+        if (availableLayerIds.has(rawState.layerId)) {
+            return rawState;
+        }
+
+        if (defaultBackgroundLayerId && availableLayerIds.has(defaultBackgroundLayerId)) {
+            return {
+                layerId: defaultBackgroundLayerId,
+                opacity: rawState.opacity
+            };
+        }
+
+        return {
+            layerId: null,
+            opacity: rawState.opacity
+        };
+    }
+
+    /** Writes the selected background-layer id and opacity for one view. */
+    setBackgroundState(viewIndex: number, layerId: string | null, opacity: number): void {
+        this.backgroundState.next(viewIndex, {
+            layerId,
+            opacity: clampBackgroundOpacity(opacity),
         });
     }
 
-    getOsmEnabled(viewIndex: number): boolean {
-        return this.getOsmState(viewIndex).enabled;
+    /** Returns the configured background opacity for the given view. */
+    getBackgroundOpacity(viewIndex: number): number {
+        return this.getBackgroundState(viewIndex).opacity;
     }
 
-    setOsmEnabled(viewIndex: number, enabled: boolean): void {
-        const current = this.getOsmState(viewIndex);
-        this.setOsmState(viewIndex, enabled, current.opacity);
-    }
-
-    getOsmOpacity(viewIndex: number): number {
-        return this.getOsmState(viewIndex).opacity;
-    }
-
-    setOsmOpacity(viewIndex: number, opacity: number): void {
-        const current = this.getOsmState(viewIndex);
-        this.setOsmState(viewIndex, current.enabled, opacity);
-    }
-
+    /** Returns the persisted orientation for the given view. */
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
     }
 
+    /** Returns the persisted camera destination for the given view. */
     getCameraPosition(viewIndex: number) {
         const destination = this.cameraViewDataState.getValue(viewIndex).destination;
         return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
 
+    /** Internal helper that writes camera destination and orientation without extra policy. */
     private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
         // Fall back to the current orientation if none was passed.
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
@@ -1102,6 +1818,7 @@ export class AppStateService implements OnDestroy {
         this.cameraViewDataState.next(viewIndex, view);
     }
 
+    /** Persists camera destination/orientation and updates the focused view marker. */
     setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
         const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
         const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
@@ -1147,6 +1864,7 @@ export class AppStateService implements OnDestroy {
         this._setView(viewIndex, destination, orientation);
     }
 
+    /** Switches one view between 2D and 3D projection mode. */
     setProjectionMode(viewIndex: number, is2DMode: boolean) {
         if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
             // Unfocused view is trying to update itself when the views are synchronized
@@ -1178,6 +1896,7 @@ export class AppStateService implements OnDestroy {
     //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
 
      */
+    /** Updates the current selection, reusing or creating inspection panels as needed. */
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
         let allPanels = this.selectionState.getValue();
@@ -1320,6 +2039,7 @@ export class AppStateService implements OnDestroy {
         return;
     }
 
+    /** Persists the size of one inspection panel. */
     setInspectionPanelSize(id: number, size: [number, number]) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1330,6 +2050,7 @@ export class AppStateService implements OnDestroy {
         this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
     }
 
+    /** Updates the locked state of one inspection panel. */
     setInspectionPanelLockedState(id: number, isLocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1340,6 +2061,7 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    /** Persists whether one inspection panel is undocked. */
     setInspectionPanelUndockedState(id: number, undocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1357,44 +2079,194 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
-    getInspectionDialogLayoutEntry(panelId: number): InspectionDialogLayoutEntry | undefined {
-        return this.selectionState.getValue().find(panel => panel.id === panelId)?.inspectionDialogLayoutEntry;
+    /** Returns the persisted layout for a dialog if one exists. */
+    getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
+        return this.dialogLayoutsState.getValue()[id];
     }
 
-    ensureInspectionDialogSlot(panelId: number, preferredIndex: number): number {
-        return this.getInspectionDialogLayoutEntry(panelId)?.slot ?? preferredIndex;
+    /** Returns whether the persisted layout marks the dialog as open. */
+    getDialogLayoutOpen(id: string): boolean {
+        return this.getDialogLayout(id)?.open ?? false;
     }
 
-    setInspectionDialogPosition(panelId: number, position: InspectionDialogPosition, preferredIndex?: number): void {
-        const allPanels = this.selectionState.getValue();
-        const panelIndex = allPanels.findIndex(panel => panel.id === panelId);
-        if (panelIndex === -1) {
+    /** Returns whether a persisted dialog should currently be mounted and visible. */
+    isDialogOpen(id: string): boolean {
+        const layout = this.getDialogLayout(id);
+        if (layout) {
+            return layout.open ?? false;
+        }
+        return this.pendingOpenDialogs.has(id);
+    }
+
+    /** Marks a persisted dialog as open or closed, even before its first measured layout exists. */
+    setDialogOpen(id: string, open: boolean): void {
+        const current = this.getDialogLayout(id);
+        if (current) {
+            this.pendingOpenDialogs.delete(id);
+            this.setDialogLayoutOpen(id, open);
             return;
         }
-        const existing = allPanels[panelIndex].inspectionDialogLayoutEntry;
-        const slot = existing === undefined
-            ? this.ensureInspectionDialogSlot(panelId, preferredIndex ?? panelId)
-            : existing.slot;
-        allPanels[panelIndex].inspectionDialogLayoutEntry = {
+        if (open) {
+            this.pendingOpenDialogs.add(id);
+            return;
+        }
+        this.pendingOpenDialogs.delete(id);
+    }
+
+    /** Convenience helper that opens one persisted dialog. */
+    openDialog(id: string): void {
+        this.setDialogOpen(id, true);
+    }
+
+    /** Convenience helper that closes one persisted dialog. */
+    closeDialog(id: string): void {
+        this.setDialogOpen(id, false);
+    }
+
+    /** Returns or creates the persisted layout record for a dialog. */
+    ensureDialogLayout(id: string, fallbackFactory: () => AppDialogLayout): AppDialogLayout | InspectionDialogLayout {
+        const existing = this.getDialogLayout(id);
+        if (existing) {
+            return existing;
+        }
+        const layout = fallbackFactory();
+        this.upsertDialogLayout(id, layout);
+        return layout;
+    }
+
+    /** Inserts or updates one persisted dialog layout record. */
+    upsertDialogLayout(id: string, layout: AppDialogLayout | InspectionDialogLayout): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const existing = currentLayouts[id];
+        const nextLayout: AppDialogLayout | InspectionDialogLayout = existing ? {
+            ...existing,
+            ...layout,
+            position: {
+                ...existing.position,
+                ...layout.position
+            },
+            size: {
+                ...existing.size,
+                ...layout.size
+            }
+        } : {
+            ...layout,
+            position: {...layout.position},
+            size: {...layout.size}
+        };
+        this.dialogLayoutsState.next({
+            ...currentLayouts,
+            [id]: nextLayout
+        });
+        this.pendingOpenDialogs.delete(id);
+    }
+
+    /** Persists the open/closed state for an existing dialog layout. */
+    setDialogLayoutOpen(id: string, open: boolean): void {
+        const current = this.getDialogLayout(id);
+        if (!current) {
+            return;
+        }
+        if ((current.open ?? false) === open) {
+            return;
+        }
+        this.upsertDialogLayout(id, {
+            ...current,
+            open
+        });
+    }
+
+    /** Returns the floating layout record for one inspection panel, if present. */
+    getInspectionDialogLayout(panelId: number): InspectionDialogLayout | undefined {
+        const layout = this.getDialogLayout(this.inspectionLayoutId(panelId));
+        if (layout && 'panelId' in layout && 'slot' in layout) {
+            return layout as InspectionDialogLayout;
+        }
+        return undefined;
+    }
+
+    /** Returns or creates the floating layout record for one inspection panel. */
+    ensureInspectionDialogLayout(
+        panelId: number,
+        preferredSlot: number,
+        fallbackFactory: () => AppDialogLayout
+    ): InspectionDialogLayout {
+        const layoutId = this.inspectionLayoutId(panelId);
+        const existing = this.getInspectionDialogLayout(panelId);
+        if (existing) {
+            return existing;
+        }
+        const fallback = fallbackFactory();
+        const created: InspectionDialogLayout = {
+            panelId,
+            slot: preferredSlot,
+            position: {...fallback.position},
+            size: {...fallback.size}
+        };
+        this.upsertDialogLayout(layoutId, created);
+        return created;
+    }
+
+    /** Updates the stored floating position for one inspection panel. */
+    setInspectionDialogPosition(panelId: number, position: AppDialogPosition, preferredIndex?: number): void {
+        if (!this.selectionState.getValue().some(panel => panel.id === panelId)) {
+            return;
+        }
+        const current = this.getInspectionDialogLayout(panelId);
+        if (current) {
+            this.upsertDialogLayout(this.inspectionLayoutId(panelId), {
+                ...current,
+                position: {left: position.left, top: position.top}
+            });
+            return;
+        }
+        const slot = preferredIndex ?? panelId;
+        const existing = this.getDialogLayout(this.inspectionLayoutId(panelId));
+        this.upsertDialogLayout(this.inspectionLayoutId(panelId), {
             panelId,
             slot,
-            position: {left: position.left, top: position.top}
-        };
-        this.onStateChanged(this.selectionState, true);
+            position: {left: position.left, top: position.top},
+            size: existing?.size ?? {
+                width: Math.round(this.defaultInspectionPanelSize[0] * this.baseFontSize),
+                height: Math.round(this.defaultInspectionPanelSize[1] * this.baseFontSize)
+            }
+        });
     }
 
-    pruneInspectionDialogLayout(_activePanelIds: number[]) {
-        // Layout is stored directly on the corresponding selection panel.
+    /** Removes persisted inspection-dialog layouts for panels that no longer exist. */
+    pruneInspectionDialogLayout(activePanelIds: number[]) {
+        const activeIds = new Set(activePanelIds.map(panelId => this.inspectionLayoutId(panelId)));
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const nextLayouts: Record<string, AppDialogLayout | InspectionDialogLayout> = {};
+        let changed = false;
+        for (const [id, layout] of Object.entries(currentLayouts)) {
+            if (id.startsWith('inspection:') && !activeIds.has(id)) {
+                changed = true;
+                continue;
+            }
+            nextLayouts[id] = layout;
+        }
+        if (changed) {
+            this.dialogLayoutsState.next(nextLayouts);
+        }
+        for (const id of Object.keys(currentLayouts)) {
+            if (!(id in nextLayouts)) {
+                this.pendingOpenDialogs.delete(id);
+            }
+        }
     }
 
+    /** Opens the inspection comparison dialog with the supplied model. */
     openInspectionComparison(model: InspectionComparisonModel): void {
         this.inspectionComparisonState.next(model);
     }
 
+    /** Closes the inspection comparison dialog. */
     closeInspectionComparison(): void {
         this.inspectionComparisonState.next(null);
     }
 
+    /** Reorders docked inspection panels according to the supplied display order. */
     reorderInspectionPanels(dockedDisplayOrder: number[]) {
         const allPanels = this.selectionState.getValue();
         const dockedPanels = allPanels.filter(panel => !panel.undocked);
@@ -1424,6 +2296,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Sets the accent color stored for one inspection panel. */
     setInspectionPanelColor(id: number, color: string) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1434,6 +2307,7 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    /** Drops all unlocked inspection panels, preserving only pinned selections. */
     unsetUnlockedSelections() {
         const nextSelection = this.selectionState.getValue().filter(panel =>
             panel.locked || panel.sourceData !== undefined
@@ -1442,6 +2316,7 @@ export class AppStateService implements OnDestroy {
         this.sanitizeInspectionComparisonForSelection(nextSelection);
     }
 
+    /** Removes one inspection panel and any associated persisted layout state. */
     unsetPanel(id: number) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -1453,6 +2328,7 @@ export class AppStateService implements OnDestroy {
         this.sanitizeInspectionComparisonForSelection(allPanels);
     }
 
+    /** Returns whether two inspection-panel orderings are identical by panel id. */
     private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
         if (a.length !== b.length) {
             return false;
@@ -1465,6 +2341,12 @@ export class AppStateService implements OnDestroy {
         return true;
     }
 
+    /** Builds the persisted layout id used for one floating inspection dialog. */
+    private inspectionLayoutId(panelId: number): string {
+        return `inspection:${panelId}`;
+    }
+
+    /** Enables or disables the explicit location marker overlay. */
     setMarkerState(enabled: boolean) {
         this.markerState.next(enabled);
         if (!enabled) {
@@ -1472,6 +2354,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Updates the explicit location marker position, optionally delaying URL sync. */
     setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
@@ -1485,6 +2368,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns per-view visibility and level configuration for one map/layer pair. */
     mapLayerConfig(mapId: string, layerId: string, fallbackVisibility: boolean = true, fallbackLevel: number = 13): LayerViewConfig[] {
         if (isSourceOrMetaData(layerId)) {
             return [];
@@ -1516,6 +2400,7 @@ export class AppStateService implements OnDestroy {
         return result;
     }
 
+    /** Writes per-view visibility and level configuration for one map/layer pair. */
     setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
         if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViewsState.getValue()) {
             return;
@@ -1544,6 +2429,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Returns or seeds the stored values for one style option across all views. */
     styleOptionValues(
         mapId: string,
         layerId: string,
@@ -1609,6 +2495,7 @@ export class AppStateService implements OnDestroy {
         this.stylesState.next(this.styles);
     }
 
+    /** Returns whether the style is visible in the persisted style tree. */
     getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
         if (this.styleVisibility.hasOwnProperty(styleId)) {
             return this.styleVisibility[styleId];
@@ -1616,72 +2503,100 @@ export class AppStateService implements OnDestroy {
         return fallback;
     }
 
+    /** Updates the persisted visibility flag for one style. */
     setStyleVisibility(styleId: string, val: boolean) {
         this.styleVisibility[styleId] = val;
         this.styleVisibilityState.next(this.styleVisibility);
     }
 
-    setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
-        const trimmed = value ? [value[0], value[1].trim()] as [number, string] : null;
+    /** Updates the active search-history selection and optionally persists the query. */
+    setSearchHistoryState(value: SearchHistoryEntry | null, saveHistory: boolean = true) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
         if (trimmed && saveHistory) {
             this.saveHistoryStateValue(trimmed);
         }
+        this.lastSearchHistoryEntryState.next(trimmed);
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
+    }
+
+    /** Rewrites search state during legacy migration without saving another history row. */
+    migrateSearchStateValue(value: SearchHistoryEntry | null) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
+        this.searchState.next(trimmed ? trimmed : []);
+        this._replaceUrl = false;
+    }
+
+    /** Rewrites the last search entry during legacy migration. Callers decide whether to suppress replay. */
+    migrateLastSearchHistoryEntry(value: SearchHistoryEntry | null) {
+        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
         this.lastSearchHistoryEntryState.next(trimmed);
     }
 
-    private saveHistoryStateValue(value: [number, string]) {
+    /** Persists one search-history entry into the bounded stored history list. */
+    private saveHistoryStateValue(value: SearchHistoryEntry) {
         const searchHistoryString = localStorage.getItem("searchHistory");
+        let searchHistory: Array<SearchHistoryEntry> = [];
         if (searchHistoryString) {
-            let parsed = JSON.parse(searchHistoryString) as any;
-            let searchHistory: Array<[number, string]>;
-            if (Array.isArray(parsed) && parsed.length && Array.isArray(parsed[0])) {
-                searchHistory = parsed as Array<[number, string]>;
-            } else if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
-                searchHistory = [parsed as [number, string]];
-            } else {
-                searchHistory = [];
+            const parsed = JSON.parse(searchHistoryString) as unknown;
+            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
+                ? parsed
+                : [parsed];
+            const seen = new Set<string>();
+            for (const rawEntry of rawEntries) {
+                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
+                if (!entry) {
+                    continue;
+                }
+                const key = historyEntryDedupeKey(entry);
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                searchHistory.push(entry);
             }
-            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] === value[0] && entry[1] === value[1]));
-            searchHistory.unshift(value);
-            while (searchHistory.length > 100) {
-                searchHistory.pop();
-            }
-            localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
-        } else {
-            localStorage.setItem("searchHistory", JSON.stringify([value]));
         }
+        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
+        searchHistory.unshift(value);
+        while (searchHistory.length > 100) {
+            searchHistory.pop();
+        }
+        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
     }
 
+    /** Clears persisted app state from local storage and resets URL-backed state. */
     resetStorage() {
         for (const state of this.statePool.values()) {
             state.resetToDefault();
             localStorage.removeItem(state.name);
         }
+        this.clearStyleOptionStorageEntries();
         localStorage.removeItem('searchHistory');
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
+        localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
         const {origin, pathname} = window.location;
         window.location.href = origin + pathname;
     }
 
+    /** Removes persisted map/layer/style references that no longer exist in the loaded data. */
     prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
-        // 1) Build sets of present maps, layers and styles
-        const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
-        const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
-        for (const [mapId, mapNode] of presentMaps.entries()) {
-            // Use feature layers (exclude SourceData) via children
-            for (const layer of mapNode.children) {
-                presentLayerIds.add(`${mapId}/${layer.id}`);
+        this.withSystemStateMutation(() => {
+            // 1) Build sets of present maps, layers and styles
+            const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+            const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
+            for (const [mapId, mapNode] of presentMaps.entries()) {
+                // Use feature layers (exclude SourceData) via children
+                for (const layer of mapNode.children) {
+                    presentLayerIds.add(`${mapId}/${layer.id}`);
+                }
+                // Selection pruning must keep SourceData inspections too.
+                for (const layerId of mapNode.layers.keys()) {
+                    presentSelectionLayerIds.add(`${mapId}/${layerId}`);
+                }
             }
-            // Selection pruning must keep SourceData inspections too.
-            for (const layerId of mapNode.layers.keys()) {
-                presentSelectionLayerIds.add(`${mapId}/${layerId}`);
-            }
-        }
 
-        const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
-        const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
+            const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
+            const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
 
         // 2) Prune layerNames and per-view layer arrays (visibility, zoom levels)
         const oldLayerNames = this.layerNames;
@@ -1759,7 +2674,7 @@ export class AppStateService implements OnDestroy {
             }
         };
         pruneViews(this.mode2dState);
-        pruneViews(this.osmState);
+        pruneViews(this.backgroundState);
         pruneViews(this.viewTileBordersState);
         pruneViews(this.viewTileGridModeState);
         pruneViews(this.cameraViewDataState);
@@ -1800,17 +2715,7 @@ export class AppStateService implements OnDestroy {
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
                 color: panel.color,
-                undocked: panel.undocked,
-                inspectionDialogLayoutEntry: panel.inspectionDialogLayoutEntry
-                    ? {
-                        panelId: panel.id,
-                        slot: panel.inspectionDialogLayoutEntry.slot,
-                        position: {
-                            left: panel.inspectionDialogLayoutEntry.position.left,
-                            top: panel.inspectionDialogLayoutEntry.position.top
-                        }
-                    }
-                    : undefined
+                undocked: panel.undocked
             };
 
             // Filter features
@@ -1837,12 +2742,73 @@ export class AppStateService implements OnDestroy {
         if (nextPanels.length !== panels.length) {
             this.selectionState.next(nextPanels);
         }
-        this.sanitizeInspectionComparisonForSelection(nextPanels);
+            this.sanitizeInspectionComparisonForSelection(nextPanels);
 
-        // Sync all states, so the URL is replaced.
-        this.syncAllStates();
+            // Sync all states, so the URL is replaced.
+            this.syncAllStates();
+        });
     }
 
+    /** Migrates legacy `osm` URL/storage payloads into the generic background-layer state once on startup. */
+    private migrateLegacyOsmState(params: Params): void {
+        const hasBackgroundStorage = localStorage.getItem(this.backgroundState.appState.name) !== null;
+        const hasBackgroundUrl = params[this.backgroundState.appState.urlParamName ?? this.backgroundState.appState.name] !== undefined;
+        if (hasBackgroundStorage || hasBackgroundUrl) {
+            return;
+        }
+
+        const legacyStorage = localStorage.getItem('osm');
+        const legacyUrl = params['osm'];
+        const legacyPayload = legacyUrl ?? legacyStorage;
+        if (legacyPayload === undefined || legacyPayload === null) {
+            return;
+        }
+
+        const serializedStates = typeof legacyPayload === 'string' && legacyPayload.trim().startsWith('[')
+            ? this.parseLegacyOsmStorage(legacyPayload)
+            : this.parseLegacyOsmUrl(String(legacyPayload));
+        if (!serializedStates.length) {
+            return;
+        }
+
+        serializedStates.forEach((state, viewIndex) => {
+            this.setBackgroundState(viewIndex, state.layerId, state.opacity);
+        });
+    }
+
+    /** Parses the JSON-encoded local-storage payload used by the removed `osm` state slot. */
+    private parseLegacyOsmStorage(rawPayload: string): BackgroundLayerViewState[] {
+        try {
+            const parsed = JSON.parse(rawPayload);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+            return parsed.map(token => this.parseLegacyOsmToken(String(token)));
+        } catch {
+            return [];
+        }
+    }
+
+    /** Parses the compact CSV URL form used by the removed `osm` query parameter. */
+    private parseLegacyOsmUrl(rawPayload: string): BackgroundLayerViewState[] {
+        if (!rawPayload.length) {
+            return [];
+        }
+        return rawPayload.split(',').map(token => this.parseLegacyOsmToken(token));
+    }
+
+    /** Converts one legacy `enabled~opacity` token into the new background-layer state shape. */
+    private parseLegacyOsmToken(rawToken: string): BackgroundLayerViewState {
+        const parts = rawToken.split('~');
+        const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
+        const opacity = parts[1] === undefined ? 6 : clampBackgroundOpacity(Number(parts[1]));
+        return {
+            layerId: enabled ? 'osm' : null,
+            opacity
+        };
+    }
+
+    /** Drops stale comparison state when the current selection no longer supports it. */
     private sanitizeInspectionComparisonForSelection(panels: InspectionPanelModel<TileFeatureId>[]): void {
         const model = this.inspectionComparisonState.getValue();
         if (!model) {
@@ -1860,6 +2826,7 @@ export class AppStateService implements OnDestroy {
         this.inspectionComparisonState.next(nextModel);
     }
 
+    /** Removes ineligible panels from a comparison model and drops empty results. */
     private sanitizeInspectionComparisonModel(model: InspectionComparisonModel, eligiblePanelIds: Set<number>): InspectionComparisonModel | null {
         const entries = [model.base, ...model.others];
         const remainingEntries = entries.filter(entry => eligiblePanelIds.has(entry.panelId));
@@ -1875,6 +2842,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Builds comparison candidates from the currently selected feature panels. */
     buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
         return panels
             .filter(panel => excludePanelId === undefined || panel.id !== excludePanelId)
@@ -1885,14 +2853,17 @@ export class AppStateService implements OnDestroy {
             }));
     }
 
+    /** Narrows inspection panels to those that represent actual feature selections. */
     private isFeaturePanel(panel: InspectionPanelModel<FeatureWrapper> | undefined): panel is InspectionPanelModel<FeatureWrapper> {
         return !!panel && panel.features.length > 0 && panel.sourceData === undefined;
     }
 
+    /** Formats the user-facing label used for comparison entries. */
     private formatFeatureLabel(features: FeatureWrapper[]): string {
         return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
     }
 
+    /** Builds one comparison entry from an existing feature inspection panel. */
     private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
         return {
             panelId: panel.id,
@@ -1905,6 +2876,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** Creates the comparison-dialog model for the selected set of feature panels. */
     createComparisonModel(basePanelId: number, otherPanelIds: number[], panels: InspectionPanelModel<FeatureWrapper>[]): InspectionComparisonModel | null {
         const panelsById = new Map(
             panels
@@ -1928,12 +2900,12 @@ export class AppStateService implements OnDestroy {
         };
     }
 
-    updateSelectedSyncOptions() {
+    /** Applies the selection emitted by the view-sync toggle UI and mirrors it into state. */
+    updateSelectedSyncOptions(selectedCodes: string[]) {
         const previousSelection = new Set(this.viewSync);
-        const hasMovement = this.syncOptions.some(option =>
-            option.code === VIEW_SYNC_MOVEMENT && option.value);
-        const hasPosition = this.syncOptions.some(option =>
-            option.code === VIEW_SYNC_POSITION && option.value);
+        let nextSelection = Array.from(new Set(selectedCodes));
+        const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
+        const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
 
         if (hasMovement && hasPosition) {
             let valueToRemove = VIEW_SYNC_POSITION;
@@ -1946,15 +2918,10 @@ export class AppStateService implements OnDestroy {
             } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
                 valueToRemove = VIEW_SYNC_MOVEMENT;
             }
-            for (const option of this.syncOptions) {
-                if (option.code === valueToRemove) {
-                    option.value = false;
-                }
-            }
+            nextSelection = nextSelection.filter(code => code !== valueToRemove);
         }
 
-        this.viewSync = this.syncOptions.filter(option =>
-            option.value).map(option=> option.code);
+        this.viewSync = nextSelection;
         this.syncViews();
     }
 }

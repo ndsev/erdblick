@@ -12,11 +12,13 @@ namespace {
 constexpr double kDegenerateVectorLengthSquared = 1e-18;
 constexpr double kMaxMiterScale = 4.0;
 
+/** Treat near-zero vectors as unusable so downstream normalization stays well-defined. */
 bool isDegenerate(glm::dvec3 const& v)
 {
     return glm::dot(v, v) <= kDegenerateVectorLengthSquared;
 }
 
+/** Build a normalized forward vector for one geometry segment in ECEF space. */
 std::optional<glm::dvec3> segmentForward(Point const& from, Point const& to)
 {
     auto const delta =
@@ -27,6 +29,7 @@ std::optional<glm::dvec3> segmentForward(Point const& from, Point const& to)
     return glm::normalize(delta);
 }
 
+/** Approximate the local "up" direction at one WGS84 point. */
 glm::dvec3 pointUp(Point const& point)
 {
     auto const cart = erdblick::wgsToCartesian<glm::dvec3>(point);
@@ -38,6 +41,7 @@ glm::dvec3 pointUp(Point const& point)
     return glm::normalize(up);
 }
 
+/** Derive a normalized sideways vector from forward and up directions when possible. */
 std::optional<glm::dvec3> sidewaysFor(
     std::optional<glm::dvec3> const& forward,
     glm::dvec3 const& up)
@@ -52,6 +56,7 @@ std::optional<glm::dvec3> sidewaysFor(
     return glm::normalize(sideways);
 }
 
+/** Fallback sideways direction for degenerate cases with too little line context. */
 glm::dvec3 fallbackSideways(Point const& point)
 {
     auto const eastInWgs = erdblick::localWgs84UnitCoordinateSystem({{point, point}, GeomType::Points})[0];
@@ -68,6 +73,7 @@ glm::dvec3 fallbackSideways(Point const& point)
     return glm::normalize(sideways);
 }
 
+/** Blend neighboring segment directions to obtain a stable forward vector at one line vertex. */
 glm::dvec3 lineVertexForward(SelfContainedGeometry const& g, size_t pointIndex)
 {
     std::optional<glm::dvec3> prevForward;
@@ -94,6 +100,12 @@ glm::dvec3 lineVertexForward(SelfContainedGeometry const& g, size_t pointIndex)
     return {0.0, 1.0, 0.0};
 }
 
+/**
+ * Compute the lateral offset direction for one line vertex.
+ *
+ * The returned `lateralScale` applies a capped miter correction so adjacent
+ * segments keep visually even spacing through bends.
+ */
 glm::dvec3 lineVertexSideways(SelfContainedGeometry const& g, size_t pointIndex, glm::dvec3 const& up, double& lateralScale)
 {
     lateralScale = 1.0;
@@ -131,6 +143,7 @@ glm::dvec3 lineVertexSideways(SelfContainedGeometry const& g, size_t pointIndex,
     return fallbackSideways(g.points_[pointIndex]);
 }
 
+/** Apply a local meter-space offset basis to one WGS84 point and convert back to WGS84. */
 Point applyLocalOffsetToPoint(
     Point const& point,
     glm::dvec3 const& sideways,

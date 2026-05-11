@@ -63,6 +63,12 @@ interface PanelOption {
     `,
     standalone: false
 })
+/**
+ * HUD panel for live coordinates, auxiliary projections, and tile ids.
+ *
+ * The panel follows the mouse by default and switches to the persisted marker
+ * position once marker placement is enabled.
+ */
 export class CoordinatesPanelComponent implements OnDestroy {
 
     longitude: number | undefined = undefined;
@@ -127,10 +133,12 @@ export class CoordinatesPanelComponent implements OnDestroy {
         });
     }
 
+    /** Releases subscriptions to marker, coordinate, and option state streams. */
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
+    /** Reapplies persisted display-option selections after option lists change. */
     private restoreSelectedOptions() {
         for (const option of this.stateService.enabledCoordsTileIds) {
             if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
@@ -139,6 +147,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
         }
     }
 
+    /** Recomputes all displayed coordinate systems and tile ids from the current lon/lat. */
     private updateValues() {
         if (this.coordinatesService.auxiliaryCoordinatesFun) {
             if (this.longitude !== undefined && this.latitude !== undefined) {
@@ -185,6 +194,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
         }
     }
 
+    /** Toggles marker placement mode and resets the persisted marker when appropriate. */
     toggleMarker() {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
@@ -213,14 +223,17 @@ export class CoordinatesPanelComponent implements OnDestroy {
         }
     }
 
+    /** Copies a coordinate tuple as a space-separated string. */
     copyToClipboard(coordArray: Array<number>) {
         this.clipboardService.copyToClipboard(coordArray.join(" "));
     }
 
+    /** Returns whether a coordinate or tile-id entry is currently enabled in the panel. */
     isSelectedOption(name: string) {
         return this.selectedOptions.some(val => val.name == name);
     }
 
+    /** Persists the currently selected coordinate and tile-id entries. */
     updateSelectedOptions() {
         this.stateService.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
@@ -229,6 +242,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
         }, new Array<string>());
     }
 
+    /** Sorts tile-id display entries by extracted level number. */
     compareLevels(a: KeyValue<string, bigint> , b: KeyValue<string, bigint>): number {
         const aLevel = parseInt(a.key.match(/\d+/)?.[0] ?? '0', 10);
         const bLevel = parseInt(b.key.match(/\d+/)?.[0] ?? '0', 10);
@@ -236,6 +250,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
         return aLevel - bLevel;
     }
 
+    /** Centers the focused map view on the current marker position. */
     focusOnMarker(markerPosition:  {x: number, y: number}) {
         const focusedViewIndex = this.stateService.focusedView;
         this.mapService.moveToWgs84PositionTopic.next({
