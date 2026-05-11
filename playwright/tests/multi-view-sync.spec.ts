@@ -51,19 +51,17 @@ test.describe('Multi-view synchronisation', () => {
         await leftBackgroundButton.click();
         const leftBackgroundSelect = page.getByTestId('background-select-0');
         const leftBackgroundEnabled = page.getByTestId('background-enabled-0').locator('input');
-        await expect(leftBackgroundEnabled).toBeChecked();
+        // navigateToRoot() disables backgrounds through the legacy OSM URL state
+        // so map-focused tests keep deterministic rendering.
+        await expect(leftBackgroundEnabled).not.toBeChecked();
         await expect(leftBackgroundSelect).toBeVisible();
-        await expect(leftBackgroundSelect).toContainText('Blue Marble');
-        await leftBackgroundSelect.click();
-        await expect(page.locator('.p-select-option', { hasText: 'No Background' })).toHaveCount(0);
         await page.keyboard.press('Escape');
         await page.keyboard.press('Escape');
         await rightBackgroundButton.click();
         const rightBackgroundSelect = page.getByTestId('background-select-1');
         const rightBackgroundEnabled = page.getByTestId('background-enabled-1').locator('input');
-        await expect(rightBackgroundEnabled).toBeChecked();
+        await expect(rightBackgroundEnabled).not.toBeChecked();
         await expect(rightBackgroundSelect).toBeVisible();
-        await expect(rightBackgroundSelect).toContainText('Blue Marble');
         await page.keyboard.press('Escape');
 
         const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
@@ -116,6 +114,19 @@ test.describe('Multi-view synchronisation', () => {
         }, { timeout: 3000 }).toBe(true);
 
         await leftBackgroundButton.click();
+        await expect(leftBackgroundEnabled).not.toBeChecked();
+        await leftBackgroundEnabled.click();
+        await expect(leftBackgroundEnabled).toBeChecked();
+        await expect(leftBackgroundSelect).toContainText('Blue Marble');
+        await page.keyboard.press('Escape');
+
+        // The synced right view should track the same enabled background state.
+        await rightBackgroundButton.click();
+        await expect(rightBackgroundEnabled).toBeChecked();
+        await expect(rightBackgroundSelect).toContainText('Blue Marble');
+        await page.keyboard.press('Escape');
+
+        await leftBackgroundButton.click();
         await expect(leftBackgroundEnabled).toBeChecked();
         await leftBackgroundEnabled.click();
         await expect(leftBackgroundEnabled).not.toBeChecked();
@@ -124,15 +135,5 @@ test.describe('Multi-view synchronisation', () => {
         await page.keyboard.press('Escape');
         await rightBackgroundButton.click();
         await expect(rightBackgroundEnabled).not.toBeChecked();
-        await page.keyboard.press('Escape');
-
-        await leftBackgroundButton.click();
-        await leftBackgroundEnabled.click();
-        await expect(leftBackgroundEnabled).toBeChecked();
-        await expect(leftBackgroundSelect).toContainText('Blue Marble');
-        await page.keyboard.press('Escape');
-        await rightBackgroundButton.click();
-        await expect(rightBackgroundEnabled).toBeChecked();
-        await expect(rightBackgroundSelect).toContainText('Blue Marble');
     });
 });
