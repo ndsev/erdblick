@@ -338,12 +338,17 @@ void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& 
         return;
     }
     for (auto&& rule : style_.rules()) {
-        if (rule.mode() != highlightMode_ || !rule.pointMergeGridCellSize()) {
+        if (rule.mode() != highlightMode_) {
             continue;
         }
-        mergedPointsPerStyleRuleId_.emplace(
-            makeMapLayerStyleRuleId(rule.index()),
-            std::map<std::string, std::pair<std::unordered_set<uint32_t>, std::optional<JsValue>>>());
+        rule.forEachConcreteRule([&](FeatureStyleRule const& concreteRule) {
+            if (!concreteRule.pointMergeGridCellSize()) {
+                return;
+            }
+            mergedPointsPerStyleRuleId_.emplace(
+                makeMapLayerStyleRuleId(concreteRule.renderIndex()),
+                std::map<std::string, std::pair<std::unordered_set<uint32_t>, std::optional<JsValue>>>());
+        });
     }
 }
 
