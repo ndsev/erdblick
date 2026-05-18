@@ -173,6 +173,7 @@ export class MapDataService {
 
     selectionTileRequests: SelectionTileRequest[] = [];
     tileDataChanged: Subject<TileDataChange> = new Subject<TileDataChange>();
+    searchTileScopeChanged: Subject<{viewIndex: number}> = new Subject<{viewIndex: number}>();
     selectionTileUpdated: Subject<string> = new Subject<string>();
     private selectedTileKeys: Set<string> = new Set<string>();
 
@@ -1102,6 +1103,9 @@ export class MapDataService {
             });
 
             await this.updateMapDataRequest();
+            for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+                this.searchTileScopeChanged.next({viewIndex});
+            }
             if (this.tilePipelinePaused) {
                 this.updatePending = true;
                 this.updateRequestedWhilePaused = true;
@@ -2378,6 +2382,33 @@ export class MapDataService {
             return lhs.tile.mapTileKey.localeCompare(rhs.tile.mapTileKey);
         });
         return tiles.map(val => val.tile);
+    }
+
+    /** Returns canonical tile keys for the feature layers currently visible in one view. */
+    getFeatureTileKeysForSearchScope(viewIndex: number): Set<string> {
+        const result = new Set<string>();
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState) {
+            return result;
+        }
+
+        for (const [mapId, mapInfo] of this.maps.maps) {
+            for (const layer of mapInfo.allFeatureLayers()) {
+                if (!this.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
+                    continue;
+                }
+                const level = this.getEffectiveMapLayerLevel(viewIndex, mapId, layer.id);
+                const tileIds = viewState.visibleTileIdsPerLevel.get(level);
+                if (!tileIds) {
+                    continue;
+                }
+                for (const tileId of tileIds) {
+                    result.add(coreLib.getTileFeatureLayerKey(mapId, layer.id, tileId));
+                }
+            }
+        }
+
+        return result;
     }
 
     /** Returns a loaded feature tile by key, accepting legacy and canonical key forms. */

@@ -697,6 +697,13 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
+    readonly featureSearchAutoAreaState = this.createState<boolean>({
+        name: 'featureSearchAutoArea',
+        defaultValue: false,
+        schema: Boolish,
+        snapshotPersist: false
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -1706,6 +1713,8 @@ export class AppStateService implements OnDestroy {
     };
     get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
+    get featureSearchAutoArea() {return this.featureSearchAutoAreaState.getValue();}
+    set featureSearchAutoArea(val: boolean) {this.featureSearchAutoAreaState.next(val);}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}

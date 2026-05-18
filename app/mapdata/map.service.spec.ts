@@ -314,6 +314,37 @@ describe('MapDataService', () => {
         }
     });
 
+    it('exposes current visible feature tile keys for search scope', async () => {
+        const {service, stateService} = createMapDataService();
+        const fakeMapTree = createFakeMapTree([10]);
+        const map = fakeMapTree.maps.get('m1')!;
+        const layer = map.layers.get('layerA')!;
+        map.allFeatureLayers = function* () {
+            yield layer;
+        };
+        service.maps$.next(fakeMapTree as any);
+        const emittedViews: number[] = [];
+        service.searchTileScopeChanged.subscribe(change => emittedViews.push(change.viewIndex));
+        const getTileIdsSpy = vi.spyOn(coreLib as any, 'getTileIds').mockReturnValue([1000n, 1001n]);
+        const getCanonicalTileCountSpy = vi
+            .spyOn(coreLib as any, 'getNumTileIdsForCanonicalCamera')
+            .mockReturnValue(2);
+
+        try {
+            stateService.numViewsState.next(1);
+            await (service as any).runUpdate();
+
+            expect(service.getFeatureTileKeysForSearchScope(0)).toEqual(new Set([
+                coreLib.getTileFeatureLayerKey('m1', 'layerA', 1000n),
+                coreLib.getTileFeatureLayerKey('m1', 'layerA', 1001n),
+            ]));
+            expect(emittedViews).toContain(0);
+        } finally {
+            getTileIdsSpy.mockRestore();
+            getCanonicalTileCountSpy.mockRestore();
+        }
+    });
+
     it('loads locate-resolved relation target tiles before returning them', async () => {
         const {service} = createMapDataService();
         const fetchMock = vi.fn(async () => ({

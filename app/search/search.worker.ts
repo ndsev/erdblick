@@ -7,6 +7,8 @@ import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 export interface SearchWorkerTask {
     type: 'SearchWorkerTask';
     tileId: bigint;
+    mapTileKey: string;
+    dataVersion: number;
     tileBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     query: string;
@@ -73,6 +75,8 @@ export interface DiagnosticsMessage {
 export interface SearchResultForTile {
     type: 'SearchResultForTile';
     tileId: bigint;
+    mapTileKey: string;
+    dataVersion: number;
     query: string;
     numFeatures: number;
     matches: Array<[string, string, SearchResultPosition]>;  // Array of (MapTileKey, FeatureId, SearchResultPosition)
@@ -168,7 +172,9 @@ function processSearch(task: SearchWorkerTask) {
     let postError = (name: string, message: string) => {
         let result: SearchResultForTile = {
             type: 'SearchResultForTile',
-            tileId: 0n,
+            tileId: task.tileId,
+            mapTileKey: task.mapTileKey,
+            dataVersion: task.dataVersion,
             query: task.query,
             numFeatures: 0,
             matches: [],
@@ -206,6 +212,8 @@ function processSearch(task: SearchWorkerTask) {
             let result: SearchResultForTile = {
                 type: 'SearchResultForTile',
                 tileId: tileId,
+                mapTileKey: task.mapTileKey,
+                dataVersion: task.dataVersion,
                 query: task.query,
                 numFeatures: numFeatures,
                 matches: queryResult.result,

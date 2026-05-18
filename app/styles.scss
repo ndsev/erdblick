@@ -3818,6 +3818,39 @@ inspection-tree {
   }
 }
 
+.feature-search-area-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5em;
+  padding: 0 0 0.35em 0;
+  font-size: 0.9em;
+}
+
+.feature-search-area-update {
+  position: absolute;
+  top: 3.25em;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 180;
+  pointer-events: none;
+
+  .p-button {
+    pointer-events: auto;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .feature-search-area-update {
+    max-width: calc(100vw - 1em);
+
+    .p-button {
+      max-width: 100%;
+    }
+  }
+}
+
 .feature-search-tabs {
   display: flex;
   flex: 1 1 auto;

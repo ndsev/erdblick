@@ -1,24 +1,12 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {MapDataService} from "../mapdata/map.service";
-import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
-import {Cartographic, Cartesian3, GeoMath, Rectangle} from "../integrations/geo";
+import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult} from "./search.worker";
+import {Cartographic, GeoMath} from "../integrations/geo";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
-import {JobGroup, JobGroupManager, JobGroupType} from "./job-group";
+import {JobGroup, JobGroupManager} from "./job-group";
 import {AppStateService} from "../shared/appstate.service";
-
-export const MAX_VISIBLE_TILES_PER_LEVEL = 69;
-export const MAX_ZOOM_LEVEL = 15;
-export const SAFE_ZOOM_LEVEL = 10;
-
-/**
- * Synthetic primitive id used to correlate clustered markers back to search results.
- */
-export interface SearchResultPrimitiveId {
-    type: string,
-    index: number
-}
 
 /**
  * Flat marker datum exposed to the deck overlay that visualizes search results.
@@ -34,244 +22,18 @@ export interface SearchResultPoint {
 const TASK_SEARCH = 'SearchWorkerTask' as const;
 const TASK_COMPLETION = 'CompletionWorkerTask' as const;
 
-/**
- * Expands one quadtree tile id into its four children using the mapget tile-id bit layout.
- */
-function generateChildrenIds(parentTileId: bigint) {
-    if (parentTileId == -1n) {
-        return [0n, 4294967296n];
-    }
-
-    let level = parentTileId & 0xFFFFn;
-    let y = (parentTileId >> 16n) & 0xFFFFn;
-    let x = parentTileId >> 32n;
-
-    level += 1n;
-
-    return [
-        (x*2n << 32n)|(y*2n << 16n)|level,
-        (x*2n + 1n << 32n)|(y*2n << 16n)|level,
-        (x*2n << 32n)|(y*2n + 1n << 16n)|level,
-        (x*2n + 1n << 32n)|(y*2n + 1n << 16n)|level
-    ]
+interface SearchResultEntry {
+    label: string;
+    mapId: string;
+    layerId: string;
+    featureId: string;
 }
 
-/**
- * Internal quadtree node used to cluster search-result markers by visible tile level.
- */
-class FeatureSearchQuadTreeNode {
-    tileId: bigint;
-    parentId: bigint | null;
-    level: number;
-    children: Array<FeatureSearchQuadTreeNode>;
-    countPerLayer: Map<string, number>;
-    markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
-    rectangle: Rectangle;
-    center: Cartesian3 | null;
-
-    /**
-     * Creates a quadtree node and derives its WGS84 rectangle from the mapget tile id.
-     */
-    constructor(tileId: bigint,
-                parentTileId: bigint | null,
-                level: number,
-                countPerLayer: Map<string, number>,
-                children: Array<FeatureSearchQuadTreeNode> = [],
-                markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = []) {
-        this.tileId = tileId;
-        this.parentId = parentTileId;
-        this.level = level;
-        this.children = children;
-        this.countPerLayer = new Map(countPerLayer.entries());
-        this.markers = markers;
-
-        const tileBox = tileId >= 0 ? coreLib.getTileBox(tileId) as Array<number> : [0, 0, 0, 0];
-        this.rectangle = Rectangle.fromDegrees(tileBox[0], tileBox[1], tileBox[2], tileBox[3]);
-        this.center = null;
-    }
-
-    /**
-     * Returns true if the given cartographic position lies inside this node's bounds.
-     */
-    containsPoint(point: Cartographic) {
-       return Rectangle.contains(this.rectangle, point);
-    }
-
-    /**
-     * Returns true if any of the provided markers falls inside this node.
-     */
-    contains(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
-        return markers.some(marker =>
-            this.containsPoint(marker[1].cartographicRad as Cartographic)
-        );
-    }
-
-    /**
-     * Returns only those markers that belong to this node's rectangle.
-     */
-    filterPointsForNode(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
-        return markers.filter(marker =>
-            this.containsPoint(marker[1].cartographicRad as Cartographic)
-        );
-    }
-
-    /**
-     * Lazily creates only those child nodes that are relevant for the provided markers or center point.
-     */
-    addChildren(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> | Cartographic) {
-        const existingIds = this.children.map(child => child.tileId);
-        const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
-        for (const id of missingIds) {
-            const child = new FeatureSearchQuadTreeNode(id, this.tileId, this.level + 1, new Map());
-            if (Array.isArray(markers)) {
-                if (child.contains(markers)) {
-                    this.children.push(child);
-                }
-            } else {
-                if (child.containsPoint(markers)) {
-                    this.children.push(child);
-                }
-            }
-        }
-    }
-
-    /**
-     * Accumulates the number of results that this node contributes for one map/layer pair.
-     */
-    incrementCountForMapLayer(mapLayer: string, increment: number) {
-        if (this.countPerLayer.has(mapLayer)) {
-            const currentCount = this.countPerLayer.get(mapLayer)!;
-            this.countPerLayer.set(mapLayer, currentCount + increment);
-            return;
-        }
-        this.countPerLayer.set(mapLayer, increment);
-    }
-}
-
-/**
- * Lightweight quadtree used to aggregate search matches into zoom-dependent clusters.
- */
-class FeatureSearchQuadTree {
-    root: FeatureSearchQuadTreeNode;
-    private maxDepth: number = MAX_ZOOM_LEVEL;
-
-    /**
-     * Starts with a synthetic root that represents the full globe.
-     */
-    constructor() {
-        this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, new Map());
-    }
-
-    /**
-     * Uses the average cartesian position as a stable center for clustered markers.
-     */
-    private calculateAveragePosition(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>): Cartesian3 {
-        const sum = markers.reduce(
-            (acc, marker) => {
-                acc.x += marker[1].cartesian.x;
-                acc.y += marker[1].cartesian.y;
-                acc.z += marker[1].cartesian.z;
-                return acc;
-            },
-            { x: 0, y: 0, z: 0 }
-        );
-
-        return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
-    }
-
-    /**
-     * Inserts all matches from one tile into the quadtree and propagates aggregate counts upward.
-     */
-    insert(tileId: bigint, mapLayerId: string, results: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
-        const markersCenter = this.calculateAveragePosition(results);
-        const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
-        let currentLevel = 0;
-        this.root.addChildren(results);
-        let targetNode: FeatureSearchQuadTreeNode | null = this.root;
-        let nodes = this.root.children;
-
-        mainLoop: while (nodes.length > 0) {
-            const next: Array<FeatureSearchQuadTreeNode> = [];
-            for (let node of nodes) {
-                if (node.tileId == tileId) {
-                    targetNode = node;
-                    break mainLoop;
-                }
-                if (node.containsPoint(markersCenterCartographic)) {
-                    node.incrementCountForMapLayer(mapLayerId, results.length);
-                    node.center = node.center ? new Cartesian3(
-                        (node.center.x + markersCenter.x) / 2,
-                        (node.center.y + markersCenter.y) / 2,
-                        (node.center.z + markersCenter.z) / 2
-                    ) : markersCenter;
-                    node.addChildren(markersCenterCartographic);
-                    next.push(...node.children);
-                }
-            }
-
-            nodes = next;
-            currentLevel++;
-            if (currentLevel > this.maxDepth) {
-                targetNode = null;
-                break;
-            }
-        }
-
-        if (targetNode) {
-            targetNode.incrementCountForMapLayer(mapLayerId, results.length);
-            targetNode.center = markersCenter;
-            targetNode.addChildren(results);
-            nodes = targetNode.children;
-            while (currentLevel <= this.maxDepth) {
-                const next: Array<FeatureSearchQuadTreeNode> = [];
-                for (const node of nodes) {
-                    const containedMarkers = node.filterPointsForNode(results);
-                    if (containedMarkers.length) {
-                        const subMarkersCenter = this.calculateAveragePosition(containedMarkers);
-                        node.incrementCountForMapLayer(mapLayerId, containedMarkers.length);
-                        node.center = subMarkersCenter;
-                        if (node.level == this.maxDepth) {
-                            node.markers.push(...containedMarkers);
-                        } else {
-                            node.addChildren(results);
-                            next.push(...node.children);
-                        }
-                    }
-                }
-                nodes = next;
-                currentLevel++;
-            }
-        }
-    }
-
-    /**
-     * Iterates over all nodes that exist at the requested clustering depth.
-     */
-    *getNodesAtLevel(level: number): IterableIterator<FeatureSearchQuadTreeNode> {
-        if (level < 0 || !this.root.children.length) {
-            return;
-        }
-
-        let currentLevel = 0;
-        let nodes = this.root.children;
-
-        while (nodes.length > 0) {
-            if (currentLevel == level) {
-                for (const node of nodes) {
-                    yield node;
-                }
-                return;
-            }
-
-            const next: Array<FeatureSearchQuadTreeNode> = [];
-            for (const node of nodes) {
-                next.push(...node.children);
-            }
-
-            nodes = next;
-            currentLevel++;
-        }
-    }
+interface SearchTileContribution {
+    tileKey: string;
+    dataVersion: number;
+    numFeatures: number;
+    result: SearchResultForTile;
 }
 
 /**
@@ -360,9 +122,16 @@ export class FeatureSearchService {
     taskIdCounter: number = 0;
     taskGroupIdCounter: number = 0;
 
-    resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
-    private pendingSearchTilesByKey = new Map<string, FeatureTile>();
+    private pendingSearchTileKeys = new Set<string>();
+    private tileContributions = new Map<string, SearchTileContribution>();
+    private coveredTileKeys = new Set<string>();
+    private searchedTileDataVersionByKey = new Map<string, number>();
+    private tileDiagnosticsByKey = new Map<string, Uint8Array>();
+    private activeQuery: string | null = null;
+    private activeSearchViewIndex: number | null = null;
+    private currentSearchScopeTileKeys = new Set<string>();
+    private pendingAreaEvaluation = false;
     private searchResultPointsByFeatureKey = new Map<string, SearchResultPoint>();
     private searchResultPointsCache: SearchResultPoint[] = [];
     private searchResultPointsCacheDirty = false;
@@ -375,6 +144,7 @@ export class FeatureSearchService {
     progress: Subject<SearchState|null> = new Subject<SearchState|null>();
     searchResults: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     traceResults: Array<any> = [];
+    areaUpdateAvailable = new BehaviorSubject<boolean>(false);
 
     diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
     diagnosticsMessageLimit: number = 25;
@@ -403,10 +173,18 @@ export class FeatureSearchService {
                 private stateService: AppStateService) {
         this.updatePointColor();
         this.mapService.tileDataChanged.subscribe(change => {
-            if (!this.pendingSearchTilesByKey.has(change.tileKey)) {
+            if (!this.activeQuery || !this.currentSearchScopeTileKeys.has(change.tileKey)) {
                 return;
             }
+            if (change.reason === "evicted") {
+                this.coveredTileKeys.delete(change.tileKey);
+                this.searchedTileDataVersionByKey.delete(change.tileKey);
+            }
             this.enqueueReadyPendingSearchTiles();
+            this.evaluateCurrentArea();
+        });
+        this.mapService.searchTileScopeChanged.subscribe(change => {
+            this.evaluateAreaAfterViewportChange(change.viewIndex);
         });
     }
 
@@ -448,6 +226,35 @@ export class FeatureSearchService {
             this.searchResultPointsCacheDirty = false;
         }
         return this.searchResultPointsCache;
+    }
+
+    get searchAreaTileCount(): number {
+        return this.currentSearchScopeTileKeys.size;
+    }
+
+    get coveredSearchAreaTileCount(): number {
+        let covered = 0;
+        for (const tileKey of this.currentSearchScopeTileKeys) {
+            if (this.isTileCoveredForCurrentVersion(tileKey)) {
+                covered++;
+            }
+        }
+        return covered;
+    }
+
+    get pendingSearchAreaTileCount(): number {
+        let pending = 0;
+        for (const tileKey of this.currentSearchScopeTileKeys) {
+            if (this.pendingSearchTileKeys.has(tileKey)) {
+                pending++;
+            }
+        }
+        return pending;
+    }
+
+    get searchAreaPercentDone(): number {
+        const total = this.searchAreaTileCount;
+        return total ? this.coveredSearchAreaTileCount / total * 100 : 0;
     }
 
     /**
@@ -539,42 +346,26 @@ export class FeatureSearchService {
     }
 
     /**
-     * Starts a fresh feature search over the currently prioritized tiles.
-     *
-     * Tiles whose staged data is still incomplete remain in a pending set until tileDataChanged says they are ready.
+     * Starts a fresh feature search over the focused view's current search area.
      */
     run(query: string) {
-        // Fresh search.
         this.clear();
+        this.activeQuery = query;
+        this.activeSearchViewIndex = this.clampedFocusedViewIndex();
         this.startTime = Date.now();
+        this.runAreaUpdate('initial');
+    }
 
-        this.currentSearch = new SearchState(query, this.generateTaskGroupId());
-        this.jobGroupManager.addGroup(this.currentSearch);
+    /** Starts a manual area refresh while keeping retained tile results. */
+    updateSearchInArea(): void {
+        this.runAreaUpdate('manual');
+    }
 
-        this.pendingSearchTilesByKey.clear();
-
-        for (const tile of this.orderedTilesForSearchProcessing()) {
-            if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                if (this.isTileStillExpected(tile)) {
-                    this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
-                    this.currentSearch.markTilePending(tile.mapTileKey);
-                }
-                continue;
-            }
-            this.enqueueSearchTask(tile, this.currentSearch);
+    /** Reacts to the autosearch preference flipping on while the current area is stale. */
+    onAutoAreaPreferenceChanged(enabled: boolean): void {
+        if (enabled && this.areaUpdateAvailable.getValue()) {
+            this.runAreaUpdate('auto');
         }
-
-        // Set up completion callback to trigger diagnostics after
-        // all tasks of the group are done. Note: This will only ever
-        // be called if a search truly finishes (is not superseded by a newer one).
-        this.currentSearch.onComplete((group: JobGroup) => {
-            this.getDiagnosticsForCompletedSearch(group.id);
-        });
-
-        this.progress.next(this.currentSearch);
-        this.enqueueReadyPendingSearchTiles();
-        this.maybeStartDiagnosticsForCompletedSearch(this.currentSearch);
-        this.runWorkers();
     }
 
     // Send a task to each worker to start processing.
@@ -590,6 +381,209 @@ export class FeatureSearchService {
             }
             this.scheduleNextTask(index);
         });
+    }
+
+    private clampedFocusedViewIndex(): number | null {
+        const viewCount = this.stateService.numViewsState.getValue();
+        if (viewCount <= 0) {
+            return null;
+        }
+        return Math.max(0, Math.min(viewCount - 1, this.stateService.focusedView));
+    }
+
+    private evaluateAreaAfterViewportChange(viewIndex: number): void {
+        if (this.activeSearchViewIndex !== viewIndex) {
+            return;
+        }
+        this.evaluateCurrentArea();
+    }
+
+    private evaluateCurrentArea(): void {
+        if (!this.activeQuery || this.activeSearchViewIndex === null) {
+            this.areaUpdateAvailable.next(false);
+            return;
+        }
+
+        const uncovered = this.refreshAreaCoverageState();
+        this.notifySearchProgress();
+        if (!uncovered.size) {
+            this.areaUpdateAvailable.next(false);
+            return;
+        }
+
+        if (this.currentSearch && !this.currentSearch.isComplete()) {
+            this.pendingAreaEvaluation = true;
+            this.areaUpdateAvailable.next(false);
+            return;
+        }
+
+        if (this.stateService.featureSearchAutoArea) {
+            this.runAreaUpdate('auto');
+            return;
+        }
+
+        this.areaUpdateAvailable.next(true);
+    }
+
+    private refreshAreaCoverageState(): Set<string> {
+        if (this.activeSearchViewIndex === null) {
+            this.currentSearchScopeTileKeys.clear();
+            return new Set<string>();
+        }
+
+        const nextScope = this.mapService.getFeatureTileKeysForSearchScope(this.activeSearchViewIndex);
+        let removedAny = false;
+        for (const tileKey of this.currentSearchScopeTileKeys) {
+            if (!nextScope.has(tileKey)) {
+                this.removeTileState(tileKey);
+                removedAny = true;
+            }
+        }
+        this.currentSearchScopeTileKeys = nextScope;
+        if (removedAny) {
+            this.rebuildVisibleSearchState();
+            if (this.currentSearch) {
+                this.progress.next(this.currentSearch);
+                this.maybeStartDiagnosticsForCompletedSearch(this.currentSearch);
+            }
+        }
+
+        return this.getUncoveredTileKeys(nextScope);
+    }
+
+    private getUncoveredTileKeys(scope: Set<string>): Set<string> {
+        const uncovered = new Set<string>();
+        for (const tileKey of scope) {
+            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            if (!tile || tile.disposed || !tile.hasData() || !this.mapService.isTileInspectionDataComplete(tile)) {
+                uncovered.add(tileKey);
+                continue;
+            }
+            if (!this.coveredTileKeys.has(tileKey)
+                || this.searchedTileDataVersionByKey.get(tileKey) !== tile.dataVersion) {
+                uncovered.add(tileKey);
+            }
+        }
+        return uncovered;
+    }
+
+    private isTileCoveredForCurrentVersion(tileKey: string): boolean {
+        if (!this.coveredTileKeys.has(tileKey)) {
+            return false;
+        }
+        const tile = this.mapService.loadedTileLayers.get(tileKey);
+        return !!tile
+            && !tile.disposed
+            && tile.hasData()
+            && this.searchedTileDataVersionByKey.get(tileKey) === tile.dataVersion;
+    }
+
+    private notifySearchProgress(): void {
+        if (this.currentSearch) {
+            this.progress.next(this.currentSearch);
+        }
+    }
+
+    private runAreaUpdate(_reason: 'initial' | 'manual' | 'auto'): void {
+        if (!this.activeQuery || this.activeSearchViewIndex === null) {
+            this.areaUpdateAvailable.next(false);
+            return;
+        }
+
+        this.areaUpdateAvailable.next(false);
+        this.pendingAreaEvaluation = false;
+        if (this.currentSearch) {
+            this.jobGroupManager.removeGroup(this.currentSearch.id);
+        }
+
+        const uncovered = this.refreshAreaCoverageState();
+        const search = new SearchState(this.activeQuery, this.generateTaskGroupId());
+        this.currentSearch = search;
+        this.jobGroupManager.addGroup(search);
+        this.pendingSearchTileKeys.clear();
+
+        this.enqueueTilesForSearch(uncovered, search);
+        search.onComplete((group: JobGroup) => {
+            this.getDiagnosticsForCompletedSearch(group.id);
+            if (this.pendingAreaEvaluation) {
+                this.pendingAreaEvaluation = false;
+                this.evaluateCurrentArea();
+            }
+        });
+
+        this.progress.next(search);
+        this.enqueueReadyPendingSearchTiles();
+        this.maybeStartDiagnosticsForCompletedSearch(search);
+        this.runWorkers();
+    }
+
+    private enqueueTilesForSearch(tileKeys: Set<string>, search: SearchState): void {
+        for (const tileKey of tileKeys) {
+            if (!this.currentSearchScopeTileKeys.has(tileKey)) {
+                continue;
+            }
+            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            if (!tile || tile.disposed || !tile.hasData() || !this.mapService.isTileInspectionDataComplete(tile)) {
+                this.pendingSearchTileKeys.add(tileKey);
+                search.markTilePending(tileKey);
+                continue;
+            }
+            this.enqueueSearchTask(tile, search);
+        }
+    }
+
+    private removeTileState(tileKey: string): void {
+        if (this.pendingSearchTileKeys.delete(tileKey)) {
+            this.currentSearch?.markTileReady(tileKey);
+        }
+        this.tileContributions.delete(tileKey);
+        this.resultsPerTile.delete(tileKey);
+        this.coveredTileKeys.delete(tileKey);
+        this.searchedTileDataVersionByKey.delete(tileKey);
+        this.tileDiagnosticsByKey.delete(tileKey);
+    }
+
+    private rebuildVisibleSearchState(): void {
+        const nextResults: SearchResultEntry[] = [];
+        const nextTraces: Array<any> = [];
+        const nextPoints = new Map<string, SearchResultPoint>();
+        const nextResultsPerTile = new Map<string, SearchResultForTile>();
+        let totalFeatureCount = 0;
+
+        for (const tileKey of this.currentSearchScopeTileKeys) {
+            const contribution = this.tileContributions.get(tileKey);
+            if (!contribution) {
+                continue;
+            }
+            const tileResult = contribution.result;
+            totalFeatureCount += contribution.numFeatures;
+            for (const [name, trace] of Object.entries(tileResult.traces || {})) {
+                nextTraces.push({
+                    name: `${name}`,
+                    calls: trace.calls,
+                    totalus: trace.totalus,
+                    values: trace.values,
+                });
+            }
+            if (!tileResult.matches.length) {
+                continue;
+            }
+            nextResultsPerTile.set(tileKey, tileResult);
+            for (const [matchTileKey, featureId, position] of tileResult.matches) {
+                const {mapId, layerId} = this.parseMapLayerIds(matchTileKey);
+                this.normalizeResultPosition(position);
+                this.addSearchResultPoint(nextPoints, mapId, layerId, featureId, position);
+                nextResults.push({label: `${featureId}`, mapId, layerId, featureId});
+            }
+        }
+
+        this.searchResults = nextResults;
+        this.traceResults = nextTraces;
+        this.resultsPerTile = nextResultsPerTile;
+        this.totalFeatureCount = totalFeatureCount;
+        this.searchResultPointsByFeatureKey = nextPoints;
+        this.searchResultPointsCacheDirty = true;
+        this.searchResultPointsVersionValue += 1;
     }
 
     /**
@@ -624,12 +618,13 @@ export class FeatureSearchService {
         if (!this.currentSearch) {
             return;
         }
-        this.pendingSearchTilesByKey.clear();
+        this.pendingSearchTileKeys.clear();
         this.currentSearch.stop();
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.currentSearch.paused = false;
         this.progress.next(this.currentSearch);
+        this.evaluateCurrentArea();
     }
 
     /**
@@ -640,9 +635,17 @@ export class FeatureSearchService {
             this.jobGroupManager.removeGroup(this.currentSearch.id);
         }
         this.currentSearch = null;
-        this.resultTree = new FeatureSearchQuadTree();
         this.resultsPerTile.clear();
-        this.pendingSearchTilesByKey.clear();
+        this.pendingSearchTileKeys.clear();
+        this.tileContributions.clear();
+        this.coveredTileKeys.clear();
+        this.searchedTileDataVersionByKey.clear();
+        this.tileDiagnosticsByKey.clear();
+        this.currentSearchScopeTileKeys.clear();
+        this.activeQuery = null;
+        this.activeSearchViewIndex = null;
+        this.pendingAreaEvaluation = false;
+        this.areaUpdateAvailable.next(false);
         this.clearSearchResultPoints();
         this.searchResults = [];
         this.traceResults = [];
@@ -685,7 +688,10 @@ export class FeatureSearchService {
             return;
         }
 
-        const messages = coreLib.simfilGetDiagnostics(completedSearchGroup.query, Array.from(completedSearchGroup.getDiagnostics()))
+        const diagnostics = Array.from(this.currentSearchScopeTileKeys)
+            .map(tileKey => this.tileDiagnosticsByKey.get(tileKey))
+            .filter((diagnostics): diagnostics is Uint8Array => diagnostics !== undefined);
+        const messages = coreLib.simfilGetDiagnostics(completedSearchGroup.query, diagnostics)
         this.diagnosticsMessages.next(messages.slice(0, this.diagnosticsMessageLimit));
     }
 
@@ -795,23 +801,25 @@ export class FeatureSearchService {
             return;
         }
 
+        const mapTileKey = this.canonicalizeMapTileKey(tileResult.mapTileKey);
+        const tile = this.mapService.loadedTileLayers.get(mapTileKey);
+        if (!this.currentSearchScopeTileKeys.has(mapTileKey)
+            || !tile
+            || tile.disposed
+            || tile.dataVersion !== tileResult.dataVersion) {
+            this.evaluateCurrentArea();
+            return;
+        }
+
         if (tileResult.error) {
             this.errors.add(tileResult.error);
         }
 
-        // Add trace results
-        for (let [key, trace] of Object.entries(tileResult.traces || {})) {
-            this.traceResults.push({
-                name: `${key}`,
-                calls: trace.calls,
-                totalus: trace.totalus,
-                values: trace.values,
-            })
-        }
-
-        // Add diagnostics to the current search group
         if (tileResult.diagnostics) {
             this.currentSearch.addDiagnostics(tileResult.diagnostics);
+            this.tileDiagnosticsByKey.set(mapTileKey, tileResult.diagnostics);
+        } else {
+            this.tileDiagnosticsByKey.delete(mapTileKey);
         }
 
         const seenFeatureKeys = new Set<string>();
@@ -832,42 +840,25 @@ export class FeatureSearchService {
             return true;
         });
 
-        // Add visualizations and register the search result.
-        if (dedupedMatches.length && tileResult.tileId) {
-            const mapTileKey = dedupedMatches[0][0];
-            const {mapId, layerId} = this.parseMapLayerIds(mapTileKey);
-            const mapLayerId = `${mapId}/${layerId}`;
-            this.resultsPerTile.set(mapTileKey, {
-                ...tileResult,
-                matches: dedupedMatches
-            });
-            let addedPoint = false;
-            const treeResults: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
-            for (const result of dedupedMatches) {
-                if (result[2].cartographic) {
-                    result[2].cartographicRad = Cartographic.fromDegrees(
-                        result[2].cartographic.x,
-                        result[2].cartographic.y,
-                        result[2].cartographic.z
-                    );
-                }
-                result[2].cartographic = null;
-                addedPoint = this.tryAddSearchResultPoint(mapId, layerId, result[1], result[2]) || addedPoint;
-                const featureId = result[1];
-                const id: SearchResultPrimitiveId = {type: "SearchResult", index: this.searchResults.length};
-                this.searchResults.push({label: `${featureId}`, mapId: mapId, layerId: layerId, featureId: featureId});
-                treeResults.push([id, result[2], mapLayerId]);
-            }
-            if (addedPoint) {
-                this.searchResultPointsVersionValue += 1;
-            }
-            this.resultTree.insert(tileResult.tileId, mapLayerId, treeResults);
-        }
+        const normalizedResult = {
+            ...tileResult,
+            mapTileKey,
+            matches: dedupedMatches
+        };
+        this.tileContributions.set(mapTileKey, {
+            tileKey: mapTileKey,
+            dataVersion: tileResult.dataVersion,
+            numFeatures: tileResult.numFeatures,
+            result: normalizedResult
+        });
+        this.coveredTileKeys.add(mapTileKey);
+        this.searchedTileDataVersionByKey.set(mapTileKey, tileResult.dataVersion);
+        this.rebuildVisibleSearchState();
+        this.evaluateCurrentArea();
 
         // Broadcast the search progress.
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
-        this.totalFeatureCount += tileResult.numFeatures;
         this.progress.next(this.currentSearch);
     }
 
@@ -922,13 +913,6 @@ export class FeatureSearchService {
     }
 
     /**
-     * Returns whether the viewport still expects this tile, even if its data has not finished loading yet.
-     */
-    private isTileStillExpected(tile: FeatureTile): boolean {
-        return this.mapService.getRequestedMaxStageForTile(tile) !== null;
-    }
-
-    /**
      * Builds a search-worker payload from the currently loaded stage blobs for one tile.
      */
     private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
@@ -940,6 +924,8 @@ export class FeatureSearchService {
         return {
             type: TASK_SEARCH,
             tileId: tile.tileId,
+            mapTileKey: tile.mapTileKey,
+            dataVersion: tile.dataVersion,
             tileBlobs,
             fieldDictBlob: uint8ArrayFromWasm((buf) => {
                 tileParser?.getFieldDict(buf, tile.nodeId)
@@ -971,30 +957,28 @@ export class FeatureSearchService {
      */
     private enqueueReadyPendingSearchTiles() {
         const activeSearch = this.currentSearch;
-        if (!activeSearch || !this.pendingSearchTilesByKey.size) {
+        if (!activeSearch || !this.pendingSearchTileKeys.size) {
             return;
         }
 
         let stateChanged = false;
         let enqueuedTask = false;
 
-        for (const [tileKey] of Array.from(this.pendingSearchTilesByKey.entries())) {
-            const tile = this.mapService.loadedTileLayers.get(tileKey);
-            if (!tile || tile.disposed) {
-                this.pendingSearchTilesByKey.delete(tileKey);
+        for (const tileKey of Array.from(this.pendingSearchTileKeys)) {
+            if (!this.currentSearchScopeTileKeys.has(tileKey)) {
+                this.pendingSearchTileKeys.delete(tileKey);
                 activeSearch.markTileReady(tileKey);
                 stateChanged = true;
                 continue;
             }
-            if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                if (!this.isTileStillExpected(tile)) {
-                    this.pendingSearchTilesByKey.delete(tileKey);
-                    activeSearch.markTileReady(tileKey);
-                    stateChanged = true;
-                }
+            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            if (!tile || tile.disposed || !tile.hasData()) {
                 continue;
             }
-            this.pendingSearchTilesByKey.delete(tileKey);
+            if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                continue;
+            }
+            this.pendingSearchTileKeys.delete(tileKey);
             activeSearch.markTileReady(tileKey);
             enqueuedTask = this.enqueueSearchTask(tile, activeSearch) || enqueuedTask;
             stateChanged = true;
@@ -1052,37 +1036,54 @@ export class FeatureSearchService {
         }
     }
 
-    /**
-     * Adds a unique search marker if the match exposes a valid cartographic position.
-     */
-    private tryAddSearchResultPoint(
+    private canonicalizeMapTileKey(tileKey: string): string {
+        try {
+            const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
+            return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+        } catch {
+            return tileKey;
+        }
+    }
+
+    private normalizeResultPosition(position: SearchResultPosition): void {
+        if (position.cartographic) {
+            position.cartographicRad = Cartographic.fromDegrees(
+                position.cartographic.x,
+                position.cartographic.y,
+                position.cartographic.z
+            );
+            position.cartographic = null;
+        }
+    }
+
+    /** Adds a unique search marker if the match exposes a valid cartographic position. */
+    private addSearchResultPoint(
+        target: Map<string, SearchResultPoint>,
         mapId: string,
         layerId: string,
         featureId: string,
         position: SearchResultPosition
-    ): boolean {
+    ): void {
         const cartographicRad = position.cartographicRad;
         if (!cartographicRad) {
-            return false;
+            return;
         }
         const lon = GeoMath.toDegrees(cartographicRad.longitude);
         const lat = GeoMath.toDegrees(cartographicRad.latitude);
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-            return false;
+            return;
         }
         const featureKey = `${mapId}/${layerId}/${featureId}`;
-        if (this.searchResultPointsByFeatureKey.has(featureKey)) {
-            return false;
+        if (target.has(featureKey)) {
+            return;
         }
-        this.searchResultPointsByFeatureKey.set(featureKey, {
+        target.set(featureKey, {
             coordinates: [lon, lat],
             mapId,
             layerId,
             featureId,
             featureKey
         });
-        this.searchResultPointsCacheDirty = true;
-        return true;
     }
 
     /**

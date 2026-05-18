@@ -44,6 +44,13 @@ interface FeatureSearchGroupingOption {
                 <p-button (click)="stopSearch()" data-testid="feature-search-stop-button" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
+            <div class="feature-search-area-controls">
+                <label for="feature-search-autosearch-area-toggle">Autosearch Area</label>
+                <p-toggleswitch [ngModel]="stateService.featureSearchAutoArea"
+                                (ngModelChange)="setAutosearchArea($event)"
+                                inputId="feature-search-autosearch-area-toggle"
+                                data-testid="feature-search-autosearch-area-toggle"/>
+            </div>
             <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">
                 <span>Awaited tiles to load: </span><span>{{ awaitedTilesToLoad }}</span>
                 <p-progress-spinner strokeWidth="10" fill="transparent" animationDuration=".5s"
@@ -218,6 +225,9 @@ export class FeatureSearchComponent implements OnDestroy {
 
         this.subscriptions.add(this.searchService.progress.subscribe(searchState => {
             if (!searchState) {
+                this.percentDone = 0;
+                this.totalTiles = 0;
+                this.doneTiles = 0;
                 this.awaitedTilesToLoad = 0;
                 this.resultsTree = [];
                 return;
@@ -226,10 +236,10 @@ export class FeatureSearchComponent implements OnDestroy {
                 return;
             }
             this.featureSearchDialogVisible = true;
-            this.percentDone = searchState.percentDone();
-            this.totalTiles = searchState.getTaskCount();
-            this.doneTiles = searchState.getCompletedCount();
-            this.awaitedTilesToLoad = searchState.getPendingTileCount();
+            this.percentDone = this.searchService.searchAreaPercentDone;
+            this.totalTiles = this.searchService.searchAreaTileCount;
+            this.doneTiles = this.searchService.coveredSearchAreaTileCount;
+            this.awaitedTilesToLoad = this.searchService.pendingSearchAreaTileCount;
             if (searchState.isComplete()) {
                 this.searchResultReady();
                 this.canPauseStopSearch = false;
@@ -380,6 +390,11 @@ export class FeatureSearchComponent implements OnDestroy {
         this.selectedGroupingOptions = this.groupingOptionsFromValues(groupingValues);
         this.stateService.featureSearchGrouping = groupingValues;
         this.recalculateResultsByGroups();
+    }
+
+    setAutosearchArea(enabled: boolean) {
+        this.stateService.featureSearchAutoArea = enabled;
+        this.searchService.onAutoAreaPreferenceChanged(enabled);
     }
 
     /** Converts persisted grouping values into dropdown options. */

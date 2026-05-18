@@ -143,6 +143,33 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('persists feature-search autosearch as a non-URL preference', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+
+        service.featureSearchAutoArea = true;
+        await flushMicrotasks();
+
+        expect(localStorage.getItem('featureSearchAutoArea')).toBe('1');
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('cancels pending URL sync before popstate hydration', async () => {
         vi.useFakeTimers();
         const routerStub = createRouterStub({ m: '0' });

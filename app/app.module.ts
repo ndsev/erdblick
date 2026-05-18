@@ -110,6 +110,7 @@ import {AppDialogComponent} from "./shared/app-dialog.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
 import {Panel} from "primeng/panel";
+import {FeatureSearchAreaUpdateComponent} from "./search/feature.search.area-update.component";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -211,7 +212,8 @@ export const initializeServices = () => {
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
         DiagnosticsExportDialogComponent,
-        AdvancedPreferencesComponent
+        AdvancedPreferencesComponent,
+        FeatureSearchAreaUpdateComponent
     ],
     bootstrap: [
         AppComponent

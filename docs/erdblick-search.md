@@ -23,7 +23,7 @@ The palette closes automatically when you click the map or another control, but 
 <!-- --8<-- [start:jump-targets] -->
 | Action | Input syntax | Result |
 | --- | --- | --- |
-| **Search Loaded Features** | Any valid [Simfil](https://github.com/ndsev/simfil/blob/main/docs/simfil-language.md) expression | Runs the feature search across every tile currently loaded in all open views. Syntax errors are shown inline before you execute the query. |
+| **Search Loaded Features** | Any valid [Simfil](https://github.com/ndsev/simfil/blob/main/docs/simfil-language.md) expression | Runs the feature search across the current tile area of the focused view. Syntax errors are shown inline before you execute the query. |
 | **Mapget Tile ID** | `<tileId>` (integer without spaces) | Navigates to the requested tile by computing its bounding box. Useful for links copied from logs or SourceData tools. |
 | **WGS84 Lon-Lat Coordinates** | `lon, lat` or `lon lat [level]` (decimal) • `12°34'56"W 48°01'30"N [level]` (DMS) | Positions the active view on the provided longitude/latitude pair. An optional zoom `level` (1–14) snaps to the matching tile. |
 | **WGS84 Lat-Lon Coordinates** | `lat, lon` or `lat lon [level]` (decimal/DMS) | Same as above but with the order reversed for users accustomed to `lat,lon` input. |
@@ -60,7 +60,8 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 <!-- --8<-- [start:feature-search] -->
 Running the **Search Loaded Features** action allows searching the loaded features deeply by their attributes, geometry and relations. Key capabilities:
 
-- **Scope** – searches span every tile currently loaded (or scheduled for loading) in each view. Increase the “Max tiles to load” limit in Preferences if you need to cover a broader area before launching a search.
+- **Scope** – search results represent the current tile area of the focused view. When the view moves to different visible tiles, erdblick keeps still-covered tile results, drops tiles that left the area, and marks the current area for update.
+- **Area updates** – with **Autosearch Area** disabled, the map shows **Update Search in Area** when the current view contains tiles that have not been searched for the active query. With **Autosearch Area** enabled, erdblick starts that update automatically after the map tile scope changes.
 - **Workers and progress** – queries run inside web workers. Progress shows “processed tiles / scheduled tiles”, so you immediately see whether you have enough data loaded. The map overlay drops temporary markers with a configurable highlight color.
 - **Pause/Resume/Stop** – use the toolbar buttons to pause a long-running search, resume where it left off, or stop it entirely. Pausing preserves current results, and stopping reveals any accumulated worker errors.
 - **Result grouping** – choose how results are organized (by map, layer, feature type, tile) via the multi-select dropdown. Counts per branch keep large sets navigable, and the filter box becomes available as soon as the tree contains entries.
@@ -70,7 +71,7 @@ Running the **Search Loaded Features** action allows searching the loaded featur
 - **Traces tab** – optionally lists instrumented Simfil operators (name, call count, total microseconds). Use it to spot expensive clauses before rewriting a filter.
 - **Performance stats** – elapsed time, tile counts, and cluster pin tiers are tracked for each search run, so you can compare queries and tune performance.
 
-Because the search iterates over loaded tiles, it will not “page in” additional data. If a query returns too few matches, pan/zoom to the desired area, [increase tile limits in the Preferences dialog](erdblick-ui-basics.md#preferences-and-resets), or run the search from both split-view panes.
+Feature search uses the normal map tile loading pipeline and waits for complete inspection data before a tile counts as covered. If a query returns too few matches, pan/zoom to the desired area, wait for tile loading to finish, [increase tile limits in the Preferences dialog](erdblick-ui-basics.md#preferences-and-resets), or run the search from the relevant split-view pane.
 
 <!-- --8<-- [end:feature-search] -->
 

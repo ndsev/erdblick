@@ -10,6 +10,7 @@ import {AppStateService} from "./shared/appstate.service";
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
+                    <feature-search-area-update></feature-search-area-update>
                     <coordinates-panel></coordinates-panel>
                     <div class="dock-toggle" (click)="toggleDock()">
                         @if (stateService.isDockOpen) {
