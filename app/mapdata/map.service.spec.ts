@@ -266,6 +266,93 @@ describe('MapDataService', () => {
         vi.spyOn(MapTileStreamClient.prototype, 'updateRequest').mockResolvedValue(true);
     });
 
+    it('registers Ctrl+j to zoom the newest selected feature in the focused view', () => {
+        const {service, stateService, keyboardService} = createMapDataService();
+        const shortcut = keyboardService.registerShortcut.mock.calls
+            .find(([keys]) => keys === 'Ctrl+j')?.[1];
+        expect(typeof shortcut).toBe('function');
+
+        vi.spyOn(service as any, 'viewShowsFeatureTile').mockReturnValue(false);
+        const makeFeatureWrapper = (featureId: string) => ({
+            featureId,
+            featureTile: {
+                mapTileKey: makeTileKey(1),
+                dataVersion: 0,
+                highestLoadedStage: () => 0,
+                mapName: 'm1',
+                layerName: 'layerA',
+                tileId: 1n,
+                level: () => 10
+            }
+        }) as any;
+        const olderFeature = makeFeatureWrapper('older');
+        const newestFeature = makeFeatureWrapper('newest');
+        service.selectionTopic.next([
+            {
+                id: 1,
+                features: [olderFeature],
+                locked: true,
+                size: [0, 0],
+                color: '#ffffff',
+                undocked: false
+            },
+            {
+                id: 2,
+                features: [newestFeature],
+                locked: false,
+                size: [0, 0],
+                color: '#ffffff',
+                undocked: false
+            },
+            {
+                id: 3,
+                features: [],
+                sourceData: {mapTileKey: makeTileKey(1)},
+                locked: false,
+                size: [0, 0],
+                color: '#ffffff',
+                undocked: false
+            }
+        ]);
+        stateService.focusedView = 0;
+        const zoomSpy = vi.spyOn(service, 'zoomToFeature').mockImplementation(() => {});
+
+        shortcut!(new KeyboardEvent('keydown', {key: 'j', ctrlKey: true}));
+
+        expect(zoomSpy).toHaveBeenCalledWith(0, newestFeature);
+    });
+
+    it('zooms features through the Deck WGS84 camera topic without using the old mesh normal path', () => {
+        const {service} = createMapDataService();
+        const moves: Array<{targetView: number; x: number; y: number; z?: number}> = [];
+        const subscription = service.moveToWgs84PositionTopic.subscribe(value => moves.push(value));
+        const feature = {
+            center: vi.fn().mockReturnValue({x: 11, y: 48, z: 2}),
+            boundingRadiusEndPoint: vi.fn().mockReturnValue({x: 11.001, y: 48, z: 2}),
+            getGeometryType: vi.fn().mockReturnValue(coreLib.GeomType.Mesh),
+            inspectionModel: vi.fn(() => {
+                throw new Error('old mesh path should not be used');
+            })
+        };
+        const featureWrapper = {
+            featureTile: {
+                mapName: 'm1',
+                layerName: 'layerA',
+                tileId: 1n,
+                level: () => 10,
+            },
+            peek: (cb: (feature: any) => void) => cb(feature),
+        } as any;
+
+        service.zoomToFeature(0, featureWrapper);
+
+        expect(feature.inspectionModel).not.toHaveBeenCalled();
+        expect(moves).toHaveLength(1);
+        expect(moves[0]).toMatchObject({targetView: 0, x: 11, y: 48});
+        expect(moves[0].z).toBeGreaterThan(100);
+        subscription.unsubscribe();
+    });
+
     it('computes visible and high-fidelity tile IDs per view policy', async () => {
         const {service, stateService} = createMapDataService();
         const fakeMapTree = createFakeMapTree([10]);

@@ -30,7 +30,7 @@ import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map
 import {ViewVisualizationState} from "../mapview/view.visualization.model";
 import {Cartesian3} from "../integrations/geo";
 import {deepEquals} from "../shared/app-state";
-import {IRenderSceneHandle, ITileVisualization, RenderRectangle, RenderVector3} from "../mapview/render-view.model";
+import {IRenderSceneHandle, ITileVisualization, RenderRectangle} from "../mapview/render-view.model";
 
 interface SelectionTileRequest {
     remoteRequest: {
@@ -89,6 +89,12 @@ interface RequestedLayerProgressState {
     stageCount: number;
 }
 
+interface Wgs84Point {
+    x: number;
+    y: number;
+    z?: number;
+}
+
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:
@@ -113,7 +119,6 @@ export class MapDataService {
     private selectionHighlightSignature = "";
     private hoverHighlightSignature = "";
     private viewVisualizationState: ViewVisualizationState[] = [];
-    private GeometryType?: typeof coreLib.GeomType;
     private updateTimer: ReturnType<typeof setTimeout> | null = null;
     private updateInProgress: boolean = false;
     private updatePending: boolean = false;
@@ -150,7 +155,6 @@ export class MapDataService {
     mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
     moveToRectangleTopic: Subject<{ targetView: number, rectangle: RenderRectangle }>;
-    originAndNormalForFeatureZoomTopic: Subject<{ targetView: number, origin: RenderVector3, normal: RenderVector3}> = new Subject();
     hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
     selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
@@ -199,6 +203,7 @@ export class MapDataService {
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
         this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
+        this.keyboardService.registerShortcut("Ctrl+j", this.zoomToSelectedFeature.bind(this));
 
         const applyDeckWorkerSettings = () => {
             configureDeckRenderWorkerSettings({
@@ -238,8 +243,6 @@ export class MapDataService {
      * This is the service's real startup hook and must run before any viewport-driven work starts.
      */
     public async initialize() {
-        this.GeometryType = coreLib.GeomType;
-
         // Setup TileLayerStream
         this.tileStream = new MapTileStreamClient("/tiles");
         this.tileStream.setPullCompressionEnabled(this.stateService.tilePullCompressionEnabled);
@@ -2639,75 +2642,86 @@ export class MapDataService {
         this.zoomToFeature(viewIndex, features[0]);
     }
 
+    /** Moves the focused view to the newest selected regular feature panel. */
+    zoomToSelectedFeature() {
+        const selectedFeaturePanel = this.selectionTopic.getValue()
+            .slice()
+            .reverse()
+            .find(panel => panel.sourceData === undefined && panel.features.length > 0);
+        const feature = selectedFeaturePanel?.features[0];
+        if (!feature) {
+            return;
+        }
+        this.zoomToFeature(this.stateService.focusedView, feature);
+    }
+
     /**
-     * Moves one or more views to a feature using mesh normals when available and a center fallback otherwise.
+     * Moves one or more views to a feature using Deck's WGS84 camera path.
      * Passing `undefined` targets every view that currently shows the feature tile.
      */
     zoomToFeature(viewIndex: number|undefined, featureWrapper: FeatureWrapper) {
-        const runForTargetViewOrAllAffected = (cb: (viewIndex: number)=>void) => {
-            if (viewIndex !== undefined) {
-                cb(viewIndex);
-            }
-            for (let i = 0; i < this.stateService.numViews; ++i) {
-                if (this.viewShowsFeatureTile(i, featureWrapper.featureTile, true)) {
-                    cb(i);
-                }
-            }
+        const targetViews = this.targetViewsForFeatureZoom(viewIndex, featureWrapper.featureTile);
+        if (!targetViews.length) {
+            return;
         }
-
         featureWrapper.peek((feature: Feature) => {
-            const center = feature.center() as Cartesian3;
-            const centerCartesian = Cartesian3.fromDegrees(center.x, center.y, center.z);
-            let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
-            radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
-            const boundingRadius = Cartesian3.distance(centerCartesian, radiusPoint);
-            const geometryType = feature.getGeometryType() as any;
-
-            if (geometryType === this.GeometryType?.Mesh) {
-                // Get the first triangle from the mesh, and calculate the
-                // camera perspective from its normal.
-                // TODO: Use a more efficient WASM function like feature.firstTriangle() to get the first triangle.
-                const inspectionModel = feature.inspectionModel()
-                let triangle: Array<Cartesian3> = [];
-                if (this) {
-                    for (const section of inspectionModel) {
-                        if (section.key == "Geometry") {
-                            for (let i = 0; i < 3; i++) {
-                                const cartographic = section.children[0].children[i].value.map((coordinate: string) => Number(coordinate));
-                                if (cartographic.length == 3) {
-                                    triangle.push(Cartesian3.fromDegrees(cartographic[0], cartographic[1], cartographic[2]));
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-                const normal = Cartesian3.cross(
-                    Cartesian3.subtract(triangle[1], triangle[0], new Cartesian3()),
-                    Cartesian3.subtract(triangle[2], triangle[0], new Cartesian3()),
-                    new Cartesian3()
-                );
-                Cartesian3.negate(normal, normal);
-                Cartesian3.normalize(normal, normal);
-                Cartesian3.multiplyByScalar(normal, 3 * boundingRadius, normal);
-                runForTargetViewOrAllAffected(vi =>
-                    this.originAndNormalForFeatureZoomTopic.next({
-                        targetView: vi,
-                        origin: {x: centerCartesian.x, y: centerCartesian.y, z: centerCartesian.z},
-                        normal: {x: normal.x, y: normal.y, z: normal.z}
-                    }));
+            const center = feature.center() as Wgs84Point;
+            if (!this.isFiniteWgs84Point(center)) {
+                return;
             }
+            const radiusPoint = feature.boundingRadiusEndPoint() as Wgs84Point;
+            const boundingRadius = this.featureBoundingRadiusMeters(center, radiusPoint);
+            const altitude = this.featureZoomAltitude(center.z, boundingRadius);
 
-            // Fallback for lines/points: Just move the camera to the position.
-            runForTargetViewOrAllAffected(vi =>
+            targetViews.forEach(vi =>
                 this.moveToWgs84PositionTopic.next({
                     targetView: vi,
                     x: center.x,
                     y: center.y,
-                    // TODO: Calculate height using a synthetic camera with target view rectangle.
-                    z: center.z + 3 * boundingRadius
+                    z: altitude
                 }));
         });
+    }
+
+    /** Resolves the view indices affected by a feature zoom request. */
+    private targetViewsForFeatureZoom(viewIndex: number|undefined, featureTile: FeatureTile): number[] {
+        if (viewIndex !== undefined) {
+            return viewIndex >= 0 && viewIndex < this.stateService.numViews ? [viewIndex] : [];
+        }
+
+        const targetViews: number[] = [];
+        for (let i = 0; i < this.stateService.numViews; ++i) {
+            if (this.viewShowsFeatureTile(i, featureTile, true)) {
+                targetViews.push(i);
+            }
+        }
+        return targetViews;
+    }
+
+    /** Validates the WGS84 point shape returned by the WASM feature bindings. */
+    private isFiniteWgs84Point(point: Wgs84Point | undefined): point is Wgs84Point {
+        return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    }
+
+    /** Computes a metric radius from two WGS84 points, falling back to zero for incomplete feature bounds. */
+    private featureBoundingRadiusMeters(center: Wgs84Point, radiusPoint: Wgs84Point | undefined): number {
+        if (!this.isFiniteWgs84Point(radiusPoint)) {
+            return 0;
+        }
+        const centerCartesian = Cartesian3.fromDegrees(center.x, center.y, this.finiteHeight(center.z));
+        const radiusCartesian = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, this.finiteHeight(radiusPoint.z));
+        const radius = Cartesian3.distance(centerCartesian, radiusCartesian);
+        return Number.isFinite(radius) ? radius : 0;
+    }
+
+    /** Converts feature size into a Deck camera altitude with a useful minimum for point-like features. */
+    private featureZoomAltitude(centerHeight: number | undefined, boundingRadius: number): number {
+        return this.finiteHeight(centerHeight) + Math.max(100, 3 * Math.max(0, boundingRadius));
+    }
+
+    /** Normalizes optional feature heights from the WASM point representation. */
+    private finiteHeight(height: number | undefined): number {
+        return Number.isFinite(height) ? Math.max(0, height as number) : 0;
     }
 
     /** Recreates all highlight visualizations for the supplied hover or selection groups. */
