@@ -3921,6 +3921,13 @@ inspection-tree {
   }
 }
 
+.inspection-focus-indicator-active {
+  .p-colorpicker input,
+  .p-colorpicker-preview {
+    border-radius: 50%;
+  }
+}
+
 .trace-entries {
   font-size: 0.9em;
 

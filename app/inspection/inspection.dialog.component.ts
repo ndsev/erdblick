@@ -16,20 +16,30 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
     template: `
         <app-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
                   [style]="dialogStyle" [persistLayout]="true" [layoutId]="layoutId"
-                  (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()">
+                  (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()"
+                  (pointerdown)="focusPanel()" (focusin)="focusPanel()">
             <ng-template #header>
                 @if (panel()) {
                     <div class="inspector-title" (pointerdown)="beginDrag()">
                         <span class="title-container" [class.feature]="panel().sourceData === undefined">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
-                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
-                                               (mousedown)="$event.stopPropagation()"
-                                               (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
-                                </p-colorpicker>
+                                <span class="inspection-focus-indicator"
+                                      [class.inspection-focus-indicator-active]="panel().focused === true">
+                                    <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
+                                                   (mousedown)="$event.stopPropagation()"
+                                                   (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
+                                    </p-colorpicker>
+                                </span>
                             } @else if (isMetadata) {
-                                <p-tag severity="info" value="META" [rounded]="true" />
+                                <span class="inspection-focus-indicator"
+                                      [class.inspection-focus-indicator-active]="panel().focused === true">
+                                    <p-tag severity="info" value="META" [rounded]="true" />
+                                </span>
                             } @else if (panel().sourceData !== undefined) {
-                                <p-tag severity="success" value="DATA" [rounded]="true" />
+                                <span class="inspection-focus-indicator"
+                                      [class.inspection-focus-indicator-active]="panel().focused === true">
+                                    <p-tag severity="success" value="DATA" [rounded]="true" />
+                                </span>
                             }
                             <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title"
                                  tooltipPosition="bottom"
@@ -148,7 +158,20 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
         <p-contextMenu #extraMenu [model]="extraMenuItems" [baseZIndex]="30000" appendTo="body"
                        [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
-    styles: [``],
+    styles: [`
+        .inspection-focus-indicator {
+            align-items: center;
+            border: 2px solid transparent;
+            border-radius: 999px;
+            display: inline-flex;
+            justify-content: center;
+            padding: 2px;
+        }
+
+        .inspection-focus-indicator-active {
+            border-color: var(--p-primary-color, #2196f3);
+        }
+    `],
     standalone: false
 })
 /**
@@ -268,6 +291,11 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         event.stopPropagation();
         const p = this.panel();
         this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
+    }
+
+    /** Marks this floating dialog as the active target for inspection shortcuts. */
+    protected focusPanel() {
+        this.stateService.setFocusedInspectionPanel(this.panel().id);
     }
 
     /** Closes and removes the inspection panel entirely. */
@@ -404,6 +432,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     /** Restores persisted layout state and wires dock-drag cues when the dialog opens. */
     protected onDialogShow() {
+        this.focusPanel();
         this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
         this.bindDockDragCue();
@@ -490,6 +519,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     /** Freezes expensive inspection trees while the floating dialog is being dragged. */
     protected beginDrag(): void {
+        this.focusPanel();
         this.featurePanel?.freezeTree();
         this.sourceDataPanel?.freezeTree();
         this.detachPointerUpListener?.();

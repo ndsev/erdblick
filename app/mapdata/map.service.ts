@@ -19,6 +19,7 @@ import {Feature, FeatureLayerStyle, HighlightMode, TileLayerParser, Viewport} fr
 import {
     AppStateService,
     InspectionPanelModel,
+    SelectedSourceData,
     TileGridMode,
     TileFeatureId,
     VIEW_SYNC_LAYERS
@@ -203,7 +204,7 @@ export class MapDataService {
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
         this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
-        this.keyboardService.registerShortcut("Ctrl+j", this.zoomToSelectedFeature.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
 
         const applyDeckWorkerSettings = () => {
             configureDeckRenderWorkerSettings({
@@ -344,6 +345,7 @@ export class MapDataService {
                 convertedSelections.push({
                     id: selection.id,
                     locked: selection.locked,
+                    focused: selection.focused,
                     size: selection.size,
                     features: features,
                     sourceData: selection.sourceData,
@@ -356,6 +358,7 @@ export class MapDataService {
             }
             pendingPanelUpdates.forEach(update => {
                 update.panel.locked = update.selection.locked;
+                update.panel.focused = update.selection.focused;
                 update.panel.color = update.selection.color;
                 update.panel.size = update.selection.size;
                 update.panel.undocked = update.selection.undocked ?? false;
@@ -2642,17 +2645,24 @@ export class MapDataService {
         this.zoomToFeature(viewIndex, features[0]);
     }
 
-    /** Moves the focused view to the newest selected regular feature panel. */
-    zoomToSelectedFeature() {
-        const selectedFeaturePanel = this.selectionTopic.getValue()
-            .slice()
-            .reverse()
-            .find(panel => panel.sourceData === undefined && panel.features.length > 0);
-        const feature = selectedFeaturePanel?.features[0];
-        if (!feature) {
+    /** Moves the focused view to the inspection panel most recently focused by the user. */
+    zoomToFocusedInspectionPanel() {
+        const focusedPanelId = this.stateService.focusedInspectionPanelId;
+        if (focusedPanelId === undefined) {
             return;
         }
-        this.zoomToFeature(this.stateService.focusedView, feature);
+        const panel = this.selectionTopic.getValue().find(candidate => candidate.id === focusedPanelId);
+        if (!panel) {
+            return;
+        }
+        const targetView = this.stateService.focusedView;
+        if (panel.features.length) {
+            this.zoomToFeature(targetView, panel.features[0]);
+            return;
+        }
+        if (panel.sourceData) {
+            this.zoomToSourceDataSelection(targetView, panel.sourceData);
+        }
     }
 
     /**
@@ -2696,6 +2706,31 @@ export class MapDataService {
             }
         }
         return targetViews;
+    }
+
+    /** Fits the target view to the tile represented by a focused source-data inspection. */
+    private zoomToSourceDataSelection(viewIndex: number, sourceData: SelectedSourceData) {
+        if (viewIndex < 0 || viewIndex >= this.stateService.numViews) {
+            return;
+        }
+        const parsedKey = this.parseMapTileKeySafe(sourceData.mapTileKey);
+        if (!parsedKey) {
+            return;
+        }
+        const [, , tileId] = parsedKey;
+        const tileBox = coreLib.getTileBox(tileId) as number[];
+        if (!Array.isArray(tileBox) || tileBox.length < 4) {
+            return;
+        }
+        this.moveToRectangleTopic.next({
+            targetView: viewIndex,
+            rectangle: {
+                west: tileBox[0],
+                south: tileBox[1],
+                east: tileBox[2],
+                north: tileBox[3],
+            }
+        });
     }
 
     /** Validates the WGS84 point shape returned by the WASM feature bindings. */

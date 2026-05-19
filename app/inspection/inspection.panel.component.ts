@@ -31,20 +31,31 @@ interface InspectionPanelContentAdapter {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="inspect-panel" data-testid="inspection-panel" [(value)]="accordionValue" [transitionOptions]="accordionTransitionOptions">
+        <p-accordion class="inspect-panel" data-testid="inspection-panel" [(value)]="accordionValue"
+                     [transitionOptions]="accordionTransitionOptions"
+                     (pointerdown)="focusPanel()" (focusin)="focusPanel()">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
                         <span class="title-container" [class.feature]="panel().sourceData === undefined">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
-                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
-                                               (mousedown)="$event.stopPropagation()"
-                                               (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
-                                </p-colorpicker>
+                                <span class="inspection-focus-indicator"
+                                      [class.inspection-focus-indicator-active]="panel().focused === true">
+                                    <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
+                                                   (mousedown)="$event.stopPropagation()"
+                                                   (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
+                                    </p-colorpicker>
+                                </span>
                             } @else if (isMetadata) {
-                                <p-tag severity="info" value="META" [rounded]="true" />
+                                <span class="inspection-focus-indicator"
+                                      [class.inspection-focus-indicator-active]="panel().focused === true">
+                                    <p-tag severity="info" value="META" [rounded]="true" />
+                                </span>
                             } @else if (panel().sourceData !== undefined) {
-                                <p-tag severity="success" value="DATA" [rounded]="true" />
+                                <span class="inspection-focus-indicator"
+                                      [class.inspection-focus-indicator-active]="panel().focused === true">
+                                    <p-tag severity="success" value="DATA" [rounded]="true" />
+                                </span>
                             }
                             <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title" 
                                  tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
@@ -198,6 +209,19 @@ interface InspectionPanelContentAdapter {
                 height: calc(100vh - 3em);
             }
         }
+
+        .inspection-focus-indicator {
+            align-items: center;
+            border: 2px solid transparent;
+            border-radius: 999px;
+            display: inline-flex;
+            justify-content: center;
+            padding: 2px;
+        }
+
+        .inspection-focus-indicator-active {
+            border-color: var(--p-primary-color, #2196f3);
+        }
     `],
     standalone: false
 })
@@ -340,6 +364,11 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
+    /** Marks this docked panel as the active target for inspection shortcuts. */
+    protected focusPanel() {
+        this.stateService.setFocusedInspectionPanel(this.panel().id);
+    }
+
     /** Removes this docked inspection panel from the selection set. */
     protected unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
@@ -413,6 +442,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Starts a dock drag request when the user drags the panel header. */
     protected onHeaderPointerDown(event: PointerEvent) {
+        this.focusPanel();
         if (event.button !== 0) {
             return;
         }

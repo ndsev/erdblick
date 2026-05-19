@@ -116,6 +116,7 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
     locked: boolean;
+    focused?: boolean;
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
@@ -385,7 +386,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    // 2~0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
+    // 2~0f~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 1~0~sourcedata:map:layer:tile~address~...features...~size
     // 0~1~...
     readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
@@ -394,7 +395,7 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
-                let s = `${state.id}~${state.locked ? 1 : 0}~`;
+                let s = `${state.id}~${state.locked ? 1 : 0}${state.focused ? 'f' : ''}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
@@ -416,7 +417,9 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
                 const id = Number(parts.shift()!);
-                const lockState = parts.shift() === "1";
+                const panelFlags = parts.shift()!;
+                const lockState = panelFlags.startsWith("1");
+                const focused = panelFlags.includes("f");
                 const undocked = parts.pop()! === "1";
                 const colorToken = parts.pop()!;
                 const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
@@ -428,6 +431,7 @@ export class AppStateService implements OnDestroy {
                     id: id,
                     features: [],
                     locked: lockState || !undocked,
+                    focused: focused || undefined,
                     size: size as [number, number],
                     color: color,
                     undocked: undocked
@@ -855,6 +859,7 @@ export class AppStateService implements OnDestroy {
 
         this.selectionState.subscribe(panels => {
             this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+            this.sanitizeFocusedInspectionPanel(panels);
         });
     }
 
@@ -1667,6 +1672,12 @@ export class AppStateService implements OnDestroy {
     set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
     set focusedView(val: number) {this.focusedViewState.next(val);};
+    get focusedInspectionPanelId() {
+        return this.selectionState.getValue().find(panel => panel.focused)?.id;
+    }
+    set focusedInspectionPanelId(val: number | undefined) {
+        this.setFocusedInspectionPanel(val);
+    };
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
@@ -1904,6 +1915,9 @@ export class AppStateService implements OnDestroy {
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
+        const duplicateFeaturePanelId = !isSourceDataSelection && featureSelection.length
+            ? this.findPanelIdContainingFeatureSelection(allPanels, featureSelection)
+            : undefined;
         if (!isSourceDataSelection && id === undefined && featureSelection.length > 0) {
             this.isDockOpen = true;
         }
@@ -1923,6 +1937,7 @@ export class AppStateService implements OnDestroy {
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
             if (!featureSelection.length && !isClearSourceDataRequest) {
+                this.setFocusedInspectionPanel(duplicateFeaturePanelId);
                 this._replaceUrl = true;
                 return;
             }
@@ -2012,6 +2027,7 @@ export class AppStateService implements OnDestroy {
                 undocked: isSourceDataSelection
             });
             this.selectionState.next(allPanels);
+            this.setFocusedInspectionPanel(newId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return newId;
         }
@@ -2032,6 +2048,7 @@ export class AppStateService implements OnDestroy {
                 allPanels[panelIndex].sourceData = undefined;
             }
             this.selectionState.next(allPanels);
+            this.setFocusedInspectionPanel(targetPanelId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return targetPanelId;
         }
@@ -2077,6 +2094,37 @@ export class AppStateService implements OnDestroy {
             allPanels[index].locked = true;
         }
         this.selectionState.next(allPanels);
+        this.setFocusedInspectionPanel(id);
+    }
+
+    /** Marks one inspection panel as the active target for inspection-level shortcuts. */
+    setFocusedInspectionPanel(id: number | undefined): void {
+        const allPanels = this.selectionState.getValue();
+        const fallbackId = allPanels.length ? allPanels[allPanels.length - 1].id : undefined;
+        const nextId = id !== undefined && allPanels.some(panel => panel.id === id)
+            ? id
+            : fallbackId;
+        let changed = false;
+        for (const panel of allPanels) {
+            const nextFocused = panel.id === nextId;
+            if ((panel.focused ?? false) === nextFocused) {
+                continue;
+            }
+            changed = true;
+            if (nextFocused) {
+                panel.focused = true;
+            } else {
+                delete panel.focused;
+            }
+        }
+        if (changed) {
+            this.selectionState.next(allPanels);
+        }
+    }
+
+    /** Returns whether the supplied inspection panel is the active shortcut target. */
+    isInspectionPanelFocused(id: number): boolean {
+        return this.focusedInspectionPanelId === id;
     }
 
     /** Returns the persisted layout for a dialog if one exists. */
@@ -2326,6 +2374,43 @@ export class AppStateService implements OnDestroy {
         allPanels.splice(index, 1);
         this.selectionState.next(allPanels);
         this.sanitizeInspectionComparisonForSelection(allPanels);
+    }
+
+    /** Finds the first regular inspection panel containing any of the requested feature identities. */
+    private findPanelIdContainingFeatureSelection(
+        panels: InspectionPanelModel<TileFeatureId>[],
+        features: TileFeatureId[]
+    ): number | undefined {
+        return panels.find(panel =>
+            panel.sourceData === undefined &&
+            panel.features.some(existing =>
+                features.some(feature =>
+                    feature.featureId === existing.featureId &&
+                    feature.mapTileKey === existing.mapTileKey
+                )
+            )
+        )?.id;
+    }
+
+    /** Keeps the focused inspection panel id aligned with the current selection set. */
+    private sanitizeFocusedInspectionPanel(panels: InspectionPanelModel<TileFeatureId>[]): void {
+        let focusedSeen = false;
+        const fallbackId = panels.length ? panels[panels.length - 1].id : undefined;
+        for (const panel of panels) {
+            if (panel.focused && !focusedSeen) {
+                focusedSeen = true;
+                continue;
+            }
+            if (panel.focused) {
+                delete panel.focused;
+            }
+        }
+        if (!focusedSeen && fallbackId !== undefined) {
+            const fallbackPanel = panels.find(panel => panel.id === fallbackId);
+            if (fallbackPanel) {
+                fallbackPanel.focused = true;
+            }
+        }
     }
 
     /** Returns whether two inspection-panel orderings are identical by panel id. */

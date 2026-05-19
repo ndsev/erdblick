@@ -92,6 +92,7 @@ class AppStateServiceStub {
         })
     };
     focusedView = 0;
+    focusedInspectionPanelId: number | undefined = undefined;
 
     get numViews() {
         return this.numViewsState.getValue();
@@ -266,7 +267,7 @@ describe('MapDataService', () => {
         vi.spyOn(MapTileStreamClient.prototype, 'updateRequest').mockResolvedValue(true);
     });
 
-    it('registers Ctrl+j to zoom the newest selected feature in the focused view', () => {
+    it('registers Ctrl+j to zoom the focused inspection panel in the focused view', () => {
         const {service, stateService, keyboardService} = createMapDataService();
         const shortcut = keyboardService.registerShortcut.mock.calls
             .find(([keys]) => keys === 'Ctrl+j')?.[1];
@@ -315,11 +316,39 @@ describe('MapDataService', () => {
             }
         ]);
         stateService.focusedView = 0;
+        stateService.focusedInspectionPanelId = 1;
         const zoomSpy = vi.spyOn(service, 'zoomToFeature').mockImplementation(() => {});
 
         shortcut!(new KeyboardEvent('keydown', {key: 'j', ctrlKey: true}));
 
-        expect(zoomSpy).toHaveBeenCalledWith(0, newestFeature);
+        expect(zoomSpy).toHaveBeenCalledWith(0, olderFeature);
+    });
+
+    it('zooms a focused SourceData inspection to its tile bounds', () => {
+        const {service, stateService} = createMapDataService();
+        const rectangles: Array<{targetView: number; rectangle: any}> = [];
+        const subscription = service.moveToRectangleTopic.subscribe(value => rectangles.push(value));
+        const tileId = 12345n;
+        const sourceDataTileKey = coreLib.getSourceDataLayerKey('m1', 'SourceData-LAYER', tileId);
+        service.selectionTopic.next([{
+            id: 4,
+            features: [],
+            sourceData: {mapTileKey: sourceDataTileKey},
+            locked: false,
+            size: [0, 0],
+            color: '#ffffff',
+            undocked: true
+        } as any]);
+        stateService.focusedView = 0;
+        stateService.focusedInspectionPanelId = 4;
+
+        service.zoomToFocusedInspectionPanel();
+
+        const [west, south, east, north] = coreLib.getTileBox(tileId) as number[];
+        expect(rectangles).toHaveLength(1);
+        expect(rectangles[0].targetView).toBe(0);
+        expect(rectangles[0].rectangle).toEqual({west, south, east, north});
+        subscription.unsubscribe();
     });
 
     it('zooms features through the Deck WGS84 camera topic without using the old mesh normal path', () => {
