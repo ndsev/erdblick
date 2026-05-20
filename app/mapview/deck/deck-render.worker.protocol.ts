@@ -21,7 +21,6 @@ export interface DeckTileRenderTask {
     tileKey: string;
     tileStageBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
-    dataSourceInfoBlob: Uint8Array;
     nodeId: string;
     mapName: string;
     layerName: string;
@@ -35,6 +34,13 @@ export interface DeckTileRenderTask {
     outputMode: DeckGeometryOutputMode;
     featureIdSubset: string[];
     mergeCountSnapshot: Record<string, number>;
+}
+
+/** Supplies datasource metadata to a render worker once per map before tile tasks reference it. */
+export interface DeckWorkerDataSourceInfoMessage {
+    type: "DeckWorkerDataSourceInfo";
+    mapName: string;
+    dataSourceInfoBlob: Uint8Array;
 }
 
 /** Handshake message sent from the main thread to bootstrap the render worker. */
@@ -159,6 +165,9 @@ export interface DeckTileRenderResult extends DeckVisualizationBufferResult {
 }
 
 /** All messages accepted by the worker. */
-export type DeckWorkerInboundMessage = DeckTileRenderTask | DeckWorkerInitMessage;
+export type DeckWorkerInboundMessage =
+    DeckTileRenderTask |
+    DeckWorkerDataSourceInfoMessage |
+    DeckWorkerInitMessage;
 /** All messages emitted by the worker. */
 export type DeckWorkerOutboundMessage = DeckTileRenderResult | DeckWorkerReadyMessage;

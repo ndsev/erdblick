@@ -4,6 +4,7 @@ import {
     DeckTileRenderBuffers,
     DeckTileRenderResult,
     DeckTileRenderTask,
+    DeckWorkerDataSourceInfoMessage,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
 import {StyleSourceRef} from "../../styledata/style-validation.model";
@@ -55,6 +56,7 @@ export class DeckRenderWorkerPool {
     private readonly workers: Worker[] = [];
     private readonly workerBusy: boolean[] = [];
     private readonly runningTaskIdByWorker: Array<string | null> = [];
+    private readonly dataSourceInfoBlobsByWorker: Array<Map<string, Uint8Array>> = [];
     private readonly inFlightByTaskId = new Map<string, PendingTask>();
     private readonly availableWorkerWaiters: Array<{
         resolve: (workerIndex: number) => void;
@@ -72,16 +74,37 @@ export class DeckRenderWorkerPool {
         await this.ensureInitialized();
         const workerIndex = await this.acquireWorkerSlot();
         return await new Promise<DeckTileRenderBuffers>((resolve, reject) => {
+            const {dataSourceInfoBlob, ...taskRequest} = request;
+            this.sendDataSourceInfoIfNeeded(workerIndex, request.mapName, dataSourceInfoBlob);
             const task: DeckTileRenderTask = {
                 type: "DeckTileRenderTask",
                 taskId: this.makeTaskId(),
-                ...request
+                ...taskRequest
             };
             const pendingTask: PendingTask = {task, resolve, reject};
             this.inFlightByTaskId.set(task.taskId, pendingTask);
             this.runningTaskIdByWorker[workerIndex] = task.taskId;
             this.workers[workerIndex]!.postMessage(task);
         });
+    }
+
+    /** Sends map-level datasource metadata to a worker once, before tasks for that map use it. */
+    private sendDataSourceInfoIfNeeded(workerIndex: number, mapName: string, dataSourceInfoBlob: Uint8Array): void {
+        let blobsByMap = this.dataSourceInfoBlobsByWorker[workerIndex];
+        if (!blobsByMap) {
+            blobsByMap = new Map<string, Uint8Array>();
+            this.dataSourceInfoBlobsByWorker[workerIndex] = blobsByMap;
+        }
+        if (blobsByMap.get(mapName) === dataSourceInfoBlob) {
+            return;
+        }
+        const message: DeckWorkerDataSourceInfoMessage = {
+            type: "DeckWorkerDataSourceInfo",
+            mapName,
+            dataSourceInfoBlob
+        };
+        this.workers[workerIndex]!.postMessage(message);
+        blobsByMap.set(mapName, dataSourceInfoBlob);
     }
 
     /** Initializes workers once and shares the same promise across concurrent callers. */
@@ -154,6 +177,7 @@ export class DeckRenderWorkerPool {
         this.workers[index] = worker;
         this.workerBusy[index] = false;
         this.runningTaskIdByWorker[index] = null;
+        this.dataSourceInfoBlobsByWorker[index] = new Map<string, Uint8Array>();
         worker.onmessage = (event: MessageEvent<DeckWorkerOutboundMessage>) => {
             const msg = event.data;
             this.runningTaskIdByWorker[index] = null;
@@ -260,6 +284,7 @@ export class DeckRenderWorkerPool {
         this.inFlightByTaskId.clear();
         this.workerBusy.length = 0;
         this.runningTaskIdByWorker.length = 0;
+        this.dataSourceInfoBlobsByWorker.length = 0;
         for (const worker of this.workers) {
             worker.terminate();
         }

@@ -17,6 +17,7 @@ import {
     DeckTileRenderResult,
     DeckTileRenderTask,
     DeckVisualizationBufferResult,
+    DeckWorkerDataSourceInfoMessage,
     DeckWorkerInboundMessage,
     DeckWorkerReadyMessage
 } from "./deck-render.worker.protocol";
@@ -25,6 +26,10 @@ import {StyleValidationIssue} from "../../styledata/style-validation.model";
 const styleTextEncoder = new TextEncoder();
 /** Parser cache keyed by datasource metadata so workers do not rebuild parser state for every tile. */
 const parserCache = new Map<string, TileLayerParser>();
+/** Datasource metadata preloaded by map id before tile tasks use it. */
+const dataSourceInfoByMapName = new Map<string, Uint8Array>();
+/** Per-map generation number used to invalidate parser caches when datasource metadata changes. */
+const dataSourceInfoRevisionByMapName = new Map<string, number>();
 /** Style cache keyed by raw YAML source so repeated renders reuse parsed wasm style objects. */
 const styleCache = new Map<string, FeatureLayerStyle>();
 
@@ -59,10 +64,10 @@ function blobSignature(blob: Uint8Array): string {
 /** Builds the parser-cache key from the datasource node and parser-context blobs. */
 function parserCacheKey(task: DeckTileRenderTask): string {
     return [
-        task.nodeId,
         task.mapName,
+        task.nodeId,
         blobSignature(task.fieldDictBlob),
-        blobSignature(task.dataSourceInfoBlob)
+        dataSourceInfoRevisionByMapName.get(task.mapName) ?? 0
     ].join("|");
 }
 
@@ -73,11 +78,37 @@ function getOrCreateParser(task: DeckTileRenderTask): TileLayerParser {
     if (cached) {
         return cached;
     }
+    const dataSourceInfoBlob = dataSourceInfoByMapName.get(task.mapName);
+    if (!dataSourceInfoBlob) {
+        throw new Error(`Deck render worker has no datasource info for map '${task.mapName}'.`);
+    }
     const parser = new coreLib.TileLayerParser();
-    uint8ArrayToWasm((data) => parser.setDataSourceInfo(data), task.dataSourceInfoBlob);
+    uint8ArrayToWasm((data) => parser.setDataSourceInfo(data), dataSourceInfoBlob);
     uint8ArrayToWasm((data) => parser.addFieldDict(data), task.fieldDictBlob);
     parserCache.set(key, parser);
     return parser;
+}
+
+/** Drops parser cache entries for one map when its datasource metadata is refreshed. */
+function clearParserCacheForMap(mapName: string): void {
+    const keyPrefix = `${mapName}|`;
+    for (const [key, parser] of parserCache.entries()) {
+        if (!key.startsWith(keyPrefix)) {
+            continue;
+        }
+        (parser as any).delete?.();
+        parserCache.delete(key);
+    }
+}
+
+/** Stores map-level datasource metadata sent separately from tile render tasks. */
+function cacheDataSourceInfo(message: DeckWorkerDataSourceInfoMessage): void {
+    dataSourceInfoByMapName.set(message.mapName, message.dataSourceInfoBlob);
+    dataSourceInfoRevisionByMapName.set(
+        message.mapName,
+        (dataSourceInfoRevisionByMapName.get(message.mapName) ?? 0) + 1
+    );
+    clearParserCacheForMap(message.mapName);
 }
 
 /** Reuses parsed `FeatureLayerStyle` objects keyed by the raw style source text. */
@@ -395,7 +426,7 @@ function toErrorMessage(error: unknown): string {
     return String(error);
 }
 
-/** Worker entry point: initialize on handshake, otherwise render one tile task and transfer its buffers. */
+/** Worker entry point for init, datasource-cache updates, and tile render tasks. */
 addEventListener("message", async ({data}) => {
     const message = data as DeckWorkerInboundMessage;
 
@@ -404,6 +435,10 @@ addEventListener("message", async ({data}) => {
             type: "DeckWorkerReady",
             scriptUrl: self.location.href
         } as DeckWorkerReadyMessage);
+        return;
+    }
+    if (message.type === "DeckWorkerDataSourceInfo") {
+        cacheDataSourceInfo(message);
         return;
     }
 

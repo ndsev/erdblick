@@ -1482,6 +1482,7 @@ export class MapDataService {
             const jsonString = JSON.stringify(result);
             this.dataSourceInfoJson = jsonString;
             this.tileStream!.setDataSourceInfoJson(jsonString);
+            FeatureTile.clearDataSourceInfoBlobCache();
         } catch (err) {
             console.error("Failed to load data source info.", err);
         }
