@@ -27,6 +27,7 @@ import {MapDataService} from "./mapdata/map.service";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
+import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
@@ -110,6 +111,7 @@ import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
 import {AppPanelComponent} from "./shared/app-panel.component";
 import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
+import {SearchCompletionPopupComponent} from "./search/search-completion-popup.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
 
@@ -188,6 +190,7 @@ export const initializeServices = () => {
         EditorComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
+        FeatureSearchDialogsComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
         HighlightSearch,
@@ -227,6 +230,7 @@ export const initializeServices = () => {
         AppDialogComponent,
         AppPanelComponent,
         AppSurfaceHeaderComponent,
+        SearchCompletionPopupComponent,
         SpeedDialModule,
         DialogModule,
         DynamicDialogModule,

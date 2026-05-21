@@ -1,7 +1,7 @@
 import {Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
-import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
-import {FeatureSearchService} from "./search/feature.search.service";
+import {AppStateService, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
+import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
 
 @Component({
     selector: 'dockable-layout',
@@ -46,7 +46,7 @@ import {FeatureSearchService} from "./search/feature.search.service";
                                 @if (isFeatureSearchDocked()) {
                                     <p-tab [value]="searchDockTabId">
                                         <span>Search</span>
-                                        <p-badge value="1"/>
+                                        <p-badge [value]="dockedFeatureSearchCount()"/>
                                     </p-tab>
                                 }
                             </p-tablist>
@@ -58,7 +58,21 @@ import {FeatureSearchService} from "./search/feature.search.service";
                                 }
                                 @if (isFeatureSearchDocked()) {
                                     <p-tabpanel [value]="searchDockTabId">
-                                        <feature-search></feature-search>
+                                        <div class="feature-search-dock-container"
+                                             [ngClass]="{
+                                                 'single-panel': dockedFeatureSearchCount() === 1,
+                                                 'multi-panel': dockedFeatureSearchCount() > 1
+                                            }">
+                                            @for (session of dockedFeatureSearchSessions(); track session.id) {
+                                                <feature-search [searchId]="session.id"
+                                                                [dockedPanelCount]="dockedFeatureSearchCount()"
+                                                                [ngClass]="{'dragging': draggedSearchId === session.id,
+                                                                            'drop-before': dropBeforeSearchId === session.id,
+                                                                            'drop-after': dropAfterSearchId === session.id}"
+                                                                [attr.data-surface-id]="session.id"
+                                                                (panelDragRequest)="onFeatureSearchPanelDragRequest($event)"></feature-search>
+                                            }
+                                        </div>
                                     </p-tabpanel>
                                 }
                             </p-tabpanels>
@@ -100,6 +114,17 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private dockPauseEndRafFirst?: number;
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
+    protected draggedSearchId?: string;
+    protected dropBeforeSearchId?: string;
+    protected dropAfterSearchId?: string;
+    private searchDragStart?: {x: number, y: number};
+    private searchDragPointerId?: number;
+    private searchDragActive = false;
+    private searchDropIndex?: number;
+    private searchDetachMove?: () => void;
+    private searchDetachUp?: () => void;
+    private searchDragPreviewElement?: HTMLDivElement;
+    private searchDragPreviewOffset = {x: 0, y: 0};
 
     constructor(public stateService: AppStateService,
                 private renderer: Renderer2,
@@ -125,8 +150,15 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     }
 
     protected isFeatureSearchDocked(): boolean {
-        return this.stateService.isSurfaceDocked(FEATURE_SEARCH_DIALOG_LAYOUT_ID) &&
-            this.featureSearchService.currentSearch !== null;
+        return this.dockedFeatureSearchCount() > 0;
+    }
+
+    protected dockedFeatureSearchCount(): number {
+        return this.dockedFeatureSearchSessions().length;
+    }
+
+    protected dockedFeatureSearchSessions() {
+        return this.featureSearchService.getDockedSessions();
     }
 
     protected hasVisibleDockTabs(): boolean {
@@ -155,6 +187,7 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
         this.detachMove?.();
         this.detachUp?.();
         this.detachCancel?.();
+        this.resetSearchDockDrag();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();
     }
@@ -162,6 +195,192 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     /** Closes the right-hand dock without changing any surface dock state. */
     protected closeDock() {
         this.stateService.isDockOpen = false;
+    }
+
+    /** Starts drag tracking for a docked Feature Search panel. */
+    protected onFeatureSearchPanelDragRequest(payload: {session: FeatureSearchSession, event: PointerEvent}): void {
+        if (this.searchDragActive || payload.event.button !== 0) {
+            return;
+        }
+        const event = payload.event;
+        this.draggedSearchId = payload.session.id;
+        this.searchDragPointerId = event.pointerId;
+        this.searchDragStart = {x: event.clientX, y: event.clientY};
+        this.searchDragActive = false;
+        this.searchDropIndex = undefined;
+        this.dropBeforeSearchId = undefined;
+        this.dropAfterSearchId = undefined;
+        this.clearSearchDragPreview();
+        this.searchDetachMove?.();
+        this.searchDetachUp?.();
+        this.searchDetachMove = this.renderer.listen('window', 'pointermove', (ev: PointerEvent) => this.onSearchDockDragMove(ev));
+        this.searchDetachUp = this.renderer.listen('window', 'pointerup', (ev: PointerEvent) => this.onSearchDockDragEnd(ev));
+    }
+
+    private onSearchDockDragMove(event: PointerEvent): void {
+        if (!this.searchDragStart || event.pointerId !== this.searchDragPointerId) {
+            return;
+        }
+        const distance = Math.hypot(event.clientX - this.searchDragStart.x, event.clientY - this.searchDragStart.y);
+        if (!this.searchDragActive && distance < this.stateService.baseFontSize * 0.5) {
+            return;
+        }
+        if (!this.searchDragActive) {
+            this.searchDragActive = true;
+            document.body.classList.add('dialog-dragging');
+        }
+        this.ensureSearchDragPreview(event);
+        this.positionSearchDragPreview(event.clientX, event.clientY);
+        if (this.isPointInSearchDock(event.clientX, event.clientY)) {
+            this.updateSearchDropTarget(event.clientY);
+        } else {
+            this.searchDropIndex = undefined;
+            this.dropBeforeSearchId = undefined;
+            this.dropAfterSearchId = undefined;
+        }
+    }
+
+    private onSearchDockDragEnd(event: PointerEvent): void {
+        if (event.pointerId !== this.searchDragPointerId) {
+            return;
+        }
+        const searchId = this.draggedSearchId;
+        if (this.searchDragActive && searchId) {
+            if (this.isPointInSearchDock(event.clientX, event.clientY)) {
+                this.updateSearchDropTarget(event.clientY);
+                this.applySearchReorder(searchId);
+            } else {
+                this.undockSearchAt(searchId, event);
+            }
+        }
+        this.resetSearchDockDrag();
+    }
+
+    private applySearchReorder(searchId: string): void {
+        const displayOrder = this.dockedFeatureSearchSessions().map(session => session.id);
+        if (displayOrder.length < 2) {
+            return;
+        }
+        const filtered = displayOrder.filter(id => id !== searchId);
+        const dropIndex = Math.min(Math.max(this.searchDropIndex ?? filtered.length, 0), filtered.length);
+        const nextDisplayOrder = filtered.slice();
+        nextDisplayOrder.splice(dropIndex, 0, searchId);
+        if (displayOrder.some((id, index) => id !== nextDisplayOrder[index])) {
+            const layoutOrder = nextDisplayOrder.map(id => FeatureSearchService.layoutIdForSearch(id));
+            this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, layoutOrder);
+        }
+    }
+
+    private updateSearchDropTarget(clientY: number): void {
+        const container = this.searchDockContainer();
+        if (!container || !this.draggedSearchId) {
+            return;
+        }
+        const elements = Array.from(container.querySelectorAll<HTMLElement>('feature-search'))
+            .map(el => ({el, id: el.dataset['surfaceId']}))
+            .filter(entry => !!entry.id && entry.id !== this.draggedSearchId);
+        if (!elements.length) {
+            this.searchDropIndex = 0;
+            this.dropBeforeSearchId = undefined;
+            this.dropAfterSearchId = undefined;
+            return;
+        }
+        let dropIndex = elements.length;
+        for (let i = 0; i < elements.length; i++) {
+            const rect = elements[i].el.getBoundingClientRect();
+            if (clientY < rect.top + rect.height / 2) {
+                dropIndex = i;
+                break;
+            }
+        }
+        this.searchDropIndex = dropIndex;
+        this.dropBeforeSearchId = dropIndex < elements.length ? elements[dropIndex].id : undefined;
+        this.dropAfterSearchId = dropIndex >= elements.length ? elements[elements.length - 1].id : undefined;
+    }
+
+    private undockSearchAt(searchId: string, event: PointerEvent): void {
+        const session = this.featureSearchService.getSession(searchId);
+        if (!session) {
+            return;
+        }
+        const fallbackOffset = this.stateService.baseFontSize;
+        const offsetX = this.searchDragPreviewElement ? this.searchDragPreviewOffset.x : fallbackOffset;
+        const offsetY = this.searchDragPreviewElement ? this.searchDragPreviewOffset.y : fallbackOffset;
+        this.stateService.setDialogPosition(session.layoutId, {
+            left: Math.max(0, Math.round(event.clientX - offsetX)),
+            top: Math.max(0, Math.round(event.clientY - offsetY))
+        });
+        this.featureSearchService.setSessionDocked(searchId, false);
+    }
+
+    private isPointInSearchDock(x: number, y: number): boolean {
+        const rect = this.searchDockContainer()?.getBoundingClientRect();
+        return !!rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    }
+
+    private searchDockContainer(): HTMLElement | null {
+        return this.dockRef?.nativeElement.querySelector('.feature-search-dock-container') ?? null;
+    }
+
+    private ensureSearchDragPreview(event: PointerEvent): void {
+        if (this.searchDragPreviewElement || !this.draggedSearchId) {
+            return;
+        }
+        const panelElement = this.searchDockContainer()
+            ?.querySelector<HTMLElement>(`feature-search[data-surface-id="${this.draggedSearchId}"]`);
+        if (!panelElement) {
+            return;
+        }
+        const rect = panelElement.getBoundingClientRect();
+        this.searchDragPreviewOffset = {
+            x: Math.min(Math.max((this.searchDragStart?.x ?? event.clientX) - rect.left, 0), rect.width),
+            y: Math.min(Math.max((this.searchDragStart?.y ?? event.clientY) - rect.top, 0), rect.height)
+        };
+        const previewElement = this.renderer.createElement('div') as HTMLDivElement;
+        this.renderer.addClass(previewElement, 'app-dock-drag-preview');
+        this.renderer.setStyle(previewElement, 'width', `${Math.round(rect.width)}px`);
+        this.renderer.setStyle(previewElement, 'height', `${Math.round(rect.height)}px`);
+        const header = panelElement.querySelector<HTMLElement>('.p-accordionheader');
+        if (header) {
+            const headerClone = header.cloneNode(true) as HTMLElement;
+            this.renderer.addClass(headerClone, 'app-dock-drag-preview-header');
+            this.renderer.appendChild(previewElement, headerClone);
+        }
+        const fillElement = this.renderer.createElement('div') as HTMLDivElement;
+        this.renderer.addClass(fillElement, 'app-dock-drag-preview-fill');
+        this.renderer.appendChild(previewElement, fillElement);
+        this.renderer.appendChild(document.body, previewElement);
+        this.searchDragPreviewElement = previewElement;
+    }
+
+    private positionSearchDragPreview(clientX: number, clientY: number): void {
+        if (!this.searchDragPreviewElement) {
+            return;
+        }
+        this.renderer.setStyle(this.searchDragPreviewElement, 'left', `${Math.round(clientX - this.searchDragPreviewOffset.x)}px`);
+        this.renderer.setStyle(this.searchDragPreviewElement, 'top', `${Math.round(clientY - this.searchDragPreviewOffset.y)}px`);
+    }
+
+    private clearSearchDragPreview(): void {
+        this.searchDragPreviewElement?.remove();
+        this.searchDragPreviewElement = undefined;
+        this.searchDragPreviewOffset = {x: 0, y: 0};
+    }
+
+    private resetSearchDockDrag(): void {
+        this.searchDetachMove?.();
+        this.searchDetachUp?.();
+        this.searchDetachMove = undefined;
+        this.searchDetachUp = undefined;
+        this.clearSearchDragPreview();
+        this.searchDragStart = undefined;
+        this.searchDragPointerId = undefined;
+        this.searchDragActive = false;
+        this.draggedSearchId = undefined;
+        this.searchDropIndex = undefined;
+        this.dropBeforeSearchId = undefined;
+        this.dropAfterSearchId = undefined;
+        document.body.classList.remove('dialog-dragging');
     }
     
     /** Starts a manual dock resize interaction from the resize handle. */

@@ -28,6 +28,14 @@ import {
     SearchHistoryStateEntrySchema,
     serializeSearchStateValue
 } from "./search-history";
+import {
+    createFeatureSearchStateEntry,
+    FeatureSearchStateEntry,
+    FeatureSearchStatePatch,
+    FeatureSearchStateSchema,
+    normalizeFeatureSearchState,
+    serializeFeatureSearchState
+} from "./feature-search-state";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -706,6 +714,15 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.coerce.number()),
         toStorage: (value: number[]) => normalizeFeatureSearchGrouping(value),
         fromStorage: (payload: any): number[] => normalizeFeatureSearchGrouping(payload),
+        snapshotPersist: false
+    });
+
+    readonly featureSearchState = this.createState<FeatureSearchStateEntry[]>({
+        name: 'featureSearchState',
+        defaultValue: [],
+        schema: FeatureSearchStateSchema,
+        toStorage: (value: FeatureSearchStateEntry[]) => serializeFeatureSearchState(value),
+        fromStorage: (payload: any): FeatureSearchStateEntry[] => normalizeFeatureSearchState(payload),
         snapshotPersist: false
     });
 
@@ -1742,6 +1759,8 @@ export class AppStateService implements OnDestroy {
     };
     get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
+    get featureSearches() {return this.featureSearchState.getValue();}
+    set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -2210,12 +2229,14 @@ export class AppStateService implements OnDestroy {
             width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
             height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
         };
+        const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
         this.upsertDialogLayout(id, {
             position: current?.position ?? {left: 0, top: 0},
             size: current?.size ?? fallbackSize,
             open: current?.open ?? false,
             docked,
-            dockTab
+            dockTab,
+            ...(nextDockOrder !== undefined ? {dockOrder: nextDockOrder} : {})
         });
         if (docked) {
             this.dockActiveTab = dockTab;
@@ -2253,6 +2274,65 @@ export class AppStateService implements OnDestroy {
         return Object.values(this.dialogLayoutsState.getValue()).some(layout =>
             (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
         );
+    }
+
+    /** Reorders generic docked surfaces within one dock tab. */
+    reorderDockedSurfaces(tabId: string, displayOrder: string[]): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const dockedIds = Object.entries(currentLayouts)
+            .filter(([, layout]) => (layout.docked ?? false) && layout.dockTab === tabId)
+            .map(([id]) => id);
+        if (dockedIds.length < 2) {
+            return;
+        }
+        const dockedIdSet = new Set(dockedIds);
+        const normalizedOrder = displayOrder.filter(id => dockedIdSet.has(id));
+        for (const id of dockedIds) {
+            if (!normalizedOrder.includes(id)) {
+                normalizedOrder.push(id);
+            }
+        }
+        let changed = false;
+        const nextLayouts = {...currentLayouts};
+        normalizedOrder.forEach((id, index) => {
+            const layout = currentLayouts[id];
+            if (!layout || layout.dockOrder === index) {
+                return;
+            }
+            nextLayouts[id] = {
+                ...layout,
+                dockOrder: index
+            };
+            changed = true;
+        });
+        if (changed) {
+            this.dialogLayoutsState.next(nextLayouts);
+        }
+    }
+
+    /** Stores the next floating position for a generic surface. */
+    setDialogPosition(id: string, position: AppDialogPosition): void {
+        const current = this.getDialogLayout(id);
+        const fallbackSize = {
+            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+        };
+        this.upsertDialogLayout(id, {
+            position,
+            size: current?.size ?? fallbackSize,
+            open: current?.open ?? false,
+            docked: current?.docked,
+            dockTab: current?.dockTab,
+            ...(current?.dockOrder !== undefined ? {dockOrder: current.dockOrder} : {})
+        });
+    }
+
+    private nextSurfaceDockOrder(dockTab: string): number {
+        const orders = Object.values(this.dialogLayoutsState.getValue())
+            .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)
+            .map(layout => layout.dockOrder)
+            .filter((order): order is number => typeof order === 'number' && Number.isFinite(order));
+        return orders.length ? Math.max(...orders) + 1 : 0;
     }
 
     /** Returns or creates the persisted layout record for a dialog. */
@@ -2306,6 +2386,19 @@ export class AppStateService implements OnDestroy {
             ...current,
             open
         });
+    }
+
+    /** Removes one persisted generic dialog layout and any pending open marker for it. */
+    removeDialogLayout(id: string): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        if (!(id in currentLayouts)) {
+            this.pendingOpenDialogs.delete(id);
+            return;
+        }
+        const nextLayouts = {...currentLayouts};
+        delete nextLayouts[id];
+        this.dialogLayoutsState.next(nextLayouts);
+        this.pendingOpenDialogs.delete(id);
     }
 
     /** Returns the floating layout record for one inspection panel, if present. */
@@ -2687,6 +2780,42 @@ export class AppStateService implements OnDestroy {
         this.lastSearchHistoryEntryState.next(trimmed);
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
+    }
+
+    /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
+    addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
+        const entry = createFeatureSearchStateEntry(value);
+        this.featureSearchState.next([...this.featureSearches, entry]);
+        return entry;
+    }
+
+    /** Patches one persisted feature-search definition. */
+    patchFeatureSearch(id: string, patch: FeatureSearchStatePatch): FeatureSearchStateEntry | undefined {
+        let updated: FeatureSearchStateEntry | undefined;
+        const next = this.featureSearches.map(entry => {
+            if (entry.id !== id) {
+                return entry;
+            }
+            updated = createFeatureSearchStateEntry({
+                ...entry,
+                ...patch,
+                id: entry.id,
+                query: patch.query ?? entry.query
+            });
+            return updated;
+        });
+        if (updated) {
+            this.featureSearchState.next(next);
+        }
+        return updated;
+    }
+
+    /** Removes one persisted feature-search definition. */
+    removeFeatureSearch(id: string): void {
+        const next = this.featureSearches.filter(entry => entry.id !== id);
+        if (next.length !== this.featureSearches.length) {
+            this.featureSearchState.next(next);
+        }
     }
 
     /** Rewrites search state during legacy migration without saving another history row. */

@@ -1,18 +1,30 @@
-import {Component, OnDestroy, ViewChild, ViewContainerRef} from "@angular/core";
-import {FeatureSearchService} from "./feature.search.service";
+import {
+    Component,
+    ElementRef,
+    EventEmitter,
+    Input,
+    OnChanges,
+    OnDestroy,
+    Output,
+    SimpleChanges,
+    ViewChild,
+    ViewContainerRef
+} from "@angular/core";
+import {FeatureSearchResultEntry, FeatureSearchService, FeatureSearchSession} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
-import {DiagnosticsMessage, TraceResult} from "./search.worker";
+import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
+import {AppStateService, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
-import {Subscription} from "rxjs";
+import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, Subscription, switchMap, timer} from "rxjs";
 import {AppPanelComponent} from "../shared/app-panel.component";
+import getCaretCoordinates from "../shared/caret.util";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -22,11 +34,11 @@ interface FeatureSearchGroupingOption {
 @Component({
     selector: "feature-search",
     template: `
-        @if (isDocked()) {
-            @if (featureSearchDialogVisible) {
+        @if (session) {
+            @if (isDocked()) {
                 <app-panel #featureSearchPanel class="feature-search-panel" data-testid="feature-search-docked-panel"
-                           [layoutId]="featureSearchLayoutId" [persistLayout]="true"
-                           [dockedPanelCount]="featureSearchDockedPanelCount"
+                           [layoutId]="session.layoutId" [persistLayout]="true"
+                           [dockedPanelCount]="dockedPanelCount"
                            [expanded]="featureSearchExpanded"
                            (onShow)="onDockedPanelShow()">
                     <ng-template #header>
@@ -36,22 +48,23 @@ interface FeatureSearchGroupingOption {
                         <ng-container *ngTemplateOutlet="searchContent"></ng-container>
                     </ng-template>
                 </app-panel>
+            } @else {
+                <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog"
+                          [closeOnEscape]="false"
+                          [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)"
+                          [draggable]="true" [resizable]="true" [appendTo]="'body'"
+                          [persistLayout]="true" [persistOpenState]="false" [layoutId]="session.layoutId"
+                          (onShow)="onDialogShow($event)"
+                          (onDragEnd)="onDialogDragEnd()"
+                          (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
+                    <ng-template #header>
+                        <ng-container *ngTemplateOutlet="searchHeader"></ng-container>
+                    </ng-template>
+                    <ng-template #content>
+                        <ng-container *ngTemplateOutlet="searchContent"></ng-container>
+                    </ng-template>
+                </app-dialog>
             }
-        } @else {
-            <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog"
-                      [closeOnEscape]="false"
-                      [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)"
-                      [draggable]="true" [resizable]="true" [appendTo]="'body'"
-                      [persistLayout]="true" [persistOpenState]="false" [layoutId]="featureSearchLayoutId"
-                      (onShow)="onDialogShow($event)"
-                      (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
-                <ng-template #header>
-                    <ng-container *ngTemplateOutlet="searchHeader"></ng-container>
-                </ng-template>
-                <ng-template #content>
-                    <ng-container *ngTemplateOutlet="searchContent"></ng-container>
-                </ng-template>
-            </app-dialog>
         }
 
         <ng-template #searchHeader>
@@ -59,16 +72,18 @@ interface FeatureSearchGroupingOption {
                                 title="Search Loaded Features"
                                 titleIcon="search"
                                 [hasColorPicker]="true"
-                                [color]="searchService.pointColor"
+                                [color]="session?.pointColor ?? '#ea4336'"
                                 [dockMode]="isDocked() ? 'undock' : 'dock'"
                                 [sizeToggleVisible]="isDocked()"
-                                [sizeToggleDisabled]="featureSearchDockedPanelCount <= 1"
+                                [sizeToggleDisabled]="dockedPanelCount <= 1"
                                 [expanded]="featureSearchExpanded"
+                                [dragEnabled]="isDocked()"
                                 (focusRequest)="bringSurfaceToFront()"
                                 (colorChange)="onSearchColorChange($event)"
                                 (dockRequest)="toggleDocked()"
                                 (sizeToggleRequest)="toggleExpanded()"
-                                (closeRequest)="closeSearch()">
+                                (closeRequest)="closeSearch()"
+                                (dragPointerDown)="onHeaderPointerDown($event)">
                 <span surfaceHeaderActions class="feature-search-header-actions">
                     <p-button icon="pi pi-refresh"
                               [disabled]="!searchQueryForRerun()"
@@ -104,8 +119,21 @@ interface FeatureSearchGroupingOption {
                           (focus)="expandFeatureSearchQueryInput()"
                           (blur)="shrinkFeatureSearchQueryInput()"
                           (keydown)="onFeatureSearchQueryKeydown($event)"
+                          (keyup)="onFeatureSearchQueryKeyup($event)"
+                          (scroll)="updateFeatureSearchCompletionCursor()"
                           placeholder="Search query">
                 </textarea>
+                <search-completion-popup
+                    [visible]="completion.visible"
+                    [pending]="completion.pending"
+                    [items]="completionItems"
+                    [selectionIndex]="completion.selectionIndex"
+                    [top]="completion.top"
+                    [left]="completion.left"
+                    [zIndex]="completion.zIndex"
+                    (popupMouseDown)="onCompletionPopupDown($event)"
+                    (candidateSelected)="applyFeatureSearchCompletion($event)">
+                </search-completion-popup>
             </div>
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
@@ -177,9 +205,9 @@ interface FeatureSearchGroupingOption {
                             <div>
                                 <span class="section-heading">Results</span>
                                 <ul>
-                                    <li><span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span></li>
-                                    <li><span>Features:</span><span>{{ searchService.totalFeatureCount }}</span></li>
-                                    <li><span>Matched:</span><span>{{ searchService.searchResults.length }}</span></li>
+                                    <li><span>Elapsed time:</span><span>{{ session?.timeElapsed ?? '0ms' }}</span></li>
+                                    <li><span>Features:</span><span>{{ session?.totalFeatureCount ?? 0 }}</span></li>
+                                    <li><span>Matched:</span><span>{{ session?.searchResults?.length ?? 0 }}</span></li>
                                 </ul>
                             </div>
                             <div *ngIf="diagnostics.length > 0">
@@ -234,10 +262,16 @@ interface FeatureSearchGroupingOption {
 /**
  * Dialog that presents long-running feature-search progress, result grouping, diagnostics, and traces.
  */
-export class FeatureSearchComponent implements OnDestroy {
-    readonly featureSearchLayoutId = FEATURE_SEARCH_DIALOG_LAYOUT_ID;
+export class FeatureSearchComponent implements OnChanges, OnDestroy {
+    @Input({required: true}) searchId!: string;
+    @Input() dockedPanelCount = 1;
+    @Output() panelDragRequest = new EventEmitter<{session: FeatureSearchSession, event: PointerEvent}>();
+
+    session?: FeatureSearchSession;
     private readonly subscriptions = new Subscription();
-    featureSearchDialogVisible = false;
+    private completionSubscriptions = new Subscription();
+    private readonly featureSearchQueryChanged = new Subject<void>();
+    featureSearchDialogVisible = true;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
@@ -246,7 +280,7 @@ export class FeatureSearchComponent implements OnDestroy {
     awaitedTilesToLoad: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
-    results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
+    results: FeatureSearchResultEntry[] = [];
     resultsTree: TreeNode[] = [];
     grouping: FeatureSearchGroupingOption[] = [
         {name: 'Maps', value: 1},
@@ -257,7 +291,7 @@ export class FeatureSearchComponent implements OnDestroy {
     selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
 
     // Active result panel index
-    resultPanelIndex: string = "";
+    resultPanelIndex: string = "results";
 
     showFilter: boolean = false;
     resultsStatus: string = "Loading...";
@@ -265,13 +299,27 @@ export class FeatureSearchComponent implements OnDestroy {
     featureSearchExpanded = false;
     featureSearchQuery = "";
     featureSearchQueryExpanded = false;
-    readonly featureSearchDockedPanelCount = 1;
+    completionItems: CompletionCandidate[] = [];
+    completion = {
+        top: 0,
+        left: 0,
+        selectionIndex: 0,
+        visible: false,
+        pending: false,
+        pendingDelay: 600,
+        completionDelay: 150,
+        zIndex: 30050,
+    };
     private lastSearchQuery = "";
-    private activeSearchId = "";
+    private activeSearchGroupId = "";
+    private completedSearchGroupId = "";
+    private lastErrorAlertSignature = "";
     private surfacedDockedSearchId = "";
+    private completionOwnerId = "";
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
+    @ViewChild('featureSearchQueryTextarea') featureSearchQueryTextarea?: ElementRef<HTMLTextAreaElement>;
     @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
     @ViewChild('featureSearchPanel') featureSearchPanel: AppPanelComponent | undefined;
 
@@ -294,57 +342,131 @@ export class FeatureSearchComponent implements OnDestroy {
             this.recalculateResultsByGroups();
         }));
 
-        this.subscriptions.add(this.searchService.progress.subscribe(searchState => {
-            if (!searchState) {
-                this.awaitedTilesToLoad = 0;
-                this.resultsTree = [];
-                this.activeSearchId = "";
-                this.surfacedDockedSearchId = "";
+        this.subscriptions.add(this.searchService.progress.subscribe(updatedSession => {
+            if (!updatedSession || updatedSession.id !== this.searchId) {
                 return;
             }
-            if (searchState !== this.searchService.currentSearch) {
+            this.syncFromSession(updatedSession);
+        }));
+        this.subscriptions.add(this.searchService.sessionsChanged.subscribe(() => {
+            const session = this.searchService.getSession(this.searchId);
+            if (!session) {
                 return;
             }
-            this.featureSearchDialogVisible = true;
-            this.lastSearchQuery = searchState.query;
-            if (this.activeSearchId !== searchState.id) {
-                this.activeSearchId = searchState.id;
-                this.featureSearchQuery = searchState.query;
-            }
-            this.percentDone = searchState.percentDone();
-            this.totalTiles = searchState.getTaskCount();
-            this.doneTiles = searchState.getCompletedCount();
-            this.awaitedTilesToLoad = searchState.getPendingTileCount();
-            this.isSearchPaused = searchState.paused;
-            if (this.isDocked()) {
-                this.stateService.isDockOpen = true;
-                if (this.surfacedDockedSearchId !== searchState.id) {
-                    this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
-                    this.surfacedDockedSearchId = searchState.id;
-                }
-            }
-            if (searchState.isComplete()) {
-                this.searchResultReady();
-                this.canPauseStopSearch = false;
-            } else {
-                this.resultsStatus = "Loading...";
-                this.canPauseStopSearch = true;
-            }
+            this.syncFromSession(session);
         }));
-        this.subscriptions.add(this.searchService.diagnosticsMessages.subscribe(value => {
-            this.diagnostics = value;
-            if (this.diagnostics.length > 0 && this.results.length === 0)
-                this.resultPanelIndex = 'diagnostics';
+        this.subscriptions.add(this.featureSearchQueryChanged
+            .pipe(debounceTime(this.completion.completionDelay))
+            .subscribe(() => this.completeFeatureSearchQuery()));
+    }
+
+    /** Rebinds this visual wrapper when the owning session id changes. */
+    ngOnChanges(changes: SimpleChanges): void {
+        if (changes['searchId']) {
+            this.bindSession();
+            this.bindCompletionOwner();
+        }
+    }
+
+    /** Loads the current session snapshot for this component instance. */
+    private bindSession(): void {
+        const session = this.searchService.getSession(this.searchId);
+        if (!session) {
+            this.session = undefined;
+            this.resetLocalState();
+            return;
+        }
+        this.syncFromSession(session);
+    }
+
+    /** Rebinds completion streams to this search instance so inputs do not share stale candidates. */
+    private bindCompletionOwner(): void {
+        const ownerId = `feature-search:${this.searchId}`;
+        if (this.completionOwnerId === ownerId) {
+            return;
+        }
+        if (this.completionOwnerId) {
+            this.searchService.clearCurrentCompletion(this.completionOwnerId);
+        }
+        this.completionOwnerId = ownerId;
+        this.completionSubscriptions.unsubscribe();
+        this.completionSubscriptions = new Subscription();
+        const completionState = this.searchService.completionStateForOwner(ownerId);
+        this.completionSubscriptions.add(completionState.pending.pipe(
+            switchMap(pending => pending ? timer(this.completion.pendingDelay).pipe(map(() => true)) : of(false)),
+            startWith(false),
+            distinctUntilChanged()
+        ).subscribe((pending: boolean) => {
+            this.completion.pending = pending;
         }));
+        this.completionSubscriptions.add(completionState.candidates.pipe(distinctUntilChanged()).subscribe(value => {
+            this.completionItems = value.filter(item =>
+                item.query !== this.featureSearchQuery && item.source === this.featureSearchQuery
+            );
+            if (this.completion.selectionIndex >= this.completionItems.length) {
+                this.completion.selectionIndex = Math.max(0, this.completionItems.length - 1);
+            }
+            const input = this.featureSearchQueryTextarea?.nativeElement;
+            const focusValid = this.completion.visible || input === document.activeElement;
+            if (this.completionItems.length > 0 && focusValid) {
+                this.refreshCompletionZIndex();
+            }
+            this.completion.visible = this.completionItems.length > 0 && focusValid;
+        }));
+    }
+
+    /** Copies session state into the local view model without crossing streams between searches. */
+    private syncFromSession(session: FeatureSearchSession): void {
+        this.session = session;
+        this.featureSearchDialogVisible = true;
+        this.lastSearchQuery = session.query;
+        if (this.activeSearchGroupId !== session.search.id) {
+            this.activeSearchGroupId = session.search.id;
+            this.completedSearchGroupId = "";
+            this.lastErrorAlertSignature = "";
+            this.featureSearchQuery = session.query;
+            this.results = [];
+            this.resultsTree = [];
+            this.resultPanelIndex = 'results';
+        }
+        this.percentDone = session.search.percentDone();
+        this.totalTiles = session.search.getTaskCount();
+        this.doneTiles = session.search.getCompletedCount();
+        this.awaitedTilesToLoad = session.search.getPendingTileCount();
+        this.isSearchPaused = session.search.paused;
+        this.diagnostics = session.diagnostics;
+        if (this.isDocked()) {
+            this.stateService.isDockOpen = true;
+            if (this.surfacedDockedSearchId !== session.id) {
+                this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
+                this.surfacedDockedSearchId = session.id;
+            }
+        }
+        if (session.search.isComplete()) {
+            this.searchResultReady();
+            this.canPauseStopSearch = false;
+        } else {
+            this.resultsStatus = "Loading...";
+            this.canPauseStopSearch = true;
+            if (session.search.paused) {
+                this.traces = session.traceResults;
+                this.results = session.searchResults;
+                this.recalculateResultsByGroups();
+            }
+        }
     }
 
     /** Stops feature search subscriptions when the component is destroyed. */
     ngOnDestroy() {
         this.subscriptions.unsubscribe();
+        this.completionSubscriptions.unsubscribe();
+        if (this.completionOwnerId) {
+            this.searchService.clearCurrentCompletion(this.completionOwnerId);
+        }
     }
 
     protected isDocked(): boolean {
-        return this.stateService.isSurfaceDocked(this.featureSearchLayoutId);
+        return !!this.session && this.searchService.isSessionDocked(this.session.id);
     }
 
     /**
@@ -353,6 +475,15 @@ export class FeatureSearchComponent implements OnDestroy {
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
+    }
+
+    protected onDialogDragEnd() {
+        const session = this.session;
+        if (!session || !this.shouldDockDialog()) {
+            this.dialogStack.bringToFront(this.featureSearchDialog);
+            return;
+        }
+        this.searchService.setSessionDocked(session.id, true);
     }
 
     protected onDockedPanelShow() {
@@ -365,8 +496,35 @@ export class FeatureSearchComponent implements OnDestroy {
         }
     }
 
+    private refreshCompletionZIndex() {
+        const container = this.featureSearchDialog?.container();
+        const inlineZIndex = container ? Number.parseInt(container.style.zIndex, 10) : Number.NaN;
+        const computedZIndex = container ? Number.parseInt(window.getComputedStyle(container).zIndex, 10) : Number.NaN;
+        const surfaceZIndex = Number.isFinite(inlineZIndex)
+            ? inlineZIndex
+            : (Number.isFinite(computedZIndex) ? computedZIndex : 30050);
+        this.completion.zIndex = this.isDocked() ? 30050 : surfaceZIndex + 1;
+    }
+
+    private shouldDockDialog(): boolean {
+        const dialog = this.featureSearchDialog?.container();
+        const dock = document.querySelector('.collapsible-dock') as HTMLElement | null;
+        if (!dialog || !dock) {
+            return false;
+        }
+        const dialogRect = dialog.getBoundingClientRect();
+        const dockRect = dock.getBoundingClientRect();
+        const overlapWidth = Math.max(0, Math.min(dialogRect.right, dockRect.right) - Math.max(dialogRect.left, dockRect.left));
+        const overlapHeight = Math.max(0, Math.min(dialogRect.bottom, dockRect.bottom) - Math.max(dialogRect.top, dockRect.top));
+        return overlapWidth >= this.stateService.baseFontSize * 2 && overlapHeight > 0;
+    }
+
     protected toggleDocked() {
-        this.stateService.setSurfaceDocked(this.featureSearchLayoutId, !this.isDocked(), SEARCH_DOCK_TAB_ID);
+        const session = this.session;
+        if (!session) {
+            return;
+        }
+        this.searchService.setSessionDocked(session.id, !this.isDocked());
         if (!this.isDocked()) {
             this.featureSearchExpanded = false;
             setTimeout(() => this.dialogStack.bringToFront(this.featureSearchDialog), 0);
@@ -376,7 +534,7 @@ export class FeatureSearchComponent implements OnDestroy {
     }
 
     protected toggleExpanded() {
-        if (this.featureSearchDockedPanelCount <= 1) {
+        if (this.dockedPanelCount <= 1) {
             return;
         }
         this.featureSearchExpanded = !this.featureSearchExpanded;
@@ -384,40 +542,160 @@ export class FeatureSearchComponent implements OnDestroy {
     }
 
     protected onSearchColorChange(color: string) {
-        this.searchService.pointColor = color;
-        this.searchService.updatePointColor();
+        if (this.session) {
+            this.searchService.setSearchColor(this.session.id, color);
+        }
+    }
+
+    protected onHeaderPointerDown(event: PointerEvent) {
+        const session = this.session;
+        if (!session || !this.isDocked() || event.button !== 0) {
+            return;
+        }
+        this.panelDragRequest.emit({session, event});
     }
 
     protected expandFeatureSearchQueryInput() {
         this.featureSearchQueryExpanded = true;
+        this.updateFeatureSearchCompletionCursor();
     }
 
     protected shrinkFeatureSearchQueryInput() {
         this.featureSearchQueryExpanded = false;
+        setTimeout(() => {
+            this.completion.visible = false;
+        }, 0);
     }
 
     protected onFeatureSearchQueryKeydown(event: KeyboardEvent) {
-        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        if (this.handleFeatureSearchCompletionKeydown(event)) {
+            return;
+        }
+        if (event.key === 'Enter') {
             event.preventDefault();
             this.rerunSearch();
+        } else if (event.key === 'Escape' && (this.completion.visible || this.completion.pending)) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.resetFeatureSearchCompletion();
         }
+    }
+
+    protected onFeatureSearchQueryKeyup(event: KeyboardEvent) {
+        this.updateFeatureSearchCompletionCursor();
+        const ignoredKeys = [
+            'Home', 'End', 'PageUp', 'PageDown', 'Escape',
+            'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
+        ];
+        if (!ignoredKeys.includes(event.key)) {
+            this.featureSearchQueryChanged.next();
+        }
+    }
+
+    protected updateFeatureSearchCompletionCursor() {
+        const textarea = this.featureSearchQueryTextarea?.nativeElement;
+        if (!textarea) {
+            return;
+        }
+        const rect = textarea.getBoundingClientRect();
+        const cursor = textarea.selectionStart || 0;
+        const style = window.getComputedStyle(textarea);
+        const fontSizePx = parseFloat(style.fontSize);
+        const offset = (1 + 0.75) * fontSizePx;
+        const caret = getCaretCoordinates(textarea, cursor);
+        if (caret) {
+            this.completion.top = rect.top + caret.top + offset;
+            this.completion.left = rect.left + caret.left;
+        } else {
+            this.completion.top = rect.bottom;
+            this.completion.left = rect.left;
+        }
+    }
+
+    protected onCompletionPopupDown(event: MouseEvent) {
+        event.preventDefault();
+    }
+
+    protected applyFeatureSearchCompletion(candidate?: CompletionCandidate) {
+        const item = candidate ?? this.completionItems[this.completion.selectionIndex];
+        const textarea = this.featureSearchQueryTextarea?.nativeElement;
+        if (!item || !textarea) {
+            return;
+        }
+        this.featureSearchQuery = item.query;
+        this.completion.visible = false;
+        this.completionItems = [];
+        const cursor = item.begin + item.text.length;
+        setTimeout(() => {
+            textarea.focus();
+            textarea.setSelectionRange(cursor, cursor, "forward");
+            this.updateFeatureSearchCompletionCursor();
+        }, 0);
+    }
+
+    private completeFeatureSearchQuery() {
+        if (!this.featureSearchQuery.trim()) {
+            this.resetFeatureSearchCompletion();
+            return;
+        }
+        const textarea = this.featureSearchQueryTextarea?.nativeElement;
+        this.searchService.completeQueryForOwner(
+            this.completionOwnerId || `feature-search:${this.searchId}`,
+            this.featureSearchQuery,
+            textarea?.selectionStart ?? this.featureSearchQuery.length
+        );
+        this.completion.selectionIndex = 0;
+    }
+
+    private resetFeatureSearchCompletion() {
+        if (this.completionOwnerId) {
+            this.searchService.clearCurrentCompletion(this.completionOwnerId);
+        }
+        this.completion.selectionIndex = 0;
+        this.completionItems = [];
+        this.completion.visible = false;
+        this.completion.pending = false;
+    }
+
+    private handleFeatureSearchCompletionKeydown(event: KeyboardEvent): boolean {
+        if (!this.completion.visible) {
+            return false;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+            event.preventDefault();
+            event.stopPropagation();
+            this.applyFeatureSearchCompletion();
+            return true;
+        }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            const direction = event.key === 'ArrowDown' ? 1 : -1;
+            const count = this.completionItems.length;
+            if (count > 0) {
+                this.completion.selectionIndex = (this.completion.selectionIndex + direction + count) % count;
+            }
+            return true;
+        }
+        return false;
     }
 
     protected rerunSearch() {
         const query = this.searchQueryForRerun();
-        if (!query) {
+        if (!query || !this.session) {
             return;
         }
         this.featureSearchQuery = query;
-        this.searchService.run(query);
+        this.searchService.rerunSearch(this.session.id, query);
     }
 
     protected searchQueryForRerun(): string {
-        return this.featureSearchQuery.trim() || this.searchService.currentSearch?.query || this.lastSearchQuery;
+        return this.featureSearchQuery.trim() || this.session?.query || this.lastSearchQuery;
     }
 
     protected closeSearch() {
-        this.onHide(null);
+        if (this.session) {
+            this.searchService.closeSearch(this.session.id);
+        }
     }
 
     /**
@@ -426,7 +704,7 @@ export class FeatureSearchComponent implements OnDestroy {
     onPanelVisibleChange(visible: boolean) {
         this.featureSearchDialogVisible = visible;
         if (!visible) {
-            this.searchService.clear();
+            this.closeSearch();
         }
     }
 
@@ -434,18 +712,26 @@ export class FeatureSearchComponent implements OnDestroy {
      * Finalizes the result tabs once the active search group reports completion.
      */
     searchResultReady() {
-        const results = this.searchService.searchResults;
-        const traces = this.searchService.traceResults;
-        const errors = this.searchService.errors;
+        const session = this.session;
+        if (!session) {
+            return;
+        }
+        this.completedSearchGroupId = session.search.id;
+        const results = session.searchResults;
+        const traces = session.traceResults;
+        const errors = session.errors;
 
         this.canPauseStopSearch = false;
         this.resultPanelIndex = 'results';
 
-        if (errors.size) {
+        const errorSignature = Array.from(errors).join('\n');
+        const errorAlertSignature = `${session.search.id}:${errorSignature}`;
+        if (errorSignature && this.lastErrorAlertSignature !== errorAlertSignature) {
+            this.lastErrorAlertSignature = errorAlertSignature;
             this.infoMessageService.showAlertDialog(
                 this.alertContainer,
                 'Feature Search Errors',
-                Array.from(errors).join('\n'));
+                errorSignature);
 
         } else if (results.length == 0) {
             if (this.diagnostics.length > 0)
@@ -456,6 +742,7 @@ export class FeatureSearchComponent implements OnDestroy {
 
         this.traces = traces
         this.results = results;
+        this.diagnostics = session.diagnostics;
         this.recalculateResultsByGroups();
     }
 
@@ -475,15 +762,16 @@ export class FeatureSearchComponent implements OnDestroy {
      * Pauses or resumes worker dispatch while keeping already collected results visible.
      */
     toggleSearchPaused() {
-        if (!this.canPauseStopSearch) {
+        const session = this.session;
+        if (!this.canPauseStopSearch || !session) {
             return;
         }
         if (this.isSearchPaused) {
-            this.searchService.resume();
+            this.searchService.resumeSearch(session.id);
             this.isSearchPaused = false;
         } else {
-            this.searchService.pause();
-            this.results = this.searchService.searchResults;
+            this.searchService.pauseSearch(session.id);
+            this.results = session.searchResults;
             this.recalculateResultsByGroups();
             this.isSearchPaused = true;
         }
@@ -493,17 +781,18 @@ export class FeatureSearchComponent implements OnDestroy {
      * Stops the active search, freezes the partial result set, and surfaces any accumulated errors.
      */
     stopSearch() {
-        if (this.canPauseStopSearch) {
-            this.searchService.stop();
+        const session = this.session;
+        if (this.canPauseStopSearch && session) {
+            this.searchService.stopSearch(session.id);
             this.canPauseStopSearch = false;
-            this.results = this.searchService.searchResults;
+            this.results = session.searchResults;
             this.recalculateResultsByGroups();
 
-            if (this.searchService.errors.size) {
+            if (session.errors.size) {
                 this.infoMessageService.showAlertDialog(
                     this.alertContainer,
                     'Feature Search Errors',
-                    Array.from(this.searchService.errors).join('\n'))
+                    Array.from(session.errors).join('\n'))
             }
         }
     }
@@ -512,6 +801,16 @@ export class FeatureSearchComponent implements OnDestroy {
      * Resets dialog-local state after the dialog closes.
      */
     onHide(_: any) {
+        const sessionId = this.session?.id;
+        if (sessionId) {
+            this.searchService.closeSearch(sessionId);
+        }
+        this.resetLocalState();
+        this.featureSearchDialogVisible = false;
+    }
+
+    /** Clears local rendering state after the owning session disappears. */
+    private resetLocalState(): void {
         this.traces = [];
         this.diagnostics = [];
         this.isSearchPaused = false;
@@ -524,15 +823,14 @@ export class FeatureSearchComponent implements OnDestroy {
         this.featureSearchExpanded = false;
         this.featureSearchQueryExpanded = false;
         this.featureSearchQuery = "";
-        this.activeSearchId = "";
+        this.completionItems = [];
+        this.completion.visible = false;
+        this.completion.pending = false;
+        this.completion.selectionIndex = 0;
+        this.activeSearchGroupId = "";
+        this.completedSearchGroupId = "";
+        this.lastErrorAlertSignature = "";
         this.surfacedDockedSearchId = "";
-        if (this.isDocked()) {
-            this.stateService.setSurfaceDocked(this.featureSearchLayoutId, false, SEARCH_DOCK_TAB_ID);
-        }
-        if (this.searchService.currentSearch) {
-            this.searchService.clear();
-        }
-        this.featureSearchDialogVisible = false;
     }
 
     /**
@@ -667,12 +965,9 @@ export class FeatureSearchComponent implements OnDestroy {
      */
     syncTreeScrollHeight(event?: MouseEvent) {
         const target = event?.target as HTMLElement | null;
-        // Find the dialog container regardless of which inner element fired the event
-        let wrapper = target?.closest('.feature-search-dialog') as HTMLElement | null;
-        if (!wrapper) {
-            wrapper = document.querySelector('.feature-search-dialog') as HTMLElement | null;
-        }
-        const dialog = wrapper?.querySelector('.p-dialog') as HTMLElement | null;
+        const wrapper = target?.closest('.feature-search-dialog') as HTMLElement | null;
+        const dialog = this.featureSearchDialog?.container()
+            ?? (wrapper?.querySelector('.p-dialog') as HTMLElement | null);
         const panel = this.featureSearchPanel?.container();
         const container = dialog ?? wrapper ?? panel;
         if (!container || !container.offsetHeight || !this.stateService.baseFontSize) {

@@ -134,7 +134,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
     private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
     private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
-    private static readonly SEARCH_RESULTS_LAYER_KEY = "builtin/search-results";
+    private static readonly SEARCH_RESULTS_LAYER_PREFIX = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
     private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
     private static readonly CANVAS_USE_DEVICE_PIXELS = 1;
@@ -197,9 +197,8 @@ export abstract class DeckMapView implements IRenderView {
     private tileGridOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private searchResultsOverlayUpdateRaf: number | null = null;
     private searchResultsOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-    private lastSearchResultsPointsVersion = -1;
-    private lastSearchResultsIconAtlasUrl = "";
-    private lastSearchResultsIconMappingUrl = "";
+    private lastSearchResultsSignature = "";
+    private searchResultLayerKeys = new Set<string>();
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
     private isHoveringFeature = false;
@@ -326,7 +325,7 @@ export abstract class DeckMapView implements IRenderView {
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
-        this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
+        this.removeSearchResultLayers();
         this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
         this.removeTileStateLayers();
         this.stopJumpAreaHighlight();
@@ -1458,39 +1457,52 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Rebuilds the clustered search-result overlay when its inputs changed. */
     private updateSearchResultsOverlay(): void {
-        const pointsVersion = this.featureSearchService.searchResultPointsVersion;
-        const iconAtlasUrl = this.featureSearchService.getSearchClusterIconAtlasUrl();
-        const iconMappingUrl = this.featureSearchService.getSearchClusterIconMappingUrl();
+        const searchLayers = this.featureSearchService.getSearchResultLayers();
+        const signature = searchLayers
+            .map(layer => `${layer.id}:${layer.pointsVersion}:${layer.iconAtlasUrl}:${layer.iconMappingUrl}`)
+            .join("|");
         if (!this.deck) {
-            this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
-            this.lastSearchResultsPointsVersion = -1;
-            this.lastSearchResultsIconAtlasUrl = "";
-            this.lastSearchResultsIconMappingUrl = "";
+            this.removeSearchResultLayers();
+            this.lastSearchResultsSignature = "";
             return;
         }
-        if (this.lastSearchResultsPointsVersion === pointsVersion
-            && this.lastSearchResultsIconAtlasUrl === iconAtlasUrl
-            && this.lastSearchResultsIconMappingUrl === iconMappingUrl) {
+        if (this.lastSearchResultsSignature === signature) {
             return;
         }
-        const points = this.featureSearchService.getSearchResultPoints();
-        this.lastSearchResultsPointsVersion = pointsVersion;
-        this.lastSearchResultsIconAtlasUrl = iconAtlasUrl;
-        this.lastSearchResultsIconMappingUrl = iconMappingUrl;
-        if (!points.length) {
-            this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
-            return;
+        this.lastSearchResultsSignature = signature;
+        const nextKeys = new Set(searchLayers.map(layer => this.searchResultLayerKey(layer.id)));
+        for (const layerKey of this.searchResultLayerKeys) {
+            if (!nextKeys.has(layerKey)) {
+                this.layerRegistry.remove(layerKey);
+            }
         }
-        const layer = new SearchResultClusterLayer({
-            id: DeckMapView.SEARCH_RESULTS_LAYER_KEY,
-            data: points as SearchResultClusterPoint[],
-            pickable: false,
-            sizeScale: 40,
-            getPosition: (point: SearchResultClusterPoint) => point.coordinates,
-            iconAtlas: iconAtlasUrl,
-            iconMapping: iconMappingUrl
-        });
-        this.layerRegistry.upsert(DeckMapView.SEARCH_RESULTS_LAYER_KEY, layer, 650);
+        this.searchResultLayerKeys = nextKeys;
+        for (const searchLayer of searchLayers) {
+            const layerKey = this.searchResultLayerKey(searchLayer.id);
+            const layer = new SearchResultClusterLayer({
+                id: layerKey,
+                data: searchLayer.points as SearchResultClusterPoint[],
+                pickable: false,
+                sizeScale: 40,
+                getPosition: (point: SearchResultClusterPoint) => point.coordinates,
+                iconAtlas: searchLayer.iconAtlasUrl,
+                iconMapping: searchLayer.iconMappingUrl
+            });
+            this.layerRegistry.upsert(layerKey, layer, 650);
+        }
+    }
+
+    /** Returns a stable deck-layer key for one feature-search session. */
+    private searchResultLayerKey(searchId: string): string {
+        return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}`;
+    }
+
+    /** Removes every feature-search result layer from this deck view. */
+    private removeSearchResultLayers(): void {
+        for (const layerKey of this.searchResultLayerKeys) {
+            this.layerRegistry.remove(layerKey);
+        }
+        this.searchResultLayerKeys.clear();
     }
 
     /**

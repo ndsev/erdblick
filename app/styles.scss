@@ -372,7 +372,7 @@ main-bar {
     }
 
     inspection-container,
-    feature-search {
+    .feature-search-dock-container {
       flex: 1 1 auto;
       min-width: 0;
       height: 100%;
@@ -554,6 +554,10 @@ app-surface-header {
     justify-content: center;
     align-items: center;
   }
+}
+
+.app-surface-header-drag {
+  cursor: grab;
 }
 
 .app-surface-header-title-group {
@@ -2997,61 +3001,6 @@ inspection-tree {
       padding: 0.25em;
     }
 
-    .completion-popup {
-      line-height: normal;
-
-      color: var(--p-content-color);
-      background: var(--p-contextmenu-background);
-      border: 1px solid var(--p-focus-ring-color);
-      border-radius: var(--p-contextmenu-border-radius);
-      padding: var(--p-contextmenu-list-padding);
-
-      position: fixed;
-      margin-top: -0.5em;
-
-      min-width: 150px;
-      min-height: 1em;
-
-      div {
-        width: 100%;
-
-        padding: 2px;
-        border-radius: 4px;
-
-        background: var(--p-content-background);
-        color: var(--p-content-color);
-
-        cursor: pointer;
-      }
-
-      div.selected {
-        background: var(--p-primary-color);
-        span {
-          color: var(--p-primary-contrast-color) !important;
-        }
-      }
-
-      .row {
-        background: none;
-
-        width: 100%;
-
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .type {
-        font-style: italic;
-        color: var(--p-surface-500);
-        padding-left: 0.5em;
-      }
-
-      .hint {
-        font-size: small;
-        color: var(--p-surface-500);
-      }
-    }
   }
 
   .p-dialog-mask {
@@ -3188,11 +3137,68 @@ inspection-tree {
   }
 }
 
+.completion-popup {
+  line-height: normal;
+
+  color: var(--p-content-color);
+  background: var(--p-contextmenu-background);
+  border: 1px solid var(--p-focus-ring-color);
+  border-radius: var(--p-contextmenu-border-radius);
+  padding: var(--p-contextmenu-list-padding);
+
+  position: fixed;
+  margin-top: -0.5em;
+
+  min-width: 150px;
+  min-height: 1em;
+
+  div {
+    width: 100%;
+
+    padding: 2px;
+    border-radius: 4px;
+
+    background: var(--p-content-background);
+    color: var(--p-content-color);
+
+    cursor: pointer;
+  }
+
+  div.selected {
+    background: var(--p-primary-color);
+    span {
+      color: var(--p-primary-contrast-color) !important;
+    }
+  }
+
+  .row {
+    background: none;
+
+    width: 100%;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .type {
+    font-style: italic;
+    color: var(--p-surface-500);
+    padding-left: 0.5em;
+  }
+
+  .hint {
+    font-size: small;
+    color: var(--p-surface-500);
+  }
+}
+
 .feature-search-dialog {
   .p-dialog.p-component {
-    width: 30em;
-    min-width: 25em;
-    min-height: min(32em, calc(100vh - 5em));
+    width: 42em;
+    min-width: min(38em, calc(100vw - 2em));
+    min-height: min(42em, calc(100vh - 5em));
+    max-width: calc(100vw - 2em);
     max-height: calc(100vh - 5em);
     margin: 0 !important;
     overflow: hidden;
@@ -3242,6 +3248,106 @@ inspection-tree {
     min-height: 0;
     padding: 0 0.5em 0.5em 0.5em;
   }
+
+  .app-panel-stack.app-panel-expanded .p-accordioncontent-content {
+    height: min(60em, calc(100vh - 10em));
+    max-height: calc(100vh - 10em);
+    resize: vertical;
+    overflow: auto;
+  }
+}
+
+.feature-search-dock-container {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.25em;
+  overflow-x: clip;
+  width: 100%;
+
+  feature-search {
+    min-width: 0;
+  }
+
+  &.single-panel {
+    overflow-y: hidden;
+
+    feature-search,
+    .feature-search-panel {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      height: 100%;
+    }
+  }
+
+  &.multi-panel {
+    overflow-y: auto;
+
+    feature-search,
+    .feature-search-panel {
+      display: block;
+      flex: 0 0 auto;
+      min-height: 0;
+      height: fit-content;
+    }
+  }
+
+  feature-search.dragging {
+    opacity: 0.6;
+  }
+
+  feature-search.dragging .app-surface-header {
+    cursor: grabbing;
+  }
+
+  feature-search.drop-before {
+    border-top: 2px solid var(--p-primary-500);
+  }
+
+  feature-search.drop-after {
+    border-bottom: 2px solid var(--p-primary-500);
+  }
+}
+
+.app-dock-drag-preview {
+  position: fixed;
+  z-index: 120000;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--p-primary-500) 75%, black);
+  border-radius: 6px;
+  overflow: hidden;
+  opacity: 0.8;
+  box-shadow: 0 0.5em 1.2em rgba(0, 0, 0, 0.2);
+  background: color-mix(in srgb, var(--p-content-background) 70%, transparent);
+}
+
+.app-dock-drag-preview-header {
+  padding: 0.25em 0.25em 0.25em 0.5em;
+  overflow: visible;
+
+  .app-surface-header {
+    cursor: grabbing;
+  }
+
+  .p-colorpicker-panel {
+    z-index: 9500;
+  }
+
+  .p-colorpicker input {
+    height: 1.5em;
+    width: 1.5em;
+  }
+}
+
+.app-dock-drag-preview-fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+                  135deg,
+                  rgba(0, 0, 0, 0.05) 0,
+                  rgba(0, 0, 0, 0.05) 0.5em,
+                  rgba(255, 255, 255, 0.05) 0.5em,
+                  rgba(255, 255, 255, 0.05) 1em
+  );
 }
 
 .feature-search-surface-header {
