@@ -330,11 +330,70 @@ main-bar {
       width: 0 !important;
     }
 
-    inspection-container {
+    .app-dock-tabs {
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 100%;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+
+      .p-tablist {
+        flex: 0 0 auto;
+      }
+
+      .p-tab {
+        align-items: center;
+        display: inline-flex;
+        gap: 0.35em;
+        padding: 0.45em 0.75em;
+      }
+
+      .p-tabpanels {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        padding: 0;
+      }
+
+      .p-tabpanel:not([hidden]) {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        padding: 0;
+      }
+
+      .p-tabpanel[hidden] {
+        display: none !important;
+      }
+    }
+
+    inspection-container,
+    feature-search {
       flex: 1 1 auto;
       min-width: 0;
       height: 100%;
       display: block;
+    }
+  }
+
+  .collapsible-dock > .dock-empty {
+    height: 100%;
+    width: 100%;
+
+    .close-dock-button {
+      position: absolute;
+      top: 0.5em;
+      right: 0.5em;
+
+      .p-button {
+        width: 1.75em !important;
+        height: 1.75em !important;
+        margin: 0;
+      }
     }
   }
 
@@ -361,6 +420,235 @@ main-bar {
   .resize-handle:hover {
     background: rgba(0,0,0,0.05);
   }
+}
+
+.app-panel-host,
+.app-panel,
+.app-panel-accordion {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.collapsible-dock > .dock-empty {
+  position: relative;
+  flex: 1;
+  align-self: center;
+  max-width: 28em;
+  margin: 0.5em auto;
+  padding: 1.5em;
+  box-sizing: border-box;
+  color: color-mix(in srgb, var(--p-text-color, #1f1f1f) 70%, var(--p-content-background) 30%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75em;
+  text-align: center;
+  overflow: hidden;
+  user-select: none;
+}
+
+.collapsible-dock > .dock-empty .dock-empty-icon {
+  font-size: 3.5em;
+  color: color-mix(in srgb, var(--p-text-color, #1f1f1f) 45%, var(--p-content-background) 55%);
+  margin-bottom: 0.1em;
+}
+
+.collapsible-dock > .dock-empty .dock-empty-title {
+  font-weight: 600;
+  font-size: 1.05em;
+  color: var(--p-text-color, #1f1f1f);
+}
+
+.collapsible-dock > .dock-empty .dock-empty-text {
+  font-size: 0.95em;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--p-text-color, #1f1f1f) 65%, var(--p-content-background) 35%);
+}
+
+.app-panel {
+  width: 100%;
+}
+
+.app-panel-single {
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.app-panel-stack {
+  flex: 0 0 auto;
+  height: fit-content;
+}
+
+.app-panel-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-panel-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.app-panel-resize-fill {
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.app-panel-single .app-panel-accordion,
+.app-panel-single .p-accordionpanel,
+.app-panel-single .p-accordioncontent,
+.app-panel-single .p-accordioncontent > .p-motion,
+.app-panel-single .p-accordioncontent-wrapper,
+.app-panel-single .p-accordioncontent-content,
+.app-panel-single .app-panel-content,
+.app-panel-resize-fill .p-accordionpanel,
+.app-panel-resize-fill .p-accordioncontent,
+.app-panel-resize-fill .p-accordioncontent > .p-motion,
+.app-panel-resize-fill .p-accordioncontent-wrapper,
+.app-panel-resize-fill .p-accordioncontent-content,
+.app-panel-resize-fill .app-panel-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app-panel-stack.app-panel-resize-vertical:not(.inspect-panel) .p-accordioncontent-content {
+  min-height: 15em;
+  max-height: calc(100vh - 10em);
+  resize: vertical;
+  overflow: auto;
+}
+
+.app-panel-stack.app-panel-expanded:not(.inspect-panel) .p-accordioncontent-content {
+  height: auto;
+  max-height: none;
+  resize: none;
+}
+
+app-surface-header {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-surface-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  width: 100%;
+  container-type: inline-size;
+
+  & > * {
+    display: flex;
+    gap: 0.25em;
+    justify-content: center;
+    align-items: center;
+  }
+}
+
+.app-surface-header-title-group {
+  flex: 1 1 auto;
+  margin-right: 0.25em;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-surface-header-title {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  flex: 1 1 auto;
+  font: inherit;
+  font-weight: bold;
+  gap: 0.15em;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.15em 0.15em 0.15em 0;
+  white-space: nowrap;
+}
+
+.app-surface-header-title:is(button) {
+  cursor: pointer;
+}
+
+.app-surface-header-title:is(button):hover {
+  background-color: var(--p-primary-color);
+  border-radius: 6px;
+  color: var(--p-primary-contrast-color);
+
+  span {
+    color: inherit;
+  }
+}
+
+.app-surface-header-title .material-symbols-outlined {
+  font-size: 1.25em;
+}
+
+.app-surface-header-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-surface-header-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.app-surface-header-actions .p-button,
+.app-surface-header .p-button {
+  height: 1.75em !important;
+  margin: 0;
+  width: 1.75em !important;
+}
+
+.app-surface-header-button-icon {
+  font-size: 1.2em;
+  margin: 0 auto;
+}
+
+.inspection-focus-indicator {
+  align-items: center;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+  padding: 2px;
+}
+
+.inspection-focus-indicator-active {
+  border-color: var(--p-primary-color, #2196f3);
+}
+
+.app-surface-header .p-colorpicker input {
+  height: 1.5em !important;
+  width: 1.5em !important;
+}
+
+.app-surface-header .inspection-focus-indicator .p-colorpicker input,
+.app-surface-header .inspection-focus-indicator .p-colorpicker-preview {
+  border-radius: 50%;
+}
+
+.app-dialog .p-dialog-header,
+.app-panel .p-accordionheader {
+  overflow: visible;
 }
 
 diagnostics-indicator {
@@ -2257,6 +2545,15 @@ inspection-tree {
       min-height: 0;
     }
 
+    .inspect-panel .app-panel,
+    .inspect-panel .app-panel-accordion,
+    .inspect-panel .app-panel-content {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
     .inspect-panel .p-accordionpanel.p-accordionpanel-active,
     .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent,
     .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-motion,
@@ -2911,10 +3208,9 @@ inspection-tree {
   }
 
   .p-dialog-header {
-    flex: 0 0 2em;
-    padding: 0 0 0 0.5em;
-    height: 2em;
-    overflow: clip;
+    flex: 0 0 auto;
+    padding: 0.25em 0.25em 0 0.25em;
+    overflow: visible;
 
     .p-dialog-title {
       font-size: medium;
@@ -2924,6 +3220,34 @@ inspection-tree {
   .p-multiselect {
     width: 100%;
   }
+}
+
+.feature-search-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+
+  .p-accordionheader {
+    padding: 0.25em 0.25em 0.25em 0.5em;
+    overflow: visible;
+  }
+
+  .p-accordioncontent-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0 0.5em 0.5em 0.5em;
+  }
+}
+
+.feature-search-surface-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
 }
 
 .maps-close-button {
@@ -3792,12 +4116,6 @@ inspection-tree {
 }
 
 .feature-search-controls {
-  button {
-    height: 2em;
-    width: 2em;
-    box-shadow: none;
-  }
-
   padding: 0 0 0.25em 0;
   display: flex;
   gap: 0.25em;
@@ -3818,9 +4136,36 @@ inspection-tree {
   }
 }
 
+.feature-search-query {
+  flex: 0 0 auto;
+  margin-bottom: 0.25em;
+
+  textarea {
+    overflow-y: scroll;
+    resize: none !important;
+    width: 100% !important;
+  }
+
+  textarea.single-line {
+    overflow-y: hidden;
+  }
+}
+
+.feature-search-awaiting {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5em;
+  justify-content: center;
+  margin: 0 0 0.25em 0;
+  font-size: 0.9em;
+  width: 100%;
+}
+
 .feature-search-tabs {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
 
@@ -3851,6 +4196,29 @@ inspection-tree {
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .p-tabpanel:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .feature-search-results-panel,
+  .feature-search-tree-host {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .feature-search-grouping {
+    align-items: center;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 0.5em;
+    font-size: 0.9em;
   }
 
   .p-tree {

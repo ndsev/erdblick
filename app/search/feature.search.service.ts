@@ -1,12 +1,12 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
+import {BehaviorSubject, filter, Subject, take} from "rxjs";
 import {MapDataService} from "../mapdata/map.service";
 import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
 import {Cartographic, Cartesian3, GeoMath, Rectangle} from "../integrations/geo";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager, JobGroupType} from "./job-group";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
 
 export const MAX_VISIBLE_TILES_PER_LEVEL = 69;
 export const MAX_ZOOM_LEVEL = 15;
@@ -372,11 +372,11 @@ export class FeatureSearchService {
     pointColor: string = "#ea4336";
     timeElapsed: string = this.formatTime(0);
     totalFeatureCount: number = 0;
-    progress: Subject<SearchState|null> = new Subject<SearchState|null>();
+    progress: BehaviorSubject<SearchState|null> = new BehaviorSubject<SearchState|null>(null);
     searchResults: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     traceResults: Array<any> = [];
 
-    diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
+    diagnosticsMessages: BehaviorSubject<DiagnosticsMessage[]> = new BehaviorSubject<DiagnosticsMessage[]>([]);
     diagnosticsMessageLimit: number = 25;
 
     completionPending: Subject<boolean> = new Subject<boolean>();
@@ -402,12 +402,23 @@ export class FeatureSearchService {
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
         this.updatePointColor();
+        this.stateService.ready.pipe(
+            filter((ready): ready is true => ready),
+            take(1)
+        ).subscribe(() => this.resetStaleDockState());
         this.mapService.tileDataChanged.subscribe(change => {
             if (!this.pendingSearchTilesByKey.has(change.tileKey)) {
                 return;
             }
             this.enqueueReadyPendingSearchTiles();
         });
+    }
+
+    /** Removes persisted dock chrome for searches that cannot survive a page reload. */
+    private resetStaleDockState(): void {
+        if (!this.currentSearch && this.stateService.isSurfaceDocked(FEATURE_SEARCH_DIALOG_LAYOUT_ID)) {
+            this.stateService.setSurfaceDocked(FEATURE_SEARCH_DIALOG_LAYOUT_ID, false, SEARCH_DOCK_TAB_ID);
+        }
     }
 
     /**

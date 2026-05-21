@@ -6,12 +6,13 @@ import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {Subscription} from "rxjs";
+import {AppPanelComponent} from "../shared/app-panel.component";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -21,12 +22,91 @@ interface FeatureSearchGroupingOption {
 @Component({
     selector: "feature-search",
     template: `
-        <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog" header="Search Loaded Features"
-                  [closeOnEscape]="false"
-                  [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)" [draggable]="true" [resizable]="true"
-                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="featureSearchLayoutId"
-                  (onShow)="onDialogShow($event)"
-                  (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
+        @if (isDocked()) {
+            @if (featureSearchDialogVisible) {
+                <app-panel #featureSearchPanel class="feature-search-panel" data-testid="feature-search-docked-panel"
+                           [layoutId]="featureSearchLayoutId" [persistLayout]="true"
+                           [dockedPanelCount]="featureSearchDockedPanelCount"
+                           [expanded]="featureSearchExpanded"
+                           (onShow)="onDockedPanelShow()">
+                    <ng-template #header>
+                        <ng-container *ngTemplateOutlet="searchHeader"></ng-container>
+                    </ng-template>
+                    <ng-template #content>
+                        <ng-container *ngTemplateOutlet="searchContent"></ng-container>
+                    </ng-template>
+                </app-panel>
+            }
+        } @else {
+            <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog"
+                      [closeOnEscape]="false"
+                      [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)"
+                      [draggable]="true" [resizable]="true" [appendTo]="'body'"
+                      [persistLayout]="true" [persistOpenState]="false" [layoutId]="featureSearchLayoutId"
+                      (onShow)="onDialogShow($event)"
+                      (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
+                <ng-template #header>
+                    <ng-container *ngTemplateOutlet="searchHeader"></ng-container>
+                </ng-template>
+                <ng-template #content>
+                    <ng-container *ngTemplateOutlet="searchContent"></ng-container>
+                </ng-template>
+            </app-dialog>
+        }
+
+        <ng-template #searchHeader>
+            <app-surface-header class="feature-search-surface-header"
+                                title="Search Loaded Features"
+                                titleIcon="search"
+                                [hasColorPicker]="true"
+                                [color]="searchService.pointColor"
+                                [dockMode]="isDocked() ? 'undock' : 'dock'"
+                                [sizeToggleVisible]="isDocked()"
+                                [sizeToggleDisabled]="featureSearchDockedPanelCount <= 1"
+                                [expanded]="featureSearchExpanded"
+                                (focusRequest)="bringSurfaceToFront()"
+                                (colorChange)="onSearchColorChange($event)"
+                                (dockRequest)="toggleDocked()"
+                                (sizeToggleRequest)="toggleExpanded()"
+                                (closeRequest)="closeSearch()">
+                <span surfaceHeaderActions class="feature-search-header-actions">
+                    <p-button icon="pi pi-refresh"
+                              [disabled]="!searchQueryForRerun()"
+                              pTooltip="Rerun search"
+                              tooltipPosition="bottom"
+                              (click)="$event.stopPropagation(); rerunSearch()"
+                              (mousedown)="$event.stopPropagation()"/>
+                    <p-button [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
+                              [disabled]="!canPauseStopSearch"
+                              [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"
+                              tooltipPosition="bottom"
+                              (click)="$event.stopPropagation(); toggleSearchPaused()"
+                              (mousedown)="$event.stopPropagation()"/>
+                    <p-button icon="pi pi-stop-circle"
+                              [disabled]="!canPauseStopSearch"
+                              pTooltip="Stop search"
+                              tooltipPosition="bottom"
+                              (click)="$event.stopPropagation(); stopSearch()"
+                              (mousedown)="$event.stopPropagation()"/>
+                </span>
+            </app-surface-header>
+        </ng-template>
+
+        <ng-template #searchContent>
+            <div class="feature-search-query search-input">
+                <textarea #featureSearchQueryTextarea
+                          class="feature-search-query-input"
+                          [class.single-line]="!featureSearchQueryExpanded"
+                          pTextarea
+                          [rows]="featureSearchQueryExpanded ? 3 : 1"
+                          [(ngModel)]="featureSearchQuery"
+                          (click)="expandFeatureSearchQueryInput()"
+                          (focus)="expandFeatureSearchQueryInput()"
+                          (blur)="shrinkFeatureSearchQueryInput()"
+                          (keydown)="onFeatureSearchQueryKeydown($event)"
+                          placeholder="Search query">
+                </textarea>
+            </div>
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
                     <p-progressBar [value]="percentDone">
@@ -35,21 +115,15 @@ interface FeatureSearchGroupingOption {
                         </ng-template>
                     </p-progressBar>
                 </div>
-                <p-button (click)="toggleSearchPaused()"
-                          data-testid="feature-search-pause-button"
-                          [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
-                          label=""
-                          [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
-                          [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
-                <p-button (click)="stopSearch()" data-testid="feature-search-stop-button" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
-                          pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
-            <div *ngIf="awaitedTilesToLoad > 0" style="display: flex; flex-direction: row; gap: 0.5em; margin: 0 0 0.25em 0; font-size: 0.9em; align-items: center; justify-content: center; width: 100%; padding-right: 3.5em;">
-                <span>Awaited tiles to load: </span><span>{{ awaitedTilesToLoad }}</span>
-                <p-progress-spinner strokeWidth="10" fill="transparent" animationDuration=".5s"
-                                    [style]="{ width: '1em', height: '1em', margin: '0' }"/>
-            </div>
-
+            @if (awaitedTilesToLoad > 0) {
+                <div class="feature-search-awaiting">
+                    <span>Awaited tiles to load:</span>
+                    <span>{{ awaitedTilesToLoad }}</span>
+                    <p-progress-spinner strokeWidth="10" fill="transparent" animationDuration=".5s"
+                                        [style]="{ width: '1em', height: '1em', margin: '0' }"/>
+                </div>
+            }
             <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" data-testid="feature-search-panel" scrollable>
                 <p-tablist>
                     <p-tab value="results">
@@ -69,35 +143,31 @@ interface FeatureSearchGroupingOption {
                 <p-tabpanels>
                     <!-- Results -->
                     <p-tabpanel value="results">
-                        <div style="display: flex; flex-direction: row; gap: 0.5em; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                            <span>Highlight colour:</span>
-                            <p-colorPicker [(ngModel)]="searchService.pointColor"
-                                           (ngModelChange)="searchService.updatePointColor()"></p-colorPicker>
-                        </div>
-                        <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
-                            <span>Group:</span>
-                            <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
-                                           [showToggleAll]="false" (ngModelChange)="onGroupingOptionsChange($event)"
-                                           placeholder="Select Grouping" [maxSelectedLabels]="5"
-                                           display="chip" optionLabel="name">
-                            </p-multiSelect>
-                        </div>
+                        <div class="feature-search-results-panel">
+                            <div class="feature-search-grouping">
+                                <span>Group:</span>
+                                <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
+                                               [showToggleAll]="false" (ngModelChange)="onGroupingOptionsChange($event)"
+                                               placeholder="Select Grouping" [maxSelectedLabels]="5"
+                                               display="chip" optionLabel="name">
+                                </p-multiSelect>
+                            </div>
 
-                        <!-- Results Tree -->
-                        <div style="height: 100%">
-                            <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
-                                    selectionMode="single"
-                                    [metaKeySelection]="false"
-                                    [lazy]="true"
-                                    [virtualScroll]="true"
-                                    [virtualScrollItemSize]="stateService.baseFontSize * 2"
-                                    [filter]="showFilter"
-                                    filterPlaceholder="Filter matched features"
-                                    [scrollHeight]="scrollHeight"
-                                    [highlightOnSelect]="true"
-                                    (onNodeSelect)="selectResult($event)"
-                                    [emptyMessage]="resultsStatus">
-                            </p-tree>
+                            <div class="feature-search-tree-host">
+                                <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
+                                        selectionMode="single"
+                                        [metaKeySelection]="false"
+                                        [lazy]="true"
+                                        [virtualScroll]="true"
+                                        [virtualScrollItemSize]="stateService.baseFontSize * 2"
+                                        [filter]="showFilter"
+                                        filterPlaceholder="Filter matched features"
+                                        [scrollHeight]="scrollHeight"
+                                        [highlightOnSelect]="true"
+                                        (onNodeSelect)="selectResult($event)"
+                                        [emptyMessage]="resultsStatus">
+                                </p-tree>
+                            </div>
                         </div>
                     </p-tabpanel>
 
@@ -155,7 +225,7 @@ interface FeatureSearchGroupingOption {
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
-        </app-dialog>
+        </ng-template>
         <div #alert></div>
     `,
     styles: [``],
@@ -192,10 +262,18 @@ export class FeatureSearchComponent implements OnDestroy {
     showFilter: boolean = false;
     resultsStatus: string = "Loading...";
     scrollHeight: string = "28.5em";
+    featureSearchExpanded = false;
+    featureSearchQuery = "";
+    featureSearchQueryExpanded = false;
+    readonly featureSearchDockedPanelCount = 1;
+    private lastSearchQuery = "";
+    private activeSearchId = "";
+    private surfacedDockedSearchId = "";
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
     @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
+    @ViewChild('featureSearchPanel') featureSearchPanel: AppPanelComponent | undefined;
 
     /**
      * Subscribes to search progress and keeps the dialog state synchronized with the active search.
@@ -220,16 +298,31 @@ export class FeatureSearchComponent implements OnDestroy {
             if (!searchState) {
                 this.awaitedTilesToLoad = 0;
                 this.resultsTree = [];
+                this.activeSearchId = "";
+                this.surfacedDockedSearchId = "";
                 return;
             }
             if (searchState !== this.searchService.currentSearch) {
                 return;
             }
             this.featureSearchDialogVisible = true;
+            this.lastSearchQuery = searchState.query;
+            if (this.activeSearchId !== searchState.id) {
+                this.activeSearchId = searchState.id;
+                this.featureSearchQuery = searchState.query;
+            }
             this.percentDone = searchState.percentDone();
             this.totalTiles = searchState.getTaskCount();
             this.doneTiles = searchState.getCompletedCount();
             this.awaitedTilesToLoad = searchState.getPendingTileCount();
+            this.isSearchPaused = searchState.paused;
+            if (this.isDocked()) {
+                this.stateService.isDockOpen = true;
+                if (this.surfacedDockedSearchId !== searchState.id) {
+                    this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
+                    this.surfacedDockedSearchId = searchState.id;
+                }
+            }
             if (searchState.isComplete()) {
                 this.searchResultReady();
                 this.canPauseStopSearch = false;
@@ -250,12 +343,81 @@ export class FeatureSearchComponent implements OnDestroy {
         this.subscriptions.unsubscribe();
     }
 
+    protected isDocked(): boolean {
+        return this.stateService.isSurfaceDocked(this.featureSearchLayoutId);
+    }
+
     /**
      * Recomputes the virtual tree height once the dialog becomes measurable.
      */
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
+    }
+
+    protected onDockedPanelShow() {
+        this.syncTreeScrollHeight();
+    }
+
+    protected bringSurfaceToFront() {
+        if (!this.isDocked()) {
+            this.dialogStack.bringToFront(this.featureSearchDialog);
+        }
+    }
+
+    protected toggleDocked() {
+        this.stateService.setSurfaceDocked(this.featureSearchLayoutId, !this.isDocked(), SEARCH_DOCK_TAB_ID);
+        if (!this.isDocked()) {
+            this.featureSearchExpanded = false;
+            setTimeout(() => this.dialogStack.bringToFront(this.featureSearchDialog), 0);
+        } else {
+            setTimeout(() => this.syncTreeScrollHeight(), 0);
+        }
+    }
+
+    protected toggleExpanded() {
+        if (this.featureSearchDockedPanelCount <= 1) {
+            return;
+        }
+        this.featureSearchExpanded = !this.featureSearchExpanded;
+        setTimeout(() => this.syncTreeScrollHeight(), 0);
+    }
+
+    protected onSearchColorChange(color: string) {
+        this.searchService.pointColor = color;
+        this.searchService.updatePointColor();
+    }
+
+    protected expandFeatureSearchQueryInput() {
+        this.featureSearchQueryExpanded = true;
+    }
+
+    protected shrinkFeatureSearchQueryInput() {
+        this.featureSearchQueryExpanded = false;
+    }
+
+    protected onFeatureSearchQueryKeydown(event: KeyboardEvent) {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            this.rerunSearch();
+        }
+    }
+
+    protected rerunSearch() {
+        const query = this.searchQueryForRerun();
+        if (!query) {
+            return;
+        }
+        this.featureSearchQuery = query;
+        this.searchService.run(query);
+    }
+
+    protected searchQueryForRerun(): string {
+        return this.featureSearchQuery.trim() || this.searchService.currentSearch?.query || this.lastSearchQuery;
+    }
+
+    protected closeSearch() {
+        this.onHide(null);
     }
 
     /**
@@ -359,6 +521,14 @@ export class FeatureSearchComponent implements OnDestroy {
         this.resultsTree = [];
         this.showFilter = false;
         this.resultsStatus = "Loading...";
+        this.featureSearchExpanded = false;
+        this.featureSearchQueryExpanded = false;
+        this.featureSearchQuery = "";
+        this.activeSearchId = "";
+        this.surfacedDockedSearchId = "";
+        if (this.isDocked()) {
+            this.stateService.setSurfaceDocked(this.featureSearchLayoutId, false, SEARCH_DOCK_TAB_ID);
+        }
         if (this.searchService.currentSearch) {
             this.searchService.clear();
         }
@@ -495,7 +665,7 @@ export class FeatureSearchComponent implements OnDestroy {
     /**
      * Derives the tree scroller height from the dialog size so virtual scrolling stays usable while resizing.
      */
-    syncTreeScrollHeight(event: MouseEvent) {
+    syncTreeScrollHeight(event?: MouseEvent) {
         const target = event?.target as HTMLElement | null;
         // Find the dialog container regardless of which inner element fired the event
         let wrapper = target?.closest('.feature-search-dialog') as HTMLElement | null;
@@ -503,7 +673,8 @@ export class FeatureSearchComponent implements OnDestroy {
             wrapper = document.querySelector('.feature-search-dialog') as HTMLElement | null;
         }
         const dialog = wrapper?.querySelector('.p-dialog') as HTMLElement | null;
-        const container = dialog ?? wrapper;
+        const panel = this.featureSearchPanel?.container();
+        const container = dialog ?? wrapper ?? panel;
         if (!container || !container.offsetHeight || !this.stateService.baseFontSize) {
             return;
         }

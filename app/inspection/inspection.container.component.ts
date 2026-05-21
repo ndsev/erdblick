@@ -1,7 +1,8 @@
 import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
-import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
+import {Subscription} from "rxjs";
 
 @Component({
     selector: 'inspection-container',
@@ -47,23 +48,13 @@ import {FeatureWrapper} from "../mapdata/features.model";
                 }
             }
         </div>
-        @for (panel of undockedPanels; track panel.id; let i = $index) {
-            @if (panel.features.length > 0 || panel.sourceData !== undefined) {
-                <inspection-panel-dialog [panel]="panel" [dialogIndex]="i"></inspection-panel-dialog>
-            }
-        }
-        @if (comparison) {
-            <inspection-comparison-dialog [comparison]="comparison"></inspection-comparison-dialog>
-        }
     `,
     styles: [``],
     standalone: false
 })
-/** Hosts all docked and floating inspection panels and manages drag-based docking/reordering. */
+/** Hosts docked inspection panels and manages drag-based docking/reordering. */
 export class InspectionContainerComponent implements OnDestroy {
     dockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
-    undockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
-    comparison: InspectionComparisonModel | null = null;
     isReordering = false;
     dockFilterText = '';
     dragPanelId?: number;
@@ -81,25 +72,23 @@ export class InspectionContainerComponent implements OnDestroy {
     private detachUp?: () => void;
     private dragPreviewElement?: HTMLDivElement;
     private dragPreviewOffset = {x: 0, y: 0};
+    private readonly subscriptions = new Subscription();
 
     constructor(private stateService: AppStateService,
                 private mapService: MapDataService,
                 private renderer: Renderer2) {
-        this.mapService.selectionTopic.subscribe(panels => {
+        this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();
-            this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            const hasDockedPanels = this.dockedPanels.length > 0;
+            const hasDockedPanels = this.dockedPanels.length > 0 || this.stateService.hasDockedSurface();
             this.stateService.isDockOpen = this.stateService.isDockOpen &&
                 (!this.stateService.isDockAutoCollapsible || hasDockedPanels);
-        });
-        this.stateService.inspectionComparisonState.subscribe(comparison => {
-            this.comparison = comparison;
-        });
+        }));
     }
 
     /** Clears transient drag state when the container is destroyed. */
     ngOnDestroy() {
+        this.subscriptions.unsubscribe();
         this.resetDockDrag();
     }
 

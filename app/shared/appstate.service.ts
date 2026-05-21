@@ -62,6 +62,8 @@ export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
 export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
 export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
 export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
+export const INSPECTION_DOCK_TAB_ID = 'inspection';
+export const SEARCH_DOCK_TAB_ID = 'search';
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -140,6 +142,12 @@ export interface AppDialogLayout {
     position: AppDialogPosition;
     size: AppDialogSize;
     open?: boolean;
+    docked?: boolean;
+    dockTab?: string;
+    dockOrder?: number;
+    panelSize?: AppDialogSize;
+    panelCollapsed?: boolean;
+    panelExpanded?: boolean;
 }
 
 /** Persisted layout for floating inspection dialogs, including dock preference. */
@@ -734,6 +742,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly dockActiveTabState = this.createState<string>({
+        name: 'dockActiveTabState',
+        defaultValue: INSPECTION_DOCK_TAB_ID,
+        schema: z.string()
+    });
+
     readonly dockAutoCollapse = this.createState<boolean>({
         name: 'dockAutoCollapse',
         defaultValue: true,
@@ -800,7 +814,16 @@ export class AppStateService implements OnDestroy {
             }),
             open: Boolish.optional(),
             panelId: z.coerce.number().optional(),
-            slot: z.coerce.number().optional()
+            slot: z.coerce.number().optional(),
+            docked: Boolish.optional(),
+            dockTab: z.string().optional(),
+            dockOrder: z.coerce.number().optional(),
+            panelSize: z.object({
+                width: z.coerce.number().positive(),
+                height: z.coerce.number().positive()
+            }).optional(),
+            panelCollapsed: Boolish.optional(),
+            panelExpanded: Boolish.optional()
         }))
     });
 
@@ -1698,6 +1721,8 @@ export class AppStateService implements OnDestroy {
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
+    get dockActiveTab() {return this.dockActiveTabState.getValue();}
+    set dockActiveTab(val: string) {this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID);};
     get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
     set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
@@ -2092,6 +2117,8 @@ export class AppStateService implements OnDestroy {
         ];
         if (!undocked) {
             allPanels[index].locked = true;
+            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+            this.isDockOpen = true;
         }
         this.selectionState.next(allPanels);
         this.setFocusedInspectionPanel(id);
@@ -2169,6 +2196,63 @@ export class AppStateService implements OnDestroy {
     /** Convenience helper that closes one persisted dialog. */
     closeDialog(id: string): void {
         this.setDialogOpen(id, false);
+    }
+
+    /** Returns whether a persisted surface is currently represented in the dock. */
+    isSurfaceDocked(id: string): boolean {
+        return this.getDialogLayout(id)?.docked ?? false;
+    }
+
+    /** Switches a generic surface between docked and floating representations. */
+    setSurfaceDocked(id: string, docked: boolean, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
+        const current = this.getDialogLayout(id);
+        const fallbackSize = {
+            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+        };
+        this.upsertDialogLayout(id, {
+            position: current?.position ?? {left: 0, top: 0},
+            size: current?.size ?? fallbackSize,
+            open: current?.open ?? false,
+            docked,
+            dockTab
+        });
+        if (docked) {
+            this.dockActiveTab = dockTab;
+            this.isDockOpen = true;
+        }
+    }
+
+    /** Toggles the docked representation for a generic surface. */
+    toggleSurfaceDocked(id: string, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
+        this.setSurfaceDocked(id, !this.isSurfaceDocked(id), dockTab);
+    }
+
+    /** Persists generic docked-panel metadata without changing floating dialog geometry. */
+    setPanelLayout(id: string, layout: Partial<Pick<AppDialogLayout, 'panelSize' | 'panelCollapsed' | 'panelExpanded' | 'dockOrder'>>): void {
+        const current = this.getDialogLayout(id);
+        if (!current) {
+            this.upsertDialogLayout(id, {
+                position: {left: 0, top: 0},
+                size: {
+                    width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+                    height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+                },
+                ...layout
+            });
+            return;
+        }
+        this.upsertDialogLayout(id, {
+            ...current,
+            ...layout
+        });
+    }
+
+    /** Returns whether any generic surface is docked, optionally filtered by tab id. */
+    hasDockedSurface(tabId?: string): boolean {
+        return Object.values(this.dialogLayoutsState.getValue()).some(layout =>
+            (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
+        );
     }
 
     /** Returns or creates the persisted layout record for a dialog. */

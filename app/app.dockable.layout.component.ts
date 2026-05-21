@@ -1,6 +1,7 @@
-import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
+import {Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
-import {AppStateService} from "./shared/appstate.service";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
+import {FeatureSearchService} from "./search/feature.search.service";
 
 @Component({
     selector: 'dockable-layout',
@@ -30,7 +31,49 @@ import {AppStateService} from "./shared/appstate.service";
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
                     <div class="drop-hint"></div>
-                    <inspection-container [ngClass]="{'hidden': !stateService.isDockOpen}"></inspection-container>
+                    @if (hasVisibleDockTabs()) {
+                        <p-tabs class="app-dock-tabs"
+                                [value]="stateService.dockActiveTab"
+                                (valueChange)="onDockTabChange($event)"
+                                scrollable>
+                            <p-tablist>
+                                @if (hasDockedInspections()) {
+                                    <p-tab [value]="inspectionDockTabId">
+                                        <span>Inspection</span>
+                                        <p-badge [value]="dockedInspectionCount()"/>
+                                    </p-tab>
+                                }
+                                @if (isFeatureSearchDocked()) {
+                                    <p-tab [value]="searchDockTabId">
+                                        <span>Search</span>
+                                        <p-badge value="1"/>
+                                    </p-tab>
+                                }
+                            </p-tablist>
+                            <p-tabpanels>
+                                @if (hasDockedInspections()) {
+                                    <p-tabpanel [value]="inspectionDockTabId">
+                                        <inspection-container [ngClass]="{'hidden': !stateService.isDockOpen}"></inspection-container>
+                                    </p-tabpanel>
+                                }
+                                @if (isFeatureSearchDocked()) {
+                                    <p-tabpanel [value]="searchDockTabId">
+                                        <feature-search></feature-search>
+                                    </p-tabpanel>
+                                }
+                            </p-tabpanels>
+                        </p-tabs>
+                    } @else {
+                        <div class="dock-empty">
+                            <p-button class="close-dock-button" icon="pi pi-times" severity="secondary" (click)="closeDock()"
+                                      (mousedown)="$event.stopPropagation()"/>
+                            <span class="material-symbols-outlined dock-empty-icon" aria-hidden="true">subtitles_off</span>
+                            <div class="dock-empty-title">No docked panels</div>
+                            <div class="dock-empty-text">
+                                Select a feature, or drag a floating dockable dialogue here.
+                            </div>
+                        </div>
+                    }
                 </div>
             }
         </div>
@@ -44,7 +87,7 @@ import {AppStateService} from "./shared/appstate.service";
  * It owns dock open/close state, user-resizing of the dock, and the temporary
  * pause events used to suppress layout-sensitive work during dock transitions.
  */
-export class DockableLayoutComponent implements OnDestroy {
+export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
 
@@ -58,15 +101,53 @@ export class DockableLayoutComponent implements OnDestroy {
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
 
-    constructor(public stateService: AppStateService, private renderer: Renderer2) {}
+    constructor(public stateService: AppStateService,
+                private renderer: Renderer2,
+                private featureSearchService: FeatureSearchService) {}
 
     protected readonly environment = environment;
+    protected readonly inspectionDockTabId = INSPECTION_DOCK_TAB_ID;
+    protected readonly searchDockTabId = SEARCH_DOCK_TAB_ID;
 
     /** Toggles dock visibility and emits resize-pause events around the transition. */
     protected toggleDock() {
         this.dispatchDockResizePauseStart();
         this.stateService.isDockOpen = !this.stateService.isDockOpen;
         this.scheduleDockResizePauseEnd();
+    }
+
+    protected dockedInspectionCount(): number {
+        return this.stateService.selection.filter(panel => !panel.undocked).length;
+    }
+
+    protected hasDockedInspections(): boolean {
+        return this.dockedInspectionCount() > 0;
+    }
+
+    protected isFeatureSearchDocked(): boolean {
+        return this.stateService.isSurfaceDocked(FEATURE_SEARCH_DIALOG_LAYOUT_ID) &&
+            this.featureSearchService.currentSearch !== null;
+    }
+
+    protected hasVisibleDockTabs(): boolean {
+        return this.visibleDockTabs().length > 0;
+    }
+
+    protected onDockTabChange(value: string | number | undefined): void {
+        const nextTab = value?.toString();
+        if (!nextTab || !this.visibleDockTabs().includes(nextTab)) {
+            return;
+        }
+        this.stateService.dockActiveTab = nextTab;
+    }
+
+    /** Keeps the selected tab aligned with tabs that are currently visible. */
+    ngDoCheck(): void {
+        const tabs = this.visibleDockTabs();
+        if (tabs.length === 0 || tabs.includes(this.stateService.dockActiveTab)) {
+            return;
+        }
+        this.stateService.dockActiveTab = tabs[0];
     }
 
     /** Clears listeners and ensures the resize-pause state is reset on teardown. */
@@ -76,6 +157,11 @@ export class DockableLayoutComponent implements OnDestroy {
         this.detachCancel?.();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();
+    }
+
+    /** Closes the right-hand dock without changing any surface dock state. */
+    protected closeDock() {
+        this.stateService.isDockOpen = false;
     }
     
     /** Starts a manual dock resize interaction from the resize handle. */
@@ -163,5 +249,16 @@ export class DockableLayoutComponent implements OnDestroy {
             window.cancelAnimationFrame(this.dockPauseEndRafSecond);
             this.dockPauseEndRafSecond = undefined;
         }
+    }
+
+    private visibleDockTabs(): string[] {
+        const tabs: string[] = [];
+        if (this.dockedInspectionCount() > 0) {
+            tabs.push(INSPECTION_DOCK_TAB_ID);
+        }
+        if (this.isFeatureSearchDocked()) {
+            tabs.push(SEARCH_DOCK_TAB_ID);
+        }
+        return tabs;
     }
 }

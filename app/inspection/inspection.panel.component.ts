@@ -31,125 +31,87 @@ interface InspectionPanelContentAdapter {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="inspect-panel" data-testid="inspection-panel" [(value)]="accordionValue"
-                     [transitionOptions]="accordionTransitionOptions"
-                     (pointerdown)="focusPanel()" (focusin)="focusPanel()">
-            <p-accordion-panel value="0">
-                <p-accordion-header>
-                    <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
-                        <span class="title-container" [class.feature]="panel().sourceData === undefined">
-                            @if (panel().sourceData === undefined && panel().features.length > 0) {
-                                <span class="inspection-focus-indicator"
-                                      [class.inspection-focus-indicator-active]="panel().focused === true">
-                                    <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
-                                                   (mousedown)="$event.stopPropagation()"
-                                                   (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
-                                    </p-colorpicker>
-                                </span>
-                            } @else if (isMetadata) {
-                                <span class="inspection-focus-indicator"
-                                      [class.inspection-focus-indicator-active]="panel().focused === true">
-                                    <p-tag severity="info" value="META" [rounded]="true" />
-                                </span>
-                            } @else if (panel().sourceData !== undefined) {
-                                <span class="inspection-focus-indicator"
-                                      [class.inspection-focus-indicator-active]="panel().focused === true">
-                                    <p-tag severity="success" value="DATA" [rounded]="true" />
-                                </span>
-                            }
-                            <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title" 
-                                 tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
-                                 (click)="toggleLockedState($event)">
-                                <span class="material-symbols-outlined">
-                                    @if (panel().locked) {
-                                        lock
-                                    } @else {
-                                        lock_open_right
-                                    }
-                                </span>
-                                <span class="title-span">
-                                    {{ title }}
-                                </span>
-                            </div>
-                            @if (panel().sourceData !== undefined) {
-                                <p-select class="source-layer-dropdown" [options]="layerMenuItems"
-                                          [(ngModel)]="selectedLayerItem"
-                                          (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
-                                          scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
-                                          optionLabel="label"
-                                          optionDisabled="disabled"/>
-                            }
-                        </span>
-                        <span>
-                            @if (panel().sourceData === undefined && panel().features.length > 0) {
+        <app-panel class="inspect-panel" styleClass="inspect-panel" data-testid="inspection-panel"
+                   [collapsed]="accordionValue !== '0'"
+                   (collapsedChange)="accordionValue = $event ? null : '0'"
+                   [dockedPanelCount]="dockedPanelCount()"
+                   [expanded]="isExpanded"
+                   [transitionOptions]="accordionTransitionOptions"
+                   (focusRequest)="focusPanel()">
+            <ng-template #header>
+                    <app-surface-header [title]="title"
+                                        [lockable]="true"
+                                        [locked]="panel().locked"
+                                        [featureTitle]="panel().sourceData === undefined"
+                                        [focusable]="true"
+                                        [focused]="panel().focused === true"
+                                        [hasColorPicker]="panel().sourceData === undefined && panel().features.length > 0"
+                                        [color]="panel().color"
+                                        dockMode="undock"
+                                        [expanded]="isExpanded"
+                                        [sizeToggleVisible]="true"
+                                        [sizeToggleDisabled]="!showDockAutoSizeToggle()"
+                                        [dragEnabled]="true"
+                                        (colorChange)="onPanelColorChange($event)"
+                                        (titleClick)="toggleLockedState($event)"
+                                        (dockRequest)="undock($event)"
+                                        (sizeToggleRequest)="toggleDockAutoSize($event)"
+                                        (closeRequest)="unsetPanel()"
+                                        (focusRequest)="focusPanel()"
+                                        (dragPointerDown)="onHeaderPointerDown($event)">
+                        @if (isMetadata) {
+                            <p-tag surfaceHeaderIndicator severity="info" value="META" [rounded]="true" />
+                        } @else if (panel().sourceData !== undefined) {
+                            <p-tag surfaceHeaderIndicator severity="success" value="DATA" [rounded]="true" />
+                        }
+                        @if (panel().sourceData !== undefined) {
+                            <p-select surfaceHeaderAfterTitle class="source-layer-dropdown" [options]="layerMenuItems"
+                                      [(ngModel)]="selectedLayerItem"
+                                      (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
+                                      scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                      optionLabel="label"
+                                      optionDisabled="disabled"/>
+                        }
+                        @if (panel().sourceData === undefined && panel().features.length > 0) {
+                            <ng-container surfaceHeaderActions>
                                 <span class="inspection-feature-tools-inline">
                                     <p-button icon="" (click)="focusOnFeatureAction($event)"
                                               (mousedown)="$event.stopPropagation()"
                                               pTooltip="Focus on feature" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">my_location</span>
+                                        <span class="material-symbols-outlined app-surface-header-button-icon">my_location</span>
                                     </p-button>
                                     <p-button icon="" (click)="openGeoJsonInNewTabAction($event)"
                                               (mousedown)="$event.stopPropagation()"
                                               pTooltip="Open GeoJSON in new tab" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">open_in_new</span>
+                                        <span class="material-symbols-outlined app-surface-header-button-icon">open_in_new</span>
                                     </p-button>
                                     <p-button icon="" (click)="downloadGeoJsonAction($event)"
                                               (mousedown)="$event.stopPropagation()"
                                               pTooltip="Download GeoJSON" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">download</span>
+                                        <span class="material-symbols-outlined app-surface-header-button-icon">download</span>
                                     </p-button>
                                     <p-button icon="" (click)="copyGeoJsonAction($event)"
                                               (mousedown)="$event.stopPropagation()"
                                               pTooltip="Copy GeoJSON" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">content_copy</span>
+                                        <span class="material-symbols-outlined app-surface-header-button-icon">content_copy</span>
                                     </p-button>
                                     <p-button icon="" (click)="openComparePopover($event)"
                                               (mousedown)="$event.stopPropagation()"
                                               pTooltip="Compare" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                        <span class="material-symbols-outlined app-surface-header-button-icon">compare_arrows</span>
                                     </p-button>
                                 </span>
                                 <p-button class="inspection-feature-tools-menu" icon="" (click)="openExtraMenu($event)"
                                           (mousedown)="$event.stopPropagation()"
                                           pTooltip="More actions" tooltipPosition="bottom">
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">more_vert</span>
+                                    <span class="material-symbols-outlined app-surface-header-button-icon">more_vert</span>
                                 </p-button>
-                            }
-                            <p-button class="undock-button" (click)="undock($event)"
-                                      (mousedown)="$event.stopPropagation()"
-                                      icon="" pTooltip="Undock" tooltipPosition="bottom">
-                                <span class="material-symbols-outlined"
-                                      style="font-size: 1.2em; margin: 0 auto;">eject</span>
-                            </p-button>
-                            @if (showDockAutoSizeToggle()) {
-                                <p-button class="dock-size-toggle-button" icon=""
-                                          (click)="toggleDockAutoSize($event)"
-                                          (mousedown)="$event.stopPropagation()"
-                                          [pTooltip]="isExpanded ? 'Shrink to default height' : 'Expand to fit content'"
-                                          tooltipPosition="left">
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">
-                                        @if (isExpanded) {
-                                            unfold_less
-                                        } @else {
-                                            unfold_more
-                                        }
-                                    </span>
-                                </p-button>
-                            }
-                            <p-button icon="pi pi-times" severity="secondary" (click)="unsetPanel()"
-                                      (mousedown)="$event.stopPropagation()"/>
-                        </span>
-                    </div>
-                </p-accordion-header>
+                            </ng-container>
+                        }
+                    </app-surface-header>
+            </ng-template>
 
-                <p-accordion-content>
+            <ng-template #content>
                     <div class="resizable-container" #resizeableContainer
                          [style.width.%]="100"
                          [style.height.em]="panel().size[1]"
@@ -177,9 +139,8 @@ interface InspectionPanelContentAdapter {
                             </feature-panel>
                         }
                     </div>
-                </p-accordion-content>
-            </p-accordion-panel>
-        </p-accordion>
+            </ng-template>
+        </app-panel>
         <p-popover #comparePopover [baseZIndex]="30000">
             <div class="comparison-popover">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.25em">
@@ -242,7 +203,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
     panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
-    accordionValue = '0';
+    accordionValue: string | null = '0';
     readonly accordionTransitionOptions = '320ms cubic-bezier(0.22, 1, 0.36, 1)';
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
@@ -367,6 +328,13 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     /** Marks this docked panel as the active target for inspection shortcuts. */
     protected focusPanel() {
         this.stateService.setFocusedInspectionPanel(this.panel().id);
+    }
+
+    /** Persists the highlight color selected from the shared surface header. */
+    protected onPanelColorChange(color: string) {
+        const panel = this.panel();
+        panel.color = color;
+        this.stateService.setInspectionPanelColor(panel.id, color);
     }
 
     /** Removes this docked inspection panel from the selection set. */

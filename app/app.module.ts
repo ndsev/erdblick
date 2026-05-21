@@ -98,6 +98,7 @@ import {Menubar} from "primeng/menubar";
 import {DynamicDialogModule} from "primeng/dynamicdialog";
 import {DialogService} from "primeng/dynamicdialog";
 import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
+import {InspectionDialogsComponent} from "./inspection/inspection.dialogs.component";
 import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
 import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
@@ -107,9 +108,10 @@ import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.compo
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
+import {AppPanelComponent} from "./shared/app-panel.component";
+import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
-import {Panel} from "primeng/panel";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -204,6 +206,7 @@ export const initializeServices = () => {
         InspectionTreeComponent,
         DockableLayoutComponent,
         InspectionPanelDialogComponent,
+        InspectionDialogsComponent,
         InspectionComparisonDialogComponent,
         SurveyComponent,
         DiagnosticsIndicatorComponent,
@@ -222,6 +225,8 @@ export const initializeServices = () => {
         AnimateOnScroll,
         AppRoutingModule,
         AppDialogComponent,
+        AppPanelComponent,
+        AppSurfaceHeaderComponent,
         SpeedDialModule,
         DialogModule,
         DynamicDialogModule,
@@ -271,8 +276,7 @@ export const initializeServices = () => {
         ToggleButton,
         Menubar,
         Ripple,
-        Tag,
-        Panel
+        Tag
     ],
     providers: [
         provideAppInitializer(initializeServices),
