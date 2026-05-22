@@ -1,6 +1,5 @@
 import {Component, OnDestroy, Renderer2, ViewChild, effect, input} from "@angular/core";
 import {Popover} from "primeng/popover";
-import {ContextMenu} from "primeng/contextmenu";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, InspectionComparisonOption, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -8,8 +7,8 @@ import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 import {AppDialogComponent} from "../shared/app-dialog.component";
+import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -31,6 +30,7 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                                         dockMode="dock"
                                         [sizeToggleVisible]="false"
                                         [dragEnabled]="true"
+                                        [extraActions]="featureHeaderActions()"
                                         (colorChange)="onPanelColorChange($event)"
                                         (titleClick)="toggleLockedState($event)"
                                         (dockRequest)="dock($event)"
@@ -49,42 +49,6 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
                                       optionLabel="label"
                                       optionDisabled="disabled"/>
-                        }
-                        @if (panel().sourceData === undefined && panel().features.length > 0) {
-                            <ng-container surfaceHeaderActions>
-                                <span class="inspection-feature-tools-inline">
-                                    <p-button icon="" (click)="focusOnFeatureAction($event)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              pTooltip="Focus on feature" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined app-surface-header-button-icon">my_location</span>
-                                    </p-button>
-                                    <p-button icon="" (click)="openGeoJsonInNewTabAction($event)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              pTooltip="Open GeoJSON in new tab" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined app-surface-header-button-icon">open_in_new</span>
-                                    </p-button>
-                                    <p-button icon="" (click)="downloadGeoJsonAction($event)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              pTooltip="Download GeoJSON" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined app-surface-header-button-icon">download</span>
-                                    </p-button>
-                                    <p-button icon="" (click)="copyGeoJsonAction($event)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              pTooltip="Copy GeoJSON" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined app-surface-header-button-icon">content_copy</span>
-                                    </p-button>
-                                    <p-button icon="" (click)="openComparePopover($event)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              pTooltip="Compare" tooltipPosition="bottom">
-                                        <span class="material-symbols-outlined app-surface-header-button-icon">compare_arrows</span>
-                                    </p-button>
-                                </span>
-                                <p-button class="inspection-feature-tools-menu" icon="" (click)="openExtraMenu($event)"
-                                          (mousedown)="$event.stopPropagation()"
-                                          pTooltip="More actions" tooltipPosition="bottom">
-                                    <span class="material-symbols-outlined app-surface-header-button-icon">more_vert</span>
-                                </p-button>
-                            </ng-container>
                         }
                     </app-surface-header>
                 }
@@ -129,8 +93,6 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                 </div>
             </div>
         </p-popover>
-        <p-contextMenu #extraMenu [model]="extraMenuItems" [baseZIndex]="30000" appendTo="body"
-                       [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
     styles: [`
         .inspection-focus-indicator {
@@ -163,13 +125,10 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
-    extraMenuItems: MenuItem[] = [];
-    private lastExtraMenuTarget?: HTMLElement;
     isMetadata: boolean = false;
 
     @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
-    @ViewChild('extraMenu') extraMenu!: ContextMenu;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
 
@@ -317,11 +276,49 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.featurePanel?.copyGeoJson();
     }
 
-    /** Opens the comparison popover after refreshing available comparison targets. */
-    protected openComparePopover(event: MouseEvent) {
-        event.stopPropagation();
-        this.refreshCompareOptions();
-        this.comparePopover.toggle(event);
+    /** Extra feature actions rendered and collapsed by the shared surface header. */
+    protected featureHeaderActions(): AppSurfaceHeaderAction[] {
+        const panel = this.panel();
+        if (panel.sourceData !== undefined || panel.features.length === 0) {
+            return [];
+        }
+        return [
+            {
+                label: 'Focus on feature',
+                tooltip: 'Focus on feature',
+                materialIcon: 'my_location',
+                menuIcon: 'pi pi-bullseye',
+                command: event => this.focusOnFeatureAction(event.originalEvent)
+            },
+            {
+                label: 'Open GeoJSON in new tab',
+                tooltip: 'Open GeoJSON in new tab',
+                materialIcon: 'open_in_new',
+                menuIcon: 'pi pi-external-link',
+                command: event => this.openGeoJsonInNewTabAction(event.originalEvent)
+            },
+            {
+                label: 'Download GeoJSON',
+                tooltip: 'Download GeoJSON',
+                materialIcon: 'download',
+                menuIcon: 'pi pi-download',
+                command: event => this.downloadGeoJsonAction(event.originalEvent)
+            },
+            {
+                label: 'Copy GeoJSON',
+                tooltip: 'Copy GeoJSON',
+                materialIcon: 'content_copy',
+                menuIcon: 'pi pi-copy',
+                command: event => this.copyGeoJsonAction(event.originalEvent)
+            },
+            {
+                label: 'Compare',
+                tooltip: 'Compare',
+                materialIcon: 'compare_arrows',
+                menuIcon: 'pi pi-arrow-right-arrow-left',
+                command: event => this.openCompareAction(event)
+            }
+        ];
     }
 
     /** Re-docks the floating inspection panel into the dock area. */
@@ -330,58 +327,14 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
     }
 
-    /** Opens the extra actions menu for the floating inspection panel. */
-    protected openExtraMenu(event: MouseEvent) {
-        event.stopPropagation();
-        this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
-        this.extraMenuItems = [
-            {
-                label: 'Focus on feature',
-                icon: 'pi pi-bullseye',
-                command: () => this.focusOnFeature()
-            },
-            {
-                label: 'GeoJSON Actions',
-                icon: 'pi pi-download',
-                items: [
-                    {
-                        label: 'Open in new tab',
-                        icon: 'pi pi-external-link',
-                        command: () => this.featurePanel?.openGeoJsonInNewTab()
-                    },
-                    {
-                        label: 'Download (.geojson)',
-                        icon: 'pi pi-download',
-                        command: () => this.featurePanel?.downloadGeoJson()
-                    },
-                    {
-                        label: 'Copy to clipboard',
-                        icon: 'pi pi-copy',
-                        command: () => this.featurePanel?.copyGeoJson()
-                    }
-                ]
-            },
-            {
-                label: 'Compare',
-                icon: 'pi pi-arrow-right-arrow-left',
-                command: (menuEvent) => this.openCompareFromMenu(menuEvent)
-            }
-        ];
-        this.extraMenu.toggle(event);
-    }
-
-    /** Reopens the comparison popover from the extra actions menu. */
-    private openCompareFromMenu(menuEvent: MenuItemCommandEvent) {
+    /** Opens the compare popover from either an inline action or the collapsed action menu. */
+    private openCompareAction(actionEvent: AppSurfaceHeaderActionCommandEvent) {
         this.refreshCompareOptions();
-        const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
-        const target = this.lastExtraMenuTarget;
-        if (target) {
-            this.comparePopover.show(originalEvent ?? null, target);
-        } else if (originalEvent) {
-            originalEvent.stopPropagation();
-            this.refreshCompareOptions();
-            this.comparePopover.toggle(originalEvent);
+        if (actionEvent.source === 'menu') {
+            this.comparePopover.show(actionEvent.originalEvent, actionEvent.anchor);
+            return;
         }
+        this.comparePopover.toggle(actionEvent.originalEvent);
     }
 
     /** Rebuilds valid comparison targets for the current selection context. */

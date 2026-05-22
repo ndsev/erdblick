@@ -25,10 +25,39 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, Subscription, switchMap, timer} from "rxjs";
 import {AppPanelComponent} from "../shared/app-panel.component";
 import getCaretCoordinates from "../shared/caret.util";
+import type {AppSurfaceHeaderAction} from "../shared/app-surface-header.component";
 
 interface FeatureSearchGroupingOption {
     name: string;
     value: number;
+}
+
+interface FeatureSearchStyleOption {
+    label: string;
+    value: string;
+}
+
+interface FeatureSearchStyleColorStop {
+    label: string;
+    value: number;
+    color: string;
+}
+
+interface FeatureSearchStyleFilterMockState {
+    id: number;
+    attributeField: string;
+    operator: string;
+    filterValue: number;
+}
+
+interface FeatureSearchStyleMockState {
+    id: number;
+    filters: FeatureSearchStyleFilterMockState[];
+    visualization: string;
+    lineWidth: number;
+    opacity: number;
+    colorMode: string;
+    colorStops: FeatureSearchStyleColorStop[];
 }
 
 @Component({
@@ -50,9 +79,9 @@ interface FeatureSearchGroupingOption {
                 </app-panel>
             } @else {
                 <app-dialog #featureSearchDialog class="feature-search-dialog" data-testid="feature-search-dialog"
-                          [closeOnEscape]="false"
+                          [closeOnEscape]="false" [modal]="false" [closable]="false"
                           [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)"
-                          [draggable]="true" [resizable]="true" [appendTo]="'body'"
+                          [draggable]="true" [resizable]="true"
                           [persistLayout]="true" [persistOpenState]="false" [layoutId]="session.layoutId"
                           (onShow)="onDialogShow($event)"
                           (onDragEnd)="onDialogDragEnd()"
@@ -78,32 +107,13 @@ interface FeatureSearchGroupingOption {
                                 [sizeToggleDisabled]="dockedPanelCount <= 1"
                                 [expanded]="featureSearchExpanded"
                                 [dragEnabled]="isDocked()"
+                                [extraActions]="featureSearchHeaderActions()"
                                 (focusRequest)="bringSurfaceToFront()"
                                 (colorChange)="onSearchColorChange($event)"
                                 (dockRequest)="toggleDocked()"
                                 (sizeToggleRequest)="toggleExpanded()"
                                 (closeRequest)="closeSearch()"
                                 (dragPointerDown)="onHeaderPointerDown($event)">
-                <span surfaceHeaderActions class="feature-search-header-actions">
-                    <p-button icon="pi pi-refresh"
-                              [disabled]="!searchQueryForRerun()"
-                              pTooltip="Rerun search"
-                              tooltipPosition="bottom"
-                              (click)="$event.stopPropagation(); rerunSearch()"
-                              (mousedown)="$event.stopPropagation()"/>
-                    <p-button [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
-                              [disabled]="!canPauseStopSearch"
-                              [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"
-                              tooltipPosition="bottom"
-                              (click)="$event.stopPropagation(); toggleSearchPaused()"
-                              (mousedown)="$event.stopPropagation()"/>
-                    <p-button icon="pi pi-stop-circle"
-                              [disabled]="!canPauseStopSearch"
-                              pTooltip="Stop search"
-                              tooltipPosition="bottom"
-                              (click)="$event.stopPropagation(); stopSearch()"
-                              (mousedown)="$event.stopPropagation()"/>
-                </span>
             </app-surface-header>
         </ng-template>
 
@@ -158,6 +168,9 @@ interface FeatureSearchGroupingOption {
                         <span>Results </span>
                         <p-badge [value]="results.length"/>
                     </p-tab>
+                    <p-tab value="style">
+                        <span>Style</span>
+                    </p-tab>
                     <p-tab value="diagnostics">
                         <span>Diagnostics </span>
                         <p-badge [value]="diagnostics.length"/>
@@ -195,6 +208,139 @@ interface FeatureSearchGroupingOption {
                                         (onNodeSelect)="selectResult($event)"
                                         [emptyMessage]="resultsStatus">
                                 </p-tree>
+                            </div>
+                        </div>
+                    </p-tabpanel>
+
+                    <!-- Style -->
+                    <p-tabpanel value="style">
+                        <div class="feature-search-style-rules" data-testid="feature-search-style-rules">
+                            @for (rule of styleRulesMock; track rule.id; let ruleIndex = $index) {
+                                <p-card class="feature-search-style-panel"
+                                        [attr.data-testid]="'feature-search-style-panel-' + rule.id">
+                                    <div class="feature-search-style-rule-header">
+                                        <span>Rule {{ ruleIndex + 1 }}</span>
+                                    </div>
+
+                                    <section class="feature-search-style-section">
+                                        <h3>1. Filter</h3>
+                                        <div class="feature-search-style-condition-list">
+                                            @for (filter of rule.filters; track filter.id) {
+                                                <div class="feature-search-style-filter-row">
+                                                    <p-select class="feature-search-style-attribute"
+                                                              [options]="styleAttributeOptions"
+                                                              [(ngModel)]="filter.attributeField"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              appendTo="body">
+                                                    </p-select>
+                                                    <p-select class="feature-search-style-operator"
+                                                              [options]="styleOperatorOptions"
+                                                              [(ngModel)]="filter.operator"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              appendTo="body">
+                                                    </p-select>
+                                                    <p-inputNumber class="feature-search-style-number"
+                                                                   [(ngModel)]="filter.filterValue"
+                                                                   [min]="0"
+                                                                   [max]="300">
+                                                    </p-inputNumber>
+                                                </div>
+                                            }
+                                        </div>
+                                        <p-button icon="pi pi-plus"
+                                                  label="Add condition"
+                                                  severity="secondary"
+                                                  [outlined]="true"
+                                                  (click)="addStyleCondition(rule)">
+                                        </p-button>
+                                    </section>
+
+                                    <section class="feature-search-style-section">
+                                        <h3>2. Visualization</h3>
+                                        <div class="feature-search-style-visualization-row">
+                                            <p-select class="feature-search-style-visualization"
+                                                      [options]="styleVisualizationOptions"
+                                                      [(ngModel)]="rule.visualization"
+                                                      optionLabel="label"
+                                                      optionValue="value"
+                                                      appendTo="body">
+                                            </p-select>
+                                            <label [for]="'feature-search-style-width-' + rule.id">Width</label>
+                                            <p-inputNumber [inputId]="'feature-search-style-width-' + rule.id"
+                                                           class="feature-search-style-number"
+                                                           [(ngModel)]="rule.lineWidth"
+                                                           [min]="1"
+                                                           [max]="32">
+                                            </p-inputNumber>
+                                            <label [for]="'feature-search-style-opacity-' + rule.id">Opacity</label>
+                                            <div class="feature-search-style-opacity">
+                                                <p-inputNumber [inputId]="'feature-search-style-opacity-' + rule.id"
+                                                               class="feature-search-style-number"
+                                                               [(ngModel)]="rule.opacity"
+                                                               [min]="0"
+                                                               [max]="100"
+                                                               suffix=" %">
+                                                </p-inputNumber>
+                                                <p-slider [(ngModel)]="rule.opacity"
+                                                          [min]="0"
+                                                          [max]="100"
+                                                          class="feature-search-style-opacity-slider">
+                                                </p-slider>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    <section class="feature-search-style-section">
+                                        <h3>3. Color</h3>
+                                        <div class="feature-search-style-color-mode-row">
+                                            <label [for]="'feature-search-style-color-mode-' + rule.id">Mode</label>
+                                            <p-select [inputId]="'feature-search-style-color-mode-' + rule.id"
+                                                      class="feature-search-style-color-mode"
+                                                      [options]="styleColorModeOptions"
+                                                      [(ngModel)]="rule.colorMode"
+                                                      optionLabel="label"
+                                                      optionValue="value"
+                                                      appendTo="body">
+                                            </p-select>
+                                            <p-chip label="numeric schema field"></p-chip>
+                                        </div>
+
+                                        <div class="feature-search-style-gradient" aria-hidden="true"></div>
+                                        <div class="feature-search-style-gradient-stops">
+                                            @for (stop of rule.colorStops; track stop.label) {
+                                                <div class="feature-search-style-gradient-stop">
+                                                    <span class="feature-search-style-gradient-marker"
+                                                          [style.border-bottom-color]="stop.color"></span>
+                                                    <div class="feature-search-style-gradient-stop-controls">
+                                                        <p-inputNumber class="feature-search-style-stop-number"
+                                                                       [(ngModel)]="stop.value"
+                                                                       [min]="0"
+                                                                       [max]="300">
+                                                        </p-inputNumber>
+                                                        <p-colorpicker [(ngModel)]="stop.color" appendTo="body"></p-colorpicker>
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    </section>
+                                </p-card>
+                            }
+
+                            <div class="feature-search-style-actions">
+                                <p-button icon="pi pi-plus"
+                                          label="Add Rule"
+                                          severity="secondary"
+                                          [outlined]="true"
+                                          (click)="addStyleRule()">
+                                </p-button>
+                                <p-button icon="pi pi-refresh"
+                                          label="Reset Style"
+                                          severity="secondary"
+                                          [outlined]="true"
+                                          (click)="resetStyleRules()">
+                                </p-button>
                             </div>
                         </div>
                     </p-tabpanel>
@@ -289,6 +435,32 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         {name: 'Tiles', value: 4}
     ];
     selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
+    styleAttributeOptions: FeatureSearchStyleOption[] = [
+        {label: 'speedLimit', value: 'speedLimit'},
+        {label: 'functionalRoadClass', value: 'functionalRoadClass'},
+        {label: 'laneCount', value: 'laneCount'},
+        {label: 'elevation', value: 'elevation'}
+    ];
+    styleOperatorOptions: FeatureSearchStyleOption[] = [
+        {label: '>', value: '>'},
+        {label: '>=', value: '>='},
+        {label: '=', value: '='},
+        {label: '<=', value: '<='},
+        {label: '<', value: '<'}
+    ];
+    styleVisualizationOptions: FeatureSearchStyleOption[] = [
+        {label: 'Line', value: 'line'},
+        {label: 'Fill', value: 'fill'},
+        {label: 'Point', value: 'point'}
+    ];
+    styleColorModeOptions: FeatureSearchStyleOption[] = [
+        {label: 'Gradient', value: 'gradient'},
+        {label: 'Steps', value: 'steps'},
+        {label: 'Categories', value: 'categories'}
+    ];
+    private nextStyleRuleId = 1;
+    private nextStyleConditionId = 1;
+    styleRulesMock: FeatureSearchStyleMockState[] = [this.createDefaultStyleRule()];
 
     // Active result panel index
     resultPanelIndex: string = "results";
@@ -358,6 +530,45 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.subscriptions.add(this.featureSearchQueryChanged
             .pipe(debounceTime(this.completion.completionDelay))
             .subscribe(() => this.completeFeatureSearchQuery()));
+    }
+
+    private createDefaultStyleFilter(): FeatureSearchStyleFilterMockState {
+        return {
+            id: this.nextStyleConditionId++,
+            attributeField: 'speedLimit',
+            operator: '>',
+            filterValue: 80
+        };
+    }
+
+    private createDefaultStyleRule(): FeatureSearchStyleMockState {
+        return {
+            id: this.nextStyleRuleId++,
+            filters: [this.createDefaultStyleFilter()],
+            visualization: 'line',
+            lineWidth: 10,
+            opacity: 40,
+            colorMode: 'gradient',
+            colorStops: [
+                {label: 'low', value: 30, color: '#2f73ff'},
+                {label: 'mid', value: 80, color: '#ffd43b'},
+                {label: 'high', value: 120, color: '#ff3347'}
+            ]
+        };
+    }
+
+    protected addStyleRule(): void {
+        this.styleRulesMock = [...this.styleRulesMock, this.createDefaultStyleRule()];
+    }
+
+    protected addStyleCondition(rule: FeatureSearchStyleMockState): void {
+        rule.filters = [...rule.filters, this.createDefaultStyleFilter()];
+    }
+
+    protected resetStyleRules(): void {
+        this.nextStyleRuleId = 1;
+        this.nextStyleConditionId = 1;
+        this.styleRulesMock = [this.createDefaultStyleRule()];
     }
 
     /** Rebinds this visual wrapper when the owning session id changes. */
@@ -603,13 +814,34 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const fontSizePx = parseFloat(style.fontSize);
         const offset = (1 + 0.75) * fontSizePx;
         const caret = getCaretCoordinates(textarea, cursor);
+        const containingBlockRect = this.completionFixedContainingBlock(textarea)?.getBoundingClientRect();
+        const blockTop = containingBlockRect?.top ?? 0;
+        const blockLeft = containingBlockRect?.left ?? 0;
         if (caret) {
-            this.completion.top = rect.top + caret.top + offset;
-            this.completion.left = rect.left + caret.left;
+            this.completion.top = rect.top + caret.top + offset - blockTop;
+            this.completion.left = rect.left + caret.left - blockLeft;
         } else {
-            this.completion.top = rect.bottom;
-            this.completion.left = rect.left;
+            this.completion.top = rect.bottom - blockTop;
+            this.completion.left = rect.left - blockLeft;
         }
+    }
+
+    private completionFixedContainingBlock(textarea: HTMLElement): HTMLElement | null {
+        let element = textarea.parentElement;
+        while (element && element !== document.body) {
+            const style = window.getComputedStyle(element);
+            const backdropFilter = style.getPropertyValue('backdrop-filter');
+            if (style.transform !== 'none'
+                || style.perspective !== 'none'
+                || style.filter !== 'none'
+                || (!!backdropFilter && backdropFilter !== 'none')
+                || style.contain.includes('paint')
+                || style.contain.includes('layout')) {
+                return element;
+            }
+            element = element.parentElement;
+        }
+        return null;
     }
 
     protected onCompletionPopupDown(event: MouseEvent) {
@@ -690,6 +922,32 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     protected searchQueryForRerun(): string {
         return this.featureSearchQuery.trim() || this.session?.query || this.lastSearchQuery;
+    }
+
+    protected featureSearchHeaderActions(): AppSurfaceHeaderAction[] {
+        return [
+            {
+                label: 'Rerun search',
+                tooltip: 'Rerun search',
+                icon: 'pi pi-refresh',
+                disabled: !this.searchQueryForRerun(),
+                command: () => this.rerunSearch()
+            },
+            {
+                label: this.isSearchPaused ? 'Resume search' : 'Pause search',
+                tooltip: this.isSearchPaused ? 'Resume search' : 'Pause search',
+                icon: this.isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle',
+                disabled: !this.canPauseStopSearch,
+                command: () => this.toggleSearchPaused()
+            },
+            {
+                label: 'Stop search',
+                tooltip: 'Stop search',
+                icon: 'pi pi-stop-circle',
+                disabled: !this.canPauseStopSearch,
+                command: () => this.stopSearch()
+            }
+        ];
     }
 
     protected closeSearch() {

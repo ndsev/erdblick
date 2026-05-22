@@ -400,6 +400,10 @@ export class FeatureSearchService {
     private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
     private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
     private static readonly LOCATION_MARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48"><path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="white"/></svg>`;
+    private static readonly FLOATING_DIALOG_WIDTH_EM = 42;
+    private static readonly FLOATING_DIALOG_HEIGHT_EM = 42;
+    private static readonly FLOATING_DIALOG_HORIZONTAL_MARGIN_EM = 2;
+    private static readonly FLOATING_DIALOG_VERTICAL_MARGIN_EM = 5;
     private static readonly DEFAULT_SEARCH_COLORS = [
         "#ea4336",
         "#3474ff",
@@ -768,6 +772,7 @@ export class FeatureSearchService {
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
         if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
             this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
+            this.moveDockedSurfaceToTop(layoutId);
             this.notifySessionsChanged();
         }
         let session = this.getInternalSession(entry.id);
@@ -784,14 +789,14 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {query, paused: false})) {
-            this.resetSessionSearch(session, {
-                ...session.definition,
-                query,
-                paused: false
-            });
-            this.startSessionSearch(session, session.definition);
-        }
+        const nextDefinition: FeatureSearchStateEntry = {
+            ...session.definition,
+            query,
+            paused: false
+        };
+        this.resetSessionSearch(session, nextDefinition);
+        this.startSessionSearch(session, nextDefinition);
+        this.stateService.patchFeatureSearch(sessionId, {query, paused: false});
     }
 
     // Send a task to each worker to start processing.
@@ -915,12 +920,55 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
+        if (!docked) {
+            this.ensureInitialFloatingDialogLayout(session.layoutId);
+        }
         this.stateService.setSurfaceDocked(session.layoutId, docked, SEARCH_DOCK_TAB_ID);
         if (docked) {
+            this.moveDockedSurfaceToTop(session.layoutId);
             this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
             this.stateService.isDockOpen = true;
         }
         this.notifySessionsChanged();
+    }
+
+    /** Places a newly docked search before older docked searches, matching inspection dock behavior. */
+    private moveDockedSurfaceToTop(layoutId: string): void {
+        const existingOrder = this.getDockedSessions()
+            .map(session => session.layoutId)
+            .filter(id => id !== layoutId);
+        this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, [layoutId, ...existingOrder]);
+    }
+
+    /** Centers searches that were first created in the dock and only have the generic dock fallback position. */
+    private ensureInitialFloatingDialogLayout(layoutId: string): void {
+        const current = this.stateService.getDialogLayout(layoutId);
+        if (current && (current.position.left !== 0 || current.position.top !== 0)) {
+            return;
+        }
+        const baseFontSize = this.stateService.baseFontSize || 16;
+        const width = Math.round(Math.min(
+            FeatureSearchService.FLOATING_DIALOG_WIDTH_EM * baseFontSize,
+            Math.max(baseFontSize, window.innerWidth - FeatureSearchService.FLOATING_DIALOG_HORIZONTAL_MARGIN_EM * baseFontSize)
+        ));
+        const height = Math.round(Math.min(
+            FeatureSearchService.FLOATING_DIALOG_HEIGHT_EM * baseFontSize,
+            Math.max(baseFontSize, window.innerHeight - FeatureSearchService.FLOATING_DIALOG_VERTICAL_MARGIN_EM * baseFontSize)
+        ));
+        this.stateService.upsertDialogLayout(layoutId, {
+            ...(current ?? {
+                position: {left: 0, top: 0},
+                size: {width, height},
+                open: false,
+                docked: false,
+                dockTab: SEARCH_DOCK_TAB_ID
+            }),
+            position: {
+                left: Math.max(0, Math.round((window.innerWidth - width) / 2)),
+                top: Math.max(0, Math.round((window.innerHeight - height) / 2))
+            },
+            size: {width, height}
+        });
     }
 
     /** Closes one search session and removes its worker, dock, and marker state. */
