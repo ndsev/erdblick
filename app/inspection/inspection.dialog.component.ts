@@ -31,8 +31,8 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
                             } @else if (panel().sourceData !== undefined) {
                                 <p-tag severity="success" value="DATA" [rounded]="true" />
                             }
-                            <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title" 
-                                 tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
+                            <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title"
+                                 tooltipPosition="bottom"
                                  (click)="toggleLockedState($event)">
                                 <span class="material-symbols-outlined">
                                     @if (panel().locked) {

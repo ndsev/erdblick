@@ -107,7 +107,8 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     /** Refreshes dialog layout style when inputs change. */
     ngOnChanges(changes: SimpleChanges): void {
         if (changes['style'] || changes['layoutId'] || changes['persistLayout'] || changes['persistOpenState'] || changes['resizable'] || changes['visible']) {
-            this.refreshEffectiveStyle(this.visible);
+            const becameVisible = changes['visible']?.currentValue === true;
+            this.refreshEffectiveStyle(becameVisible);
         }
     }
 
