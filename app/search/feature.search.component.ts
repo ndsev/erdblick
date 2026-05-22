@@ -26,6 +26,7 @@ import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, Subscri
 import {AppPanelComponent} from "../shared/app-panel.component";
 import getCaretCoordinates from "../shared/caret.util";
 import type {AppSurfaceHeaderAction} from "../shared/app-surface-header.component";
+import type {FeatureSearchScope} from "../shared/feature-search-state";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -37,7 +38,13 @@ interface FeatureSearchStyleOption {
     value: string;
 }
 
+interface FeatureSearchScopeOption {
+    label: string;
+    value: FeatureSearchScope;
+}
+
 interface FeatureSearchStyleColorStop {
+    id: number;
     label: string;
     value: number;
     color: string;
@@ -59,7 +66,10 @@ interface FeatureSearchStyleMockState {
     lineWidth: number;
     opacity: number;
     colorMode: string;
+    colorField: string;
+    solidColor: string;
     colorStops: FeatureSearchStyleColorStop[];
+    categoryStops: FeatureSearchStyleColorStop[];
 }
 
 @Component({
@@ -147,6 +157,16 @@ interface FeatureSearchStyleMockState {
                     (candidateSelected)="applyFeatureSearchCompletion($event)">
                 </search-completion-popup>
             </div>
+            <div class="feature-search-scope-control">
+                <span>Search scope</span>
+                <p-selectbutton [options]="featureSearchScopeOptions"
+                                [(ngModel)]="featureSearchScope"
+                                optionLabel="label"
+                                optionValue="value"
+                                [allowEmpty]="false"
+                                (ngModelChange)="onFeatureSearchScopeChange($event)">
+                </p-selectbutton>
+            </div>
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
                     <p-progressBar [value]="percentDone">
@@ -171,7 +191,8 @@ interface FeatureSearchStyleMockState {
                         <p-badge [value]="results.length"/>
                     </p-tab>
                     <p-tab value="style">
-                        <span>Style</span>
+                        <span>Styles </span>
+                        <p-badge [value]="styleRulesMock.length"/>
                     </p-tab>
                     <p-tab value="diagnostics">
                         <span>Diagnostics </span>
@@ -234,7 +255,7 @@ interface FeatureSearchStyleMockState {
                                                        [attr.data-testid]="'feature-search-style-panel-' + rule.id">
                                         <p-accordion-header>
                                             <div class="feature-search-style-rule-header">
-                                                <span>Rule {{ ruleIndex + 1 }}</span>
+                                                <span>Rule {{ styleRulesMock.length - ruleIndex }}</span>
                                                 <span class="feature-search-style-rule-actions">
                                                     <p-button icon="pi pi-refresh"
                                                               label="Reset Style"
@@ -376,26 +397,72 @@ interface FeatureSearchStyleMockState {
                                                               optionValue="value"
                                                               appendTo="body">
                                                     </p-select>
-                                                    <p-chip label="numeric schema field"></p-chip>
+                                                    <label [for]="'feature-search-style-color-field-' + rule.id">Field</label>
+                                                    <p-select [inputId]="'feature-search-style-color-field-' + rule.id"
+                                                              class="feature-search-style-color-field"
+                                                              [options]="styleAttributeOptions"
+                                                              [(ngModel)]="rule.colorField"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              appendTo="body">
+                                                    </p-select>
                                                 </div>
 
-                                                <div class="feature-search-style-gradient" aria-hidden="true"></div>
-                                                <div class="feature-search-style-gradient-stops">
-                                                    @for (stop of rule.colorStops; track stop.label) {
-                                                        <div class="feature-search-style-gradient-stop">
-                                                            <span class="feature-search-style-gradient-marker"
-                                                                  [style.border-bottom-color]="stop.color"></span>
-                                                            <div class="feature-search-style-gradient-stop-controls">
-                                                                <p-inputNumber class="feature-search-style-stop-number"
-                                                                               [(ngModel)]="stop.value"
+                                                @if (rule.colorMode === 'gradient') {
+                                                    <div class="feature-search-style-gradient"
+                                                         [style.background]="styleGradientPreview(rule)"
+                                                         aria-hidden="true"></div>
+                                                    <div class="feature-search-style-gradient-stops">
+                                                        @for (stop of rule.colorStops; track stop.id) {
+                                                            <div class="feature-search-style-gradient-stop">
+                                                                <span class="feature-search-style-gradient-marker"
+                                                                      [style.border-bottom-color]="stop.color"></span>
+                                                                <div class="feature-search-style-gradient-stop-controls">
+                                                                    <p-inputNumber class="feature-search-style-stop-number"
+                                                                                   [(ngModel)]="stop.value"
+                                                                                   [min]="0"
+                                                                                   [max]="300">
+                                                                    </p-inputNumber>
+                                                                    <p-colorpicker [(ngModel)]="stop.color" appendTo="body"></p-colorpicker>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                } @else if (rule.colorMode === 'solid') {
+                                                    <div class="feature-search-style-solid-color-row">
+                                                        <span>Color</span>
+                                                        <p-colorpicker [(ngModel)]="rule.solidColor" appendTo="body"></p-colorpicker>
+                                                    </div>
+                                                } @else if (rule.colorMode === 'categories') {
+                                                    <div class="feature-search-style-category-actions">
+                                                        <p-button icon="pi pi-plus"
+                                                                  label="Add category"
+                                                                  severity="secondary"
+                                                                  [outlined]="true"
+                                                                  (click)="addStyleCategory(rule)">
+                                                        </p-button>
+                                                    </div>
+                                                    <div class="feature-search-style-category-list">
+                                                        @for (category of rule.categoryStops; track category.id) {
+                                                            <div class="feature-search-style-category-row">
+                                                                <p-colorpicker [(ngModel)]="category.color" appendTo="body"></p-colorpicker>
+                                                                <p-inputNumber class="feature-search-style-category-value"
+                                                                               [(ngModel)]="category.value"
                                                                                [min]="0"
                                                                                [max]="300">
                                                                 </p-inputNumber>
-                                                                <p-colorpicker [(ngModel)]="stop.color" appendTo="body"></p-colorpicker>
+                                                                <p-button class="feature-search-style-category-delete"
+                                                                          icon="pi pi-times"
+                                                                          severity="danger"
+                                                                          [outlined]="true"
+                                                                          pTooltip="Delete category"
+                                                                          tooltipPosition="bottom"
+                                                                          (click)="deleteStyleCategory(rule, category)">
+                                                                </p-button>
                                                             </div>
-                                                        </div>
-                                                    }
-                                                </div>
+                                                        }
+                                                    </div>
+                                                }
                                             </section>
                                         </p-accordion-content>
                                     </p-accordion-panel>
@@ -520,6 +587,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     ];
     private nextStyleRuleId = 1;
     private nextStyleConditionId = 1;
+    private nextStyleColorStopId = 1;
     styleRulesMock: FeatureSearchStyleMockState[] = [this.createDefaultStyleRule()];
     styleRuleAccordionValue: string[] = ['1'];
 
@@ -532,6 +600,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     featureSearchExpanded = false;
     featureSearchQuery = "";
     featureSearchQueryExpanded = false;
+    featureSearchScope: FeatureSearchScope = 'auto';
+    featureSearchScopeOptions: FeatureSearchScopeOption[] = [
+        {label: 'Feature', value: 'feature'},
+        {label: 'Attribute', value: 'attribute'},
+        {label: 'Auto', value: 'auto'}
+    ];
     completionItems: CompletionCandidate[] = [];
     completion = {
         top: 0,
@@ -604,6 +678,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
+    private createStyleColorStop(label: string, value: number, color: string): FeatureSearchStyleColorStop {
+        return {
+            id: this.nextStyleColorStopId++,
+            label,
+            value,
+            color
+        };
+    }
+
     private createStyleRule(id: number): FeatureSearchStyleMockState {
         return {
             id,
@@ -612,10 +695,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             lineWidth: 10,
             opacity: 40,
             colorMode: 'gradient',
+            colorField: 'speedLimit',
+            solidColor: '#2f73ff',
             colorStops: [
-                {label: 'low', value: 30, color: '#2f73ff'},
-                {label: 'mid', value: 80, color: '#ffd43b'},
-                {label: 'high', value: 120, color: '#ff3347'}
+                this.createStyleColorStop('low', 30, '#2f73ff'),
+                this.createStyleColorStop('mid', 80, '#ffd43b'),
+                this.createStyleColorStop('high', 120, '#ff3347')
+            ],
+            categoryStops: [
+                this.createStyleColorStop('category 1', 30, '#2f73ff'),
+                this.createStyleColorStop('category 2', 80, '#ff3347')
             ]
         };
     }
@@ -652,6 +741,29 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         rule.filters = rule.filters.filter(candidate => candidate.id !== filter.id);
     }
 
+    protected addStyleCategory(rule: FeatureSearchStyleMockState): void {
+        const nextIndex = rule.categoryStops.length + 1;
+        rule.categoryStops = [
+            ...rule.categoryStops,
+            this.createStyleColorStop(`category ${nextIndex}`, nextIndex * 10, '#2f73ff')
+        ];
+    }
+
+    protected deleteStyleCategory(rule: FeatureSearchStyleMockState, category: FeatureSearchStyleColorStop): void {
+        rule.categoryStops = rule.categoryStops.filter(candidate => candidate.id !== category.id);
+    }
+
+    protected styleGradientPreview(rule: FeatureSearchStyleMockState): string {
+        if (!rule.colorStops.length) {
+            return rule.solidColor;
+        }
+        const denominator = Math.max(rule.colorStops.length - 1, 1);
+        const stops = rule.colorStops
+            .map((stop, index) => `${stop.color} ${Math.round((index / denominator) * 100)}%`)
+            .join(', ');
+        return `linear-gradient(90deg, ${stops})`;
+    }
+
     protected toggleStyleConditionMode(filter: FeatureSearchStyleFilterMockState): void {
         filter.manualConditionEnabled = !filter.manualConditionEnabled;
         if (filter.manualConditionEnabled && !filter.manualCondition.trim()) {
@@ -669,6 +781,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     protected resetStyleRules(): void {
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
+        this.nextStyleColorStopId = 1;
         const rule = this.createDefaultStyleRule();
         this.styleRulesMock = [rule];
         this.styleRuleAccordionValue = [this.styleRulePanelValue(rule)];
@@ -734,6 +847,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.session = session;
         this.featureSearchDialogVisible = true;
         this.lastSearchQuery = session.query;
+        this.featureSearchScope = session.definition.scope;
         if (this.activeSearchGroupId !== session.search.id) {
             this.activeSearchGroupId = session.search.id;
             this.completedSearchGroupId = "";
@@ -1027,6 +1141,13 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return this.featureSearchQuery.trim() || this.session?.query || this.lastSearchQuery;
     }
 
+    protected onFeatureSearchScopeChange(scope: FeatureSearchScope): void {
+        this.featureSearchScope = scope;
+        if (this.session && this.session.definition.scope !== scope) {
+            this.stateService.patchFeatureSearch(this.session.id, {scope});
+        }
+    }
+
     protected featureSearchHeaderActions(): AppSurfaceHeaderAction[] {
         return [
             {
@@ -1184,6 +1305,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.featureSearchExpanded = false;
         this.featureSearchQueryExpanded = false;
         this.featureSearchQuery = "";
+        this.featureSearchScope = "auto";
         this.completionItems = [];
         this.completion.visible = false;
         this.completion.pending = false;

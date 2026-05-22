@@ -4239,6 +4239,30 @@ inspection-tree {
   }
 }
 
+.feature-search-scope-control {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0 0 0.35em 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9em;
+
+  > span {
+    flex: 0 0 auto;
+    font-weight: 600;
+  }
+
+  .p-selectbutton {
+    flex: 0 1 auto;
+  }
+
+  .p-togglebutton-content {
+    padding: 0.25em 0.65em;
+  }
+}
+
 .feature-search-awaiting {
   align-items: center;
   display: flex;
@@ -4386,6 +4410,9 @@ inspection-tree {
   .feature-search-style-filter-row,
   .feature-search-style-visualization-row,
   .feature-search-style-color-mode-row,
+  .feature-search-style-solid-color-row,
+  .feature-search-style-category-actions,
+  .feature-search-style-category-row,
   .feature-search-style-opacity,
   .feature-search-style-gradient-stop-controls {
     display: flex;
@@ -4462,15 +4489,10 @@ inspection-tree {
   .feature-search-style-color-mode-row {
     flex-wrap: wrap;
 
-    .feature-search-style-color-mode {
+    .feature-search-style-color-mode,
+    .feature-search-style-color-field {
       flex: 0 1 9em;
       min-width: 8em;
-    }
-
-    .p-chip {
-      background: color-mix(in srgb, var(--p-green-500) 28%, var(--p-content-background));
-      color: var(--p-green-100);
-      font-weight: 600;
     }
   }
 
@@ -4515,6 +4537,39 @@ inspection-tree {
     flex-wrap: wrap;
     gap: 0.35em;
     max-width: 100%;
+  }
+
+  .feature-search-style-solid-color-row,
+  .feature-search-style-category-actions {
+    flex-wrap: wrap;
+  }
+
+  .feature-search-style-solid-color-row > span {
+    color: var(--p-text-muted-color);
+    font-weight: 600;
+  }
+
+  .feature-search-style-category-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+  }
+
+  .feature-search-style-category-row {
+    flex-wrap: wrap;
+
+    .feature-search-style-category-value {
+      flex: 0 0 auto;
+
+      .p-inputnumber-input {
+        width: 7em;
+        text-align: center;
+      }
+    }
+  }
+
+  .feature-search-style-category-delete {
+    flex: 0 0 auto;
   }
 
   .feature-search-style-actions {
