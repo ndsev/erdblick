@@ -37,7 +37,8 @@ declare let window: DebugWindow;
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
-            <feature-search></feature-search>
+            <inspection-dialogs></inspection-dialogs>
+            <feature-search-dialogs></feature-search-dialogs>
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
             <survey></survey>

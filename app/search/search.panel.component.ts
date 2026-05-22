@@ -49,29 +49,17 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                           placeholder="Search">
                 </textarea>
 
-                @if (completion.visible || completion.pending) {
-                    <div class="completion-popup" (mousedown)="onCompletionPopupDown($event)"
-                         [style.top.px]="completion.top"
-                         [style.left.px]="completion.left" [style.z-index]="completion.zIndex">
-                        @for (item of completionItems; track $index) {
-                            <div [ngClass]="{'selected': $index === completion.selectionIndex}"
-                                 (click)="applyCompletion(item.query)">
-                                <div class="row">
-                                    <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
-                                </div>
-                                @if (item.hint) {
-                                    <div class="row hint">
-                                        {{ item.hint }}
-                                    </div>
-                                }
-                            </div>
-                        }
-                        @if (completion.pending) {
-                            <p-progress-spinner aria-label="Loading completion candidates" 
-                                                [style]="{ height: '1em', width: '1em' }" />
-                        }
-                    </div>
-                }
+                <search-completion-popup
+                    [visible]="completion.visible"
+                    [pending]="completion.pending"
+                    [items]="completionItems"
+                    [selectionIndex]="completion.selectionIndex"
+                    [top]="completion.top"
+                    [left]="completion.left"
+                    [zIndex]="completion.zIndex"
+                    (popupMouseDown)="onCompletionPopupDown($event)"
+                    (candidateSelected)="applyCompletion($event.query)">
+                </search-completion-popup>
             </div>
 
             <div class="resizable-container" #searchcontrols>
@@ -410,9 +398,10 @@ export class SearchPanelComponent implements AfterViewInit {
             // This is to prevent the pop-up showing if the user quickly
             // tabs out of the query input before the first completion
             // items are ready.
+            const textarea = this.textarea?.nativeElement;
             const focusValid =
                 this.completion.visible ||
-                this.textarea.nativeElement === document.activeElement;
+                textarea === document.activeElement;
 
             if (length > 0 && focusValid) {
                 this.refreshCompletionZIndex();

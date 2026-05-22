@@ -5,7 +5,6 @@ import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
-import {KeyboardService} from "../shared/keyboard.service";
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
 
@@ -68,11 +67,8 @@ export class FeaturePanelComponent implements OnDestroy {
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private mapService: MapDataService,
-                private keyboardService: KeyboardService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone) {
-        // TODO: This shortcut is broken, the panels will race with each other.
-        // this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
         effect(() => {
             this.panel();
             this.scheduleInspectionTreeRebuild();
@@ -377,16 +373,6 @@ export class FeaturePanelComponent implements OnDestroy {
         }
 
         return rowData[colKey];
-    }
-
-    /** Moves the camera to the first selected feature represented by this panel. */
-    zoomToFeature() {
-        // Currently only takes the first element for Jump to Feature functionality.
-        // TODO: Allow to use the whole set for Jump to Feature.
-        if (!this.selectedFeatures) {
-            return;
-        }
-        this.mapService.zoomToFeature(undefined, this.selectedFeatures[0]);
     }
 
     /** Opens the delegated GeoJSON actions menu for the current feature selection. */

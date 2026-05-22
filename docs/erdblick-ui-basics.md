@@ -22,7 +22,7 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
 
 - **Mouse**: left drag pans, right drag tilts, scroll zooms.
-- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses search, `Ctrl+J` zooms to the selected feature, and `M` toggles the Maps & Layers panel.
+- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses search, `Ctrl+J` zooms to the focused inspection panel, and `M` toggles the Maps & Layers panel.
 - **Compass widget**: click to reset heading or drag to rotate.
 - **Camera control buttons**: use the arrow and plus/minus buttons near the compass for simple pan/zoom actions.
 - **2D / 3D toggle**: switch between flat Web Mercator-style rendering and the full 3D view.
