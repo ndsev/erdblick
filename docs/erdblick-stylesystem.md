@@ -101,6 +101,7 @@ rules:
 | `lod` | Optional exact feature LOD match (`0..7`). Useful inside `first-of` chains to style coarse and fine features differently. |
 | `selectable` | `true`/`false` flag that decides whether the feature can be selected or will be skipped when the user clicks it. |
 | `first-of` | Array of child rules; erdblick evaluates them top-to-bottom and applies only the first match. Remaining child rules are skipped. |
+| `all-of` | Array of child rules; erdblick evaluates every matching child and renders all matching leaves. `first-of` and `all-of` can be nested, but not used on the same rule node. |
 
 ### Core Visual Properties
 
@@ -113,7 +114,8 @@ rules:
 | `flat` | Clamp geometry to ground, ignoring heights. |
 | `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
 | `depth-test` | Whether the rendered geometry participates in depth testing. Set `false` for overlay-style highlights that should render on top. |
-| `offset` / `vertical-offset` | Base local `[x, y, z]` offset in meters (or a single vertical offset for `z`). |
+| `offset` / `vertical-offset` / `lateral-offset` | Base local `[x, y, z]` offset in meters, or scalar aliases for `z` and local `x`. For line geometry, local `x` is the lateral side-of-line offset. |
+| `offset-type` | Optional offset algorithm name. Only `miter` is currently supported, and it is the default line-offset behavior. |
 | `offset-increment` | Additional local `[x, y, z]` offset step used for stacked rendering. Effective offset is `offset + offset-increment * slot`, where the slot increments per emitted feature for `aspect: feature` rules and per rendered attribute/transition slot for `aspect: attribute` rules. |
 | `icon-url` / `icon-url-expression` | Static path or Simfil expression for billboard icons. |
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
@@ -262,7 +264,7 @@ When you move beyond basic coloring and start visualizing relations or labels, a
 
 ## Performance Considerations
 
-Style filters can significantly affect rendering cost. Wildcards (`*` and `**`) are convenient while exploring data, but they require erdblick to check multiple paths for each feature. On large tiles, broad wildcard filters and long `first-of` chains can become expensive.
+Style filters can significantly affect rendering cost. Wildcards (`*` and `**`) are convenient while exploring data, but they require erdblick to check multiple paths for each feature. On large tiles, broad wildcard filters, long `first-of` chains, and broad `all-of` branches can become expensive. `all-of` intentionally emits multiple concrete renderings for one matched feature.
 
 The road speed heatmap below shows two common pitfalls:
 

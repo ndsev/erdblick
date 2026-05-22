@@ -963,18 +963,18 @@ void FeatureLayerVisualizationBase::run()
         for (auto ruleIndex : candidateRuleIndices) {
             auto const& rule = style_.rules()[ruleIndex];
             if (rule.aspect() == FeatureStyleRule::Feature) {
-                if ((featureGeomMask & rule.geometryTypesMask()) == 0) {
+                if ((featureGeomMask & rule.effectiveGeometryTypesMask()) == 0) {
                     continue;
                 }
             }
-            auto mapLayerStyleRuleId = makeMapLayerStyleRuleId(rule.index());
-            if (auto* matchingSubRule = rule.match(*feature, boundEvalFun)) {
-                if (matchingSubRule->pointMergeGridCellSize()) {
+            rule.forEachMatchingRule(*feature, boundEvalFun, [&](FeatureStyleRule const& matchingRule) {
+                auto const mapLayerStyleRuleId = makeMapLayerStyleRuleId(matchingRule.renderIndex());
+                if (matchingRule.pointMergeGridCellSize()) {
                     boundEvalFun.context_ = ensureEvaluationContext();
                 }
-                addFeature(feature, boundEvalFun, *matchingSubRule, mapLayerStyleRuleId);
+                addFeature(feature, boundEvalFun, matchingRule, mapLayerStyleRuleId);
                 featuresAdded_ = true;
-            }
+            });
         }
     };
 
@@ -1021,7 +1021,7 @@ void FeatureLayerVisualizationBase::addFeature(
             break;
         }
         if (auto geomCollection = feature->geomOrNull()) {
-            auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.index()];
+            auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.renderIndex()];
             auto const effectiveOffset = effectiveOffsetForSlot(rule, currentOffsetSlot);
             bool emittedFeatureGeometry = false;
             auto addFeatureGeometry =
@@ -1044,7 +1044,7 @@ void FeatureLayerVisualizationBase::addFeature(
                 geomCollection->forEachGeometry(addFeatureGeometry);
             }
             if (emittedFeatureGeometry) {
-                ++featureOffsetSlotsByRuleIndex_[rule.index()];
+                ++featureOffsetSlotsByRuleIndex_[rule.renderIndex()];
             }
         }
         break;

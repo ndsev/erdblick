@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <map>
 
 using namespace erdblick;
 
@@ -49,6 +50,41 @@ std::shared_ptr<mapget::LayerInfo> relationTestLayerInfo()
             }
         ]
     })json"));
+}
+
+std::shared_ptr<mapget::LayerInfo> lineTestLayerInfo()
+{
+    return mapget::LayerInfo::fromJson(nlohmann::json::parse(R"json(
+    {
+        "layerId": "LineLayer",
+        "type": "Features",
+        "featureTypes": [
+            {
+                "name": "Way",
+                "uniqueIdCompositions": [[
+                    {"partId": "wayId", "datatype": "U32"}
+                ]]
+            }
+        ]
+    })json"));
+}
+
+std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId)
+{
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        tileId,
+        "LineTestNode",
+        "LineTestMap",
+        lineTestLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+
+    auto const center = tileId.center();
+    auto feature = layer->newFeature("Way", {{"wayId", 1}});
+    feature->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+    return layer;
 }
 
 std::shared_ptr<mapget::TileFeatureLayer> makeRelationTestTile(
@@ -196,6 +232,35 @@ bool hasRenderedPathGeometry(nlohmann::json const& renderResult)
     auto const& pathBillboard = renderResult["pathBillboard"]["positions"];
     return pathBillboard.is_array() && !pathBillboard.empty();
 }
+
+bool reportHasProperty(nlohmann::json const& report, std::string const& property)
+{
+    if (!report.contains("issues") || !report["issues"].is_array()) {
+        return false;
+    }
+    for (auto const& issue : report["issues"]) {
+        if (issue.value("property", std::string()) == property) {
+            return true;
+        }
+    }
+    return false;
+}
+
+BoundEvalFun booleanEvalFun(std::map<std::string, bool> values)
+{
+    return BoundEvalFun{
+        simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::null()),
+        [values = std::move(values)](std::string const& expression) {
+            auto key = expression;
+            if (key.starts_with("any(") && key.ends_with(")")) {
+                key = key.substr(4, key.size() - 5);
+            }
+            auto found = values.find(key);
+            return simfil::Value(found != values.end() && found->second);
+        },
+        {}
+    };
+}
 }
 
 TEST_CASE("DeckFeatureLayerVisualization", "[erdblick.renderer]")
@@ -280,6 +345,205 @@ offset-increment: [4.0, 5.0, 6.0]
     FeatureStyleRule rule(yaml, 0);
     REQUIRE(rule.offset() == glm::dvec3(1.0, 2.0, 3.0));
     REQUIRE(rule.offsetIncrement() == glm::dvec3(4.0, 5.0, 6.0));
+}
+
+TEST_CASE("FeatureStyleRuleAllOfParsing", "[erdblick.style]")
+{
+    auto yaml = YAML::Load(R"(
+type: Way
+geometry: [line]
+all-of:
+  - color: red
+  - dashed: true
+)");
+    FeatureStyleRule rule(yaml, 0);
+    REQUIRE(rule.branchMode() == FeatureStyleRule::BranchMode::AllOf);
+    REQUIRE(rule.subRules().size() == 2);
+    REQUIRE(rule.subRules()[0].supports(mapget::GeomType::Line));
+    REQUIRE(rule.subRules()[1].supports(mapget::GeomType::Line));
+    REQUIRE(rule.effectiveGeometryTypesMask() == rule.geometryTypesMask());
+}
+
+TEST_CASE("FeatureStyleRuleLateralOffsetParsing", "[erdblick.style]")
+{
+    auto yaml = YAML::Load(R"(
+type: Way
+geometry: [line]
+lateral-offset: 2.0
+vertical-offset: 3.0
+)");
+    FeatureStyleRule rule(yaml, 0);
+    REQUIRE(rule.offset() == glm::dvec3(2.0, 0.0, 3.0));
+}
+
+TEST_CASE("FeatureStyleRuleOffsetOverridesLateralOffset", "[erdblick.style]")
+{
+    auto yaml = YAML::Load(R"(
+type: Way
+geometry: [line]
+lateral-offset: 2.0
+offset: [4.0, 5.0, 6.0]
+)");
+    FeatureStyleRule rule(yaml, 0);
+    REQUIRE(rule.offset() == glm::dvec3(4.0, 5.0, 6.0));
+}
+
+TEST_CASE("FeatureStyleRuleAllOfMatching", "[erdblick.style]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto yaml = YAML::Load(R"(
+type: Way
+geometry: [line]
+all-of:
+  - filter: A
+    width: 1
+  - filter: B
+    dashed: true
+)");
+    FeatureStyleRule rule(yaml, 0);
+
+    std::vector<FeatureStyleRule const*> matches;
+    auto evalFun = booleanEvalFun({{"A", true}, {"B", false}});
+    REQUIRE(rule.forEachMatchingRule(*feature, evalFun, [&](auto const& matchingRule) {
+        matches.push_back(&matchingRule);
+    }));
+    REQUIRE(matches.size() == 1);
+    REQUIRE(matches[0]->width() == 1.0f);
+
+    matches.clear();
+    evalFun = booleanEvalFun({{"A", true}, {"B", true}});
+    REQUIRE(rule.forEachMatchingRule(*feature, evalFun, [&](auto const& matchingRule) {
+        matches.push_back(&matchingRule);
+    }));
+    REQUIRE(matches.size() == 2);
+    REQUIRE(matches[1]->isDashed());
+}
+
+TEST_CASE("FeatureStyleRuleNestedBranchesMatchInOrder", "[erdblick.style]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto yaml = YAML::Load(R"(
+type: Way
+geometry: [line]
+first-of:
+  - filter: A
+    all-of:
+      - width: 1
+      - width: 2
+  - filter: B
+    width: 3
+)");
+    FeatureStyleRule rule(yaml, 0);
+    std::vector<float> widths;
+    auto evalFun = booleanEvalFun({{"A", true}, {"B", true}});
+    REQUIRE(rule.forEachMatchingRule(*feature, evalFun, [&](auto const& matchingRule) {
+        widths.push_back(matchingRule.width());
+    }));
+    auto const expectedWidths = std::vector<float>{1.0f, 2.0f};
+    REQUIRE(widths == expectedWidths);
+
+    uint32_t renderIndex = 0;
+    rule.assignRenderRuleIndices(renderIndex);
+    std::vector<uint32_t> renderIndices;
+    rule.forEachConcreteRule([&](auto const& concreteRule) {
+        renderIndices.push_back(concreteRule.renderIndex());
+    });
+    auto const expectedRenderIndices = std::vector<uint32_t>{0, 1, 2};
+    REQUIRE(renderIndices == expectedRenderIndices);
+}
+
+TEST_CASE("FeatureLayerStyleValidatesAllOfAndOffsetAliases", "[erdblick.style]")
+{
+    auto valid = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "AllOfValidation"
+rules:
+  - type: Way
+    geometry: [line]
+    lateral-offset: 1
+    offset-type: miter
+    all-of:
+      - color: red
+)yaml"));
+    REQUIRE(valid.isValid());
+
+    auto badAllOf = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "BadAllOf"
+rules:
+  - type: Way
+    all-of: {}
+)yaml"));
+    REQUIRE_FALSE(badAllOf.isValid());
+    REQUIRE(reportHasProperty(nlohmann::json(badAllOf.validationReport()), "all-of"));
+
+    auto mixedBranches = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "MixedBranches"
+rules:
+  - type: Way
+    first-of:
+      - color: red
+    all-of:
+      - color: blue
+)yaml"));
+    REQUIRE_FALSE(mixedBranches.isValid());
+    REQUIRE(reportHasProperty(nlohmann::json(mixedBranches.validationReport()), "all-of"));
+
+    auto badOffsetType = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "BadOffsetType"
+rules:
+  - type: Way
+    geometry: [line]
+    offset-type: screen
+)yaml"));
+    REQUIRE_FALSE(badOffsetType.isValid());
+    REQUIRE(reportHasProperty(nlohmann::json(badOffsetType.validationReport()), "offset-type"));
+
+    auto badLateralOffset = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "BadLateralOffset"
+rules:
+  - type: Way
+    geometry: [line]
+    lateral-offset: [1]
+)yaml"));
+    REQUIRE_FALSE(badLateralOffset.isValid());
+    REQUIRE(reportHasProperty(nlohmann::json(badLateralOffset.validationReport()), "lateral-offset"));
+}
+
+TEST_CASE("DeckFeatureLayerVisualization renders all-of line leaves", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "AllOfRender"
+rules:
+  - type: Way
+    geometry: [line]
+    all-of:
+      - color: red
+        lateral-offset: 1
+      - color: blue
+        dashed: true
+        dash-length: 7
+        lateral-offset: -1
+        selectable: false
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
+    DeckFeatureLayerVisualization visualization(0, "LineTestMap/LineLayer/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    auto result = nlohmann::json(visualization.renderResult());
+    auto const& pathWorld = result["pathWorld"];
+    REQUIRE(pathWorld["startIndices"].size() == 3);
+    REQUIRE(pathWorld["featureAddresses"].size() == 2);
+    REQUIRE(pathWorld["dashArrays"].size() == 8);
+    REQUIRE(pathWorld["dashArrays"][0].get<float>() == 1.0f);
+    REQUIRE(pathWorld["dashArrays"][4].get<float>() == 7.0f);
 }
 
 TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdblick.renderer]")
