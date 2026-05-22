@@ -48,6 +48,8 @@ interface FeatureSearchStyleFilterMockState {
     attributeField: string;
     operator: string;
     filterValue: number;
+    manualConditionEnabled: boolean;
+    manualCondition: string;
 }
 
 interface FeatureSearchStyleMockState {
@@ -215,133 +217,190 @@ interface FeatureSearchStyleMockState {
                     <!-- Style -->
                     <p-tabpanel value="style">
                         <div class="feature-search-style-rules" data-testid="feature-search-style-rules">
-                            @for (rule of styleRulesMock; track rule.id; let ruleIndex = $index) {
-                                <p-card class="feature-search-style-panel"
-                                        [attr.data-testid]="'feature-search-style-panel-' + rule.id">
-                                    <div class="feature-search-style-rule-header">
-                                        <span>Rule {{ ruleIndex + 1 }}</span>
-                                    </div>
-
-                                    <section class="feature-search-style-section">
-                                        <h3>1. Filter</h3>
-                                        <div class="feature-search-style-condition-list">
-                                            @for (filter of rule.filters; track filter.id) {
-                                                <div class="feature-search-style-filter-row">
-                                                    <p-select class="feature-search-style-attribute"
-                                                              [options]="styleAttributeOptions"
-                                                              [(ngModel)]="filter.attributeField"
-                                                              optionLabel="label"
-                                                              optionValue="value"
-                                                              appendTo="body">
-                                                    </p-select>
-                                                    <p-select class="feature-search-style-operator"
-                                                              [options]="styleOperatorOptions"
-                                                              [(ngModel)]="filter.operator"
-                                                              optionLabel="label"
-                                                              optionValue="value"
-                                                              appendTo="body">
-                                                    </p-select>
-                                                    <p-inputNumber class="feature-search-style-number"
-                                                                   [(ngModel)]="filter.filterValue"
-                                                                   [min]="0"
-                                                                   [max]="300">
-                                                    </p-inputNumber>
-                                                </div>
-                                            }
-                                        </div>
-                                        <p-button icon="pi pi-plus"
-                                                  label="Add condition"
-                                                  severity="secondary"
-                                                  [outlined]="true"
-                                                  (click)="addStyleCondition(rule)">
-                                        </p-button>
-                                    </section>
-
-                                    <section class="feature-search-style-section">
-                                        <h3>2. Visualization</h3>
-                                        <div class="feature-search-style-visualization-row">
-                                            <p-select class="feature-search-style-visualization"
-                                                      [options]="styleVisualizationOptions"
-                                                      [(ngModel)]="rule.visualization"
-                                                      optionLabel="label"
-                                                      optionValue="value"
-                                                      appendTo="body">
-                                            </p-select>
-                                            <label [for]="'feature-search-style-width-' + rule.id">Width</label>
-                                            <p-inputNumber [inputId]="'feature-search-style-width-' + rule.id"
-                                                           class="feature-search-style-number"
-                                                           [(ngModel)]="rule.lineWidth"
-                                                           [min]="1"
-                                                           [max]="32">
-                                            </p-inputNumber>
-                                            <label [for]="'feature-search-style-opacity-' + rule.id">Opacity</label>
-                                            <div class="feature-search-style-opacity">
-                                                <p-inputNumber [inputId]="'feature-search-style-opacity-' + rule.id"
-                                                               class="feature-search-style-number"
-                                                               [(ngModel)]="rule.opacity"
-                                                               [min]="0"
-                                                               [max]="100"
-                                                               suffix=" %">
-                                                </p-inputNumber>
-                                                <p-slider [(ngModel)]="rule.opacity"
-                                                          [min]="0"
-                                                          [max]="100"
-                                                          class="feature-search-style-opacity-slider">
-                                                </p-slider>
-                                            </div>
-                                        </div>
-                                    </section>
-
-                                    <section class="feature-search-style-section">
-                                        <h3>3. Color</h3>
-                                        <div class="feature-search-style-color-mode-row">
-                                            <label [for]="'feature-search-style-color-mode-' + rule.id">Mode</label>
-                                            <p-select [inputId]="'feature-search-style-color-mode-' + rule.id"
-                                                      class="feature-search-style-color-mode"
-                                                      [options]="styleColorModeOptions"
-                                                      [(ngModel)]="rule.colorMode"
-                                                      optionLabel="label"
-                                                      optionValue="value"
-                                                      appendTo="body">
-                                            </p-select>
-                                            <p-chip label="numeric schema field"></p-chip>
-                                        </div>
-
-                                        <div class="feature-search-style-gradient" aria-hidden="true"></div>
-                                        <div class="feature-search-style-gradient-stops">
-                                            @for (stop of rule.colorStops; track stop.label) {
-                                                <div class="feature-search-style-gradient-stop">
-                                                    <span class="feature-search-style-gradient-marker"
-                                                          [style.border-bottom-color]="stop.color"></span>
-                                                    <div class="feature-search-style-gradient-stop-controls">
-                                                        <p-inputNumber class="feature-search-style-stop-number"
-                                                                       [(ngModel)]="stop.value"
-                                                                       [min]="0"
-                                                                       [max]="300">
-                                                        </p-inputNumber>
-                                                        <p-colorpicker [(ngModel)]="stop.color" appendTo="body"></p-colorpicker>
-                                                    </div>
-                                                </div>
-                                            }
-                                        </div>
-                                    </section>
-                                </p-card>
-                            }
-
-                            <div class="feature-search-style-actions">
+                            <div class="feature-search-style-actions feature-search-style-actions-top">
                                 <p-button icon="pi pi-plus"
                                           label="Add Rule"
                                           severity="secondary"
                                           [outlined]="true"
                                           (click)="addStyleRule()">
                                 </p-button>
-                                <p-button icon="pi pi-refresh"
-                                          label="Reset Style"
-                                          severity="secondary"
-                                          [outlined]="true"
-                                          (click)="resetStyleRules()">
-                                </p-button>
                             </div>
+                            <p-accordion class="feature-search-style-accordion"
+                                         [multiple]="true"
+                                         [(value)]="styleRuleAccordionValue">
+                                @for (rule of styleRulesMock; track rule.id; let ruleIndex = $index) {
+                                    <p-accordion-panel class="feature-search-style-panel"
+                                                       [value]="styleRulePanelValue(rule)"
+                                                       [attr.data-testid]="'feature-search-style-panel-' + rule.id">
+                                        <p-accordion-header>
+                                            <div class="feature-search-style-rule-header">
+                                                <span>Rule {{ ruleIndex + 1 }}</span>
+                                                <span class="feature-search-style-rule-actions">
+                                                    <p-button icon="pi pi-refresh"
+                                                              label="Reset Style"
+                                                              severity="secondary"
+                                                              [outlined]="true"
+                                                              (click)="$event.stopPropagation(); resetStyleRule(rule)"
+                                                              (mousedown)="$event.stopPropagation()">
+                                                    </p-button>
+                                                    <p-button icon="pi pi-trash"
+                                                              label="Delete Rule"
+                                                              severity="danger"
+                                                              [outlined]="true"
+                                                              (click)="$event.stopPropagation(); deleteStyleRule(rule)"
+                                                              (mousedown)="$event.stopPropagation()">
+                                                    </p-button>
+                                                </span>
+                                            </div>
+                                        </p-accordion-header>
+                                        <p-accordion-content>
+                                            <section class="feature-search-style-section">
+                                                <h3>1. Filter</h3>
+                                                <div class="feature-search-style-condition-list">
+                                                    @for (filter of rule.filters; track filter.id) {
+                                                        <div class="feature-search-style-filter-row">
+                                                            @if (filter.manualConditionEnabled) {
+                                                                <p-button class="feature-search-style-condition-mode"
+                                                                          label=""
+                                                                          severity="success"
+                                                                          pTooltip="Use structured condition"
+                                                                          tooltipPosition="bottom"
+                                                                          [style]="{'width': '2em', 'height': '2em'}"
+                                                                          (click)="toggleStyleConditionMode(filter)">
+                                                                    <span class="material-symbols-outlined" style="font-size: 1em; margin: 0 auto;">
+                                                                        asterisk
+                                                                    </span>
+                                                                </p-button>
+                                                            } @else {
+                                                                <p-button class="feature-search-style-condition-mode"
+                                                                          label=""
+                                                                          pTooltip="Use rich simfil condition"
+                                                                          tooltipPosition="bottom"
+                                                                          [style]="{'width': '2em', 'height': '2em'}"
+                                                                          (click)="toggleStyleConditionMode(filter)">
+                                                                    <span class="material-symbols-outlined" style="font-size: 1em; margin: 0 auto;">
+                                                                        asterisk
+                                                                    </span>
+                                                                </p-button>
+                                                            }
+                                                            @if (filter.manualConditionEnabled) {
+                                                                <input class="feature-search-style-manual-condition"
+                                                                       type="text"
+                                                                       pInputText
+                                                                       [(ngModel)]="filter.manualCondition"
+                                                                       placeholder="Simfil condition"/>
+                                                            } @else {
+                                                                <p-select class="feature-search-style-attribute"
+                                                                          [options]="styleAttributeOptions"
+                                                                          [(ngModel)]="filter.attributeField"
+                                                                          optionLabel="label"
+                                                                          optionValue="value"
+                                                                          appendTo="body">
+                                                                </p-select>
+                                                                <p-select class="feature-search-style-operator"
+                                                                          [options]="styleOperatorOptions"
+                                                                          [(ngModel)]="filter.operator"
+                                                                          optionLabel="label"
+                                                                          optionValue="value"
+                                                                          appendTo="body">
+                                                                </p-select>
+                                                                <p-inputNumber class="feature-search-style-number"
+                                                                               [(ngModel)]="filter.filterValue"
+                                                                               [min]="0"
+                                                                               [max]="300">
+                                                                </p-inputNumber>
+                                                            }
+                                                            <p-button class="feature-search-style-condition-delete"
+                                                                      icon="pi pi-times"
+                                                                      severity="danger"
+                                                                      [outlined]="true"
+                                                                      pTooltip="Delete condition"
+                                                                      tooltipPosition="bottom"
+                                                                      (click)="deleteStyleCondition(rule, filter)">
+                                                            </p-button>
+                                                        </div>
+                                                    }
+                                                </div>
+                                                <p-button icon="pi pi-plus"
+                                                          label="Add condition"
+                                                          severity="secondary"
+                                                          [outlined]="true"
+                                                          (click)="addStyleCondition(rule)">
+                                                </p-button>
+                                            </section>
+
+                                            <section class="feature-search-style-section">
+                                                <h3>2. Visualization</h3>
+                                                <div class="feature-search-style-visualization-row">
+                                                    <p-select class="feature-search-style-visualization"
+                                                              [options]="styleVisualizationOptions"
+                                                              [(ngModel)]="rule.visualization"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              appendTo="body">
+                                                    </p-select>
+                                                    <label [for]="'feature-search-style-width-' + rule.id">Width</label>
+                                                    <p-inputNumber [inputId]="'feature-search-style-width-' + rule.id"
+                                                                   class="feature-search-style-number"
+                                                                   [(ngModel)]="rule.lineWidth"
+                                                                   [min]="1"
+                                                                   [max]="32">
+                                                    </p-inputNumber>
+                                                    <label [for]="'feature-search-style-opacity-' + rule.id">Opacity</label>
+                                                    <div class="feature-search-style-opacity">
+                                                        <p-inputNumber [inputId]="'feature-search-style-opacity-' + rule.id"
+                                                                       class="feature-search-style-number"
+                                                                       [(ngModel)]="rule.opacity"
+                                                                       [min]="0"
+                                                                       [max]="100"
+                                                                       suffix=" %">
+                                                        </p-inputNumber>
+                                                        <p-slider [(ngModel)]="rule.opacity"
+                                                                  [min]="0"
+                                                                  [max]="100"
+                                                                  class="feature-search-style-opacity-slider">
+                                                        </p-slider>
+                                                    </div>
+                                                </div>
+                                            </section>
+
+                                            <section class="feature-search-style-section">
+                                                <h3>3. Color</h3>
+                                                <div class="feature-search-style-color-mode-row">
+                                                    <label [for]="'feature-search-style-color-mode-' + rule.id">Mode</label>
+                                                    <p-select [inputId]="'feature-search-style-color-mode-' + rule.id"
+                                                              class="feature-search-style-color-mode"
+                                                              [options]="styleColorModeOptions"
+                                                              [(ngModel)]="rule.colorMode"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              appendTo="body">
+                                                    </p-select>
+                                                    <p-chip label="numeric schema field"></p-chip>
+                                                </div>
+
+                                                <div class="feature-search-style-gradient" aria-hidden="true"></div>
+                                                <div class="feature-search-style-gradient-stops">
+                                                    @for (stop of rule.colorStops; track stop.label) {
+                                                        <div class="feature-search-style-gradient-stop">
+                                                            <span class="feature-search-style-gradient-marker"
+                                                                  [style.border-bottom-color]="stop.color"></span>
+                                                            <div class="feature-search-style-gradient-stop-controls">
+                                                                <p-inputNumber class="feature-search-style-stop-number"
+                                                                               [(ngModel)]="stop.value"
+                                                                               [min]="0"
+                                                                               [max]="300">
+                                                                </p-inputNumber>
+                                                                <p-colorpicker [(ngModel)]="stop.color" appendTo="body"></p-colorpicker>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </section>
+                                        </p-accordion-content>
+                                    </p-accordion-panel>
+                                }
+                            </p-accordion>
                         </div>
                     </p-tabpanel>
 
@@ -450,17 +509,19 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     ];
     styleVisualizationOptions: FeatureSearchStyleOption[] = [
         {label: 'Line', value: 'line'},
-        {label: 'Fill', value: 'fill'},
-        {label: 'Point', value: 'point'}
+        {label: 'Mesh', value: 'mesh'},
+        {label: 'Point', value: 'point'},
+        {label: 'Text', value: 'text'}
     ];
     styleColorModeOptions: FeatureSearchStyleOption[] = [
         {label: 'Gradient', value: 'gradient'},
-        {label: 'Steps', value: 'steps'},
+        {label: 'Solid', value: 'solid'},
         {label: 'Categories', value: 'categories'}
     ];
     private nextStyleRuleId = 1;
     private nextStyleConditionId = 1;
     styleRulesMock: FeatureSearchStyleMockState[] = [this.createDefaultStyleRule()];
+    styleRuleAccordionValue: string[] = ['1'];
 
     // Active result panel index
     resultPanelIndex: string = "results";
@@ -537,13 +598,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             id: this.nextStyleConditionId++,
             attributeField: 'speedLimit',
             operator: '>',
-            filterValue: 80
+            filterValue: 80,
+            manualConditionEnabled: false,
+            manualCondition: ''
         };
     }
 
-    private createDefaultStyleRule(): FeatureSearchStyleMockState {
+    private createStyleRule(id: number): FeatureSearchStyleMockState {
         return {
-            id: this.nextStyleRuleId++,
+            id,
             filters: [this.createDefaultStyleFilter()],
             visualization: 'line',
             lineWidth: 10,
@@ -557,18 +620,58 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
+    private createDefaultStyleRule(): FeatureSearchStyleMockState {
+        return this.createStyleRule(this.nextStyleRuleId++);
+    }
+
     protected addStyleRule(): void {
-        this.styleRulesMock = [...this.styleRulesMock, this.createDefaultStyleRule()];
+        const rule = this.createDefaultStyleRule();
+        const panelValue = this.styleRulePanelValue(rule);
+        this.styleRulesMock = [rule, ...this.styleRulesMock];
+        this.styleRuleAccordionValue = [
+            panelValue,
+            ...this.styleRuleAccordionValue.filter(value => value !== panelValue)
+        ];
+    }
+
+    protected deleteStyleRule(rule: FeatureSearchStyleMockState): void {
+        const panelValue = this.styleRulePanelValue(rule);
+        this.styleRulesMock = this.styleRulesMock.filter(candidate => candidate.id !== rule.id);
+        this.styleRuleAccordionValue = this.styleRuleAccordionValue.filter(value => value !== panelValue);
+    }
+
+    protected styleRulePanelValue(rule: FeatureSearchStyleMockState): string {
+        return `${rule.id}`;
     }
 
     protected addStyleCondition(rule: FeatureSearchStyleMockState): void {
         rule.filters = [...rule.filters, this.createDefaultStyleFilter()];
     }
 
+    protected deleteStyleCondition(rule: FeatureSearchStyleMockState, filter: FeatureSearchStyleFilterMockState): void {
+        rule.filters = rule.filters.filter(candidate => candidate.id !== filter.id);
+    }
+
+    protected toggleStyleConditionMode(filter: FeatureSearchStyleFilterMockState): void {
+        filter.manualConditionEnabled = !filter.manualConditionEnabled;
+        if (filter.manualConditionEnabled && !filter.manualCondition.trim()) {
+            filter.manualCondition = `${filter.attributeField} ${filter.operator} ${filter.filterValue}`;
+        }
+    }
+
+    protected resetStyleRule(rule: FeatureSearchStyleMockState): void {
+        const resetRule = this.createStyleRule(rule.id);
+        this.styleRulesMock = this.styleRulesMock.map(candidate =>
+            candidate.id === rule.id ? resetRule : candidate
+        );
+    }
+
     protected resetStyleRules(): void {
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
-        this.styleRulesMock = [this.createDefaultStyleRule()];
+        const rule = this.createDefaultStyleRule();
+        this.styleRulesMock = [rule];
+        this.styleRuleAccordionValue = [this.styleRulePanelValue(rule)];
     }
 
     /** Rebinds this visual wrapper when the owning session id changes. */
