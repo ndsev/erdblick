@@ -13,14 +13,20 @@ export interface FeatureSearchColorStop {
     value: unknown;
 }
 
+export type FeatureSearchGeometryKind = "any" | "point" | "line" | "polygon" | "mesh";
+
+export type FeatureSearchColorMode =
+    | {mode: "solid"; color: string}
+    | {mode: "gradient"; field: string; stops: FeatureSearchColorStop[]; fallbackColor?: string}
+    | {mode: "categories"; field: string; stops: FeatureSearchColorStop[]; fallbackColor?: string};
+
 export interface FeatureSearchStyleRule {
+    geometry: FeatureSearchGeometryKind;
     filter: FeatureSearchRuleFilter[];
-    type: string;
+    color: FeatureSearchColorMode;
     width?: number;
-    dataExpression?: string;
-    solidColor?: string;
-    gradient: FeatureSearchColorStop[];
-    colorMap: FeatureSearchColorStop[];
+    pointRadius?: number;
+    opacity?: number;
 }
 
 export interface FeatureSearchStateEntry {
@@ -44,6 +50,8 @@ const MAX_FEATURE_SEARCHES = 50;
 const MAX_STYLE_RULES_PER_SEARCH = 50;
 const MAX_FILTERS_PER_RULE = 25;
 const MAX_COLOR_STOPS_PER_RULE = 25;
+const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "polygon", "mesh"]);
+const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
 
 function createFeatureSearchId(): string {
     return `feature_search_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -95,6 +103,23 @@ function normalizeString(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function normalizeGeometry(value: unknown): FeatureSearchGeometryKind {
+    if (typeof value !== "string") {
+        return "any";
+    }
+    const normalized = value.trim();
+    if (VALID_GEOMETRIES.has(normalized as FeatureSearchGeometryKind)) {
+        return normalized as FeatureSearchGeometryKind;
+    }
+    if (normalized === "anyGeom") {
+        return "any";
+    }
+    if (normalized === "text") {
+        return "point";
+    }
+    return "any";
+}
+
 function normalizeRuleFilters(value: unknown): FeatureSearchRuleFilter[] {
     if (!Array.isArray(value)) {
         return [];
@@ -137,23 +162,68 @@ function normalizeColorStops(value: unknown): FeatureSearchColorStop[] {
     });
 }
 
+function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchColorMode {
+    const nested = raw["color"];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        const color = nested as Record<string, unknown>;
+        const mode = normalizeString(color["mode"]) ?? "solid";
+        if (mode === "solid") {
+            return {
+                mode: "solid",
+                color: normalizeHexColor(color["color"], DEFAULT_PIN_COLOR)
+            };
+        }
+        if (mode === "gradient" || mode === "categories") {
+            return {
+                mode,
+                field: normalizeString(color["field"]) ?? "",
+                stops: normalizeColorStops(color["stops"]),
+                ...(normalizeString(color["fallbackColor"])
+                    ? {fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR)}
+                    : {})
+            };
+        }
+        if (!VALID_COLOR_MODES.has(mode)) {
+            return {mode: "solid", color: DEFAULT_PIN_COLOR};
+        }
+    }
+
+    const legacyExpression = normalizeString(raw["dataExpression"]) ?? "";
+    const legacySolidColor = normalizeString(raw["solidColor"]);
+    if (legacySolidColor) {
+        return {mode: "solid", color: normalizeHexColor(legacySolidColor)};
+    }
+    const legacyGradient = normalizeColorStops(raw["gradient"]);
+    if (legacyGradient.length) {
+        return {mode: "gradient", field: legacyExpression, stops: legacyGradient};
+    }
+    const legacyColorMap = normalizeColorStops(raw["colorMap"]);
+    if (legacyColorMap.length) {
+        return {mode: "categories", field: legacyExpression, stops: legacyColorMap};
+    }
+    return {mode: "solid", color: DEFAULT_PIN_COLOR};
+}
+
+function normalizePositiveNumber(value: unknown, min = 0): number | undefined {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue >= min ? numberValue : undefined;
+}
+
 function normalizeStyleRule(value: unknown): FeatureSearchStyleRule | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return null;
     }
     const raw = value as Record<string, unknown>;
-    const type = normalizeString(raw["type"]) ?? "anyGeom";
-    const width = Number(raw["width"]);
-    const dataExpression = normalizeString(raw["dataExpression"]);
-    const solidColor = normalizeString(raw["solidColor"]);
+    const width = normalizePositiveNumber(raw["width"]);
+    const pointRadius = normalizePositiveNumber(raw["pointRadius"]);
+    const opacity = normalizePositiveNumber(raw["opacity"]);
     return {
+        geometry: normalizeGeometry(raw["geometry"] ?? raw["type"]),
         filter: normalizeRuleFilters(raw["filter"]),
-        type,
-        ...(Number.isFinite(width) && width >= 0 ? {width} : {}),
-        ...(dataExpression ? {dataExpression} : {}),
-        ...(solidColor ? {solidColor} : {}),
-        gradient: normalizeColorStops(raw["gradient"]),
-        colorMap: normalizeColorStops(raw["colorMap"])
+        color: normalizeSearchColorMode(raw),
+        ...(width !== undefined ? {width} : {}),
+        ...(pointRadius !== undefined ? {pointRadius} : {}),
+        ...(opacity !== undefined ? {opacity: Math.min(opacity, 1)} : {})
     };
 }
 

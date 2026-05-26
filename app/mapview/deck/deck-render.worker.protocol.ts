@@ -36,6 +36,19 @@ export interface DeckTileRenderTask {
     mergeCountSnapshot: Record<string, number>;
 }
 
+/** Inbound worker task for one streamed server-side search-result tile. */
+export interface DeckSearchTileRenderTask {
+    type: "DeckSearchTileRenderTask";
+    taskId: string;
+    viewIndex: number;
+    tileKey: string;
+    searchResultLayerBlob: Uint8Array;
+    fieldDictBlob: Uint8Array;
+    nodeId: string;
+    mapName: string;
+    styleSpecJson: string;
+}
+
 /** Supplies datasource metadata to a render worker once per map before tile tasks reference it. */
 export interface DeckWorkerDataSourceInfoMessage {
     type: "DeckWorkerDataSourceInfo";
@@ -145,6 +158,7 @@ export interface DeckVisualizationBufferResult extends DeckGeometryBucketBuffers
     coordinateOrigin: Float64Array;
     lowFiBundles: DeckLowFiBundleBuffers[];
     mergedPointFeatures: Record<string, any[]>;
+    resultFeatureIds?: string[];
     styleIssues?: StyleValidationIssue[];
 }
 
@@ -167,6 +181,7 @@ export interface DeckTileRenderResult extends DeckVisualizationBufferResult {
 /** All messages accepted by the worker. */
 export type DeckWorkerInboundMessage =
     DeckTileRenderTask |
+    DeckSearchTileRenderTask |
     DeckWorkerDataSourceInfoMessage |
     DeckWorkerInitMessage;
 /** All messages emitted by the worker. */

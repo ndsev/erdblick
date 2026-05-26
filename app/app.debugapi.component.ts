@@ -105,17 +105,6 @@ export class ErdblickDebugApi {
         return coreLib;
     }
 
-    /** Run some simfil query to reproduce problems with search. */
-    runSimfilQuery(query: string = "**.transition") {
-        for (const [_, tile] of this.mapService.loadedTileLayers) {
-            tile.peek(parsedTile => {
-                let search = new coreLib.FeatureLayerSearch(parsedTile);
-                const matchingFeatures = search.filter(query);
-                search.delete();
-            })
-        }
-    }
-
     mapTileKey(mapId: string, layerId: string, tileId: string | number | bigint): string {
         const numericTileId = typeof tileId === "bigint" ? tileId : BigInt(tileId);
         return coreLib.getTileFeatureLayerKey(mapId, layerId, numericTileId) as string;

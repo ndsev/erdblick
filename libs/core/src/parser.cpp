@@ -1,13 +1,281 @@
+#include <algorithm>
+#include <cctype>
 #include <iostream>
+#include <map>
 #include <regex>
+#include <set>
+#include <span>
 #include <sstream>
+#include <unordered_set>
 #include "mapget/model/stringpool.h"
+#include "mapget/model/schemaregistry.h"
+#include "mapget/model/simfilutil.h"
+#include "simfil/model/model.h"
+#include "simfil/simfil.h"
 #include "parser.h"
 
 using namespace mapget;
 
 namespace erdblick
 {
+
+namespace {
+
+constexpr int kSchemaCompletionDepth = 6;
+
+std::string completionTypeToString(simfil::CompletionCandidate::Type type)
+{
+    switch (type) {
+    case simfil::CompletionCandidate::Type::CONSTANT:
+        return "Constant";
+    case simfil::CompletionCandidate::Type::FIELD:
+        return "Field";
+    case simfil::CompletionCandidate::Type::FUNCTION:
+        return "Function";
+    case simfil::CompletionCandidate::Type::HINT:
+        return "Hint";
+    }
+    return "";
+}
+
+simfil::ModelNode::Ptr makeSchemaCompletionNode(
+    std::shared_ptr<simfil::ModelPool> const& model,
+    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    simfil::SchemaId schemaId,
+    int depth)
+{
+    if (!registry || schemaId == simfil::NoSchemaId) {
+        return model->newValue(std::string_view{});
+    }
+
+    switch (registry->kind(schemaId)) {
+    case simfil::Schema::Kind::Object: {
+        auto object = model->newObject();
+        (void)object->setSchema(schemaId);
+        if (depth > 0) {
+            for (auto const& fieldName : registry->directFields(schemaId)) {
+                auto childSchema = registry->childSchema(schemaId, fieldName);
+                auto child = makeSchemaCompletionNode(model, registry, childSchema, depth - 1);
+                (void)object->addField(fieldName, child);
+            }
+        }
+        return object;
+    }
+    case simfil::Schema::Kind::Array: {
+        auto array = model->newArray();
+        (void)array->setSchema(schemaId);
+        return array;
+    }
+    case simfil::Schema::Kind::Value:
+        return model->newValue(std::string_view{});
+    }
+
+    return model->newValue(std::string_view{});
+}
+
+void addAttributeOverlayFields(
+    simfil::model_ptr<simfil::Object>& attributeRoot,
+    std::shared_ptr<simfil::ModelPool> const& model,
+    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::string const& featureType)
+{
+    (void)attributeRoot->addField("$name", std::string_view{});
+    (void)attributeRoot->addField("$layer", std::string_view{});
+    (void)attributeRoot->addField("$validityIndex", int64_t{0});
+    (void)attributeRoot->addField("$validityCount", int64_t{1});
+
+    auto featureSchema = registry ? registry->featureSchema(featureType) : simfil::NoSchemaId;
+    if (featureSchema != simfil::NoSchemaId) {
+        auto featureRoot = makeSchemaCompletionNode(model, registry, featureSchema, kSchemaCompletionDepth);
+        (void)attributeRoot->addField("$feature", featureRoot);
+    }
+}
+
+void addCompletionCandidates(
+    std::set<simfil::CompletionCandidate>& merged,
+    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<simfil::StringPool> const& strings,
+    std::string const& query,
+    int point,
+    simfil::ModelNode const& root,
+    simfil::CompletionOptions const& options)
+{
+    auto env = mapget::makeEnvironment(strings);
+    mapget::installCompletionSchemaRegistry(*env, registry, strings);
+
+    auto result = simfil::complete(*env, query, point, root, options);
+    if (!result) {
+        return;
+    }
+    merged.insert(result->begin(), result->end());
+}
+
+NativeJsValue completionCandidatesToJs(
+    std::string const& query,
+    std::set<simfil::CompletionCandidate> const& candidates,
+    size_t limit)
+{
+    auto result = JsValue::List();
+    size_t count = 0;
+    for (auto const& item : candidates) {
+        if (limit && count >= limit) {
+            break;
+        }
+        auto insertText = item.text;
+        if (item.type == simfil::CompletionCandidate::Type::FUNCTION) {
+            insertText += "(";
+        }
+
+        auto completedQuery = query;
+        completedQuery.replace(item.location.offset, item.location.size, insertText);
+
+        result.push(JsValue::Dict({
+            {"text", JsValue(item.text)},
+            {"range", JsValue::List({
+                JsValue(static_cast<int>(item.location.offset)),
+                JsValue(static_cast<int>(item.location.size)),
+            })},
+            {"query", JsValue(completedQuery)},
+            {"type", JsValue(completionTypeToString(item.type))},
+            {"hint", item.hint.empty() ? JsValue::Undefined() : JsValue(item.hint)},
+        }));
+        ++count;
+    }
+    return *result;
+}
+
+bool hasFeatureModelSchema(mapget::LayerInfo const& layerInfo)
+{
+    return !layerInfo.featureModelSchema_.is_null();
+}
+
+struct ScopeFields
+{
+    std::set<std::string, std::less<>> featureDirectFields;
+    std::set<std::string, std::less<>> attributeDirectFields;
+    bool hasSchema = false;
+};
+
+void addFields(std::set<std::string, std::less<>>& target, std::span<const std::string> fields)
+{
+    for (auto const& field : fields) {
+        target.insert(field);
+    }
+}
+
+ScopeFields collectScopeFields(std::map<std::string, mapget::DataSourceInfo> const& infos)
+{
+    ScopeFields fields;
+    fields.attributeDirectFields.insert("$name");
+    fields.attributeDirectFields.insert("$feature");
+    fields.attributeDirectFields.insert("$layer");
+    fields.attributeDirectFields.insert("$validityIndex");
+    fields.attributeDirectFields.insert("$validityCount");
+
+    for (auto const& [_, dataSource] : infos) {
+        for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
+                continue;
+            }
+            auto registry = layerInfo->schemaRegistry();
+            if (!registry) {
+                continue;
+            }
+            fields.hasSchema = true;
+            for (auto const& featureType : layerInfo->featureTypes_) {
+                auto featureSchema = registry->featureSchema(featureType.name_);
+                addFields(fields.featureDirectFields, registry->directFields(featureSchema));
+
+                auto layerMapSchema = registry->attributeLayerMapSchema(featureType.name_);
+                for (auto const& layerName : registry->directFields(layerMapSchema)) {
+                    auto layerSchema = registry->childSchema(
+                        layerMapSchema,
+                        layerName,
+                        simfil::Schema::Kind::Object);
+                    for (auto const& attributeName : registry->directFields(layerSchema)) {
+                        auto attributeSchema = registry->childSchema(
+                            layerSchema,
+                            attributeName,
+                            simfil::Schema::Kind::Object);
+                        addFields(fields.attributeDirectFields, registry->directFields(attributeSchema));
+                    }
+                }
+            }
+        }
+    }
+    return fields;
+}
+
+std::vector<std::string> topLevelIdentifiers(std::string const& query)
+{
+    std::vector<std::string> identifiers;
+    bool inString = false;
+    char quote = '\0';
+    bool escaped = false;
+    for (size_t i = 0; i < query.size();) {
+        auto const c = query[i];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == quote) {
+                inString = false;
+            }
+            ++i;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            inString = true;
+            quote = c;
+            ++i;
+            continue;
+        }
+        auto const isStart = std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$';
+        if (!isStart) {
+            ++i;
+            continue;
+        }
+        auto const start = i;
+        ++i;
+        while (i < query.size()) {
+            auto const next = query[i];
+            if (!std::isalnum(static_cast<unsigned char>(next)) && next != '_' && next != '$') {
+                break;
+            }
+            ++i;
+        }
+        if (start > 0 && query[start - 1] == '.') {
+            continue;
+        }
+        auto j = i;
+        while (j < query.size() && std::isspace(static_cast<unsigned char>(query[j]))) {
+            ++j;
+        }
+        if (j < query.size() && query[j] == '(') {
+            continue;
+        }
+        identifiers.push_back(query.substr(start, i - start));
+    }
+    return identifiers;
+}
+
+bool isIgnoredIdentifier(std::string const& identifier)
+{
+    static const std::set<std::string, std::less<>> ignored = {
+        "true",
+        "false",
+        "null",
+        "and",
+        "or",
+        "not",
+        "any",
+        "all",
+    };
+    return ignored.contains(identifier);
+}
+
+} // namespace
 
 TileLayerParser::TileLayerParser()
 {
@@ -108,6 +376,18 @@ TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& b
 TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
 {
     auto result = TileSourceDataLayer(std::make_shared<mapget::TileSourceDataLayer>(
+        buffer.bytes(),
+        [this](auto&& mapId, auto&& layerId)
+        {
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
+        },
+        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); }));
+    return result;
+}
+
+TileSearchResultLayer TileLayerParser::readTileSearchResultLayer(SharedUint8Array const& buffer)
+{
+    auto result = TileSearchResultLayer(std::make_shared<mapget::TileSearchResultLayer>(
         buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
@@ -276,6 +556,128 @@ void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
     auto nodeId = mapget::StringPool::readDataSourceNodeId(buffer.bytes(), 0, &bytesRead);
     auto fieldDict = cachedStrings_->getStringPool(nodeId);
     (void) fieldDict->read(buffer.bytes(), bytesRead);
+}
+
+NativeJsValue TileLayerParser::completeSearchQuery(
+    std::string const& query,
+    int point,
+    NativeJsValue const& options_)
+{
+    JsValue options(options_);
+    point = std::max<int>(0, std::min<int>(point, query.size()));
+
+    simfil::CompletionOptions opts;
+    opts.limit = 15;
+    if (options.has("limit")) {
+        opts.limit = std::max<int>(0, options["limit"].as<int>());
+    }
+    if (options.has("timeoutMs")) {
+        opts.timeoutMs = std::max<int>(0, options["timeoutMs"].as<int>());
+    }
+
+    std::string scope;
+    if (options.has("scope")) {
+        scope = options["scope"].as<std::string>();
+    }
+    auto const includeFeatureScope = scope != "attribute";
+    auto const includeAttributeScope = scope != "feature";
+
+    std::set<simfil::CompletionCandidate> mergedCandidates;
+    for (auto const& [_, dataSource] : info_) {
+        for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
+                continue;
+            }
+            std::shared_ptr<mapget::SchemaRegistry const> registry = layerInfo->schemaRegistry();
+            if (!registry) {
+                continue;
+            }
+
+            for (auto const& featureType : layerInfo->featureTypes_) {
+                auto const featureSchema = registry->featureSchema(featureType.name_);
+                if (includeFeatureScope && featureSchema != simfil::NoSchemaId) {
+                    auto strings = std::make_shared<mapget::StringPool>("SearchCompletion");
+                    auto model = std::make_shared<simfil::ModelPool>(strings);
+                    auto root = makeSchemaCompletionNode(model, registry, featureSchema, kSchemaCompletionDepth);
+                    addCompletionCandidates(mergedCandidates, registry, strings, query, point, *root, opts);
+                }
+
+                if (!includeAttributeScope) {
+                    continue;
+                }
+
+                auto const layerMapSchema = registry->attributeLayerMapSchema(featureType.name_);
+                if (layerMapSchema == simfil::NoSchemaId) {
+                    continue;
+                }
+                for (auto const& layerName : registry->directFields(layerMapSchema)) {
+                    auto const layerSchema = registry->childSchema(
+                        layerMapSchema,
+                        layerName,
+                        simfil::Schema::Kind::Object);
+                    if (layerSchema == simfil::NoSchemaId) {
+                        continue;
+                    }
+                    for (auto const& attributeName : registry->directFields(layerSchema)) {
+                        auto const attributeSchema = registry->childSchema(
+                            layerSchema,
+                            attributeName,
+                            simfil::Schema::Kind::Object);
+                        if (attributeSchema == simfil::NoSchemaId) {
+                            continue;
+                        }
+
+                        auto strings = std::make_shared<mapget::StringPool>("SearchCompletion");
+                        auto model = std::make_shared<simfil::ModelPool>(strings);
+                        auto attributeRoot = model->newObject();
+                        (void)attributeRoot->setSchema(attributeSchema);
+                        for (auto const& fieldName : registry->directFields(attributeSchema)) {
+                            auto childSchema = registry->childSchema(attributeSchema, fieldName);
+                            auto child = makeSchemaCompletionNode(model, registry, childSchema, kSchemaCompletionDepth - 1);
+                            (void)attributeRoot->addField(fieldName, child);
+                        }
+                        addAttributeOverlayFields(attributeRoot, model, registry, featureType.name_);
+                        addCompletionCandidates(mergedCandidates, registry, strings, query, point, *attributeRoot, opts);
+                    }
+                }
+            }
+        }
+    }
+
+    return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+}
+
+bool TileLayerParser::isAttributeScopeSearchQuery(std::string const& query) const
+{
+    auto const fields = collectScopeFields(info_);
+    if (!fields.hasSchema) {
+        return false;
+    }
+
+    auto const identifiers = topLevelIdentifiers(query);
+    bool sawAttributeOnlyIdentifier = false;
+    for (auto const& identifier : identifiers) {
+        auto normalizedIdentifier = identifier;
+        std::ranges::transform(normalizedIdentifier, normalizedIdentifier.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (isIgnoredIdentifier(normalizedIdentifier)) {
+            continue;
+        }
+
+        auto const inFeatureScope = fields.featureDirectFields.contains(identifier);
+        auto const inAttributeScope = fields.attributeDirectFields.contains(identifier);
+        if (inAttributeScope && !inFeatureScope) {
+            sawAttributeOnlyIdentifier = true;
+            continue;
+        }
+
+        // Unknown or ambiguous fields remain feature-scope. Auto mode should not
+        // accidentally switch an ordinary feature query into attribute evaluation.
+        return false;
+    }
+
+    return sawAttributeOnlyIdentifier;
 }
 
 JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const

@@ -36,7 +36,6 @@ const char *__asan_default_options() {
 #include "testdataprovider.h"
 #include "inspection.h"
 #include "geometry.h"
-#include "search.h"
 #include "layer.h"
 #include "simfil/exception-handler.h"
 #include "simfil/simfil.h"
@@ -711,6 +710,21 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("featureByAddress", &TileFeatureLayer::featureByAddress)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
+    ////////// TileSearchResultLayer
+    em::class_<TileSearchResultLayer>("TileSearchResultLayer")
+        .function("id", &TileSearchResultLayer::id)
+        .function("nodeId", &TileSearchResultLayer::nodeId)
+        .function("mapId", &TileSearchResultLayer::mapId)
+        .function("layerId", &TileSearchResultLayer::layerId)
+        .function("tileId", &TileSearchResultLayer::tileId)
+        .function("stage", &TileSearchResultLayer::stage)
+        .function("numResults", &TileSearchResultLayer::numResults)
+        .function("resultFields", &TileSearchResultLayer::resultFields)
+        .function("info", &TileSearchResultLayer::info)
+        .function("resultEntries", &TileSearchResultLayer::resultEntries)
+        .function("toJson", &TileSearchResultLayer::toJson)
+        .function("copyDiagnostics", &TileSearchResultLayer::copyDiagnostics);
+
     ////////// Highlight Modes
     em::enum_<FeatureStyleRule::HighlightMode>("HighlightMode")
         .value("NO_HIGHLIGHT", FeatureStyleRule::NoHighlight)
@@ -759,11 +773,20 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "processResolvedExternalReferences",
             &DeckFeatureLayerVisualization::processResolvedExternalReferences);
 
-    ////////// FeatureLayerSearch
-    em::class_<FeatureLayerSearch>("FeatureLayerSearch")
-        .constructor<TileFeatureLayer&>()
-        .function("filter", &FeatureLayerSearch::filter)
-        .function("complete", &FeatureLayerSearch::complete);
+    ////////// DeckTileSearchResultLayerVisualization
+    em::class_<DeckTileSearchResultLayerVisualization>("DeckTileSearchResultLayerVisualization")
+        .constructor<int, std::string, std::string>()
+        .function(
+            "addTileSearchResultLayer",
+            std::function<void(DeckTileSearchResultLayerVisualization&, TileSearchResultLayer const&)>(
+                [](DeckTileSearchResultLayerVisualization& self, TileSearchResultLayer const& tile)
+                {
+                    self.addTileSearchResultLayer(tile);
+                }))
+        .function("run", &DeckTileSearchResultLayerVisualization::run)
+        .function("abiVersion", &DeckTileSearchResultLayerVisualization::abiVersion)
+        .function("renderResult", &DeckTileSearchResultLayerVisualization::renderResult)
+        .function("vertexCount", &DeckTileSearchResultLayerVisualization::vertexCount);
 
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
@@ -789,7 +812,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
         .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
+        .function("readTileSearchResultLayer", &TileLayerParser::readTileSearchResultLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
+        .function("completeSearchQuery", &TileLayerParser::completeSearchQuery)
+        .function("isAttributeScopeSearchQuery", &TileLayerParser::isAttributeScopeSearchQuery)
         .function(
             "filterFeatureJumpTargets",
             std::function<

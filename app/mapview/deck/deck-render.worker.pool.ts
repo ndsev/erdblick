@@ -1,6 +1,7 @@
 import {
     DeckGeometryOutputMode,
     DeckLowFiBundleBuffers,
+    DeckSearchTileRenderTask,
     DeckTileRenderBuffers,
     DeckTileRenderResult,
     DeckTileRenderTask,
@@ -35,6 +36,18 @@ export interface DeckTileRenderRequest {
     mergeCountSnapshot: Record<string, number>;
 }
 
+/** Main-thread request payload for rendering one streamed search-result tile. */
+export interface DeckSearchTileRenderRequest {
+    viewIndex: number;
+    tileKey: string;
+    searchResultLayerBlob: Uint8Array;
+    fieldDictBlob: Uint8Array;
+    dataSourceInfoBlob: Uint8Array;
+    nodeId: string;
+    mapName: string;
+    styleSpecJson: string;
+}
+
 /** Runtime settings that decide whether worker rendering is used and how many workers are spawned. */
 export interface DeckRenderWorkerSettings {
     threadedRenderingEnabled: boolean;
@@ -43,7 +56,7 @@ export interface DeckRenderWorkerSettings {
 
 /** Promise bookkeeping kept until one worker finishes rendering a specific tile task. */
 type PendingTask = {
-    task: DeckTileRenderTask;
+    task: DeckTileRenderTask | DeckSearchTileRenderTask;
     resolve: (value: DeckTileRenderBuffers) => void;
     reject: (reason?: unknown) => void;
 };
@@ -78,6 +91,25 @@ export class DeckRenderWorkerPool {
             this.sendDataSourceInfoIfNeeded(workerIndex, request.mapName, dataSourceInfoBlob);
             const task: DeckTileRenderTask = {
                 type: "DeckTileRenderTask",
+                taskId: this.makeTaskId(),
+                ...taskRequest
+            };
+            const pendingTask: PendingTask = {task, resolve, reject};
+            this.inFlightByTaskId.set(task.taskId, pendingTask);
+            this.runningTaskIdByWorker[workerIndex] = task.taskId;
+            this.workers[workerIndex]!.postMessage(task);
+        });
+    }
+
+    /** Queues one search-result tile render request onto the next free worker. */
+    async renderSearchTile(request: DeckSearchTileRenderRequest): Promise<DeckTileRenderBuffers> {
+        await this.ensureInitialized();
+        const workerIndex = await this.acquireWorkerSlot();
+        return await new Promise<DeckTileRenderBuffers>((resolve, reject) => {
+            const {dataSourceInfoBlob, ...taskRequest} = request;
+            this.sendDataSourceInfoIfNeeded(workerIndex, request.mapName, dataSourceInfoBlob);
+            const task: DeckSearchTileRenderTask = {
+                type: "DeckSearchTileRenderTask",
                 taskId: this.makeTaskId(),
                 ...taskRequest
             };
@@ -238,6 +270,7 @@ export class DeckRenderWorkerPool {
                 gltfPickProxies: bundle.gltfPickProxies
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
+            resultFeatureIds: result.resultFeatureIds ?? [],
             styleIssues: result.styleIssues ?? [],
             workerTimings: result.timings
         });

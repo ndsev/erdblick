@@ -5,11 +5,11 @@ import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounceTime, distinctUntilChanged, map, of, skip, startWith, Subject, switchMap, timer} from "rxjs";
+import {debounceTime, distinctUntilChanged, skip, Subject} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
-import {CompletionCandidate} from "./search.worker";
+import {CompletionCandidate} from "./search.model";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
@@ -51,7 +51,7 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
 
                 <search-completion-popup
                     [visible]="completion.visible"
-                    [pending]="completion.pending"
+                    [pending]="false"
                     [items]="completionItems"
                     [selectionIndex]="completion.selectionIndex"
                     [top]="completion.top"
@@ -158,10 +158,6 @@ export class SearchPanelComponent implements AfterViewInit {
         selectionIndex: 0,
         // True if the popup is visible
         visible: false,
-        // True if we are waiting for candidates
-        pending: false,
-        // Delay in ms to show the spinner
-        pendingDelay: 600,
         // Delay for requesting completion candidates
         completionDelay: 150,
         // Keep completion above Search Actions dialog without using a hardcoded global z-index.
@@ -373,14 +369,6 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.reloadSearchHistory();
-
-        this.searchService.completionPending.pipe(
-            switchMap(pending => pending ? timer(this.completion.pendingDelay).pipe(map(() => true)) : of(false)),
-            startWith(false),
-            distinctUntilChanged()
-        ).subscribe((pending: boolean) => {
-            this.completion.pending = pending;
-        })
 
         this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
             this.completionItems = value.filter((item, index, array) => {
@@ -1052,7 +1040,7 @@ export class SearchPanelComponent implements AfterViewInit {
             }
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            if (this.completion.visible || this.completion.pending) {
+            if (this.completion.visible) {
                 this.resetCompletion();
                 return;
             } else if (this.searchInputValue) {
@@ -1239,7 +1227,5 @@ export class SearchPanelComponent implements AfterViewInit {
         this.completion.selectionIndex = 0;
         this.completionItems = [];
         this.completion.visible = false;
-        this.searchService.completionPending.next(false);
-        this.searchService.completionCandidates.next([]);
     }
 }

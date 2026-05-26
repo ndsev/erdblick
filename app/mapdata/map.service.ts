@@ -2,10 +2,15 @@ import {Injectable, NgZone} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {MapTileRequestStatus, MapTileStreamClient} from "./tilestream";
 import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from "./features.model";
-import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
+import type {
+    MapTileStreamSearchStatusPayload,
+    MapTileStreamStatusPayload,
+    MapTileStreamTransportCompressionStats
+} from "./tilestream";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
+import {DeckTileSearchVisualization} from "../mapview/deck/deck-tile-search.visualization.model";
 import {
     configureDeckRenderWorkerSettings,
     getDeckRenderWorkerConcurrency,
@@ -32,6 +37,8 @@ import {ViewVisualizationState} from "../mapview/view.visualization.model";
 import {Cartesian3} from "../integrations/geo";
 import {deepEquals} from "../shared/app-state";
 import {IRenderSceneHandle, ITileVisualization, RenderRectangle} from "../mapview/render-view.model";
+import type {FeatureSearchScope} from "../shared/feature-search-state";
+import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
 
 interface SelectionTileRequest {
     remoteRequest: {
@@ -96,6 +103,104 @@ interface Wgs84Point {
     z?: number;
 }
 
+export interface FeatureSearchDataPlaneRequest {
+    searchId: string;
+    query: string;
+    scope: FeatureSearchScope;
+    autoUpdate: boolean;
+    updateSerial: number;
+    generationSerial: number;
+    paused: boolean;
+    showResultsOnMap: boolean;
+    pinColor: string;
+    searchStyleRules: FeatureSearchStyleRule[];
+    withFields: string[];
+}
+
+export interface SearchResultTileEntry {
+    mapTileKey: string;
+    featureId: string;
+    resultIndex: number;
+    position: {
+        cartesian: {x: number, y: number, z: number};
+        cartographic: {x: number, y: number, z: number} | null;
+        cartographicRad?: {longitude: number, latitude: number, height: number} | null;
+    };
+    values?: unknown[];
+    attributeIndex?: number;
+    validityIndex?: number;
+    validityCount?: number;
+}
+
+export interface SearchResultTilePayload {
+    searchId: string;
+    refresh: number;
+    mapId: string;
+    layerId: string;
+    tileId: bigint;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
+    resultCount: number;
+    resultFields: string[];
+    traces: Record<string, unknown> | null;
+    diagnostics: Uint8Array | null;
+    entries: SearchResultTileEntry[];
+}
+
+export interface SearchResultTileEvictedPayload {
+    searchId: string;
+    sourceTileKey: string;
+}
+
+interface SearchLayerTileSet {
+    mapId: string;
+    layerId: string;
+    tileIds: Set<number>;
+    priorityTileIds: Set<number>;
+}
+
+interface FeatureSearchTileState {
+    mapId: string;
+    layerId: string;
+    tileId: number;
+    sourceTileKey: string;
+    refresh: number;
+    priority: boolean;
+    requested: boolean;
+    completed: boolean;
+}
+
+interface FeatureSearchTileRequest {
+    mapId: string;
+    layerId: string;
+    tileIds: number[];
+    priorityTileIds?: number[];
+    searchId: string;
+    refresh: number;
+    searchQuery: string;
+    searchScope: "feature" | "attribute";
+    withFields?: string[];
+}
+
+interface SearchResultRenderTile {
+    searchId: string;
+    refresh: number;
+    sourceTileKey: string;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
+    layerBlob: Uint8Array;
+    tile: FeatureTile;
+}
+
+interface SearchResultStyleSpec {
+    fallbackColor: string;
+    fallbackWidth: number;
+    fallbackPointRadius: number;
+    rules: FeatureSearchStyleRule[];
+}
+
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:
@@ -110,6 +215,7 @@ interface Wgs84Point {
 @Injectable({providedIn: 'root'})
 export class MapDataService {
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
+    private static readonly SEARCH_RESULT_STYLE_PREFIX = "__search_result__:";
 
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
@@ -136,6 +242,16 @@ export class MapDataService {
     private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
     private observedLayerStageCountByKey: Map<string, number> = new Map();
     private dataSourceInfoJson: string | null = null;
+    private activeFeatureSearchRequests: Map<string, FeatureSearchDataPlaneRequest> = new Map();
+    private pendingFeatureSearchCancellations: Map<string, FeatureSearchDataPlaneRequest> = new Map();
+    private pendingFeatureSearchCancellationLayerKeysById: Map<string, Set<string>> = new Map();
+    private lastFeatureSearchRequestSignature = "";
+    private featureSearchRefreshById: Map<string, number> = new Map();
+    private featureSearchFingerprintById: Map<string, string> = new Map();
+    private lastFeatureSearchUpdateSerialById: Map<string, number> = new Map();
+    private featureSearchTileStatesById: Map<string, Map<string, FeatureSearchTileState>> = new Map();
+    private searchResultRenderTilesByKey: Map<string, SearchResultRenderTile> = new Map();
+    private searchResultMaxRefreshById: Map<string, number> = new Map();
     private selectionConversionRevision = 0;
     private hoverConversionRevision = 0;
     private lastHoverRequestSignature = "";
@@ -176,9 +292,57 @@ export class MapDataService {
         return this.dataSourceInfoJson;
     }
 
+    /** Replaces the active server-side feature-search definitions used by the next `/tiles` request. */
+    setFeatureSearchRequests(requests: FeatureSearchDataPlaneRequest[]): void {
+        const normalized = requests
+            .filter(request => request.searchId && request.query)
+            .map(request => ({
+                ...request,
+                autoUpdate: !!request.autoUpdate,
+                updateSerial: Number.isFinite(Number(request.updateSerial))
+                    ? Math.max(0, Math.floor(Number(request.updateSerial)))
+                    : 0,
+                generationSerial: Number.isFinite(Number(request.generationSerial))
+                    ? Math.max(0, Math.floor(Number(request.generationSerial)))
+                    : 0,
+                paused: !!request.paused,
+                showResultsOnMap: request.showResultsOnMap !== false,
+                pinColor: (request.pinColor || "").trim(),
+                searchStyleRules: [...(request.searchStyleRules ?? [])],
+                withFields: Array.from(new Set((request.withFields ?? []).filter(Boolean))).sort()
+            }))
+            .sort((lhs, rhs) => lhs.searchId.localeCompare(rhs.searchId));
+        const signature = JSON.stringify(normalized);
+        if (signature === this.lastFeatureSearchRequestSignature) {
+            return;
+        }
+
+        const nextIds = new Set(normalized.map(request => request.searchId));
+        for (const [searchId, request] of this.activeFeatureSearchRequests) {
+            if (!nextIds.has(searchId)) {
+                this.pendingFeatureSearchCancellations.set(searchId, request);
+                this.pendingFeatureSearchCancellationLayerKeysById.set(
+                    searchId,
+                    this.layerKeysForFeatureSearchTileStates(searchId)
+                );
+                this.clearFeatureSearchTileStates(searchId, true);
+            }
+        }
+
+        this.activeFeatureSearchRequests = new Map(normalized.map(request => [request.searchId, request]));
+        for (const request of normalized) {
+            this.refreshForFeatureSearchDefinition(request);
+        }
+        this.lastFeatureSearchRequestSignature = signature;
+        this.scheduleUpdate();
+    }
+
     selectionTileRequests: SelectionTileRequest[] = [];
     tileDataChanged: Subject<TileDataChange> = new Subject<TileDataChange>();
     selectionTileUpdated: Subject<string> = new Subject<string>();
+    searchResultTileReceived: Subject<SearchResultTilePayload> = new Subject<SearchResultTilePayload>();
+    searchResultTileEvicted: Subject<SearchResultTileEvictedPayload> = new Subject<SearchResultTileEvictedPayload>();
+    searchStatusReceived: Subject<MapTileStreamSearchStatusPayload> = new Subject<MapTileStreamSearchStatusPayload>();
     private selectedTileKeys: Set<string> = new Set<string>();
 
     constructor(public styleService: StyleService,
@@ -251,8 +415,14 @@ export class MapDataService {
         this.tileStream.onFeatures = (payload) => {
             this.ngZone.runOutsideAngular(() => this.addTileFeatureLayer(payload));
         };
+        this.tileStream.onSearchResults = (payload) => {
+            this.ngZone.runOutsideAngular(() => this.addTileSearchResultLayer(payload));
+        };
         this.tileStream.onStatus = (status) => {
             this.ngZone.runOutsideAngular(() => this.handleTilesRequestStatus(status));
+        };
+        this.tileStream.onSearchStatus = (status) => {
+            this.ngZone.runOutsideAngular(() => this.handleSearchStatus(status));
         };
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
@@ -515,6 +685,11 @@ export class MapDataService {
         return result;
     }
 
+    /** Returns whether a view currently wants high-fidelity geometry for a tile id. */
+    public prefersHighFidelityForTile(viewIndex: number, tileId: bigint): boolean {
+        return this.viewVisualizationState[viewIndex]?.getTileRenderPolicy(tileId).targetFidelity === "high";
+    }
+
     /** Returns a snapshot of the current logical `/tiles` backend request progress. */
     public getBackendRequestProgress(): BackendRequestProgress {
         return {...this.backendRequestProgress};
@@ -713,7 +888,11 @@ export class MapDataService {
             return false;
         }
         const style = this.styleService.styles.get(visualization.styleId);
-        if (visualization.styleId !== "_builtin" && (!style || !style.visible)) {
+        const searchRequest = this.searchRequestForVisualizationStyle(visualization.styleId);
+        if (!searchRequest && visualization.styleId !== "_builtin" && (!style || !style.visible)) {
+            return false;
+        }
+        if (searchRequest && (!searchRequest.showResultsOnMap || !visualization.prefersHighFidelity)) {
             return false;
         }
         return visualization.isDirty();
@@ -1062,6 +1241,79 @@ export class MapDataService {
             .join(", ");
         const detail = statusMessage ? ` (${statusMessage})` : "";
         this.showErrorMessage(`Tile request failed: ${summary}${detail}`);
+    }
+
+    /** Publishes server-side search progress independently from regular tile request progress. */
+    private handleSearchStatus(status: MapTileStreamSearchStatusPayload) {
+        if (!status || status.type !== "mapget.search.status") {
+            return;
+        }
+        if (!this.activeFeatureSearchRequests.has(status.searchId)) {
+            return;
+        }
+        const refresh = Number(status.refresh ?? 0);
+        const currentRefresh = this.featureSearchRefreshById.get(status.searchId);
+        if (currentRefresh !== undefined && refresh !== currentRefresh) {
+            return;
+        }
+        this.searchStatusReceived.next(status);
+    }
+
+    /** Stores one streamed result layer for queued high-fidelity rendering. */
+    private addSearchResultRenderTile(
+        searchId: string,
+        refresh: number,
+        sourceTileKey: string,
+        sourceMapId: string,
+        sourceLayerId: string,
+        sourceTileId: bigint,
+        nodeId: string,
+        layerBlob: Uint8Array,
+        resultCount: number
+    ): boolean {
+        if (!this.activeFeatureSearchRequests.has(searchId)) {
+            return false;
+        }
+        const currentRefresh = this.featureSearchRefreshById.get(searchId);
+        if (currentRefresh !== undefined && refresh !== currentRefresh) {
+            return false;
+        }
+        const previousMaxRefresh = this.searchResultMaxRefreshById.get(searchId) ?? -1;
+        if (refresh < previousMaxRefresh) {
+            return false;
+        }
+        if (refresh > previousMaxRefresh) {
+            this.clearSearchResultRenderTilesForSearch(searchId, refresh);
+            this.searchResultMaxRefreshById.set(searchId, refresh);
+        }
+        this.markFeatureSearchTileCompleted(searchId, refresh, sourceTileKey);
+        if (resultCount <= 0) {
+            this.removeSearchResultRenderTile(searchId, sourceTileKey);
+            return true;
+        }
+
+        const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
+        const tile = this.searchResultRenderTilesByKey.get(key)?.tile ?? new FeatureTile(this.tileLayerParser, null, false, {
+            mapTileKey: sourceTileKey,
+            nodeId,
+            mapName: sourceMapId,
+            layerName: sourceLayerId,
+            tileId: sourceTileId
+        });
+        tile.nodeId = nodeId || tile.nodeId;
+        tile.setRenderOrder(this.searchResultTileRenderOrder(sourceTileId));
+        this.searchResultRenderTilesByKey.set(key, {
+            searchId,
+            refresh,
+            sourceTileKey,
+            sourceMapId,
+            sourceLayerId,
+            sourceTileId,
+            layerBlob,
+            tile
+        });
+        this.updateVisualizations();
+        return true;
     }
 
     /** Debounces expensive viewport updates while still guaranteeing a trailing refresh. */
@@ -1545,12 +1797,30 @@ export class MapDataService {
 
             // Update visualizations - first, delete stale visualizations.
             for (const styleId of state.getVisualizedStyleIds()) {
-                let styleEnabled = false;
-                if (this.styleService.styles.has(styleId)) {
+                const searchRequest = this.searchRequestForVisualizationStyle(styleId);
+                let styleEnabled = !!searchRequest?.showResultsOnMap;
+                if (!searchRequest && this.styleService.styles.has(styleId)) {
                     styleEnabled = this.styleService.styles.get(styleId)!.visible;
                 }
                 const removals: string[] = [];
                 for (const tileVisu of state.getVisualizations(styleId)) {
+                    if (searchRequest) {
+                        this.applyTileRenderPolicyToVisualization(viewIndex, tileVisu);
+                        const renderTileKey = this.searchResultRenderTileKey(searchRequest.searchId, tileVisu.tile.mapTileKey);
+                        if (!this.searchResultRenderTilesByKey.has(renderTileKey)
+                            || !isVisibleForView(tileVisu.tile)
+                            || !styleEnabled
+                            || !tileVisu.prefersHighFidelity) {
+                            this.tileVisualizationDestructionTopic.next(tileVisu);
+                            removals.push(tileVisu.tile.mapTileKey);
+                            continue;
+                        }
+                        if (tileVisu.isDirty()) {
+                            tileVisu.updateStatus(true);
+                            this.queueVisualization(state, tileVisu);
+                        }
+                        continue;
+                    }
                     if (!isVisibleForView(tileVisu.tile)) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
                         removals.push(tileVisu.tile.mapTileKey);
@@ -1648,6 +1918,7 @@ export class MapDataService {
                     }
                 }
             }
+            this.updateSearchResultVisualizationsForView(state, viewIndex);
         });
         if (anyRenderPolicyChanged
             || this.selectionVisualizations.length > 0
@@ -1655,6 +1926,155 @@ export class MapDataService {
             || this.selectionTopic.getValue().length > 0
             || this.hoverTopic.getValue().length > 0) {
             this.refreshHighlightVisualizationsForCurrentPolicies();
+        }
+    }
+
+    /** Returns the style id namespace used for queued high-fidelity search-result visualizations. */
+    private searchResultStyleId(searchId: string): string {
+        return `${MapDataService.SEARCH_RESULT_STYLE_PREFIX}${searchId}`;
+    }
+
+    /** Extracts a search id from a search-result visualization style id. */
+    private searchIdFromSearchResultStyleId(styleId: string): string | null {
+        return styleId.startsWith(MapDataService.SEARCH_RESULT_STYLE_PREFIX)
+            ? styleId.slice(MapDataService.SEARCH_RESULT_STYLE_PREFIX.length)
+            : null;
+    }
+
+    /** Builds the cache key for one search/result source tile pair. */
+    private searchResultRenderTileKey(searchId: string, sourceTileKey: string): string {
+        return `${searchId}:${sourceTileKey}`;
+    }
+
+    /** Removes one cached search-result tile and any queued/rendered visualizations for it. */
+    private removeSearchResultRenderTile(searchId: string, sourceTileKey: string): void {
+        const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
+        if (!this.searchResultRenderTilesByKey.delete(key)) {
+            return;
+        }
+        const styleId = this.searchResultStyleId(searchId);
+        for (const state of this.viewVisualizationState) {
+            for (const visualization of state.removeVisualizations(styleId, sourceTileKey)) {
+                this.tileVisualizationDestructionTopic.next(visualization);
+            }
+            state.visualizationQueue.retain(visualization =>
+                visualization.styleId !== styleId || visualization.tile.mapTileKey !== sourceTileKey);
+        }
+    }
+
+    /** Removes cached result tiles for a search, optionally only stale refreshes. */
+    private clearSearchResultRenderTilesForSearch(searchId: string, refreshBefore?: number): void {
+        for (const renderTile of Array.from(this.searchResultRenderTilesByKey.values())) {
+            if (renderTile.searchId !== searchId) {
+                continue;
+            }
+            if (refreshBefore !== undefined && renderTile.refresh >= refreshBefore) {
+                continue;
+            }
+            this.removeSearchResultRenderTile(searchId, renderTile.sourceTileKey);
+        }
+        if (refreshBefore === undefined) {
+            this.searchResultMaxRefreshById.delete(searchId);
+        }
+    }
+
+    /** Looks up the active search request represented by a visualization style id. */
+    private searchRequestForVisualizationStyle(styleId: string): FeatureSearchDataPlaneRequest | undefined {
+        const searchId = this.searchIdFromSearchResultStyleId(styleId);
+        return searchId ? this.activeFeatureSearchRequests.get(searchId) : undefined;
+    }
+
+    /** Serializes search-result styling for the native renderer's direct result-value evaluator. */
+    private searchResultStyleSpec(request: FeatureSearchDataPlaneRequest): string {
+        const spec: SearchResultStyleSpec = {
+            fallbackColor: request.pinColor?.trim() || "#ea4336",
+            fallbackWidth: 4,
+            fallbackPointRadius: 6,
+            rules: request.searchStyleRules ?? []
+        };
+        return JSON.stringify(spec);
+    }
+
+    /** Keeps search-result layers above normal map styles while preserving session order. */
+    private searchResultStyleOrder(searchId: string): number {
+        const orderedSearchIds = Array.from(this.activeFeatureSearchRequests.keys()).sort();
+        const index = orderedSearchIds.indexOf(searchId);
+        return 10_000 + Math.max(0, index);
+    }
+
+    /** Uses the best visible-tile ordering rank known across views for detached result tiles. */
+    private searchResultTileRenderOrder(tileId: bigint): number {
+        let order = FeatureTile.DEFAULT_RENDER_ORDER;
+        for (const state of this.viewVisualizationState) {
+            order = Math.min(order, state.getTileOrder(tileId));
+        }
+        return order;
+    }
+
+    /** Schedules queued high-fidelity renderers for streamed search-result tiles in one view. */
+    private updateSearchResultVisualizationsForView(
+        state: ViewVisualizationState,
+        viewIndex: number
+    ): void {
+        for (const renderTile of this.searchResultRenderTilesByKey.values()) {
+            const request = this.activeFeatureSearchRequests.get(renderTile.searchId);
+            if (!request?.showResultsOnMap) {
+                continue;
+            }
+            if (!this.viewShowsFeatureTile(viewIndex, renderTile.tile)) {
+                continue;
+            }
+
+            renderTile.tile.setRenderOrder(state.getTileOrder(renderTile.sourceTileId));
+            const renderPolicy = this.tileRenderPolicyForView(viewIndex, renderTile.tile);
+            if (!renderPolicy.prefersHighFidelity) {
+                continue;
+            }
+
+            const styleId = this.searchResultStyleId(renderTile.searchId);
+            const highFidelityStage = this.getLayerHighFidelityStage(
+                renderTile.sourceMapId,
+                renderTile.sourceLayerId
+            );
+            const styleSpecJson = this.searchResultStyleSpec(request);
+            const styleOrder = this.searchResultStyleOrder(renderTile.searchId);
+            const existing = state.getVisualization(styleId, renderTile.sourceTileKey);
+            if (existing instanceof DeckTileSearchVisualization) {
+                existing.updateSearchResultLayer(
+                    renderTile.layerBlob,
+                    styleSpecJson,
+                    styleOrder
+                );
+                existing.highFidelityStage = highFidelityStage;
+                existing.prefersHighFidelity = true;
+                existing.maxLowFiLod = renderPolicy.maxLowFiLod;
+                if (existing.isDirty()) {
+                    existing.updateStatus(true);
+                    this.queueVisualization(state, existing);
+                }
+                continue;
+            }
+
+            if (existing) {
+                this.tileVisualizationDestructionTopic.next(existing);
+                state.removeVisualizations(styleId, renderTile.sourceTileKey).forEach(_ => _);
+            }
+
+            const visualization = new DeckTileSearchVisualization(
+                viewIndex,
+                styleId,
+                renderTile.tile,
+                this.tileLayerParser,
+                renderTile.layerBlob,
+                styleSpecJson,
+                highFidelityStage,
+                true,
+                renderPolicy.maxLowFiLod,
+                styleOrder
+            );
+            state.putVisualization(styleId, renderTile.sourceTileKey, visualization);
+            visualization.updateStatus(true);
+            this.queueVisualization(state, visualization);
         }
     }
 
@@ -1791,6 +2211,352 @@ export class MapDataService {
         return signatureParts.join("|");
     }
 
+    /** Uses the schema-aware native parser to keep auto scope aligned with completion. */
+    private isAttributeScopeSearchQuery(query: string): boolean {
+        try {
+            return this.tileLayerParser.isAttributeScopeSearchQuery(query);
+        } catch (error) {
+            console.warn("Failed to infer feature-search scope from schema metadata.", error);
+            return false;
+        }
+    }
+
+    /** Resolves persisted search scope state to the concrete token expected by mapget. */
+    private resolveFeatureSearchScope(request: FeatureSearchDataPlaneRequest): "feature" | "attribute" {
+        if (request.scope === "feature" || request.scope === "attribute") {
+            return request.scope;
+        }
+        return this.isAttributeScopeSearchQuery(request.query) ? "attribute" : "feature";
+    }
+
+    /** Encodes map/layer ids without relying on slash splitting, since map ids may be grouped paths. */
+    private featureSearchLayerKey(mapId: string, layerId: string): string {
+        return JSON.stringify([mapId, layerId]);
+    }
+
+    /** Adds one source tile to the reusable visible-tile plan consumed by map loading and search. */
+    private trackVisibleSearchLayerTile(
+        visibleLayerTiles: Map<string, SearchLayerTileSet>,
+        mapId: string,
+        layerId: string,
+        tileId: bigint,
+        priority: boolean
+    ): void {
+        const key = this.featureSearchLayerKey(mapId, layerId);
+        let entry = visibleLayerTiles.get(key);
+        if (!entry) {
+            entry = {
+                mapId,
+                layerId,
+                tileIds: new Set<number>(),
+                priorityTileIds: new Set<number>(),
+            };
+            visibleLayerTiles.set(key, entry);
+        }
+        const numericTileId = Number(tileId);
+        entry.tileIds.add(numericTileId);
+        if (priority) {
+            entry.priorityTileIds.add(numericTileId);
+        }
+    }
+
+    /** Decodes a key produced by featureSearchLayerKey(). */
+    private parseFeatureSearchLayerKey(key: string): {mapId: string; layerId: string} | null {
+        try {
+            const parsed = JSON.parse(key);
+            if (Array.isArray(parsed) && typeof parsed[0] === "string" && typeof parsed[1] === "string") {
+                return {mapId: parsed[0], layerId: parsed[1]};
+            }
+        } catch (_error) {
+            // Ignore malformed legacy keys.
+        }
+        return null;
+    }
+
+    /** Builds the stable logical-search fingerprint that owns the backend refresh generation. */
+    private featureSearchDefinitionFingerprint(request: FeatureSearchDataPlaneRequest): string {
+        return JSON.stringify({
+            searchId: request.searchId,
+            generationSerial: request.generationSerial,
+            query: request.query,
+            scope: this.resolveFeatureSearchScope(request),
+            withFields: request.withFields
+        });
+    }
+
+    /** Bumps refresh only when old chunks for this search id must be treated as stale. */
+    private refreshForFeatureSearchDefinition(request: FeatureSearchDataPlaneRequest): number {
+        const fingerprint = this.featureSearchDefinitionFingerprint(request);
+        const searchId = request.searchId;
+        if (this.featureSearchFingerprintById.get(searchId) === fingerprint) {
+            return this.featureSearchRefreshById.get(searchId) ?? 0;
+        }
+        const nextRefresh = (this.featureSearchRefreshById.get(searchId) ?? 0) + 1;
+        this.featureSearchFingerprintById.set(searchId, fingerprint);
+        this.featureSearchRefreshById.set(searchId, nextRefresh);
+        this.clearFeatureSearchTileStates(searchId, true);
+        return nextRefresh;
+    }
+
+    /** Returns the mutable per-source-tile state table for one search. */
+    private featureSearchTileStates(searchId: string): Map<string, FeatureSearchTileState> {
+        let states = this.featureSearchTileStatesById.get(searchId);
+        if (!states) {
+            states = new Map<string, FeatureSearchTileState>();
+            this.featureSearchTileStatesById.set(searchId, states);
+        }
+        return states;
+    }
+
+    /** Returns all concrete source layers currently represented by one search's tile state. */
+    private layerKeysForFeatureSearchTileStates(searchId: string): Set<string> {
+        const result = new Set<string>();
+        const states = this.featureSearchTileStatesById.get(searchId);
+        if (!states) {
+            return result;
+        }
+        for (const state of states.values()) {
+            result.add(this.featureSearchLayerKey(state.mapId, state.layerId));
+        }
+        return result;
+    }
+
+    /** Removes one source tile from local search coverage and optionally from UI-facing result state. */
+    private removeFeatureSearchTileState(searchId: string, sourceTileKey: string, notifyEviction: boolean): void {
+        const states = this.featureSearchTileStatesById.get(searchId);
+        states?.delete(sourceTileKey);
+        this.removeSearchResultRenderTile(searchId, sourceTileKey);
+        if (notifyEviction) {
+            this.searchResultTileEvicted.next({searchId, sourceTileKey});
+        }
+    }
+
+    /** Clears all per-tile state for one search generation. */
+    private clearFeatureSearchTileStates(searchId: string, notifyEvictions: boolean): void {
+        const states = this.featureSearchTileStatesById.get(searchId);
+        if (states) {
+            for (const sourceTileKey of Array.from(states.keys())) {
+                this.removeFeatureSearchTileState(searchId, sourceTileKey, notifyEvictions);
+            }
+        }
+        this.featureSearchTileStatesById.delete(searchId);
+        this.lastFeatureSearchUpdateSerialById.delete(searchId);
+        this.clearSearchResultRenderTilesForSearch(searchId);
+    }
+
+    /** Freezes current results but makes unfinished tiles eligible for re-request after resume. */
+    private markFeatureSearchTilesPending(searchId: string): void {
+        const states = this.featureSearchTileStatesById.get(searchId);
+        if (!states) {
+            return;
+        }
+        for (const state of states.values()) {
+            if (!state.completed) {
+                state.requested = false;
+            }
+        }
+    }
+
+    /** Adopts the current visible tile plan for an auto-update or explicit area update. */
+    private adoptFeatureSearchVisibleTiles(
+        searchId: string,
+        refresh: number,
+        visibleLayerTiles: Map<string, SearchLayerTileSet>
+    ): void {
+        const states = this.featureSearchTileStates(searchId);
+        const desiredKeys = new Set<string>();
+        for (const entry of visibleLayerTiles.values()) {
+            for (const tileId of entry.tileIds) {
+                const sourceTileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, BigInt(tileId));
+                desiredKeys.add(sourceTileKey);
+                const priority = entry.priorityTileIds.has(tileId);
+                const existing = states.get(sourceTileKey);
+                if (existing && existing.refresh === refresh) {
+                    existing.priority = priority;
+                    continue;
+                }
+                states.set(sourceTileKey, {
+                    mapId: entry.mapId,
+                    layerId: entry.layerId,
+                    tileId,
+                    sourceTileKey,
+                    refresh,
+                    priority,
+                    requested: false,
+                    completed: false
+                });
+            }
+        }
+
+        for (const sourceTileKey of Array.from(states.keys())) {
+            if (!desiredKeys.has(sourceTileKey)) {
+                this.removeFeatureSearchTileState(searchId, sourceTileKey, true);
+            }
+        }
+    }
+
+    /** Marks one streamed search-result tile as completed, including zero-result tiles. */
+    private markFeatureSearchTileCompleted(searchId: string, refresh: number, sourceTileKey: string): void {
+        const state = this.featureSearchTileStatesById.get(searchId)?.get(sourceTileKey);
+        if (!state || state.refresh !== refresh) {
+            return;
+        }
+        state.completed = true;
+        state.requested = false;
+    }
+
+    /** Builds one concrete mapget search request object for a map/layer tile set. */
+    private createFeatureSearchTileRequest(
+        request: FeatureSearchDataPlaneRequest,
+        mapId: string,
+        layerId: string,
+        tileIds: number[],
+        priorityTileIds: number[],
+        refresh: number
+    ): FeatureSearchTileRequest {
+        const result: FeatureSearchTileRequest = {
+            mapId,
+            layerId,
+            tileIds,
+            searchId: request.searchId,
+            refresh,
+            searchQuery: request.query,
+            searchScope: this.resolveFeatureSearchScope(request),
+        };
+        if (priorityTileIds.length) {
+            result.priorityTileIds = priorityTileIds;
+        }
+        if (request.withFields.length) {
+            result.withFields = request.withFields;
+        }
+        return result;
+    }
+
+    /** Creates empty tile requests that cancel or pause a server-side search on its previously active layers. */
+    private createFeatureSearchCancellationRequests(
+        request: FeatureSearchDataPlaneRequest,
+        layerKeys: Iterable<string>,
+        refresh: number
+    ): FeatureSearchTileRequest[] {
+        const cancellations: FeatureSearchTileRequest[] = [];
+        for (const layerKey of layerKeys) {
+            const parsed = this.parseFeatureSearchLayerKey(layerKey);
+            if (!parsed) {
+                continue;
+            }
+            cancellations.push(this.createFeatureSearchTileRequest(
+                request,
+                parsed.mapId,
+                parsed.layerId,
+                [],
+                [],
+                refresh
+            ));
+        }
+        return cancellations;
+    }
+
+    /** Groups incomplete source tiles into concrete backend search requests. */
+    private appendFeatureSearchTileRequests(
+        requests: FeatureSearchTileRequest[],
+        request: FeatureSearchDataPlaneRequest,
+        refresh: number
+    ): void {
+        const states = this.featureSearchTileStatesById.get(request.searchId);
+        if (!states) {
+            return;
+        }
+        const statesByLevelLayer = new Map<string, {
+            mapId: string;
+            layerId: string;
+            tileIds: number[];
+            priorityTileIds: number[];
+        }>();
+        for (const state of states.values()) {
+            if (state.completed) {
+                continue;
+            }
+            const tileLevel = Math.trunc(state.tileId % 0x10000);
+            const key = `${state.mapId}/${state.layerId}/${tileLevel}`;
+            let entry = statesByLevelLayer.get(key);
+            if (!entry) {
+                entry = {
+                    mapId: state.mapId,
+                    layerId: state.layerId,
+                    tileIds: [],
+                    priorityTileIds: []
+                };
+                statesByLevelLayer.set(key, entry);
+            }
+            entry.tileIds.push(state.tileId);
+            if (state.priority) {
+                entry.priorityTileIds.push(state.tileId);
+            }
+            state.requested = true;
+        }
+
+        const sortedEntries = Array.from(statesByLevelLayer.values())
+            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
+        for (const entry of sortedEntries) {
+            entry.tileIds.sort((lhs, rhs) => lhs - rhs);
+            entry.priorityTileIds.sort((lhs, rhs) => lhs - rhs);
+            requests.push(this.createFeatureSearchTileRequest(
+                request,
+                entry.mapId,
+                entry.layerId,
+                entry.tileIds,
+                entry.priorityTileIds,
+                refresh
+            ));
+        }
+    }
+
+    /** Builds all active server-side search-as-map requests for the next `/tiles` update. */
+    private buildFeatureSearchTileRequests(
+        visibleLayerTiles: Map<string, SearchLayerTileSet>
+    ): FeatureSearchTileRequest[] {
+        const requests: FeatureSearchTileRequest[] = [];
+
+        for (const [searchId, request] of this.activeFeatureSearchRequests) {
+            const refresh = this.refreshForFeatureSearchDefinition(request);
+
+            if (request.paused) {
+                const cancellationLayerKeys = this.layerKeysForFeatureSearchTileStates(searchId);
+                requests.push(...this.createFeatureSearchCancellationRequests(request, cancellationLayerKeys, refresh));
+                this.markFeatureSearchTilesPending(searchId);
+                continue;
+            }
+
+            const lastUpdateSerial = this.lastFeatureSearchUpdateSerialById.get(searchId);
+            const shouldAdoptVisibleTiles = request.autoUpdate
+                || lastUpdateSerial !== request.updateSerial
+                || !this.featureSearchTileStatesById.has(searchId);
+            if (shouldAdoptVisibleTiles && (visibleLayerTiles.size > 0 || request.autoUpdate)) {
+                this.adoptFeatureSearchVisibleTiles(searchId, refresh, visibleLayerTiles);
+                this.lastFeatureSearchUpdateSerialById.set(searchId, request.updateSerial);
+            }
+
+            this.appendFeatureSearchTileRequests(requests, request, refresh);
+        }
+
+        for (const [searchId, request] of Array.from(this.pendingFeatureSearchCancellations)) {
+            const layerKeys = this.pendingFeatureSearchCancellationLayerKeysById.get(searchId);
+            if (layerKeys?.size) {
+                const refresh = (this.featureSearchRefreshById.get(searchId) ?? 0) + 1;
+                requests.push(...this.createFeatureSearchCancellationRequests(request, layerKeys, refresh));
+            }
+            this.pendingFeatureSearchCancellations.delete(searchId);
+            this.pendingFeatureSearchCancellationLayerKeysById.delete(searchId);
+            this.lastFeatureSearchUpdateSerialById.delete(searchId);
+            this.featureSearchTileStatesById.delete(searchId);
+            this.featureSearchRefreshById.delete(searchId);
+            this.featureSearchFingerprintById.delete(searchId);
+            this.searchResultMaxRefreshById.delete(searchId);
+        }
+
+        return requests;
+    }
+
     /**
      * Recomputes the logical `/tiles` request from visible tiles and pinned selection tiles.
      * Requests are grouped by map/layer/level so websocket chunking can stay backend-friendly.
@@ -1813,6 +2579,7 @@ export class MapDataService {
         };
         const requestByLayer = new Map<string, LayerRequestEntry>();
         const expectedByLayer = new Map<string, ExpectedLayerEntry>();
+        const visibleSearchLayerTiles = new Map<string, SearchLayerTileSet>();
         const queueTile = (
             mapId: string,
             layerId: string,
@@ -1913,6 +2680,13 @@ export class MapDataService {
                     for (let tileId of tileIds!) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
                         const isSelectedTile = this.selectedTileKeys.has(tileMapLayerKey);
+                        this.trackVisibleSearchLayerTile(
+                            visibleSearchLayerTiles,
+                            mapName,
+                            layer.id,
+                            tileId,
+                            isSelectedTile
+                        );
                         const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
                         if (!existingTile) {
                             this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
@@ -1940,7 +2714,7 @@ export class MapDataService {
             }
         }
 
-        const requests = Array.from(requestByLayer.values()).map(entry => {
+        const requests: any[] = Array.from(requestByLayer.values()).map(entry => {
             let maxRequestedStage = 0;
             for (const nextMissingStage of entry.tileIdToNextMissingStage.values()) {
                 if (nextMissingStage > maxRequestedStage) {
@@ -1968,6 +2742,7 @@ export class MapDataService {
             }
             return request;
         });
+        requests.push(...this.buildFeatureSearchTileRequests(visibleSearchLayerTiles));
 
         this.resetRequestedStageProgressFromExpected(expectedByLayer);
 
@@ -2002,6 +2777,84 @@ export class MapDataService {
                 this.viewportLoadStartedAtMs = performance.now();
                 this.viewportRenderCompletedAtMs = this.viewportLoadStartedAtMs;
             }
+        }
+    }
+
+    /** Parses a streamed TileSearchResultLayer and forwards its compact UI payload. */
+    private addTileSearchResultLayer(searchResultLayerBlob: Uint8Array) {
+        const searchResultLayer = uint8ArrayToWasm((wasmBlob: any) => {
+            return (this.tileLayerParser as any).readTileSearchResultLayer(wasmBlob);
+        }, searchResultLayerBlob) as any | null;
+        if (!searchResultLayer) {
+            return;
+        }
+
+        try {
+            const rawInfo = (searchResultLayer.info?.() ?? {}) as Record<string, unknown>;
+            const searchId = typeof rawInfo["searchId"] === "string" ? rawInfo["searchId"] : "";
+            if (!searchId) {
+                return;
+            }
+
+            const refresh = Number(rawInfo["refresh"] ?? 0);
+            const resultFields = (searchResultLayer.resultFields?.() ?? []) as string[];
+            const resultCountValue = Number(rawInfo["resultCount"] ?? searchResultLayer.numResults?.() ?? 0);
+            const tileId = BigInt(searchResultLayer.tileId() as any);
+            const sourceMapId = typeof rawInfo["sourceMapId"] === "string"
+                ? rawInfo["sourceMapId"]
+                : searchResultLayer.mapId();
+            const sourceLayerId = typeof rawInfo["sourceLayerId"] === "string"
+                ? rawInfo["sourceLayerId"]
+                : searchResultLayer.layerId();
+            const sourceTileId = rawInfo["sourceTileId"] !== undefined
+                ? BigInt(rawInfo["sourceTileId"] as any)
+                : tileId;
+            const sourceTileKey = coreLib.getTileFeatureLayerKey(sourceMapId, sourceLayerId, sourceTileId);
+            const rawEntries = (searchResultLayer.resultEntries?.() ?? []) as SearchResultTileEntry[];
+            const entries = rawEntries.map(entry => ({
+                ...entry,
+                mapTileKey: entry.mapTileKey
+                    ? this.canonicalizeMapTileKey(entry.mapTileKey)
+                    : sourceTileKey
+            }));
+            const tracesValue = rawInfo["traces"];
+            const traces = tracesValue && typeof tracesValue === "object" && !Array.isArray(tracesValue)
+                ? tracesValue as Record<string, unknown>
+                : null;
+            const diagnostics = uint8ArrayFromWasm((buffer) => searchResultLayer.copyDiagnostics(buffer));
+            const normalizedRefresh = Number.isFinite(refresh) ? refresh : 0;
+            const accepted = this.addSearchResultRenderTile(
+                searchId,
+                normalizedRefresh,
+                sourceTileKey,
+                sourceMapId,
+                sourceLayerId,
+                sourceTileId,
+                searchResultLayer.nodeId(),
+                searchResultLayerBlob,
+                Number.isFinite(resultCountValue) ? resultCountValue : entries.length
+            );
+            if (!accepted) {
+                return;
+            }
+
+            this.searchResultTileReceived.next({
+                searchId,
+                refresh: normalizedRefresh,
+                mapId: searchResultLayer.mapId(),
+                layerId: searchResultLayer.layerId(),
+                tileId,
+                sourceMapId,
+                sourceLayerId,
+                sourceTileId,
+                resultCount: Number.isFinite(resultCountValue) ? resultCountValue : entries.length,
+                resultFields,
+                traces,
+                diagnostics,
+                entries
+            });
+        } finally {
+            searchResultLayer.delete?.();
         }
     }
 

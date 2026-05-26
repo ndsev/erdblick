@@ -1,19 +1,21 @@
-import {initializeLibrary, coreLib, type ErdblickCore_, uint8ArrayToWasm} from "../../integrations/wasm";
+import {coreLib, type ErdblickCore_, initializeLibrary, uint8ArrayToWasm} from "../../integrations/wasm";
 import {
     DeckFeatureLayerVisualization,
+    DeckTileSearchResultLayerVisualization,
     FeatureLayerStyle,
     HighlightMode,
     RuleFidelity,
     TileFeatureLayer,
-    TileLayerParser
+    TileLayerParser,
+    TileSearchResultLayer
 } from "../../../build/libs/core/erdblick-core";
 import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
     DeckGeometryBucketBuffers,
-    DeckGeometryOutputMode,
     DeckLowFiBundleBuffers,
+    DeckSearchTileRenderTask,
     DeckTileRenderResult,
     DeckTileRenderTask,
     DeckVisualizationBufferResult,
@@ -35,16 +37,19 @@ const styleCache = new Map<string, FeatureLayerStyle>();
 
 /** Strongly typed handle for the wasm deck visualization constructor exposed after init. */
 type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
+/** Strongly typed handle for the wasm search-result visualization constructor exposed after init. */
+type DeckTileSearchResultLayerVisualizationCtor = ErdblickCore_["DeckTileSearchResultLayerVisualization"];
 /** Strongly typed handle for the wasm `RuleFidelity` enum object. */
 type RuleFidelityEnum = ErdblickCore_["RuleFidelity"];
-/** Deck visualization variant that exposes the packed binary render result to the worker. */
-type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
-    renderResult(): DeckVisualizationBufferResult;
-};
 
 /** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
 function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
     return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
+}
+
+/** Returns the wasm constructor for deck search-result visualizations after the core library is initialized. */
+function deckTileSearchResultLayerVisualizationCtor(): DeckTileSearchResultLayerVisualizationCtor {
+    return coreLib.DeckTileSearchResultLayerVisualization as DeckTileSearchResultLayerVisualizationCtor;
 }
 
 /** Returns the wasm fidelity enum used by the deck render worker. */
@@ -246,10 +251,8 @@ function readRuntimeStyleIssues(
     deckVisu: DeckFeatureLayerVisualization,
     task: DeckTileRenderTask
 ): StyleValidationIssue[] {
-    const rawIssues = typeof (deckVisu as any).runtimeStyleIssues === "function"
-        ? ((deckVisu as any).runtimeStyleIssues() as StyleValidationIssue[])
-        : [];
-    return (rawIssues ?? []).map(issue => ({
+    const rawIssues = (deckVisu.runtimeStyleIssues() as StyleValidationIssue[]) ?? [];
+    return rawIssues.map(issue => ({
         ...issue,
         source: {...(issue.source ?? {}), ...task.styleSourceRef},
         runtimeContext: {
@@ -267,7 +270,7 @@ function readRenderResult(
     deckVisu: DeckFeatureLayerVisualization,
     task: DeckTileRenderTask
 ): DeckVisualizationBufferResult {
-    const renderResult = (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+    const renderResult = deckVisu.renderResult() as DeckVisualizationBufferResult;
     return {
         ...renderResult,
         styleIssues: readRuntimeStyleIssues(deckVisu, task)
@@ -356,6 +359,55 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     }
 }
 
+/** Executes one search-result tile render inside the worker and returns deck-ready buffers. */
+function processSearchTileRenderTask(task: DeckSearchTileRenderTask): DeckTileRenderResult {
+    const totalStart = performance.now();
+    let searchLayer: TileSearchResultLayer | null = null;
+    let deckVisu: DeckTileSearchResultLayerVisualization | null = null;
+    try {
+        const parser = getOrCreateParser({
+            mapName: task.mapName,
+            nodeId: task.nodeId,
+            fieldDictBlob: task.fieldDictBlob
+        } as DeckTileRenderTask);
+        const deserializeStart = performance.now();
+        searchLayer = uint8ArrayToWasm((data) => parser.readTileSearchResultLayer(data), task.searchResultLayerBlob) as
+            TileSearchResultLayer | null;
+        const deserializeMs = performance.now() - deserializeStart;
+        if (!searchLayer) {
+            throw new Error("Worker render requested with an invalid search-result layer.");
+        }
+
+        const renderStart = performance.now();
+        const deckSearchCtor = deckTileSearchResultLayerVisualizationCtor();
+        deckVisu = new deckSearchCtor(
+            task.viewIndex,
+            task.tileKey,
+            task.styleSpecJson
+        );
+        deckVisu.addTileSearchResultLayer(searchLayer);
+        deckVisu.run();
+        const renderResult = deckVisu.renderResult() as DeckVisualizationBufferResult;
+        const renderMs = performance.now() - renderStart;
+
+        return {
+            type: "DeckTileRenderResult",
+            taskId: task.taskId,
+            tileKey: task.tileKey,
+            vertexCount: Math.max(0, Math.floor(Number(deckVisu.vertexCount()))),
+            ...renderResult,
+            timings: {
+                deserializeMs,
+                renderMs,
+                totalMs: performance.now() - totalStart
+            }
+        };
+    } finally {
+        deckVisu?.delete();
+        searchLayer?.delete();
+    }
+}
+
 /** Creates empty geometry buffers used in the worker error path. */
 function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
     return {
@@ -414,7 +466,8 @@ function emptyResult(): Omit<DeckTileRenderResult, "type" | "taskId" | "tileKey"
         vertexCount: 0,
         coordinateOrigin: new Float64Array(),
         lowFiBundles: [] as DeckLowFiBundleBuffers[],
-        mergedPointFeatures: {} as Record<string, any[]>
+        mergedPointFeatures: {} as Record<string, any[]>,
+        resultFeatureIds: []
     };
 }
 
@@ -442,11 +495,13 @@ addEventListener("message", async ({data}) => {
         return;
     }
 
-    const task = message as DeckTileRenderTask;
+    const task = message as DeckTileRenderTask | DeckSearchTileRenderTask;
     try {
         // `initializeLibrary()` is idempotent; awaiting it here keeps the worker bootstrap simple.
         await initializeLibrary();
-        const result = processTileRenderTask(task);
+        const result = task.type === "DeckSearchTileRenderTask"
+            ? processSearchTileRenderTask(task)
+            : processTileRenderTask(task);
         postMessage(result, transferVisualizationResult(result));
     } catch (error) {
         const failure: DeckTileRenderResult = {

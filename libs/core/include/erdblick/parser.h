@@ -47,6 +47,11 @@ public:
      */
     TileSourceDataLayer readTileSourceDataLayer(SharedUint8Array const& buffer);
 
+    /**
+     * Parse a TileSearchResultLayer from a buffer.
+     */
+    TileSearchResultLayer readTileSearchResultLayer(SharedUint8Array const& buffer);
+
     /** Cheap metadata view read from a tile blob without fully parsing the tile. */
     struct TileLayerMetadata {
         std::string id;
@@ -89,6 +94,22 @@ public:
      * Add a serialized field dictionary that is not wrapped in a message frame.
      */
     void addFieldDict(SharedUint8Array const& buffer);
+
+    /**
+     * Complete a SIMFIL search query using only LayerInfo.featureModelSchema metadata.
+     *
+     * Returns an empty list when no schema metadata is available. This deliberately
+     * does not fall back to loaded tile blobs.
+     */
+    NativeJsValue completeSearchQuery(std::string const& query, int point, NativeJsValue const& options);
+
+    /**
+     * Conservative schema-backed inference for search scope auto mode.
+     *
+     * Returns true only when the query references attribute-context fields or
+     * overlay variables unambiguously.
+     */
+    bool isAttributeScopeSearchQuery(std::string const& query) const;
 
     /**
      * Set layer info which will be used if the external doesn't fit.

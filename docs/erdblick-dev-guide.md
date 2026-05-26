@@ -159,13 +159,13 @@ In code, the main responsibilities are:
 - `AppConfigService` loads bundled `config/config.json`, optionally merges a public `/config.erdblick` backend section, normalizes style and `additionalStyles` entries, survey, extension-module, background-layer, and startup-state metadata, and feeds the frontend services that depend on deployment-specific configuration.
 - `MapViewComponent` and `MapView` encapsulate the deck.gl view per pane (two or more views), read camera changes, and forward interaction events to services.
 - `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding). It can seed config-provided default state before local storage and URL hydration, while preserving user-owned browser state.
-- `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
+- `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, server-side search-result streaming, and hover or selection highlights.
 - `StyleService` loads YAML style sheets from the normalized style URL list, loads base styles before additional styles, tracks additional/base collisions, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
 - `DeckMapView` also renders config-driven raster background layers: tiled XYZ sources for bundled or remote imagery, and experimental WMS sources for 2D-first deployments.
-- `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
+- `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), schema-aware search completion, search-result visualization, and geometry helpers via Emscripten bindings.
 - A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor and server-supplied UI defaults. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, bundled background imagery under `bundle/images/backgrounds`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
 
-The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
+The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, server-side search, and inspection tools.
 
 ### Map Data (mapdata/*)
 
@@ -279,13 +279,12 @@ flowchart LR
   subgraph search_dir[search/*]
     SearchPanel[SearchPanelComponent<br>command palette]
     FeatureSearch[FeatureSearchComponent<br>search dialog]
-    SearchSvc[FeatureSearchService<br>workers and results]
+    SearchSvc[FeatureSearchService<br>sessions and results]
     JumpSvc[JumpTargetService<br>jump targets]
   end
-  MapSvc[MapDataService<br>tiles]
+  MapSvc[MapDataService<br>tiles and search stream]
   State[AppStateService<br>search state]
-  Workers[Workers<br>search.worker.ts]
-  Core[WASM core<br>TileLayerParser and search]
+  Core[WASM core<br>TileLayerParser completion]
   Backend[Backend<br>/tiles and /locate]
 
   SearchPanel --> SearchSvc
@@ -295,21 +294,21 @@ flowchart LR
 
   SearchSvc --> MapSvc
   SearchSvc --> State
-  SearchSvc --> Workers
-  Workers --> Core
-  SearchSvc --> Backend
+  SearchSvc --> Core
+  MapSvc --> Backend
+  MapSvc --> Core
 ```
 
 From the perspective of this group:
 
 - `SearchPanelComponent` implements the command palette UX and hands off parsing and execution to `FeatureSearchService` and `JumpTargetService`.
 - `FeatureSearchComponent` provides the dedicated search dialog including diagnostics and tracing.
-- `FeatureSearchService` orchestrates search jobs and completion requests across tiles and workers, and publishes aggregated results.
+- `FeatureSearchService` orchestrates persisted search sessions, schema-backed completion requests, server progress, diagnostics, low-fi result pins, and aggregated result lists.
 - `JumpTargetService` offers additional jump targets (tile IDs, feature IDs, SourceData) on top of the palette.
-- `MapDataService` supplies tile blobs and field dictionaries to search workers.
+- `MapDataService` turns active search sessions into `/tiles` search requests, streams `TileSearchResultLayer` payloads, and schedules high-fidelity result geometry rendering.
 - `AppStateService` records the currently active search and keeps history in sync with URLs.
-- `search.worker.ts` drives the WASM `TileLayerParser` and `FeatureLayerSearch` functions in isolation.
-- The backend is used both as a tile source for search and as the `/locate` endpoint when resolving external references.
+- `TileLayerParser` provides schema-aware completion and conservative auto-scope inference from datasource metadata.
+- The backend evaluates feature and attribute searches server-side through `/tiles`; `/locate` is still used when resolving external references.
 
 ### Inspection and SourceData (inspection/*)
 
@@ -599,7 +598,7 @@ The erdblick core is compiled to WASM without C++ exception support. Enabling na
 
 - In `bindings.cpp`, `simfil::ThrowHandler` is wired up via `setExceptionHandler`, which forwards exception type and message into JavaScript. The browser-side handler installed in `integrations/wasm.ts` (`coreLib.setExceptionHandler`) wraps these in JavaScript `Error` objects.
 - Most calls into the core either go through helpers like `uint8ArrayToWasm` (which catch and log exceptions before returning) or are wrapped in explicit try/catch blocks (for example around `FeatureLayerVisualization.run` in `TileVisualization.render`).
-- Search workers wrap their calls to `FeatureLayerSearch` in defensive try/catch blocks and convert failures into `SearchResultForTile` entries with an `error` string. These errors show up alongside search results; structured diagnostics still come from the dedicated diagnostics tasks.
+- Server-side search status and result frames are handled defensively in `MapDataService` / `FeatureSearchService`; transport or evaluation errors are attached to the affected search session and shown alongside diagnostics.
 
 ### IO and Streaming Errors
 
@@ -614,64 +613,42 @@ In general, treat the browser console and the statistics dialog as complementary
 
 ## Feature Search/Query completion
 
-Feature search combines a main-thread service with a pool of web workers:
+Feature search is server-side. The frontend owns session state, request composition, completion, and rendering of streamed result layers:
 
 ```mermaid
 sequenceDiagram
   participant UI as SearchPanelComponent
   participant Search as FeatureSearchService
-  participant Jobs as JobGroupManager
   participant MapSvc as MapDataService
-  participant Worker as search worker pool
-  participant Core as TileLayerParser and FeatureLayerSearch
+  participant Backend as mapget /tiles
+  participant Core as TileLayerParser and search-result renderer
 
   UI->>Search: run query
-  Search->>Jobs: create search group<br>with id and query
-  Search->>MapSvc: enumerate loaded tiles<br>and field dictionaries
+  Search->>MapSvc: set active search request<br>query, scope, style fields
+  MapSvc->>Core: infer auto scope from schema<br>when requested
+  MapSvc->>Backend: stream /tiles request<br>with search data plane
 
   loop for each tile
-    Search->>Worker: post SearchWorkerTask<br>with tile blob and group id
-    Jobs->>Jobs: register search task id<br>in job group
+    Backend-->>MapSvc: TileSearchResultLayer<br>and search status
+    MapSvc->>Search: result entries,<br>diagnostics, progress
+    MapSvc->>Core: queue high-fidelity<br>result geometry rendering
   end
 
-  Worker->>Core: setDataSourceInfo and addFieldDict
-  Worker->>Core: readTileFeatureLayer for tile
-  Worker->>Core: filter query on tile
-  Core-->>Worker: matches traces diagnostics
-  Worker-->>Search: SearchResultForTile<br>with task id and group id
-  Search->>Jobs: mark search task as complete
-
-  Jobs-->>Search: group complete callback<br>when last search task finishes
+  Search-->>UI: progress, diagnostics,<br>result list and low-fi pins
 
   UI->>Search: request completions<br>for prefix at caret
-  Search->>Jobs: create completion group<br>for prefix and position
-  Search->>MapSvc: pick tiles for completion<br>from loaded tiles
-
-  loop for each selected tile
-    Search->>Worker: post CompletionWorkerTask<br>with prefix and cursor position
-    Jobs->>Jobs: register completion task id
-  end
-
-  Worker->>Core: FeatureLayerSearch.complete<br>with completion options
-  Core-->>Worker: completion candidates per tile
-  Worker-->>Search: CompletionCandidatesForTile
-  Search->>Jobs: mark completion task as complete
-  Jobs-->>Search: completion group done
-  Search-->>UI: merged candidate list<br>for autocompletion popup
+  Search->>Core: completeSearchQuery<br>from LayerInfo schema
+  Core-->>Search: completion candidates<br>or empty list without schema
+  Search-->>UI: candidate list<br>for autocompletion popup
 ```
 
 A few implementation details matter for contributors:
 
-- `FeatureSearchService` owns the worker pool, work queue, and result aggregation logic. It creates up to `navigator.hardwareConcurrency` workers and keeps them hot across searches.
-- Tasks posted to workers carry the serialized tile blob, the current field dictionary blob, and `dataSourceInfo` so that each worker can build a local `TileLayerParser` and `TileFeatureLayer` instance.
-- The quad tree inside `FeatureSearchService` clusters search results into per-tile buckets and computes billboard positions, which are then rendered through the deck.gl-based `MapView`.
-- Completion and diagnostics follow the same structure with `CompletionWorkerTask` messages; the worker invokes `FeatureLayerSearch.complete` and `FeatureLayerSearch.diagnostics` respectively.
-
-When touching this area, keep web worker pitfalls in mind:
-
-- Avoid heavy `console.log` usage in workers; logging from tight loops can dominate runtime and flood the console.
-- Minimize data passed between main thread and workers; prefer compact binary blobs over large JSON structures.
-- Batch result messages where possible: posting many tiny messages is more expensive than a few aggregated ones.
+- `FeatureSearchService` aggregates session state, result lists, diagnostics, server progress, and low-fidelity pin clusters. It no longer parses or searches tile blobs in the browser.
+- `MapDataService` composes active searches into the `/tiles` request, tracks refresh ids to ignore stale result frames, and owns the streamed `TileSearchResultLayer` cache used for high-fidelity rendering.
+- `TileLayerParser.completeSearchQuery()` builds lightweight schema-backed SIMFIL roots from `LayerInfo.featureModelSchema`. Datasources without schema metadata intentionally produce no completion candidates.
+- `TileLayerParser.isAttributeScopeSearchQuery()` is conservative. Unknown or ambiguous top-level identifiers remain feature-scope; only unambiguous attribute-context fields or overlay variables select attribute scope automatically.
+- High-fidelity result geometry uses `DeckTileSearchVisualization` / `DeckTileSearchResultLayerVisualization` and the same deck render queue as normal map tiles. Low-fidelity pins remain in the search service cluster overlay.
 
 ## Feature and SourceData Layer Selection
 

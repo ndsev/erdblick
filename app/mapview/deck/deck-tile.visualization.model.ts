@@ -294,10 +294,6 @@ const DECK_ARROW_ICON_MAPPING = {
 
 type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
 type DeckRuleFidelityEnum = ErdblickCore_["RuleFidelity"];
-type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
-    renderResult(): DeckVisualizationBufferResult;
-    runtimeStyleIssues?(): StyleValidationIssue[];
-};
 
 /** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
 /** Resolves the wasm visualization constructor while keeping the call sites strongly typed. */
@@ -1946,11 +1942,8 @@ export class DeckTileVisualization implements ITileVisualization {
 
     /** Reads the binary render result from the wasm visualization wrapper. */
     private readRenderResultFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
-        const deckVisuWithResult = deckVisu as DeckFeatureLayerVisualizationWithRenderResult;
-        const renderResult = deckVisuWithResult.renderResult();
-        const styleIssues = typeof deckVisuWithResult.runtimeStyleIssues === "function"
-            ? deckVisuWithResult.runtimeStyleIssues() ?? []
-            : [];
+        const renderResult = deckVisu.renderResult() as DeckVisualizationBufferResult;
+        const styleIssues = (deckVisu.runtimeStyleIssues() as StyleValidationIssue[]) ?? [];
         return {
             ...renderResult,
             styleIssues

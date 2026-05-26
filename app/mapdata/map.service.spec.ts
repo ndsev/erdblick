@@ -778,6 +778,103 @@ describe('MapDataService', () => {
         await selectionTilePromise;
     });
 
+    it('keeps search refresh stable while auto-update requests only incomplete visible tiles', () => {
+        const {service} = createMapDataService();
+        const searchRequest = {
+            searchId: 'search-1',
+            query: 'typeId == "Road"',
+            scope: 'feature',
+            autoUpdate: true,
+            updateSerial: 0,
+            generationSerial: 0,
+            paused: false,
+            showResultsOnMap: true,
+            pinColor: '#ea4336',
+            searchStyleRules: [],
+            withFields: []
+        };
+        const visibleTiles = (tileIds: number[]) => new Map([
+            [JSON.stringify(['m1', 'layerA']), {
+                mapId: 'm1',
+                layerId: 'layerA',
+                tileIds: new Set(tileIds),
+                priorityTileIds: new Set<number>()
+            }]
+        ]);
+
+        service.setFeatureSearchRequests([searchRequest as any]);
+        const first = (service as any).buildFeatureSearchTileRequests(visibleTiles([65537, 131073]));
+
+        expect(first).toHaveLength(1);
+        expect(first[0]).toMatchObject({
+            searchId: 'search-1',
+            refresh: 1,
+            tileIds: [65537, 131073]
+        });
+
+        (service as any).markFeatureSearchTileCompleted('search-1', 1, makeTileKey(65537));
+        const second = (service as any).buildFeatureSearchTileRequests(visibleTiles([65537, 131073, 196609]));
+
+        expect(second).toHaveLength(1);
+        expect(second[0]).toMatchObject({
+            searchId: 'search-1',
+            refresh: 1,
+            tileIds: [131073, 196609]
+        });
+    });
+
+    it('keeps non-auto search area frozen until the explicit update serial changes', () => {
+        const {service} = createMapDataService();
+        const evictedSourceTileKeys: string[] = [];
+        const subscription = service.searchResultTileEvicted.subscribe(payload => {
+            evictedSourceTileKeys.push(payload.sourceTileKey);
+        });
+        const baseSearchRequest = {
+            searchId: 'search-1',
+            query: 'typeId == "Road"',
+            scope: 'feature',
+            autoUpdate: false,
+            updateSerial: 0,
+            generationSerial: 0,
+            paused: false,
+            showResultsOnMap: true,
+            pinColor: '#ea4336',
+            searchStyleRules: [],
+            withFields: []
+        };
+        const visibleTiles = (tileIds: number[]) => new Map([
+            [JSON.stringify(['m1', 'layerA']), {
+                mapId: 'm1',
+                layerId: 'layerA',
+                tileIds: new Set(tileIds),
+                priorityTileIds: new Set<number>()
+            }]
+        ]);
+
+        service.setFeatureSearchRequests([baseSearchRequest as any]);
+        const first = (service as any).buildFeatureSearchTileRequests(visibleTiles([1]));
+        expect(first[0].tileIds).toEqual([1]);
+
+        (service as any).markFeatureSearchTileCompleted('search-1', 1, makeTileKey(1));
+        const frozen = (service as any).buildFeatureSearchTileRequests(visibleTiles([2]));
+        expect(frozen).toEqual([]);
+        expect(evictedSourceTileKeys).toEqual([]);
+
+        service.setFeatureSearchRequests([{
+            ...baseSearchRequest,
+            updateSerial: 1
+        } as any]);
+        const updated = (service as any).buildFeatureSearchTileRequests(visibleTiles([2]));
+
+        expect(updated).toHaveLength(1);
+        expect(updated[0]).toMatchObject({
+            refresh: 1,
+            tileIds: [2]
+        });
+        expect(evictedSourceTileKeys).toEqual([makeTileKey(1)]);
+        subscription.unsubscribe();
+    });
+
     it('restores feature panels immediately from placeholder tiles while selection data is still loading', async () => {
         const {service, stateService} = createMapDataService();
         await service.initialize();

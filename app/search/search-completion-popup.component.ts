@@ -1,7 +1,7 @@
 import {Component, EventEmitter, Input, Output} from "@angular/core";
 import {NgClass} from "@angular/common";
 import {ProgressSpinnerModule} from "primeng/progressspinner";
-import {CompletionCandidate} from "./search.worker";
+import {CompletionCandidate} from "./search.model";
 
 @Component({
     selector: "search-completion-popup",

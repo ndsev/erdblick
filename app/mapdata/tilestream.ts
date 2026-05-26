@@ -15,8 +15,10 @@ export const MAP_TILE_STREAM_TYPE_FEATURES = 2;
 export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
+export const MAP_TILE_STREAM_TYPE_SEARCH_RESULTS = 7;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
+export const MAP_TILE_STREAM_SEARCH_STATUS_TYPE = "mapget.search.status";
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 
@@ -35,6 +37,22 @@ export interface MapTileStreamStatusPayload {
     allDone: boolean;
     requests: MapTileStreamStatusRequest[];
     message?: string;
+}
+
+export interface MapTileStreamSearchStatusPayload {
+    type: typeof MAP_TILE_STREAM_SEARCH_STATUS_TYPE;
+    searchId: string;
+    refresh?: number;
+    requestKey?: string;
+    mapId?: string;
+    layerId?: string;
+    state: string;
+    tilesQueued?: number;
+    tilesLoaded?: number;
+    tilesSearched?: number;
+    matches?: number;
+    chunksEmitted?: number;
+    error?: string;
 }
 export enum TileLoadState {
     LoadingQueued = 0,
@@ -143,8 +161,10 @@ export class MapTileStreamClient {
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
     onSourceData: ((payload: Uint8Array) => void) | null = null;
+    onSearchResults: ((payload: Uint8Array) => void) | null = null;
     onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
+    onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
@@ -165,6 +185,12 @@ export class MapTileStreamClient {
         return this;
     }
 
+    /** Registers the callback that receives search-result payload frames without the transport header. */
+    withSearchResultsCallback(callback: (payload: Uint8Array) => void) {
+        this.onSearchResults = callback;
+        return this;
+    }
+
     /** Registers the callback that receives field-dictionary update frames. */
     withFieldsCallback(callback: (frame: Uint8Array) => void) {
         this.onFields = callback;
@@ -174,6 +200,12 @@ export class MapTileStreamClient {
     /** Registers the callback that receives parsed `/tiles` status payloads. */
     withStatusCallback(callback: (status: MapTileStreamStatusPayload) => void) {
         this.onStatus = callback;
+        return this;
+    }
+
+    /** Registers the callback that receives parsed server-side search status payloads. */
+    withSearchStatusCallback(callback: (status: MapTileStreamSearchStatusPayload) => void) {
+        this.onSearchStatus = callback;
         return this;
     }
 
@@ -711,6 +743,12 @@ export class MapTileStreamClient {
                     if (!this.matchesCurrentRequest(payload.requestId)) {
                         return;
                     }
+                    if (payload.type === MAP_TILE_STREAM_SEARCH_STATUS_TYPE) {
+                        if (this.onSearchStatus) {
+                            this.onSearchStatus(payload as unknown as MapTileStreamSearchStatusPayload);
+                        }
+                        return;
+                    }
                     if (this.onStatus) {
                         this.onStatus(payload);
                     }
@@ -769,6 +807,13 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
                 if (this.onSourceData) {
                     this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
+                }
+                return;
+            }
+
+            if (type === MAP_TILE_STREAM_TYPE_SEARCH_RESULTS) {
+                if (this.onSearchResults) {
+                    this.onSearchResults(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
                 return;
             }

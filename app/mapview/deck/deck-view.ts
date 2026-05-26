@@ -105,6 +105,7 @@ interface TileGridLevelExtent {
 /** Metadata deck pick layers expose so `pickFeature()` can resolve addresses back to feature ids. */
 interface DeckPickLayerProps {
     tileKey?: string;
+    searchResultFeatureIds?: string[];
     featureAddresses?: ArrayLike<number | null>;
     featureAddressesByPath?: ArrayLike<number | null>;
 }
@@ -509,8 +510,20 @@ export abstract class DeckMapView implements IRenderView {
             }
             return this.mapService.resolveTileFeatureIdByAddress(tileKey, value as number);
         };
+        const resolveSearchResultAddress = (
+            tileKey: string | undefined,
+            resultFeatureIds: string[] | undefined,
+            value: unknown
+        ): TileFeatureId | null => {
+            if (!tileKey || !resultFeatureIds || !Number.isInteger(value)) {
+                return null;
+            }
+            const featureId = resultFeatureIds[value as number];
+            return featureId ? {mapTileKey: tileKey, featureId} : null;
+        };
 
-        const objectTileKey = (picked.layer?.props as DeckPickLayerProps | undefined)?.tileKey;
+        const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
+        const objectTileKey = layerProps?.tileKey;
         const pickedObject = picked.object;
         const objectFeatureTileKeys = Array.isArray(pickedObject?.featureTileKeys)
             ? pickedObject.featureTileKeys as unknown[]
@@ -527,20 +540,43 @@ export abstract class DeckMapView implements IRenderView {
                     })
                     .filter((value): value is TileFeatureId => value !== null);
             }
+            const searchResult = resolveSearchResultAddress(
+                objectTileKey,
+                layerProps?.searchResultFeatureIds,
+                objectFeatureAddresses
+            );
+            if (searchResult) {
+                return [searchResult];
+            }
             const resolved = resolveFeatureAddress(objectTileKey, objectFeatureAddresses);
             return resolved ? [resolved] : [];
         }
 
         const pickedIndex = Number(picked.index);
-        const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
         if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
             const featureAddress = readFeatureAddress(layerProps?.featureAddresses, pickedIndex);
             if (featureAddress !== null) {
+                const searchResult = resolveSearchResultAddress(
+                    layerProps?.tileKey,
+                    layerProps?.searchResultFeatureIds,
+                    featureAddress
+                );
+                if (searchResult) {
+                    return [searchResult];
+                }
                 const resolved = resolveFeatureAddress(layerProps?.tileKey, featureAddress);
                 return resolved ? [resolved] : [];
             }
             const featureAddressByPath = readFeatureAddress(layerProps?.featureAddressesByPath, pickedIndex);
             if (featureAddressByPath !== null) {
+                const searchResult = resolveSearchResultAddress(
+                    layerProps?.tileKey,
+                    layerProps?.searchResultFeatureIds,
+                    featureAddressByPath
+                );
+                if (searchResult) {
+                    return [searchResult];
+                }
                 const resolved = resolveFeatureAddress(layerProps?.tileKey, featureAddressByPath);
                 return resolved ? [resolved] : [];
             }
@@ -1131,6 +1167,7 @@ export abstract class DeckMapView implements IRenderView {
             this.updateViewport();
             this.updateBackgroundLayer();
             this.scheduleTileGridOverlayUpdate();
+            this.scheduleSearchResultsOverlayUpdate();
         }
     }
 
@@ -1455,7 +1492,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
-    /** Rebuilds the clustered search-result overlay when its inputs changed. */
+    /** Rebuilds the low-fidelity search-result pin overlay. */
     private updateSearchResultsOverlay(): void {
         const searchLayers = this.featureSearchService.getSearchResultLayers();
         const signature = searchLayers
@@ -1470,31 +1507,47 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         this.lastSearchResultsSignature = signature;
-        const nextKeys = new Set(searchLayers.map(layer => this.searchResultLayerKey(layer.id)));
+
+        const nextKeys = new Set<string>();
+        for (const searchLayer of searchLayers) {
+            if (searchLayer.points.length) {
+                nextKeys.add(this.searchResultLayerKey(searchLayer.id, "cluster"));
+            }
+        }
         for (const layerKey of this.searchResultLayerKeys) {
             if (!nextKeys.has(layerKey)) {
                 this.layerRegistry.remove(layerKey);
             }
         }
         this.searchResultLayerKeys = nextKeys;
+
         for (const searchLayer of searchLayers) {
-            const layerKey = this.searchResultLayerKey(searchLayer.id);
-            const layer = new SearchResultClusterLayer({
-                id: layerKey,
-                data: searchLayer.points as SearchResultClusterPoint[],
-                pickable: false,
-                sizeScale: 40,
-                getPosition: (point: SearchResultClusterPoint) => point.coordinates,
-                iconAtlas: searchLayer.iconAtlasUrl,
-                iconMapping: searchLayer.iconMappingUrl
-            });
-            this.layerRegistry.upsert(layerKey, layer, 650);
+            const lowFiPoints = searchLayer.points
+                .filter(point => !this.mapService.prefersHighFidelityForTile(this._viewIndex, point.tileId));
+
+            const clusterLayerKey = this.searchResultLayerKey(searchLayer.id, "cluster");
+            if (lowFiPoints.length) {
+                this.layerRegistry.upsert(
+                    clusterLayerKey,
+                    new SearchResultClusterLayer({
+                        id: clusterLayerKey,
+                        data: lowFiPoints as SearchResultClusterPoint[],
+                        pickable: false,
+                        sizeScale: 40,
+                        getPosition: (point: SearchResultClusterPoint) => point.coordinates,
+                        iconAtlas: searchLayer.iconAtlasUrl,
+                        iconMapping: searchLayer.iconMappingUrl
+                    }),
+                    650);
+            } else {
+                this.layerRegistry.remove(clusterLayerKey);
+            }
         }
     }
 
     /** Returns a stable deck-layer key for one feature-search session. */
-    private searchResultLayerKey(searchId: string): string {
-        return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}`;
+    private searchResultLayerKey(searchId: string, kind: "cluster"): string {
+        return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}/${kind}`;
     }
 
     /** Removes every feature-search result layer from this deck view. */
