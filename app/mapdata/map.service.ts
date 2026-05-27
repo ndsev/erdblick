@@ -36,9 +36,20 @@ import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map
 import {ViewVisualizationState} from "../mapview/view.visualization.model";
 import {Cartesian3} from "../integrations/geo";
 import {deepEquals} from "../shared/app-state";
-import {IRenderSceneHandle, ITileVisualization, RenderRectangle} from "../mapview/render-view.model";
-import type {FeatureSearchScope} from "../shared/feature-search-state";
-import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
+import {
+    IRenderSceneHandle,
+    ITileVisualization,
+    RenderRectangle,
+    type TileVisualizationTile
+} from "../mapview/render-view.model";
+import {SearchResultTile} from "./search-result-tile.model";
+import {
+    normalizeFeatureSearchRenderStrategy,
+    type FeatureSearchRenderStrategy,
+    type FeatureSearchScope,
+    type FeatureSearchStyleRule
+} from "../shared/feature-search-state";
+import {tileGridVisibleCellCount} from "../mapview/tile-grid-visibility";
 
 interface SelectionTileRequest {
     remoteRequest: {
@@ -114,6 +125,7 @@ export interface FeatureSearchDataPlaneRequest {
     showResultsOnMap: boolean;
     pinColor: string;
     searchStyleRules: FeatureSearchStyleRule[];
+    renderStrategy: FeatureSearchRenderStrategy;
     withFields: string[];
 }
 
@@ -193,8 +205,7 @@ interface SearchResultRenderTile {
     sourceMapId: string;
     sourceLayerId: string;
     sourceTileId: bigint;
-    layerBlob: Uint8Array;
-    tile: FeatureTile;
+    tile: SearchResultTile;
 }
 
 interface SearchResultStyleSpec {
@@ -330,6 +341,7 @@ export class MapDataService {
                 showResultsOnMap: request.showResultsOnMap !== false,
                 pinColor: (request.pinColor || "").trim(),
                 searchStyleRules: [...(request.searchStyleRules ?? [])],
+                renderStrategy: normalizeFeatureSearchRenderStrategy(request.renderStrategy),
                 withFields: Array.from(new Set((request.withFields ?? []).filter(Boolean))).sort()
             }))
             .sort((lhs, rhs) => lhs.searchId.localeCompare(rhs.searchId));
@@ -711,6 +723,33 @@ export class MapDataService {
         return this.viewVisualizationState[viewIndex]?.getTileRenderPolicy(tileId).targetFidelity === "high";
     }
 
+    /** Returns whether search-result geometry should be rendered for one visible source tile. */
+    public prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: bigint): boolean {
+        const request = this.activeFeatureSearchRequests.get(searchId);
+        if (!request?.showResultsOnMap || !request.renderStrategy.showHighFiGeometry) {
+            return false;
+        }
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState) {
+            return false;
+        }
+        return this.visibleSearchGridCellCountForLevel(viewIndex, tileId)
+            <= request.renderStrategy.highFidelityMaxVisibleTiles;
+    }
+
+    /**
+     * Counts actual visible grid cells at the tile's level for search-specific fidelity decisions.
+     * This deliberately does not use `visibleTileIdsPerLevel`, which is capped by the tile load limit.
+     */
+    private visibleSearchGridCellCountForLevel(viewIndex: number, tileId: bigint): number {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState) {
+            return Number.MAX_SAFE_INTEGER;
+        }
+        const level = Number(coreLib.getTileLevel(tileId));
+        return tileGridVisibleCellCount(level, viewState.viewport, this.maps.getViewTileGridMode(viewIndex));
+    }
+
     /** Returns whether a feature tile id is currently inside one view's visible tile set and layer state. */
     public showsFeatureTileInView(viewIndex: number, mapId: string, layerId: string, tileId: bigint): boolean {
         const viewState = this.viewVisualizationState[viewIndex];
@@ -719,6 +758,12 @@ export class MapDataService {
         }
         return this.maps.getMapLayerVisibility(viewIndex, mapId, layerId)
             && coreLib.getTileLevel(tileId) === this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+    }
+
+    /** Returns whether a search-result source tile is visible in one view and layer context. */
+    private viewShowsSearchResultTile(viewIndex: number, tile: SearchResultTile): boolean {
+        return !tile.disposed
+            && this.showsFeatureTileInView(viewIndex, tile.sourceMapId, tile.sourceLayerId, tile.sourceTileId);
     }
 
     /** Returns schema-backed attribute contexts matching a search query. */
@@ -951,15 +996,31 @@ export class MapDataService {
         if (viewState.getVisualization(visualization.styleId, visualization.tile.mapTileKey) !== visualization) {
             return false;
         }
-        if (visualization.tile.disposed || !this.viewShowsFeatureTile(viewIndex, visualization.tile)) {
-            return false;
-        }
         const style = this.styleService.styles.get(visualization.styleId);
         const searchRequest = this.searchRequestForVisualizationStyle(visualization.styleId);
-        if (!searchRequest && visualization.styleId !== "_builtin" && (!style || !style.visible)) {
+        if (searchRequest) {
+            if (!(visualization instanceof DeckTileSearchVisualization)) {
+                return false;
+            }
+            if (!this.searchResultRenderTilesByKey.has(
+                this.searchResultRenderTileKey(searchRequest.searchId, visualization.tile.sourceTileKey)
+            )) {
+                return false;
+            }
+            if (!searchRequest.showResultsOnMap || !this.viewShowsSearchResultTile(viewIndex, visualization.tile)) {
+                return false;
+            }
+            visualization.prefersHighFidelity = this.prefersHighFidelityForSearchResultTile(
+                viewIndex,
+                searchRequest.searchId,
+                visualization.tile.sourceTileId
+            );
+            return visualization.isDirty();
+        }
+        if (visualization.tile.disposed || !this.viewShowsFeatureTile(viewIndex, visualization.tile as FeatureTile)) {
             return false;
         }
-        if (searchRequest && (!searchRequest.showResultsOnMap || !visualization.prefersHighFidelity)) {
+        if (!searchRequest && visualization.styleId !== "_builtin" && (!style || !style.visible)) {
             return false;
         }
         return visualization.isDirty();
@@ -1364,15 +1425,24 @@ export class MapDataService {
             return true;
         }
 
-        const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
-        const tile = this.searchResultRenderTilesByKey.get(key)?.tile ?? new FeatureTile(this.tileLayerParser, null, false, {
-            mapTileKey: sourceTileKey,
+        const update = {
+            refresh,
             nodeId,
-            mapName: sourceMapId,
-            layerName: sourceLayerId,
-            tileId: sourceTileId
-        });
-        tile.nodeId = nodeId || tile.nodeId;
+            layerBlob
+        };
+        const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
+        const tile = this.searchResultRenderTilesByKey.get(key)?.tile ?? new SearchResultTile(
+            this.tileLayerParser,
+            searchId,
+            sourceTileKey,
+            sourceMapId,
+            sourceLayerId,
+            sourceTileId,
+            update
+        );
+        if (this.searchResultRenderTilesByKey.has(key)) {
+            tile.update(update);
+        }
         tile.setRenderOrder(this.searchResultTileRenderOrder(sourceTileId));
         this.searchResultRenderTilesByKey.set(key, {
             searchId,
@@ -1381,10 +1451,9 @@ export class MapDataService {
             sourceMapId,
             sourceLayerId,
             sourceTileId,
-            layerBlob,
             tile
         });
-        this.updateVisualizations();
+        this.updateSearchResultVisualizationsForTile(tile);
         return true;
     }
 
@@ -1576,7 +1645,7 @@ export class MapDataService {
     }
 
     /** Returns the current fidelity policy that a view wants for a given tile. */
-    private tileRenderPolicyForView(viewIndex: number, tile: FeatureTile): {
+    private tileRenderPolicyForView(viewIndex: number, tile: TileVisualizationTile): {
         prefersHighFidelity: boolean;
         maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     } {
@@ -1813,6 +1882,7 @@ export class MapDataService {
             this.dataSourceInfoJson = jsonString;
             this.tileStream!.setDataSourceInfoJson(jsonString);
             FeatureTile.clearDataSourceInfoBlobCache();
+            SearchResultTile.clearDataSourceInfoBlobCache();
             this.clearSearchSchemaMetadataCaches();
         } catch (err) {
             console.error("Failed to load data source info.", err);
@@ -1884,23 +1954,41 @@ export class MapDataService {
                 const removals: string[] = [];
                 for (const tileVisu of state.getVisualizations(styleId)) {
                     if (searchRequest) {
-                        this.applyTileRenderPolicyToVisualization(viewIndex, tileVisu);
-                        const renderTileKey = this.searchResultRenderTileKey(searchRequest.searchId, tileVisu.tile.mapTileKey);
-                        if (!this.searchResultRenderTilesByKey.has(renderTileKey)
-                            || !isVisibleForView(tileVisu.tile)
-                            || !styleEnabled
-                            || !tileVisu.prefersHighFidelity) {
+                        if (!(tileVisu instanceof DeckTileSearchVisualization)) {
                             this.tileVisualizationDestructionTopic.next(tileVisu);
                             removals.push(tileVisu.tile.mapTileKey);
                             continue;
                         }
+                        const highFidelityActive = this.prefersHighFidelityForSearchResultTile(
+                            viewIndex,
+                            searchRequest.searchId,
+                            tileVisu.tile.sourceTileId
+                        );
+                        const renderTileKey = this.searchResultRenderTileKey(
+                            searchRequest.searchId,
+                            tileVisu.tile.sourceTileKey
+                        );
+                        if (!this.searchResultRenderTilesByKey.has(renderTileKey)
+                            || !this.viewShowsSearchResultTile(viewIndex, tileVisu.tile)
+                            || !styleEnabled) {
+                            this.tileVisualizationDestructionTopic.next(tileVisu);
+                            removals.push(tileVisu.tile.mapTileKey);
+                            continue;
+                        }
+                        const renderPolicy = this.tileRenderPolicyForView(viewIndex, tileVisu.tile);
+                        tileVisu.highFidelityStage = this.getLayerHighFidelityStage(
+                            tileVisu.tile.mapName,
+                            tileVisu.tile.layerName
+                        );
+                        tileVisu.prefersHighFidelity = highFidelityActive;
+                        tileVisu.maxLowFiLod = renderPolicy.maxLowFiLod;
                         if (tileVisu.isDirty()) {
                             tileVisu.updateStatus(true);
                             this.queueVisualization(state, tileVisu);
                         }
                         continue;
                     }
-                    if (!isVisibleForView(tileVisu.tile)) {
+                    if (!isVisibleForView(tileVisu.tile as FeatureTile)) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
                         removals.push(tileVisu.tile.mapTileKey);
                         continue;
@@ -2028,9 +2116,11 @@ export class MapDataService {
     /** Removes one cached search-result tile and any queued/rendered visualizations for it. */
     private removeSearchResultRenderTile(searchId: string, sourceTileKey: string): void {
         const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
-        if (!this.searchResultRenderTilesByKey.delete(key)) {
+        const renderTile = this.searchResultRenderTilesByKey.get(key);
+        if (!renderTile || !this.searchResultRenderTilesByKey.delete(key)) {
             return;
         }
+        renderTile.tile.dispose();
         const styleId = this.searchResultStyleId(searchId);
         for (const state of this.viewVisualizationState) {
             for (const visualization of state.removeVisualizations(styleId, sourceTileKey)) {
@@ -2100,15 +2190,17 @@ export class MapDataService {
             if (!request?.showResultsOnMap) {
                 continue;
             }
-            if (!this.viewShowsFeatureTile(viewIndex, renderTile.tile)) {
+            if (!this.viewShowsSearchResultTile(viewIndex, renderTile.tile)) {
                 continue;
             }
 
             renderTile.tile.setRenderOrder(state.getTileOrder(renderTile.sourceTileId));
             const renderPolicy = this.tileRenderPolicyForView(viewIndex, renderTile.tile);
-            if (!renderPolicy.prefersHighFidelity) {
-                continue;
-            }
+            const highFidelityActive = this.prefersHighFidelityForSearchResultTile(
+                viewIndex,
+                renderTile.searchId,
+                renderTile.sourceTileId
+            );
 
             const styleId = this.searchResultStyleId(renderTile.searchId);
             const highFidelityStage = this.getLayerHighFidelityStage(
@@ -2119,13 +2211,12 @@ export class MapDataService {
             const styleOrder = this.searchResultStyleOrder(renderTile.searchId);
             const existing = state.getVisualization(styleId, renderTile.sourceTileKey);
             if (existing instanceof DeckTileSearchVisualization) {
-                existing.updateSearchResultLayer(
-                    renderTile.layerBlob,
+                existing.updateSearchResultStyle(
                     styleSpecJson,
                     styleOrder
                 );
                 existing.highFidelityStage = highFidelityStage;
-                existing.prefersHighFidelity = true;
+                existing.prefersHighFidelity = highFidelityActive;
                 existing.maxLowFiLod = renderPolicy.maxLowFiLod;
                 if (existing.isDirty()) {
                     existing.updateStatus(true);
@@ -2139,12 +2230,15 @@ export class MapDataService {
                 state.removeVisualizations(styleId, renderTile.sourceTileKey).forEach(_ => _);
             }
 
+            if (!highFidelityActive) {
+                continue;
+            }
+
             const visualization = new DeckTileSearchVisualization(
                 viewIndex,
                 styleId,
                 renderTile.tile,
                 this.tileLayerParser,
-                renderTile.layerBlob,
                 styleSpecJson,
                 highFidelityStage,
                 true,
@@ -2152,6 +2246,76 @@ export class MapDataService {
                 styleOrder
             );
             state.putVisualization(styleId, renderTile.sourceTileKey, visualization);
+            visualization.updateStatus(true);
+            this.queueVisualization(state, visualization);
+        }
+    }
+
+    /** Updates only the visualizations affected by one streamed search-result tile. */
+    private updateSearchResultVisualizationsForTile(tile: SearchResultTile): void {
+        const request = this.activeFeatureSearchRequests.get(tile.searchId);
+        if (!request?.showResultsOnMap) {
+            return;
+        }
+        const styleId = this.searchResultStyleId(tile.searchId);
+        const highFidelityStage = this.getLayerHighFidelityStage(tile.sourceMapId, tile.sourceLayerId);
+        const styleSpecJson = this.searchResultStyleSpec(request);
+        const styleOrder = this.searchResultStyleOrder(tile.searchId);
+
+        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+            const state = this.viewVisualizationState[viewIndex];
+            const existing = state.getVisualization(styleId, tile.sourceTileKey);
+            if (!this.viewShowsSearchResultTile(viewIndex, tile)) {
+                if (existing) {
+                    this.tileVisualizationDestructionTopic.next(existing);
+                    state.removeVisualizations(styleId, tile.sourceTileKey).forEach(_ => _);
+                    state.visualizationQueue.retain(visualization =>
+                        visualization.styleId !== styleId || visualization.tile.mapTileKey !== tile.sourceTileKey);
+                }
+                continue;
+            }
+
+            tile.setRenderOrder(state.getTileOrder(tile.sourceTileId));
+            const renderPolicy = this.tileRenderPolicyForView(viewIndex, tile);
+            const highFidelityActive = this.prefersHighFidelityForSearchResultTile(
+                viewIndex,
+                tile.searchId,
+                tile.sourceTileId
+            );
+
+            if (existing instanceof DeckTileSearchVisualization) {
+                existing.updateSearchResultStyle(styleSpecJson, styleOrder);
+                existing.highFidelityStage = highFidelityStage;
+                existing.prefersHighFidelity = highFidelityActive;
+                existing.maxLowFiLod = renderPolicy.maxLowFiLod;
+                if (existing.isDirty()) {
+                    existing.updateStatus(true);
+                    this.queueVisualization(state, existing);
+                }
+                continue;
+            }
+
+            if (existing) {
+                this.tileVisualizationDestructionTopic.next(existing);
+                state.removeVisualizations(styleId, tile.sourceTileKey).forEach(_ => _);
+            }
+
+            if (!highFidelityActive) {
+                continue;
+            }
+
+            const visualization = new DeckTileSearchVisualization(
+                viewIndex,
+                styleId,
+                tile,
+                this.tileLayerParser,
+                styleSpecJson,
+                highFidelityStage,
+                true,
+                renderPolicy.maxLowFiLod,
+                styleOrder
+            );
+            state.putVisualization(styleId, tile.sourceTileKey, visualization);
             visualization.updateStatus(true);
             this.queueVisualization(state, visualization);
         }
@@ -3100,6 +3264,9 @@ export class MapDataService {
             const viewState = this.viewVisualizationState[viewIndex];
             tileLayer.setRenderOrder(viewState.getTileOrder(tileLayer.tileId));
             for (const visu of viewState.getVisualizations(undefined, tileKey)) {
+                if (visu instanceof DeckTileSearchVisualization) {
+                    continue;
+                }
                 foundExistingVisualization = true;
                 const style = this.styleService.styles.get(visu.styleId);
                 if (style && !this.tileSatisfiesStyleStage(tileLayer, style.featureLayerStyle)) {

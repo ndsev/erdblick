@@ -5,6 +5,7 @@
 #include "erdblick/rule.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
+#include "mapget/model/searchresultlayer.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
@@ -544,6 +545,39 @@ rules:
     REQUIRE(pathWorld["dashArrays"].size() == 8);
     REQUIRE(pathWorld["dashArrays"][0].get<float>() == 1.0f);
     REQUIRE(pathWorld["dashArrays"][4].get<float>() == 7.0f);
+}
+
+TEST_CASE("DeckTileSearchResultLayerVisualization does not connect point-cloud validity hits", "[erdblick.renderer]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("SearchResultNode");
+    auto layer = std::make_shared<mapget::TileSearchResultLayer>(
+        mapget::TileId::fromWgs84(42.0, 11.0, 13),
+        strings->nodeId_,
+        "LineTestMap",
+        lineTestLayerInfo(),
+        strings);
+
+    auto const center = layer->tileId().center();
+    auto geometry = layer->newGeometryCollection();
+    auto line = geometry->newGeometry(mapget::GeomType::Line);
+    for (auto pointIndex = 0; pointIndex < 10; ++pointIndex) {
+        line->append({
+            center.x + (pointIndex % 2 == 0 ? -0.04 : 0.04),
+            center.y + static_cast<double>(pointIndex) * 0.0004,
+            0.0});
+    }
+
+    auto featureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
+    std::vector<simfil::ModelNode::Ptr> values;
+    layer->newSearchResult(featureId, geometry, values, 0U, 0U, 10U);
+
+    DeckTileSearchResultLayerVisualization visualization(0, "LineTestMap/LineLayer/0", R"json({})json");
+    visualization.addTileSearchResultLayer(TileSearchResultLayer(layer));
+    visualization.run();
+
+    auto result = nlohmann::json(visualization.renderResult());
+    REQUIRE(result["pathWorld"]["positions"].empty());
+    REQUIRE(result["pointWorld"]["positions"].size() == 30);
 }
 
 TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdblick.renderer]")

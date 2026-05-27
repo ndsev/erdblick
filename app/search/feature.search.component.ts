@@ -26,9 +26,11 @@ import {debounceTime, distinctUntilChanged, Subject, Subscription} from "rxjs";
 import {AppPanelComponent} from "../shared/app-panel.component";
 import getCaretCoordinates from "../shared/caret.util";
 import type {AppSurfaceHeaderAction} from "../shared/app-surface-header.component";
+import {DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY} from "../shared/feature-search-state";
 import type {
     FeatureSearchColorMode,
     FeatureSearchGeometryKind,
+    FeatureSearchRenderStrategy,
     FeatureSearchRuleFilter,
     FeatureSearchScope,
     FeatureSearchStyleRule
@@ -59,7 +61,10 @@ interface FeatureSearchResultTreeItem {
     layerId: string;
     featureId: string;
     featureType: string;
-    tileId: number;
+    tileId: string;
+    resultKey: string;
+    mapTileKey: string;
+    hoverFeatureId: string;
 }
 
 interface FeatureSearchStyleColorStop {
@@ -268,6 +273,14 @@ interface FeatureSearchStyleRuleDraft {
                                         [highlightOnSelect]="true"
                                         (onNodeSelect)="selectResult($event)"
                                         [emptyMessage]="resultsStatus">
+                                    <ng-template let-node pTemplate="default">
+                                        <span class="feature-search-tree-node-label"
+                                              [title]="node.label"
+                                              (mouseenter)="hoverResultNode(node)"
+                                              (mouseleave)="clearHoveredResultNode()">
+                                            {{ node.label }}
+                                        </span>
+                                    </ng-template>
                                 </p-tree>
                             </div>
                         </div>
@@ -276,6 +289,44 @@ interface FeatureSearchStyleRuleDraft {
                     <!-- Style -->
                     <p-tabpanel value="style">
                         <div class="feature-search-style-rules" data-testid="feature-search-style-rules">
+                            <section class="feature-search-render-strategy">
+                                <h3>Render Strategy</h3>
+                                <div class="feature-search-render-strategy-grid">
+                                    <label for="feature-search-show-lowfi-dots">Low-fi dots</label>
+                                    <p-toggleswitch [ngModel]="searchRenderStrategy().showLowFiDots"
+                                                    inputId="feature-search-show-lowfi-dots"
+                                                    (ngModelChange)="patchRenderStrategy('showLowFiDots', $event)">
+                                    </p-toggleswitch>
+
+                                    <label for="feature-search-show-bucket-labels">Bucket labels</label>
+                                    <p-toggleswitch [ngModel]="searchRenderStrategy().showBucketLabels"
+                                                    inputId="feature-search-show-bucket-labels"
+                                                    (ngModelChange)="patchRenderStrategy('showBucketLabels', $event)">
+                                    </p-toggleswitch>
+
+                                    <label for="feature-search-show-highfi-geometry">High-fi geometry</label>
+                                    <p-toggleswitch [ngModel]="searchRenderStrategy().showHighFiGeometry"
+                                                    inputId="feature-search-show-highfi-geometry"
+                                                    (ngModelChange)="patchRenderStrategy('showHighFiGeometry', $event)">
+                                    </p-toggleswitch>
+
+                                    <label for="feature-search-show-highfi-dots">Dots during high-fi</label>
+                                    <p-toggleswitch [ngModel]="searchRenderStrategy().showHighFiResultDots"
+                                                    inputId="feature-search-show-highfi-dots"
+                                                    (ngModelChange)="patchRenderStrategy('showHighFiResultDots', $event)">
+                                    </p-toggleswitch>
+
+                                    <label for="feature-search-highfi-threshold">High-fi tile limit</label>
+                                    <p-inputNumber class="feature-search-style-number"
+                                                   inputId="feature-search-highfi-threshold"
+                                                   [ngModel]="searchRenderStrategy().highFidelityMaxVisibleTiles"
+                                                   (ngModelChange)="patchRenderStrategy('highFidelityMaxVisibleTiles', $event)"
+                                                   [min]="1"
+                                                   [max]="65536"
+                                                   [showButtons]="true">
+                                    </p-inputNumber>
+                                </div>
+                            </section>
                             <div class="feature-search-style-actions feature-search-style-actions-top">
                                 <p-button icon="pi pi-plus"
                                           label="Add Rule"
@@ -850,6 +901,31 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }
         this.styleRulesStateSignature = signature;
         this.stateService.patchFeatureSearch(session.id, {searchStyleRules});
+    }
+
+    /** Returns the current search rendering controls with defaults for older persisted states. */
+    protected searchRenderStrategy(): FeatureSearchRenderStrategy {
+        return this.session?.definition.renderStrategy ?? DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY;
+    }
+
+    /** Persists one render-strategy control while preserving the other rendering choices. */
+    protected patchRenderStrategy<K extends keyof FeatureSearchRenderStrategy>(
+        key: K,
+        value: FeatureSearchRenderStrategy[K]
+    ): void {
+        const session = this.session;
+        if (!session) {
+            return;
+        }
+        const nextValue = key === "highFidelityMaxVisibleTiles"
+            ? this.clampNumber(value, 1, 65536, DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.highFidelityMaxVisibleTiles)
+            : !!value;
+        this.stateService.patchFeatureSearch(session.id, {
+            renderStrategy: {
+                ...this.searchRenderStrategy(),
+                [key]: nextValue
+            }
+        });
     }
 
     /** Rebuilds local editor drafts from the persisted search style rules. */
@@ -1572,6 +1648,23 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }
     }
 
+    /** Mirrors result-tree hover into the map hover highlighter, including attribute-validity suffixes. */
+    protected hoverResultNode(node: TreeNode): void {
+        const data = node.data as {mapTileKey?: string; hoverFeatureId?: string} | undefined;
+        if (!data?.mapTileKey || !data.hoverFeatureId) {
+            return;
+        }
+        this.mapService.setHoveredFeatures([{
+            mapTileKey: data.mapTileKey,
+            featureId: data.hoverFeatureId
+        }]);
+    }
+
+    /** Clears map hover state when leaving a result-tree row. */
+    protected clearHoveredResultNode(): void {
+        this.mapService.setHoveredFeatures([]);
+    }
+
     /**
      * Pauses or resumes server-side search while keeping already collected results visible.
      */
@@ -1711,16 +1804,24 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             layerId: result.layerId,
             featureId: result.featureId,
             featureType: featureIdParts[0] ?? "",
-            tileId: Number(featureIdParts[1] ?? 0)
+            tileId: result.sourceTileId.toString(),
+            resultKey: result.resultKey,
+            mapTileKey: result.mapTileKey,
+            hoverFeatureId: result.hoverFeatureId
         };
     }
 
     /** Creates one selectable result-tree leaf for a streamed result entry. */
     private resultLeafNode(item: FeatureSearchResultTreeItem, index: number, parentKey: string): TreeNode {
         return {
-            key: `${parentKey}/leaf:${index}:${item.featureId}`,
+            key: `${parentKey}/leaf:${index}:${item.resultKey}`,
             label: item.label,
-            data: {mapId: item.mapId, featureId: item.featureId},
+            data: {
+                mapId: item.mapId,
+                featureId: item.featureId,
+                mapTileKey: item.mapTileKey,
+                hoverFeatureId: item.hoverFeatureId
+            },
             leaf: true,
             selectable: true
         } as TreeNode;
@@ -1944,9 +2045,14 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             const acc = accessors[key];
             if (!acc) {
                 const leaves = items.map((it, idx) => ({
-                    key: `${parentKey}/leaf:${idx}:${it.featureId}`,
+                    key: `${parentKey}/leaf:${idx}:${it.resultKey}`,
                     label: it.label,
-                    data: { mapId: it.mapId, featureId: it.featureId },
+                    data: {
+                        mapId: it.mapId,
+                        featureId: it.featureId,
+                        mapTileKey: it.mapTileKey,
+                        hoverFeatureId: it.hoverFeatureId
+                    },
                     leaf: true,
                     selectable: true
                 } as TreeNode));

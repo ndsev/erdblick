@@ -2,7 +2,7 @@ import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {PathLayer, ScatterplotLayer, SolidPolygonLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {Matrix4} from "@math.gl/core";
-import {FeatureTile} from "../../mapdata/features.model";
+import {SearchResultTile} from "../../mapdata/search-result-tile.model";
 import {SceneMode} from "../../integrations/geo";
 import {coreLib, uint8ArrayToWasm} from "../../integrations/wasm";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
@@ -116,14 +116,13 @@ const DECK_NO_DEPTH_TEST_PARAMETERS = {
 export class DeckTileSearchVisualization implements ITileVisualization {
     readonly viewIndex: number;
     readonly styleId: string;
-    readonly tile: FeatureTile;
+    readonly tile: SearchResultTile;
     styleOrder: number;
     highFidelityStage: number;
     prefersHighFidelity: boolean;
     maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     showTileBorder = false;
 
-    private searchResultLayerBlob: Uint8Array;
     private readonly parser: TileLayerParser;
     private styleSpecJson: string;
     private renderQueued = false;
@@ -138,9 +137,8 @@ export class DeckTileSearchVisualization implements ITileVisualization {
     constructor(
         viewIndex: number,
         styleId: string,
-        tile: FeatureTile,
+        tile: SearchResultTile,
         parser: TileLayerParser,
-        searchResultLayerBlob: Uint8Array,
         styleSpecJson: string,
         highFidelityStage: number,
         prefersHighFidelity: boolean,
@@ -151,7 +149,6 @@ export class DeckTileSearchVisualization implements ITileVisualization {
         this.styleId = styleId;
         this.tile = tile;
         this.parser = parser;
-        this.searchResultLayerBlob = searchResultLayerBlob;
         this.styleSpecJson = styleSpecJson;
         this.highFidelityStage = highFidelityStage;
         this.prefersHighFidelity = prefersHighFidelity;
@@ -159,20 +156,26 @@ export class DeckTileSearchVisualization implements ITileVisualization {
         this.styleOrder = styleOrder;
     }
 
-    updateSearchResultLayer(
-        searchResultLayerBlob: Uint8Array,
+    updateSearchResultStyle(
         styleSpecJson: string,
         styleOrder: number
     ): void {
-        this.searchResultLayerBlob = searchResultLayerBlob;
         this.styleSpecJson = styleSpecJson;
         this.styleOrder = styleOrder;
     }
 
     async render(sceneHandle: IRenderSceneHandle): Promise<boolean> {
         const registry = this.resolveRegistry(sceneHandle);
-        if (this.deleted || !this.prefersHighFidelity) {
-            this.destroy(sceneHandle);
+        if (this.deleted) {
+            this.clearRenderedLayers(registry);
+            return false;
+        }
+        if (!this.prefersHighFidelity) {
+            this.clearRenderedLayers(registry);
+            this.rendered = true;
+            this.renderQueued = false;
+            this.lastSignature = this.renderSignature();
+            this.tileDataVersionAtLastRender = this.tile.dataVersion;
             return false;
         }
 
@@ -194,6 +197,11 @@ export class DeckTileSearchVisualization implements ITileVisualization {
     destroy(sceneHandle: IRenderSceneHandle): void {
         this.deleted = true;
         const registry = this.resolveRegistry(sceneHandle);
+        this.clearRenderedLayers(registry);
+    }
+
+    /** Removes all deck layer contributions without retiring the visualization object. */
+    private clearRenderedLayers(registry: DeckLayerRegistry): void {
         for (const key of this.surfaceLayerKeys) {
             registry.remove(key);
         }
@@ -211,22 +219,23 @@ export class DeckTileSearchVisualization implements ITileVisualization {
     }
 
     isDirty(): boolean {
-        return !this.rendered
-            || this.lastSignature !== this.renderSignature()
-            || this.tileDataVersionAtLastRender !== this.tile.dataVersion;
+        if (!this.rendered || this.lastSignature !== this.renderSignature()) {
+            return true;
+        }
+        return this.prefersHighFidelity && this.tileDataVersionAtLastRender !== this.tile.dataVersion;
     }
 
     renderRank(): number {
         const priorityBucket = this.hasPendingFidelitySwitch()
             ? RENDER_RANK_PRIORITY_SWITCH_ONLY
-            : ((!this.rendered && this.searchResultLayerBlob.length > 0)
+            : ((!this.rendered && this.tile.layerBlob.length > 0)
                 ? RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA
                 : RENDER_RANK_PRIORITY_DEFAULT);
         const rawRenderOrder = this.tile.renderOrder();
         const renderOrder = Number.isFinite(rawRenderOrder)
             ? Math.max(0, Math.min(Math.floor(rawRenderOrder), RENDER_RANK_RENDER_ORDER_MAX))
             : RENDER_RANK_RENDER_ORDER_MAX;
-        const hasDataRank = this.searchResultLayerBlob.length > 0 ? RENDER_RANK_HAS_DATA : RENDER_RANK_MISSING_DATA;
+        const hasDataRank = this.tile.layerBlob.length > 0 ? RENDER_RANK_HAS_DATA : RENDER_RANK_MISSING_DATA;
         return priorityBucket * RENDER_RANK_PRIORITY_STRIDE
             + renderOrder * RENDER_RANK_ORDER_STRIDE
             + hasDataRank;
@@ -275,7 +284,7 @@ export class DeckTileSearchVisualization implements ITileVisualization {
         const result = await deckRenderWorkerPool().renderSearchTile({
             viewIndex: this.viewIndex,
             tileKey: this.tile.mapTileKey,
-            searchResultLayerBlob: this.searchResultLayerBlob,
+            searchResultLayerBlob: this.tile.layerBlob,
             fieldDictBlob,
             dataSourceInfoBlob,
             nodeId: this.tile.nodeId,
@@ -291,7 +300,7 @@ export class DeckTileSearchVisualization implements ITileVisualization {
         try {
             searchLayer = uint8ArrayToWasm(
                 (data) => this.parser.readTileSearchResultLayer(data),
-                this.searchResultLayerBlob
+                this.tile.layerBlob
             ) as TileSearchResultLayer | null;
             if (!searchLayer) {
                 throw new Error("Failed to parse search-result layer.");

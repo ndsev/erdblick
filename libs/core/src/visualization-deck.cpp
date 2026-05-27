@@ -517,6 +517,7 @@ bool distanceScalesAt(
     return std::isfinite(unitsPerMeter) && std::isfinite(unitsPerMeter2);
 }
 
+/** Return all stored geometry points in model order. */
 std::vector<mapget::Point> geometryPoints(mapget::model_ptr<mapget::Geometry> const& geometry)
 {
     std::vector<mapget::Point> points;
@@ -530,6 +531,7 @@ std::vector<mapget::Point> geometryPoints(mapget::model_ptr<mapget::Geometry> co
     });
     return points;
 }
+
 }
 
 DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(

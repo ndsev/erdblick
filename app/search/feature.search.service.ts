@@ -11,7 +11,7 @@ import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.mod
 import {GeoMath} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
-import {FeatureSearchStateEntry} from "../shared/feature-search-state";
+import {FeatureSearchStateEntry, FeatureSearchRenderStrategy} from "../shared/feature-search-state";
 import {MapTileStreamSearchStatusPayload} from "../mapdata/tilestream";
 
 /**
@@ -22,12 +22,16 @@ export interface SearchResultPoint {
     mapId: string;
     layerId: string;
     tileId: bigint;
+    mapTileKey: string;
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
     sourceTileId: bigint;
     featureId: string;
+    resultIndex: number;
+    resultKey: string;
     featureKey: string;
+    hoverFeatureId: string;
 }
 
 export interface SearchResultPointBucket {
@@ -40,13 +44,17 @@ export interface SearchResultPointBucket {
 
 export interface SearchResultPinMarker {
     coordinates: [number, number];
+    pixelOffset?: [number, number];
     count: number;
     mapId: string;
     layerId: string;
     tileId: bigint;
     featureId: string;
+    resultKey: string;
     featureKey: string;
     featureKeys: string[];
+    resultKeys: string[];
+    showBucketLabel?: boolean;
 }
 
 export interface SearchResultPinMaterializationRequest {
@@ -59,6 +67,17 @@ export interface FeatureSearchResultEntry {
     mapId: string;
     layerId: string;
     featureId: string;
+    resultIndex: number;
+    resultKey: string;
+    mapTileKey: string;
+    sourceTileKey: string;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
+    hoverFeatureId: string;
+    attributeIndex?: number;
+    validityIndex?: number;
+    validityCount?: number;
 }
 
 export interface FeatureSearchSession {
@@ -76,7 +95,6 @@ export interface FeatureSearchSession {
     startTime: number;
     endTime: number;
     pointColor: string;
-    clusterIconAtlasUrl: string;
     timeElapsed: string;
     totalFeatureCount: number;
     searchResults: FeatureSearchResultEntry[];
@@ -108,6 +126,7 @@ interface SearchResultTileContribution {
     sourceLayerId: string;
     sourceTileId: bigint;
     resultCount: number;
+    resultFields: string[];
     results: FeatureSearchResultEntry[];
     traceResults: TraceResult[];
     diagnostics: Uint8Array | null;
@@ -117,8 +136,9 @@ interface SearchResultTileContribution {
 export interface FeatureSearchResultLayer {
     id: string;
     pointsVersion: number;
-    iconAtlasUrl: string;
-    iconMappingUrl: string;
+    pointColor: string;
+    pointColorRgba: [number, number, number, number];
+    renderStrategy: FeatureSearchRenderStrategy;
     points: SearchResultPoint[];
     pointBuckets: SearchResultPointBucket[];
     pinIndex: SearchResultPinIndex;
@@ -136,8 +156,6 @@ interface SearchResultPinNodeDelta {
     tileId: bigint;
     level: number;
     count: number;
-    lonSum: number;
-    latSum: number;
     samples: SearchResultPoint[];
 }
 
@@ -168,13 +186,7 @@ export class SearchResultPinIndex {
             return;
         }
 
-        const contribution: SearchResultPinContribution = {
-            maxLevel: 0,
-            deltasByLevel: new Map<number, Map<string, SearchResultPinNodeDelta>>()
-        };
-        for (const point of points) {
-            this.addPointToContribution(contribution, point);
-        }
+        const contribution = this.createContribution(points);
         this.contributionsBySourceTileKey.set(sourceTileKey, contribution);
     }
 
@@ -212,59 +224,45 @@ export class SearchResultPinIndex {
             .map(delta => this.markerFromDelta(delta))
             .sort((lhs, rhs) => {
                 if (lhs.tileId === rhs.tileId) {
-                    return lhs.featureKey.localeCompare(rhs.featureKey);
+                    return lhs.resultKey.localeCompare(rhs.resultKey);
                 }
                 return lhs.tileId < rhs.tileId ? -1 : 1;
             });
     }
 
-    /** Adds one point to every ancestor tile delta used for later view-level materialization. */
-    private addPointToContribution(contribution: SearchResultPinContribution, point: SearchResultPoint): void {
-        let tileId = point.sourceTileId;
+    /** Creates one source-tile contribution by counting results once per source-tile ancestor. */
+    private createContribution(points: readonly SearchResultPoint[]): SearchResultPinContribution {
+        const representative = points[0];
+        const samples = points.slice(0, SearchResultPinIndex.MAX_SAMPLE_FEATURES);
+        const contribution: SearchResultPinContribution = {
+            maxLevel: 0,
+            deltasByLevel: new Map<number, Map<string, SearchResultPinNodeDelta>>()
+        };
+        let tileId = representative.sourceTileId;
         let level = Number(coreLib.getTileLevel(tileId));
         contribution.maxLevel = Math.max(contribution.maxLevel, level);
 
         while (level >= 0) {
-            let deltasForLevel = contribution.deltasByLevel.get(level);
-            if (!deltasForLevel) {
-                deltasForLevel = new Map<string, SearchResultPinNodeDelta>();
-                contribution.deltasByLevel.set(level, deltasForLevel);
-            }
-
-            const nodeKey = `${point.sourceMapId}\n${point.sourceLayerId}\n${tileId.toString()}`;
-            let delta = deltasForLevel.get(nodeKey);
-            if (!delta) {
-                delta = {
-                    key: nodeKey,
-                    mapId: point.sourceMapId,
-                    layerId: point.sourceLayerId,
-                    tileId,
-                    level,
-                    count: 0,
-                    lonSum: 0,
-                    latSum: 0,
-                    samples: []
-                };
-                deltasForLevel.set(nodeKey, delta);
-            }
-            this.addPointToDelta(delta, point);
+            const deltasForLevel = new Map<string, SearchResultPinNodeDelta>();
+            const nodeKey = `${representative.sourceMapId}\n${tileId.toString()}`;
+            deltasForLevel.set(nodeKey, {
+                key: nodeKey,
+                mapId: representative.sourceMapId,
+                layerId: representative.sourceLayerId,
+                tileId,
+                level,
+                count: points.length,
+                samples
+            });
+            contribution.deltasByLevel.set(level, deltasForLevel);
             if (level === 0) {
                 break;
             }
             tileId = this.parentTileId(tileId, level);
             level -= 1;
         }
-    }
 
-    /** Accumulates point counts, average-position sums, and a bounded inspection sample. */
-    private addPointToDelta(delta: SearchResultPinNodeDelta, point: SearchResultPoint): void {
-        delta.count += 1;
-        delta.lonSum += point.coordinates[0];
-        delta.latSum += point.coordinates[1];
-        if (delta.samples.length < SearchResultPinIndex.MAX_SAMPLE_FEATURES) {
-            // Samples are intentionally bounded because materialized aggregate markers may cover many result features.
-            delta.samples.push(point);
-        }
+        return contribution;
     }
 
     /** Merges one pre-aggregated source-tile delta into the visible-view result set. */
@@ -282,8 +280,6 @@ export class SearchResultPinIndex {
         }
 
         existing.count += delta.count;
-        existing.lonSum += delta.lonSum;
-        existing.latSum += delta.latSum;
         for (const sample of delta.samples) {
             if (existing.samples.length >= SearchResultPinIndex.MAX_SAMPLE_FEATURES) {
                 break;
@@ -295,15 +291,19 @@ export class SearchResultPinIndex {
     /** Converts the internal aggregate delta into the flat marker object consumed by Deck. */
     private markerFromDelta(delta: SearchResultPinNodeDelta): SearchResultPinMarker {
         const representative = delta.samples[0];
+        const tilePosition = coreLib.getTilePosition(delta.tileId);
         return {
-            coordinates: [delta.lonSum / delta.count, delta.latSum / delta.count],
+            coordinates: [tilePosition.x, tilePosition.y],
             count: delta.count,
             mapId: representative.mapId,
             layerId: representative.layerId,
             tileId: delta.tileId,
             featureId: representative.featureId,
+            resultKey: representative.resultKey,
             featureKey: representative.featureKey,
-            featureKeys: delta.samples.map(sample => sample.featureKey)
+            featureKeys: delta.samples.map(sample => sample.featureKey),
+            resultKeys: delta.samples.map(sample => sample.resultKey),
+            showBucketLabel: true
         };
     }
 
@@ -323,8 +323,6 @@ export class SearchResultPinIndex {
  * Search execution is delegated to mapget; this service keeps server progress and UI-friendly result caches in sync.
  */
 export class FeatureSearchService {
-    private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
-    private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
     private static readonly LOCATION_MARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48"><path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="white"/></svg>`;
     private static readonly FLOATING_DIALOG_WIDTH_EM = 42;
     private static readonly FLOATING_DIALOG_HEIGHT_EM = 42;
@@ -359,8 +357,6 @@ export class FeatureSearchService {
 
     private readonly searchSessions: FeatureSearchSession[] = [];
     private searchResultLayersVersionValue = 0;
-    private tintedAtlasByColor = new Map<string, string>();
-    private baseAtlasImagePromise: Promise<HTMLImageElement> | null = null;
     private locationMarkerGraphicUrl: string | null = null;
     private pendingResultDataRebuildSessionIds = new Set<string>();
     private resultDataRebuildRaf: number | null = null;
@@ -448,13 +444,6 @@ export class FeatureSearchService {
     }
 
     /**
-     * Returns the static mapping JSON that pairs atlas sprites with numbered pin-marker states.
-     */
-    getSearchClusterIconMappingUrl(): string {
-        return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
-    }
-
-    /**
      * Returns the legacy single-marker icon used for explicit coordinate marking.
      */
     markerGraphics(): string {
@@ -472,8 +461,9 @@ export class FeatureSearchService {
             .map(session => ({
                 id: session.id,
                 pointsVersion: session.searchResultPointsVersion,
-                iconAtlasUrl: session.clusterIconAtlasUrl,
-                iconMappingUrl: FeatureSearchService.SEARCH_ICON_MAPPING_URL,
+                pointColor: session.pointColor,
+                pointColorRgba: this.parseSearchResultColor(session.pointColor),
+                renderStrategy: session.definition.renderStrategy,
                 points: this.getSessionSearchResultPoints(session),
                 pointBuckets: this.getSessionSearchResultPointBuckets(session),
                 pinIndex: session.searchResultPinIndex
@@ -540,6 +530,10 @@ export class FeatureSearchService {
             }
         }
         if (previous.showResultsOnMap !== definition.showResultsOnMap) {
+            this.bumpSearchResultLayersVersion();
+            this.progress.next(session);
+        }
+        if (JSON.stringify(previous.renderStrategy) !== JSON.stringify(definition.renderStrategy)) {
             this.bumpSearchResultLayersVersion();
             this.progress.next(session);
         }
@@ -815,7 +809,6 @@ export class FeatureSearchService {
             startTime: 0,
             endTime: 0,
             pointColor: this.normalizeHexColor(definition.pinColor),
-            clusterIconAtlasUrl: FeatureSearchService.SEARCH_ICON_ATLAS_URL,
             timeElapsed: this.formatTime(0),
             totalFeatureCount: 0,
             searchResults: [],
@@ -838,6 +831,9 @@ export class FeatureSearchService {
     /** Extracts server-side result-field expressions needed by search-result styling. */
     private withFieldsForSearch(definition: FeatureSearchStateEntry): string[] {
         const fields = new Set<string>();
+        if (this.isAttributeResultSearch(definition)) {
+            fields.add("$name");
+        }
         for (const rule of definition.searchStyleRules ?? []) {
             for (const filter of rule.filter ?? []) {
                 if (filter.field?.trim()) {
@@ -850,6 +846,17 @@ export class FeatureSearchService {
             }
         }
         return Array.from(fields).sort();
+    }
+
+    /** Returns whether a search definition currently targets attribute hits rather than whole features. */
+    private isAttributeResultSearch(definition: FeatureSearchStateEntry): boolean {
+        if (definition.scope === "attribute") {
+            return true;
+        }
+        if (definition.scope === "feature") {
+            return false;
+        }
+        return this.mapService.getAttributeScopeForQuery(definition.query).length > 0;
     }
 
     /** Synchronizes the UI/session search state into MapDataService's `/tiles` request data plane. */
@@ -865,6 +872,7 @@ export class FeatureSearchService {
             showResultsOnMap: session.definition.showResultsOnMap,
             pinColor: session.definition.pinColor,
             searchStyleRules: session.definition.searchStyleRules,
+            renderStrategy: session.definition.renderStrategy,
             withFields: this.withFieldsForSearch(session.definition)
         }));
         this.mapService.setFeatureSearchRequests(requests);
@@ -1058,8 +1066,12 @@ export class FeatureSearchService {
 
         const results: FeatureSearchResultEntry[] = [];
         const points: SearchResultPoint[] = [];
+        const resultFields = payload.resultFields ?? [];
         for (const entry of payload.entries) {
             const {mapId, layerId} = this.parseMapLayerIds(entry.mapTileKey);
+            const resultIndex = this.entryResultIndex(entry, results.length);
+            const resultKey = this.searchResultEntryKey(sourceTileKey, entry.mapTileKey, resultIndex);
+            const hoverFeatureId = this.searchResultHoverFeatureId(entry.featureId, entry);
             const point = this.makeSearchResultPoint(
                 sourceTileKey,
                 payload.sourceMapId,
@@ -1067,17 +1079,32 @@ export class FeatureSearchService {
                 payload.sourceTileId,
                 mapId,
                 layerId,
+                entry.mapTileKey,
                 entry.featureId,
+                resultIndex,
+                resultKey,
+                hoverFeatureId,
                 entry
             );
             if (point) {
                 points.push(point);
             }
             results.push({
-                label: `${entry.featureId}`,
+                label: this.searchResultEntryLabel(entry, resultFields, resultIndex),
                 mapId,
                 layerId,
-                featureId: entry.featureId
+                featureId: entry.featureId,
+                resultIndex,
+                resultKey,
+                mapTileKey: entry.mapTileKey,
+                sourceTileKey,
+                sourceMapId: payload.sourceMapId,
+                sourceLayerId: payload.sourceLayerId,
+                sourceTileId: payload.sourceTileId,
+                hoverFeatureId,
+                ...(this.hasFiniteIndex(entry.attributeIndex) ? {attributeIndex: Math.floor(entry.attributeIndex)} : {}),
+                ...(this.hasFiniteIndex(entry.validityIndex) ? {validityIndex: Math.floor(entry.validityIndex)} : {}),
+                ...(this.hasFiniteIndex(entry.validityCount) ? {validityCount: Math.floor(entry.validityCount)} : {})
             });
         }
 
@@ -1088,6 +1115,7 @@ export class FeatureSearchService {
             sourceLayerId: payload.sourceLayerId,
             sourceTileId: payload.sourceTileId,
             resultCount: payload.resultCount,
+            resultFields,
             results,
             traceResults,
             diagnostics: payload.diagnostics,
@@ -1195,6 +1223,18 @@ export class FeatureSearchService {
         return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
     }
 
+    /** Returns whether an optional backend index is usable in UI labels and hover feature ids. */
+    private hasFiniteIndex(value: unknown): value is number {
+        return Number.isFinite(Number(value));
+    }
+
+    /** Normalizes the backend result index, falling back to the streamed array position for older payloads. */
+    private entryResultIndex(entry: SearchResultTileEntry, fallback: number): number {
+        return this.hasFiniteIndex(entry.resultIndex)
+            ? Math.max(0, Math.floor(entry.resultIndex))
+            : fallback;
+    }
+
     /** Applies full-coverage progress snapshots from MapDataService without losing streamed result state. */
     private applyProgressSnapshot(
         session: FeatureSearchSession,
@@ -1229,8 +1269,8 @@ export class FeatureSearchService {
                 nextDiagnosticsBlobs.push(contribution.diagnostics);
             }
             for (const point of contribution.points) {
-                if (!nextPoints.has(point.featureKey)) {
-                    nextPoints.set(point.featureKey, point);
+                if (!nextPoints.has(point.resultKey)) {
+                    nextPoints.set(point.resultKey, point);
                 }
             }
         }
@@ -1289,8 +1329,8 @@ export class FeatureSearchService {
 
         let pointsChanged = false;
         for (const point of contribution.points) {
-            if (!session.searchResultPointsByFeatureKey.has(point.featureKey)) {
-                session.searchResultPointsByFeatureKey.set(point.featureKey, point);
+            if (!session.searchResultPointsByFeatureKey.has(point.resultKey)) {
+                session.searchResultPointsByFeatureKey.set(point.resultKey, point);
                 pointsChanged = true;
             }
         }
@@ -1370,29 +1410,12 @@ export class FeatureSearchService {
         this.searchResultLayersVersionValue += 1;
     }
 
-    /** Updates one session's configured marker color and lazily resolves its tinted atlas. */
+    /** Updates one session's configured marker color and refreshes dependent map overlays. */
     private updateSessionColor(session: FeatureSearchSession, color: string): void {
         const normalizedColor = this.normalizeHexColor(color);
         session.pointColor = normalizedColor;
-        this.ensureTintedClusterAtlas(normalizedColor)
-            .then(atlasUrl => {
-                const current = this.getInternalSession(session.id);
-                if (!current || current.pointColor !== normalizedColor) {
-                    return;
-                }
-                current.clusterIconAtlasUrl = atlasUrl;
-                this.bumpSearchResultLayersVersion();
-                this.progress.next(current);
-            })
-            .catch(() => {
-                const current = this.getInternalSession(session.id);
-                if (!current || current.pointColor !== normalizedColor) {
-                    return;
-                }
-                current.clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
-                this.bumpSearchResultLayersVersion();
-                this.progress.next(current);
-            });
+        this.bumpSearchResultLayersVersion();
+        this.progress.next(session);
     }
 
     /**
@@ -1423,6 +1446,12 @@ export class FeatureSearchService {
         ];
     }
 
+    /** Converts a normalized search color into the RGBA tuple consumed by Deck marker layers. */
+    private parseSearchResultColor(color: string): [number, number, number, number] {
+        const [r, g, b] = this.parseHexRgb(color);
+        return [r, g, b, 235];
+    }
+
     /**
      * Extracts map and layer ids from a tile key, falling back to a plain split if parsing fails.
      */
@@ -1436,6 +1465,81 @@ export class FeatureSearchService {
         }
     }
 
+    /** Builds the stable UI identity for one streamed search result, independent of its feature id. */
+    private searchResultEntryKey(sourceTileKey: string, mapTileKey: string, resultIndex: number): string {
+        return `${sourceTileKey}\n${mapTileKey}\n${resultIndex}`;
+    }
+
+    /** Builds the feature-id suffix consumed by native highlight code for attribute/validity hover. */
+    private searchResultHoverFeatureId(featureId: string, entry: SearchResultTileEntry): string {
+        let hoverFeatureId = featureId;
+        if (this.hasFiniteIndex(entry.attributeIndex)) {
+            hoverFeatureId += `:attribute#${Math.max(0, Math.floor(entry.attributeIndex))}`;
+        }
+        if (this.hasFiniteIndex(entry.validityIndex)) {
+            hoverFeatureId += `:validity#${Math.max(0, Math.floor(entry.validityIndex))}`;
+        }
+        return hoverFeatureId;
+    }
+
+    /** Creates a compact human-readable label that keeps multiple hits on the same feature distinguishable. */
+    private searchResultEntryLabel(
+        entry: SearchResultTileEntry,
+        resultFields: readonly string[],
+        resultIndex: number
+    ): string {
+        const attributeName = this.searchResultFieldValue(entry, resultFields, "$name");
+        const attributeSuffix = attributeName
+            || (this.hasFiniteIndex(entry.attributeIndex)
+                ? `attribute ${Math.max(0, Math.floor(entry.attributeIndex)) + 1}`
+                : "");
+        const validitySuffix = this.searchResultValidityLabel(entry);
+        const detail = [attributeSuffix, validitySuffix].filter(Boolean).join(" ");
+        if (detail) {
+            return `${entry.featureId} - ${detail}`;
+        }
+        return resultIndex > 0 ? `${entry.featureId} #${resultIndex + 1}` : entry.featureId;
+    }
+
+    /** Formats one optional validity ordinal using one-based values for users. */
+    private searchResultValidityLabel(entry: SearchResultTileEntry): string {
+        if (!this.hasFiniteIndex(entry.validityIndex)) {
+            return "";
+        }
+        const validityIndex = Math.max(0, Math.floor(entry.validityIndex));
+        if (this.hasFiniteIndex(entry.validityCount) && entry.validityCount > 0) {
+            return `validity ${validityIndex + 1}/${Math.floor(entry.validityCount)}`;
+        }
+        return `validity ${validityIndex + 1}`;
+    }
+
+    /** Reads and stringifies one backend-provided result field value. */
+    private searchResultFieldValue(
+        entry: SearchResultTileEntry,
+        resultFields: readonly string[],
+        field: string
+    ): string {
+        const fieldIndex = resultFields.indexOf(field);
+        if (fieldIndex < 0 || !entry.values || fieldIndex >= entry.values.length) {
+            return "";
+        }
+        const value = entry.values[fieldIndex];
+        if (value === null || value === undefined) {
+            return "";
+        }
+        if (typeof value === "string") {
+            return value;
+        }
+        if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+            return String(value);
+        }
+        try {
+            return JSON.stringify(value);
+        } catch (_error) {
+            return String(value);
+        }
+    }
+
     /**
      * Creates a search marker if the match exposes a valid cartographic position.
      */
@@ -1446,7 +1550,11 @@ export class FeatureSearchService {
         sourceTileId: bigint,
         mapId: string,
         layerId: string,
+        mapTileKey: string,
         featureId: string,
+        resultIndex: number,
+        resultKey: string,
+        hoverFeatureId: string,
         entry: SearchResultTileEntry
     ): SearchResultPoint | null {
         const cartographicRad = entry.position.cartographicRad;
@@ -1469,72 +1577,17 @@ export class FeatureSearchService {
             mapId,
             layerId,
             tileId: sourceTileId,
+            mapTileKey,
             sourceTileKey,
             sourceMapId,
             sourceLayerId,
             sourceTileId,
             featureId,
-            featureKey
+            resultIndex,
+            resultKey,
+            featureKey,
+            hoverFeatureId
         };
-    }
-
-    /**
-     * Lazily recolors the numbered pin icon atlas so marker styling tracks the configured highlight color.
-     */
-    private async ensureTintedClusterAtlas(color: string): Promise<string> {
-        const cached = this.tintedAtlasByColor.get(color);
-        if (cached) {
-            return cached;
-        }
-        const baseAtlasImage = await this.loadBaseClusterAtlasImage();
-        const [targetR, targetG, targetB] = this.parseHexRgb(color);
-        const canvas = document.createElement("canvas");
-        canvas.width = baseAtlasImage.naturalWidth || baseAtlasImage.width;
-        canvas.height = baseAtlasImage.naturalHeight || baseAtlasImage.height;
-        const context = canvas.getContext("2d", {willReadFrequently: true});
-        if (!context) {
-            return FeatureSearchService.SEARCH_ICON_ATLAS_URL;
-        }
-        context.drawImage(baseAtlasImage, 0, 0);
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            const alpha = data[i + 3];
-            if (alpha === 0) {
-                continue;
-            }
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            if (r > 235 && g > 235 && b > 235) {
-                continue;
-            }
-            data[i] = targetR;
-            data[i + 1] = targetG;
-            data[i + 2] = targetB;
-            data[i + 3] = 255;
-        }
-        context.putImageData(imageData, 0, 0);
-        const tintedAtlasUrl = canvas.toDataURL("image/png");
-        this.tintedAtlasByColor.set(color, tintedAtlasUrl);
-        return tintedAtlasUrl;
-    }
-
-    /**
-     * Loads the shared base atlas once and reuses the promise across recoloring passes.
-     */
-    private loadBaseClusterAtlasImage(): Promise<HTMLImageElement> {
-        if (this.baseAtlasImagePromise) {
-            return this.baseAtlasImagePromise;
-        }
-        this.baseAtlasImagePromise = new Promise((resolve, reject) => {
-            const image = new Image();
-            image.decoding = "async";
-            image.onload = () => resolve(image);
-            image.onerror = () => reject(new Error("Failed to load search cluster icon atlas."));
-            image.src = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
-        });
-        return this.baseAtlasImagePromise;
     }
 
     /**

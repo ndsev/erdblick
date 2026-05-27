@@ -1,7 +1,6 @@
 import {BehaviorSubject} from "rxjs";
 import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {Viewport} from "../../build/libs/core/erdblick-core";
-import {FeatureTile} from "../mapdata/features.model";
 
 /** Hover pick payload emitted by a render view after a screen-space hover query. */
 export interface HoveredFeatureIds {
@@ -32,6 +31,22 @@ export interface IRenderSceneHandle {
     readonly scene: unknown;
 }
 
+/** Minimal tile surface required by the shared visualization scheduler. */
+export interface TileVisualizationTile {
+    mapTileKey: string;
+    nodeId: string;
+    mapName: string;
+    layerName: string;
+    tileId: bigint;
+    dataVersion: number;
+    disposed: boolean;
+    stats: Map<string, number[]>;
+
+    setRenderOrder(order: number): void;
+    renderOrder(): number;
+    setVertexCount(count: number): void;
+}
+
 /**
  * Contract implemented by tile visualizations regardless of renderer backend.
  * Instances are long-lived and can be marked dirty multiple times as tiles or style options change.
@@ -39,7 +54,7 @@ export interface IRenderSceneHandle {
 export interface ITileVisualization {
     readonly viewIndex: number;
     readonly styleId: string;
-    readonly tile: FeatureTile;
+    readonly tile: TileVisualizationTile;
     styleOrder: number;
     highFidelityStage: number;
     prefersHighFidelity: boolean;

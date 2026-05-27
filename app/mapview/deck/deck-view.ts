@@ -13,7 +13,12 @@ import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
-import {FeatureSearchService} from "../../search/feature.search.service";
+import {
+    FeatureSearchService,
+    type FeatureSearchResultLayer,
+    type SearchResultPinMarker,
+    type SearchResultPoint
+} from "../../search/feature.search.service";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
 import {
@@ -43,8 +48,26 @@ import {
     TileGridStateOverlayLayer,
     tileGridOverlayData
 } from "./deck-tile-grid-overlay.layer";
-import {createSearchResultPinLayer} from "./deck-search-result-pin.layer";
+import {
+    createSearchResultPinLabelLayer,
+    createSearchResultPinLayer,
+    layoutSearchResultPinMarkers,
+    SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE,
+    searchResultPinCountDomain,
+    type SearchResultPinLayoutEntry
+} from "./deck-search-result-pin.layer";
 import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
+import {
+    coarsenedTileGridLevels,
+    coarsenedTileLevel,
+    tileGridExtentForLevel,
+    tileGridLatToNormY,
+    tileGridLonToNormX,
+    tileGridNormYToLat,
+    tileGridVisibleCellCount,
+    wrapColumnIntoExtent,
+    type TileGridLevelExtent
+} from "../tile-grid-visibility";
 
 /** Internal camera state deck uses while the rest of the app still speaks Cesium-like camera values. */
 interface DeckCameraState {
@@ -71,6 +94,17 @@ interface VisibleLayerRef {
     layerId: string;
 }
 
+/** One active search layer together with the visible source tiles it contributes to this view. */
+interface SearchResultOverlayInput {
+    searchLayer: FeatureSearchResultLayer;
+    dotLayerKey: string;
+    labelLayerKey: string;
+    lowFiSourceTileKeys: Set<string>;
+    highFiPointMarkers: SearchResultPinMarker[];
+    targetLevel: number;
+    sourceTileKeySignature: string;
+}
+
 /** Shared rectangle overlay datum for tile outlines and jump-area highlights. */
 interface DeckRectangleOverlayDatum {
     polygon: [number, number][];
@@ -82,24 +116,6 @@ interface DeckRectangleOverlayDatum {
 /** Single location marker datum for the search/jump marker overlay. */
 interface DeckLocationMarkerDatum {
     position: [number, number];
-}
-
-/** Extent of the visible tile-grid region for one level, including wrap-aware column bookkeeping. */
-interface TileGridLevelExtent {
-    level: number;
-    rowCount: number;
-    colCount: number;
-    coversFullWorldX: boolean;
-    minCol: number;
-    maxCol: number;
-    minRow: number;
-    maxRow: number;
-    width: number;
-    height: number;
-    west: number;
-    east: number;
-    south: number;
-    north: number;
 }
 
 /** Metadata deck pick layers expose so `pickFeature()` can resolve addresses back to feature ids. */
@@ -148,7 +164,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
-    private static readonly SEARCH_RESULT_PIN_LEVEL_OFFSET = 3;
+    private static readonly SEARCH_RESULT_PIN_SIZE_SCALE = SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE;
     private static readonly HOVER_PICK_THROTTLE_MS = 75;
     private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
@@ -1501,26 +1517,45 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
+        const viewport = this.computeViewport();
+        if (!viewport) {
+            this.removeSearchResultLayers();
+            this.lastSearchResultsSignature = "";
+            return;
+        }
+
         const searchLayers = this.featureSearchService.getSearchResultLayers();
-        const overlayInputs = searchLayers.map(searchLayer => {
-            const sourceTileKeys = new Set<string>();
+        const overlayInputs: SearchResultOverlayInput[] = searchLayers.map(searchLayer => {
+            const lowFiSourceTileKeys = new Set<string>();
+            const highFiPointMarkers: SearchResultPinMarker[] = [];
             const sourceTileKeyParts: string[] = [];
-            let maxLevel = 0;
+            let maxVisibleLevel = 0;
             for (const bucket of searchLayer.pointBuckets) {
-                if (!this.mapService.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)
-                    || this.mapService.prefersHighFidelityForTile(this._viewIndex, bucket.tileId)) {
+                if (!this.mapService.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
                     continue;
                 }
-                sourceTileKeys.add(bucket.sourceTileKey);
+                if (this.mapService.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
+                    if (searchLayer.renderStrategy.showHighFiResultDots) {
+                        highFiPointMarkers.push(...bucket.points.map(point => this.searchResultPointMarker(point)));
+                    }
+                    continue;
+                }
+                if (!searchLayer.renderStrategy.showLowFiDots) {
+                    continue;
+                }
+                lowFiSourceTileKeys.add(bucket.sourceTileKey);
                 sourceTileKeyParts.push(bucket.sourceTileKey);
-                maxLevel = Math.max(maxLevel, Number(coreLib.getTileLevel(bucket.tileId)));
+                maxVisibleLevel = Math.max(maxVisibleLevel, Number(coreLib.getTileLevel(bucket.tileId)));
             }
+            const targetLevel = this.searchResultPinTargetLevel(searchLayer, maxVisibleLevel, viewport);
             return {
                 searchLayer,
-                layerKey: this.searchResultLayerKey(searchLayer.id, "pin"),
-                sourceTileKeys,
-                sourceTileKeySignature: sourceTileKeyParts.sort().join(","),
-                targetLevel: this.searchResultPinTargetLevel(maxLevel)
+                dotLayerKey: this.searchResultLayerKey(searchLayer.id, "dot"),
+                labelLayerKey: this.searchResultLayerKey(searchLayer.id, "label"),
+                lowFiSourceTileKeys,
+                highFiPointMarkers,
+                targetLevel,
+                sourceTileKeySignature: sourceTileKeyParts.sort().join(",")
             };
         });
 
@@ -1528,8 +1563,8 @@ export abstract class DeckMapView implements IRenderView {
             .map(input => [
                 input.searchLayer.id,
                 input.searchLayer.pointsVersion,
-                input.searchLayer.iconAtlasUrl,
-                input.searchLayer.iconMappingUrl,
+                input.searchLayer.pointColor,
+                JSON.stringify(input.searchLayer.renderStrategy),
                 input.targetLevel,
                 input.sourceTileKeySignature
             ].join(":"))
@@ -1539,10 +1574,35 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.lastSearchResultsSignature = signature;
 
+        const pinsByLayerKey = new Map<string, SearchResultPinMarker[]>();
+        const layoutEntries: SearchResultPinLayoutEntry[] = [];
+        for (const input of overlayInputs) {
+            const lowFiPins = input.lowFiSourceTileKeys.size > 0 && !input.searchLayer.pinIndex.isEmpty
+                ? input.searchLayer.pinIndex.materialize({
+                    sourceTileKeys: input.lowFiSourceTileKeys,
+                    targetLevel: input.targetLevel
+                })
+                : [];
+            const layerPins = [...lowFiPins, ...input.highFiPointMarkers];
+            const countDomain = searchResultPinCountDomain(layerPins);
+            for (const marker of lowFiPins) {
+                layoutEntries.push({
+                    marker,
+                    sortKey: `${input.searchLayer.id}\n${marker.resultKey}`,
+                    countDomain
+                });
+            }
+            pinsByLayerKey.set(input.dotLayerKey, layerPins);
+        }
+        layoutSearchResultPinMarkers(layoutEntries, DeckMapView.SEARCH_RESULT_PIN_SIZE_SCALE);
+
         const nextKeys = new Set<string>();
         for (const input of overlayInputs) {
-            if (input.sourceTileKeys.size > 0 && !input.searchLayer.pinIndex.isEmpty) {
-                nextKeys.add(input.layerKey);
+            if ((pinsByLayerKey.get(input.dotLayerKey)?.length ?? 0) > 0) {
+                nextKeys.add(input.dotLayerKey);
+                if (input.searchLayer.renderStrategy.showBucketLabels) {
+                    nextKeys.add(input.labelLayerKey);
+                }
             }
         }
         for (const layerKey of this.searchResultLayerKeys) {
@@ -1553,39 +1613,79 @@ export abstract class DeckMapView implements IRenderView {
         this.searchResultLayerKeys = nextKeys;
 
         for (const input of overlayInputs) {
-            const lowFiPins = input.searchLayer.pinIndex.materialize({
-                sourceTileKeys: input.sourceTileKeys,
-                targetLevel: input.targetLevel
-            });
-            if (lowFiPins.length) {
+            const layerPins = pinsByLayerKey.get(input.dotLayerKey) ?? [];
+            if (layerPins.length) {
+                const countDomain = searchResultPinCountDomain(layerPins);
                 this.layerRegistry.upsert(
-                    input.layerKey,
+                    input.dotLayerKey,
                     createSearchResultPinLayer({
-                        id: input.layerKey,
-                        data: lowFiPins,
+                        id: input.dotLayerKey,
+                        data: layerPins,
                         pickable: false,
-                        sizeScale: 40,
-                        iconAtlas: input.searchLayer.iconAtlasUrl,
-                        iconMapping: input.searchLayer.iconMappingUrl
+                        sizeScale: DeckMapView.SEARCH_RESULT_PIN_SIZE_SCALE,
+                        dotColor: input.searchLayer.pointColorRgba,
+                        countDomain
                     }),
                     650);
+                if (input.searchLayer.renderStrategy.showBucketLabels) {
+                    this.layerRegistry.upsert(
+                        input.labelLayerKey,
+                        createSearchResultPinLabelLayer({
+                            id: input.labelLayerKey,
+                            data: layerPins,
+                            pickable: false
+                        }),
+                        651);
+                }
             } else {
-                this.layerRegistry.remove(input.layerKey);
+                this.layerRegistry.remove(input.dotLayerKey);
+                this.layerRegistry.remove(input.labelLayerKey);
             }
         }
     }
 
-    /** Selects a coarse mapget tile level for low-fidelity pin aggregation. */
-    private searchResultPinTargetLevel(maxVisibleLevel: number): number {
+    /**
+     * Selects a mapget tile level for low-fidelity pins using the same visible-grid-cell basis as the fidelity switch.
+     * The search's high/low threshold is used as the aggregation budget, then relaxed by one level because dots are
+     * cheaper than high-fidelity geometry and benefit from a denser spatial distribution.
+     */
+    private searchResultPinTargetLevel(
+        searchLayer: FeatureSearchResultLayer,
+        maxVisibleLevel: number,
+        viewport: Viewport
+    ): number {
         if (!Number.isFinite(maxVisibleLevel) || maxVisibleLevel <= 0) {
             return 0;
         }
-        return Math.max(0, maxVisibleLevel - DeckMapView.SEARCH_RESULT_PIN_LEVEL_OFFSET);
+        const coarsenedLevel = coarsenedTileLevel(
+            maxVisibleLevel,
+            viewport,
+            searchLayer.renderStrategy.highFidelityMaxVisibleTiles,
+            this.tileGridMode
+        );
+        return Math.min(maxVisibleLevel, coarsenedLevel + 1);
     }
 
     /** Returns a stable deck-layer key for one feature-search session. */
-    private searchResultLayerKey(searchId: string, kind: "pin"): string {
+    private searchResultLayerKey(searchId: string, kind: "dot" | "label"): string {
         return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}/${kind}`;
+    }
+
+    /** Converts an individual high-fidelity search result into a positioned dot marker. */
+    private searchResultPointMarker(point: SearchResultPoint): SearchResultPinMarker {
+        return {
+            coordinates: point.coordinates,
+            count: 1,
+            mapId: point.mapId,
+            layerId: point.layerId,
+            tileId: point.tileId,
+            featureId: point.featureId,
+            resultKey: point.resultKey,
+            featureKey: point.featureKey,
+            featureKeys: [point.featureKey],
+            resultKeys: [point.resultKey],
+            showBucketLabel: false
+        };
     }
 
     /** Removes every feature-search result layer from this deck view. */
@@ -1674,7 +1774,12 @@ export abstract class DeckMapView implements IRenderView {
             this.logTileGridDiagnostic("no-viewport");
             return;
         }
-        const effectiveLevels = this.coarsenedTileGridLevels(levels, viewport);
+        const effectiveLevels = coarsenedTileGridLevels(
+            levels,
+            viewport,
+            DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS,
+            this.tileGridMode
+        );
         const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels, viewport);
         const gridLayerCount = this.updateTileGridLayers(effectiveLevels, viewport);
         this.logTileGridDiagnostic(
@@ -1739,14 +1844,15 @@ export abstract class DeckMapView implements IRenderView {
         const tileLimitPerView = this.tileLimitPerView();
         let coloredTileCount = 0;
         for (const level of levels) {
-            if (this.tileGridVisibleCellCount(level, viewport) > DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS) {
+            if (tileGridVisibleCellCount(level, viewport, this.tileGridMode) >
+                DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS) {
                 continue;
             }
             const visibleLayers = visibleLayersByLevel.get(level) ?? [];
             if (!visibleLayers.length) {
                 continue;
             }
-            const extent = this.tileGridExtentForLevel(level, viewport);
+            const extent = tileGridExtentForLevel(level, viewport, this.tileGridMode);
             if (!extent) {
                 continue;
             }
@@ -1807,31 +1913,6 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.tileStateLayerKeys = nextLayerKeys;
         return {layerCount: nextLayerKeys.size, coloredTileCount};
-    }
-
-    /** Coarsens every requested grid level until its visible cell count falls under the safety threshold. */
-    private coarsenedTileGridLevels(levels: number[], viewport: Viewport): number[] {
-        const effectiveLevels = new Set<number>();
-        for (const level of levels) {
-            effectiveLevels.add(this.coarsenedTileGridLevel(level, viewport));
-        }
-        return Array.from(effectiveLevels.values()).sort((lhs, rhs) => lhs - rhs);
-    }
-
-    /** Coarsens one grid level until the number of visible cells becomes acceptable. */
-    private coarsenedTileGridLevel(level: number, viewport: Viewport): number {
-        let effectiveLevel = Math.max(0, Math.min(22, Math.floor(level)));
-        while (effectiveLevel > 0 &&
-            this.tileGridVisibleCellCount(effectiveLevel, viewport) > DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS) {
-            effectiveLevel -= 1;
-        }
-        return effectiveLevel;
-    }
-
-    /** Returns the number of grid cells that would be visible for a level in the current viewport. */
-    private tileGridVisibleCellCount(level: number, viewport: Viewport): number {
-        const extent = this.tileGridExtentForLevel(level, viewport);
-        return extent ? extent.width * extent.height : 0;
     }
 
     /** Returns the effective feature levels currently visible across all enabled map layers in this view. */
@@ -1902,57 +1983,6 @@ export abstract class DeckMapView implements IRenderView {
         this.tileGridLayerKeys.clear();
     }
 
-    /**
-     * Computes the wrap-aware tile-grid extent that covers the current viewport for one level.
-     * The extent intentionally includes a small margin so fast pans do not reveal seams immediately.
-     */
-    private tileGridExtentForLevel(level: number, viewport: Viewport): TileGridLevelExtent | null {
-        if (!Number.isFinite(level) || level < 0) {
-            return null;
-        }
-        const safeLevel = Math.max(0, Math.min(22, Math.floor(level)));
-        const viewportWest = viewport.west;
-        const viewportEast = viewport.west + viewport.width;
-        const viewportSouth = viewport.south;
-        const viewportNorth = viewport.south + viewport.height;
-        const westNorm = this.tileGridLonToNormX(viewportWest);
-        const eastNorm = this.tileGridLonToNormX(viewportEast);
-        const southNorm = this.tileGridLatToNormY(viewportSouth, this.tileGridMode);
-        const northNorm = this.tileGridLatToNormY(viewportNorth, this.tileGridMode);
-        const rowCount = Math.pow(2, safeLevel);
-        const colCount = this.tileGridMode === "nds" ? rowCount * 2 : rowCount;
-        const coversFullWorldX = eastNorm - westNorm >= 1 - 1e-9;
-        const normMinX = coversFullWorldX ? 0 : Math.min(westNorm, eastNorm);
-        const normMaxX = coversFullWorldX ? 1 : Math.max(westNorm, eastNorm);
-        const normMinY = Math.min(northNorm, southNorm);
-        const normMaxY = Math.max(northNorm, southNorm);
-        const marginTiles = 2;
-        const minCol = coversFullWorldX ? 0 : Math.floor(normMinX * colCount) - marginTiles;
-        const maxCol = coversFullWorldX ? colCount : Math.ceil(normMaxX * colCount) + marginTiles;
-        const minRow = Math.max(0, Math.floor(normMinY * rowCount) - marginTiles);
-        const maxRow = Math.min(rowCount, Math.ceil(normMaxY * rowCount) + marginTiles);
-        const width = Math.max(1, maxCol - minCol);
-        const height = Math.max(1, maxRow - minRow);
-        const north = this.tileGridNormYToLat(minRow / rowCount, this.tileGridMode);
-        const south = this.tileGridNormYToLat(maxRow / rowCount, this.tileGridMode);
-        return {
-            level: safeLevel,
-            rowCount,
-            colCount,
-            coversFullWorldX,
-            minCol,
-            maxCol,
-            minRow,
-            maxRow,
-            width,
-            height,
-            west: this.tileGridNormXToLon(minCol / colCount),
-            east: this.tileGridNormXToLon(maxCol / colCount),
-            north: Math.min(north, DeckMapView.WEB_MERCATOR_MAX_LATITUDE),
-            south: Math.max(south, -DeckMapView.WEB_MERCATOR_MAX_LATITUDE)
-        };
-    }
-
     /** Classifies one tile cell as error, empty, or uncolored across every visible layer at that level. */
     private tileStateKindForTile(tileId: bigint, visibleLayers: VisibleLayerRef[]): number {
         let hasParticipant = false;
@@ -2001,12 +2031,12 @@ export abstract class DeckMapView implements IRenderView {
         if (!Number.isFinite(west) || !Number.isFinite(north)) {
             return null;
         }
-        const colNorm = this.tileGridLonToNormX(west);
-        const rowNorm = this.tileGridLatToNormY(north, this.tileGridMode);
+        const colNorm = tileGridLonToNormX(west);
+        const rowNorm = tileGridLatToNormY(north, this.tileGridMode);
         const rawCol = Math.floor(colNorm * extent.colCount + 1e-9);
         const rawRow = Math.floor(rowNorm * extent.rowCount + 1e-9);
         const row = Math.max(0, Math.min(extent.rowCount - 1, rawRow));
-        const col = this.wrapColumnIntoExtent(rawCol, extent);
+        const col = wrapColumnIntoExtent(rawCol, extent);
         if (col < 0 || col >= extent.width) {
             return null;
         }
@@ -2015,20 +2045,6 @@ export abstract class DeckMapView implements IRenderView {
             return null;
         }
         return {col, row: rowInExtent};
-    }
-
-    /** Wraps a raw tile column into the current extent so world-wrap repeats stay contiguous. */
-    private wrapColumnIntoExtent(rawCol: number, extent: TileGridLevelExtent): number {
-        const normalizedCol = ((rawCol % extent.colCount) + extent.colCount) % extent.colCount;
-        const repeatsToNearExtent = Math.round((extent.minCol - normalizedCol) / extent.colCount);
-        let repeatedCol = normalizedCol + repeatsToNearExtent * extent.colCount;
-        while (repeatedCol < extent.minCol) {
-            repeatedCol += extent.colCount;
-        }
-        while (repeatedCol >= extent.maxCol) {
-            repeatedCol -= extent.colCount;
-        }
-        return repeatedCol - extent.minCol;
     }
 
     /** Returns the per-view tile budget derived from the global load limit and split-view count. */
@@ -2258,7 +2274,7 @@ export abstract class DeckMapView implements IRenderView {
                 subdivisionY: 1
             };
         }
-        const extent = this.tileGridExtentForLevel(level, viewport);
+        const extent = tileGridExtentForLevel(level, viewport, this.tileGridMode);
         if (!extent) {
             return {
                 data: tileGridOverlayData(),
@@ -2343,16 +2359,16 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const bandCount = this.tileGridNdsBandCount(north, south);
-        const mercatorNorth = this.tileGridLatToNormY(north, "xyz");
-        const mercatorSouth = this.tileGridLatToNormY(south, "xyz");
+        const mercatorNorth = tileGridLatToNormY(north, "xyz");
+        const mercatorSouth = tileGridLatToNormY(south, "xyz");
         const data: TileGridOverlayDatum[] = [];
         for (let bandIndex = 0; bandIndex < bandCount; bandIndex++) {
             const t0 = bandIndex / bandCount;
             const t1 = (bandIndex + 1) / bandCount;
             const bandMercatorNorth = mercatorNorth + (mercatorSouth - mercatorNorth) * t0;
             const bandMercatorSouth = mercatorNorth + (mercatorSouth - mercatorNorth) * t1;
-            const bandNorth = this.tileGridNormYToLat(bandMercatorNorth, "xyz");
-            const bandSouth = this.tileGridNormYToLat(bandMercatorSouth, "xyz");
+            const bandNorth = tileGridNormYToLat(bandMercatorNorth, "xyz");
+            const bandSouth = tileGridNormYToLat(bandMercatorSouth, "xyz");
             const ndsYCorrection = this.tileGridNdsBandCorrection(localMin[1], localSize[1], bandNorth, bandSouth);
             for (const polygon of polygonsForBounds(bandSouth, bandNorth)) {
                 data.push({polygon, ndsYCorrection});
@@ -2408,8 +2424,8 @@ export abstract class DeckMapView implements IRenderView {
      * The correction stays centered on the latitude midpoint to preserve precision.
      */
     private tileGridNdsBandCount(north: number, south: number): number {
-        const mercatorNorth = this.tileGridLatToNormY(north, "xyz");
-        const mercatorSouth = this.tileGridLatToNormY(south, "xyz");
+        const mercatorNorth = tileGridLatToNormY(north, "xyz");
+        const mercatorSouth = tileGridLatToNormY(south, "xyz");
         const mercatorSpan = Math.abs(mercatorSouth - mercatorNorth);
         if (mercatorSpan >= 0.75) {
             return 8;
@@ -2439,10 +2455,10 @@ export abstract class DeckMapView implements IRenderView {
         }
         const northLocalY = this.tileGridLocalNdsY(north, localMinY, localSizeY);
         const southLocalY = this.tileGridLocalNdsY(south, localMinY, localSizeY);
-        const mercatorNorthY = this.tileGridLatToNormY(north, "xyz");
-        const mercatorSouthY = this.tileGridLatToNormY(south, "xyz");
+        const mercatorNorthY = tileGridLatToNormY(north, "xyz");
+        const mercatorSouthY = tileGridLatToNormY(south, "xyz");
         const mercatorMidY = 0.5 * (mercatorNorthY + mercatorSouthY);
-        const midpointLat = this.tileGridNormYToLat(mercatorMidY, "xyz");
+        const midpointLat = tileGridNormYToLat(mercatorMidY, "xyz");
         const midpointInputY = 0.5 * (northLocalY + southLocalY);
         const midpointOutputY = this.tileGridLocalNdsY(midpointLat, localMinY, localSizeY);
         return this.tileGridQuadraticThroughPoints(
@@ -2457,7 +2473,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Converts a latitude to shader-local NDS Y coordinates for one overlay extent. */
     private tileGridLocalNdsY(lat: number, localMinY: number, localSizeY: number): number {
-        const ndsY = this.tileGridLatToNormY(lat, "nds");
+        const ndsY = tileGridLatToNormY(lat, "nds");
         return (ndsY - localMinY) / Math.max(1e-6, localSizeY);
     }
 
@@ -2483,39 +2499,6 @@ export abstract class DeckMapView implements IRenderView {
         const linear = -l0 * (x1 + x2) - l1 * (x0 + x2) - l2 * (x0 + x1);
         const constant = l0 * x1 * x2 + l1 * x0 * x2 + l2 * x0 * x1;
         return [constant, linear, quadratic];
-    }
-
-    /** Converts longitude to the normalized X space shared by tile-grid calculations. */
-    private tileGridLonToNormX(lon: number): number {
-        return (lon + 180.0) / 360.0;
-    }
-
-    /** Converts normalized X space back to longitude. */
-    private tileGridNormXToLon(normX: number): number {
-        return normX * 360.0 - 180.0;
-    }
-
-    /** Converts latitude to normalized Y in either XYZ/Mercator or NDS grid space. */
-    private tileGridLatToNormY(lat: number, mode: TileGridMode): number {
-        if (mode === "nds") {
-            const clampedLat = Math.max(-90.0, Math.min(90.0, lat));
-            return (90.0 - clampedLat) / 180.0;
-        }
-        const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
-        const sinLat = Math.sin((clampedLat * Math.PI) / 180.0);
-        const mercatorY = 0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI);
-        return Math.max(0, Math.min(1, mercatorY));
-    }
-
-    /** Converts normalized Y back to latitude in either XYZ/Mercator or NDS grid space. */
-    private tileGridNormYToLat(normY: number, mode: TileGridMode): number {
-        const clampedY = Math.max(0, Math.min(1, normY));
-        if (mode === "nds") {
-            return 90.0 - clampedY * 180.0;
-        }
-        const exponent = Math.exp(Math.PI * (1 - 2 * clampedY));
-        const latRad = 2 * Math.atan(exponent) - Math.PI / 2;
-        return (latRad * 180.0) / Math.PI;
     }
 
     /** Logs tile-grid diagnostics only when the message changed, to keep the console readable. */

@@ -4,6 +4,8 @@ import "@angular/compiler";
 import {coreLib, initializeLibrary} from "../integrations/wasm";
 import {MapTileRequestStatus, MapTileStreamClient} from './tilestream';
 import {LOW_FI_LOD0_TILE_COUNT_THRESHOLD} from "../mapview/view.visualization.model";
+import {SearchResultTile} from "./search-result-tile.model";
+import type {FeatureSearchDataPlaneRequest} from "./map.service";
 
 beforeAll(async () => {
     await initializeLibrary();
@@ -223,6 +225,8 @@ const createMapDataService = () => {
 describe('MapDataService', () => {
     const flushAsync = async (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
     const makeTileKey = (tileId: number | bigint) => coreLib.getTileFeatureLayerKey('m1', 'layerA', BigInt(tileId));
+    const makeTileId = (x: number, y: number, level: number) =>
+        (BigInt(x) << 32n) | (BigInt(y) << 16n) | BigInt(level);
     const makeTileMetadata = (tileId: number | bigint) => {
         const mapTileKey = makeTileKey(tileId);
         return {
@@ -258,7 +262,8 @@ describe('MapDataService', () => {
         getMapLayerAutoLevel: vi.fn().mockReturnValue(false),
         setMapLayerLevel: vi.fn(),
         setMapLayerAutoLevel: vi.fn(),
-        getViewTileBorderState: vi.fn().mockReturnValue(false)
+        getViewTileBorderState: vi.fn().mockReturnValue(false),
+        getViewTileGridMode: vi.fn().mockReturnValue('nds')
     });
 
     beforeEach(() => {
@@ -821,6 +826,106 @@ describe('MapDataService', () => {
             refresh: 1,
             tileIds: [131073, 196609]
         });
+    });
+
+    it('updates streamed search-result render tiles without a full visualization rebuild', () => {
+        const {service} = createMapDataService();
+        const searchRequest = {
+            searchId: 'search-1',
+            query: 'typeId == "Road"',
+            scope: 'feature',
+            autoUpdate: true,
+            updateSerial: 0,
+            generationSerial: 0,
+            paused: false,
+            showResultsOnMap: true,
+            pinColor: '#ea4336',
+            searchStyleRules: [],
+            withFields: []
+        };
+        const sourceTileKey = makeTileKey(1);
+        service.setFeatureSearchRequests([searchRequest as any]);
+        const fullUpdateSpy = vi.spyOn(service as any, 'updateVisualizations');
+        const tileUpdateSpy = vi
+            .spyOn(service as any, 'updateSearchResultVisualizationsForTile')
+            .mockImplementation(() => {});
+
+        const accepted = (service as any).addSearchResultRenderTile(
+            'search-1',
+            1,
+            sourceTileKey,
+            'm1',
+            'layerA',
+            1n,
+            'n1',
+            new Uint8Array([1, 2, 3]),
+            1
+        );
+
+        expect(accepted).toBe(true);
+        expect(fullUpdateSpy).not.toHaveBeenCalled();
+        expect(tileUpdateSpy).toHaveBeenCalledOnce();
+        const key = (service as any).searchResultRenderTileKey('search-1', sourceTileKey);
+        const renderTile = (service as any).searchResultRenderTilesByKey.get(key);
+        expect(renderTile.tile).toBeInstanceOf(SearchResultTile);
+        expect(renderTile.tile.dataVersion).toBe(0);
+
+        (service as any).addSearchResultRenderTile(
+            'search-1',
+            1,
+            sourceTileKey,
+            'm1',
+            'layerA',
+            1n,
+            'n1',
+            new Uint8Array([4, 5, 6]),
+            1
+        );
+
+        expect(renderTile.tile.dataVersion).toBe(1);
+    });
+
+    it('uses uncapped viewport grid cell counts for search-result high-fidelity decisions', () => {
+        const {service} = createMapDataService();
+        const fakeMapTree = createFakeMapTree([12]);
+        const sourceTileId = makeTileId(0, 0, 12);
+        service.maps$.next(fakeMapTree as any);
+        const searchRequest: FeatureSearchDataPlaneRequest = {
+            searchId: 'search-1',
+            query: 'typeId == "Road"',
+            scope: 'feature',
+            autoUpdate: true,
+            updateSerial: 0,
+            generationSerial: 0,
+            paused: false,
+            showResultsOnMap: true,
+            pinColor: '#ea4336',
+            searchStyleRules: [],
+            renderStrategy: {
+                showLowFiDots: true,
+                showBucketLabels: true,
+                showHighFiGeometry: true,
+                showHighFiResultDots: false,
+                highFidelityMaxVisibleTiles: 1
+            },
+            withFields: []
+        };
+        service.setFeatureSearchRequests([searchRequest]);
+
+        const viewStates = (service as any).viewVisualizationState as any[];
+        viewStates[0].viewport = {
+            south: 35,
+            west: -25,
+            width: 70,
+            height: 35,
+            camPosLon: 0,
+            camPosLat: 0,
+            orientation: 0
+        };
+        // The old code looked at this load-limit-capped list and would keep high fidelity enabled.
+        viewStates[0].visibleTileIdsPerLevel.set(12, [sourceTileId]);
+
+        expect(service.prefersHighFidelityForSearchResultTile(0, 'search-1', sourceTileId)).toBe(false);
     });
 
     it('keeps non-auto search area frozen until the explicit update serial changes', () => {

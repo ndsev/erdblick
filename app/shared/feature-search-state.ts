@@ -29,6 +29,14 @@ export interface FeatureSearchStyleRule {
     opacity?: number;
 }
 
+export interface FeatureSearchRenderStrategy {
+    showLowFiDots: boolean;
+    showBucketLabels: boolean;
+    showHighFiGeometry: boolean;
+    showHighFiResultDots: boolean;
+    highFidelityMaxVisibleTiles: number;
+}
+
 export interface FeatureSearchStateEntry {
     id: string;
     query: string;
@@ -38,6 +46,7 @@ export interface FeatureSearchStateEntry {
     showResultsOnMap: boolean;
     pinColor: string;
     searchStyleRules: FeatureSearchStyleRule[];
+    renderStrategy: FeatureSearchRenderStrategy;
 }
 
 export type FeatureSearchStatePatch = Partial<Omit<FeatureSearchStateEntry, "id">>;
@@ -52,6 +61,16 @@ const MAX_FILTERS_PER_RULE = 25;
 const MAX_COLOR_STOPS_PER_RULE = 25;
 const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "polygon", "mesh"]);
 const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
+const MIN_HIGH_FIDELITY_VISIBLE_TILES = 1;
+const MAX_HIGH_FIDELITY_VISIBLE_TILES = 64 * 1024;
+
+export const DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY: FeatureSearchRenderStrategy = {
+    showLowFiDots: true,
+    showBucketLabels: true,
+    showHighFiGeometry: true,
+    showHighFiResultDots: false,
+    highFidelityMaxVisibleTiles: 512
+};
 
 function createFeatureSearchId(): string {
     return `feature_search_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -209,6 +228,43 @@ function normalizePositiveNumber(value: unknown, min = 0): number | undefined {
     return Number.isFinite(numberValue) && numberValue >= min ? numberValue : undefined;
 }
 
+export function normalizeFeatureSearchRenderStrategy(value: unknown): FeatureSearchRenderStrategy {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return {...DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY};
+    }
+    const raw = value as Record<string, unknown>;
+    const highFidelityMaxVisibleTiles = normalizePositiveNumber(
+        raw["highFidelityMaxVisibleTiles"],
+        MIN_HIGH_FIDELITY_VISIBLE_TILES
+    );
+    return {
+        showLowFiDots: normalizeBoolean(
+            raw["showLowFiDots"],
+            DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.showLowFiDots
+        ),
+        showBucketLabels: normalizeBoolean(
+            raw["showBucketLabels"],
+            DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.showBucketLabels
+        ),
+        showHighFiGeometry: normalizeBoolean(
+            raw["showHighFiGeometry"],
+            DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.showHighFiGeometry
+        ),
+        showHighFiResultDots: normalizeBoolean(
+            raw["showHighFiResultDots"],
+            DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.showHighFiResultDots
+        ),
+        highFidelityMaxVisibleTiles: Math.min(
+            MAX_HIGH_FIDELITY_VISIBLE_TILES,
+            Math.max(
+                MIN_HIGH_FIDELITY_VISIBLE_TILES,
+                Math.floor(highFidelityMaxVisibleTiles
+                    ?? DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.highFidelityMaxVisibleTiles)
+            )
+        )
+    };
+}
+
 function normalizeStyleRule(value: unknown): FeatureSearchStyleRule | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return null;
@@ -251,7 +307,8 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         paused: normalizeBoolean(raw["paused"], false),
         showResultsOnMap: normalizeBoolean(raw["showResultsOnMap"], true),
         pinColor: normalizeHexColor(raw["pinColor"]),
-        searchStyleRules: styleRules
+        searchStyleRules: styleRules,
+        renderStrategy: normalizeFeatureSearchRenderStrategy(raw["renderStrategy"])
     };
 }
 
@@ -284,6 +341,7 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
         showResultsOnMap: true,
         pinColor: DEFAULT_PIN_COLOR,
         searchStyleRules: [],
+        renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
         ...value
     })!;
 }

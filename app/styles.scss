@@ -4586,6 +4586,38 @@ inspection-tree {
     padding: 0 0 0.25em 0;
   }
 
+  .feature-search-render-strategy {
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 6px;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 0.75em;
+    padding: 0.85em;
+
+    h3 {
+      margin: 0;
+      color: var(--p-text-muted-color);
+      font-size: 1em;
+      font-weight: 700;
+    }
+  }
+
+  .feature-search-render-strategy-grid {
+    align-items: center;
+    display: grid;
+    gap: 0.6em 1em;
+    grid-template-columns: minmax(9em, 1fr) auto;
+  }
+
+  .feature-search-tree-node-label {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+  }
+
   .p-tree {
     display: flex;
     flex-direction: column;
