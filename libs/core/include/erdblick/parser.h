@@ -112,6 +112,21 @@ public:
     bool isAttributeScopeSearchQuery(std::string const& query) const;
 
     /**
+     * Return attribute contexts whose schema can evaluate the supplied query.
+     *
+     * The result is a list of `{attrName, featureType, attrLayerName, mapId, layerId}` dictionaries.
+     */
+    NativeJsValue getAttributeScopeForQuery(std::string const& query) const;
+
+    /**
+     * Enumerate schema-backed result fields usable by search-result style rules.
+     *
+     * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
+     * getAttributeScopeForQuery(query), falling back to all attribute contexts if the query is ambiguous.
+     */
+    NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope) const;
+
+    /**
      * Set layer info which will be used if the external doesn't fit.
      * Used for test data, which does not have layer info among the
      * info fetched from the connected mapget service.

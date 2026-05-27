@@ -6,6 +6,7 @@
 #include <set>
 #include <span>
 #include <sstream>
+#include <tuple>
 #include <unordered_set>
 #include "mapget/model/stringpool.h"
 #include "mapget/model/schemaregistry.h"
@@ -156,6 +157,27 @@ struct ScopeFields
     bool hasSchema = false;
 };
 
+struct AttributeScopeInfo
+{
+    std::string attrName;
+    std::string attrLayerName;
+    std::string featureType;
+    std::string mapId;
+    std::string layerId;
+    std::shared_ptr<mapget::SchemaRegistry const> registry;
+    simfil::SchemaId attributeSchema = simfil::NoSchemaId;
+    simfil::SchemaId featureSchema = simfil::NoSchemaId;
+};
+
+struct SearchStyleFieldInfo
+{
+    std::string path;
+    std::string mapId;
+    std::string layerId;
+    std::string attrName;
+    std::string featureType;
+};
+
 void addFields(std::set<std::string, std::less<>>& target, std::span<const std::string> fields)
 {
     for (auto const& field : fields) {
@@ -260,6 +282,97 @@ std::vector<std::string> topLevelIdentifiers(std::string const& query)
     return identifiers;
 }
 
+/** Returns string literals from direct positive comparisons such as `$name == "SpeedLimit"`. */
+std::set<std::string> positiveStringLiteralsForIdentifier(
+    std::string const& query,
+    std::string const& identifier)
+{
+    std::set<std::string> literals;
+    bool inString = false;
+    char quote = '\0';
+    bool escaped = false;
+    for (size_t i = 0; i < query.size();) {
+        auto const c = query[i];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == quote) {
+                inString = false;
+            }
+            ++i;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            inString = true;
+            quote = c;
+            ++i;
+            continue;
+        }
+
+        auto const isStart = std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$';
+        if (!isStart) {
+            ++i;
+            continue;
+        }
+        auto const start = i;
+        ++i;
+        while (i < query.size()) {
+            auto const next = query[i];
+            if (!std::isalnum(static_cast<unsigned char>(next)) && next != '_' && next != '$') {
+                break;
+            }
+            ++i;
+        }
+        if (query.substr(start, i - start) != identifier || (start > 0 && query[start - 1] == '.')) {
+            continue;
+        }
+
+        auto j = i;
+        while (j < query.size() && std::isspace(static_cast<unsigned char>(query[j]))) {
+            ++j;
+        }
+        if (j + 1 < query.size() && query[j] == '=' && query[j + 1] == '=') {
+            j += 2;
+        }
+        else if (j < query.size() && query[j] == '=') {
+            ++j;
+        }
+        else {
+            continue;
+        }
+        while (j < query.size() && std::isspace(static_cast<unsigned char>(query[j]))) {
+            ++j;
+        }
+        if (j >= query.size() || (query[j] != '"' && query[j] != '\'')) {
+            continue;
+        }
+
+        auto const literalQuote = query[j++];
+        std::string literal;
+        bool literalEscaped = false;
+        while (j < query.size()) {
+            auto const literalChar = query[j++];
+            if (literalEscaped) {
+                literal.push_back(literalChar);
+                literalEscaped = false;
+                continue;
+            }
+            if (literalChar == '\\') {
+                literalEscaped = true;
+                continue;
+            }
+            if (literalChar == literalQuote) {
+                literals.insert(literal);
+                break;
+            }
+            literal.push_back(literalChar);
+        }
+    }
+    return literals;
+}
+
 bool isIgnoredIdentifier(std::string const& identifier)
 {
     static const std::set<std::string, std::less<>> ignored = {
@@ -273,6 +386,223 @@ bool isIgnoredIdentifier(std::string const& identifier)
         "all",
     };
     return ignored.contains(identifier);
+}
+
+/** Collects every attribute context that can be styled or searched through schema metadata. */
+std::vector<AttributeScopeInfo> collectAttributeScopes(std::map<std::string, mapget::DataSourceInfo> const& infos)
+{
+    std::vector<AttributeScopeInfo> scopes;
+    for (auto const& [_, dataSource] : infos) {
+        for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
+                continue;
+            }
+            auto registry = layerInfo->schemaRegistry();
+            if (!registry) {
+                continue;
+            }
+            for (auto const& featureType : layerInfo->featureTypes_) {
+                auto const featureSchema = registry->featureSchema(featureType.name_);
+                auto const layerMapSchema = registry->attributeLayerMapSchema(featureType.name_);
+                if (layerMapSchema == simfil::NoSchemaId) {
+                    continue;
+                }
+                for (auto const& attrLayerName : registry->directFields(layerMapSchema)) {
+                    auto const layerSchema = registry->childSchema(
+                        layerMapSchema,
+                        attrLayerName,
+                        simfil::Schema::Kind::Object);
+                    if (layerSchema == simfil::NoSchemaId) {
+                        continue;
+                    }
+                    for (auto const& attrName : registry->directFields(layerSchema)) {
+                        auto const attributeSchema = registry->childSchema(
+                            layerSchema,
+                            attrName,
+                            simfil::Schema::Kind::Object);
+                        if (attributeSchema == simfil::NoSchemaId) {
+                            continue;
+                        }
+                        scopes.push_back({
+                            attrName,
+                            attrLayerName,
+                            featureType.name_,
+                            dataSource.mapId_,
+                            layerInfo->layerId_,
+                            registry,
+                            attributeSchema,
+                            featureSchema
+                        });
+                    }
+                }
+            }
+        }
+    }
+    return scopes;
+}
+
+/** Returns whether any query literal plausibly names the supplied attribute or layer. */
+bool literalsMatchName(std::set<std::string> const& literals, std::string const& name)
+{
+    if (literals.empty()) {
+        return true;
+    }
+    return std::ranges::any_of(literals, [&](auto const& literal) {
+        return literal == name || name.find(literal) != std::string::npos || literal.find(name) != std::string::npos;
+    });
+}
+
+/** Checks whether one attribute context can evaluate all top-level fields used by a query. */
+bool attributeScopeMatchesQuery(
+    AttributeScopeInfo const& scope,
+    std::vector<std::string> const& identifiers,
+    std::set<std::string> const& attributeNameLiterals,
+    std::set<std::string> const& attributeLayerLiterals)
+{
+    if (identifiers.empty()) {
+        return true;
+    }
+
+    std::set<std::string, std::less<>> fields = {
+        "$name",
+        "$layer",
+        "$validityIndex",
+        "$validityCount",
+        "$feature"
+    };
+    addFields(fields, scope.registry->directFields(scope.attributeSchema));
+
+    bool queryNamesAttribute = false;
+    bool queryNamesAttributeLayer = false;
+    for (auto const& identifier : identifiers) {
+        auto normalizedIdentifier = identifier;
+        std::ranges::transform(normalizedIdentifier, normalizedIdentifier.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (isIgnoredIdentifier(normalizedIdentifier)) {
+            continue;
+        }
+        if (!fields.contains(identifier)) {
+            return false;
+        }
+        queryNamesAttribute = queryNamesAttribute || identifier == "$name";
+        queryNamesAttributeLayer = queryNamesAttributeLayer || identifier == "$layer";
+    }
+    if (queryNamesAttribute
+        && !attributeNameLiterals.empty()
+        && !literalsMatchName(attributeNameLiterals, scope.attrName)) {
+        return false;
+    }
+    if (queryNamesAttributeLayer
+        && !attributeLayerLiterals.empty()
+        && !literalsMatchName(attributeLayerLiterals, scope.attrLayerName)) {
+        return false;
+    }
+    return true;
+}
+
+/** Returns whether a schema field can be appended with dot notation in a style-field path. */
+bool isPathIdentifier(std::string const& field)
+{
+    if (field.empty()) {
+        return false;
+    }
+    auto const first = static_cast<unsigned char>(field.front());
+    if (!std::isalpha(first) && field.front() != '_' && field.front() != '$') {
+        return false;
+    }
+    return std::ranges::all_of(field.begin() + 1, field.end(), [](char c) {
+        auto const ch = static_cast<unsigned char>(c);
+        return std::isalnum(ch) || c == '_' || c == '$';
+    });
+}
+
+/** Appends one schema field to a result-field path using dot or bracket notation as needed. */
+std::string appendFieldPathSegment(std::string const& base, std::string const& field)
+{
+    auto const segment = isPathIdentifier(field)
+        ? field
+        : "[" + nlohmann::json(field).dump() + "]";
+    if (base.empty()) {
+        return segment;
+    }
+    return isPathIdentifier(field)
+        ? base + "." + segment
+        : base + segment;
+}
+
+/** Recursively enumerates nested schema paths that mapget can return through `withFields`. */
+void collectSchemaFieldPaths(
+    std::vector<std::string>& paths,
+    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    simfil::SchemaId schemaId,
+    std::string const& basePath,
+    int depth)
+{
+    if (!registry || schemaId == simfil::NoSchemaId || depth <= 0) {
+        return;
+    }
+
+    for (auto const& field : registry->directFields(schemaId)) {
+        auto const path = appendFieldPathSegment(basePath, field);
+        paths.push_back(path);
+        auto const childSchema = registry->childSchema(schemaId, field);
+        if (childSchema != simfil::NoSchemaId && registry->kind(childSchema) == simfil::Schema::Kind::Object) {
+            collectSchemaFieldPaths(paths, registry, childSchema, path, depth - 1);
+        }
+    }
+}
+
+/** Adds one search-style field candidate while preserving map/layer/attribute context. */
+void addSearchStyleField(
+    std::vector<SearchStyleFieldInfo>& fields,
+    std::set<std::string>& seen,
+    std::string const& path,
+    std::string const& mapId,
+    std::string const& layerId,
+    std::string const& attrName,
+    std::string const& featureType)
+{
+    if (path.empty()) {
+        return;
+    }
+    auto const key = mapId + "\n" + layerId + "\n" + attrName + "\n" + featureType + "\n" + path;
+    if (!seen.insert(key).second) {
+        return;
+    }
+    fields.push_back({path, mapId, layerId, attrName, featureType});
+}
+
+/** Converts native attribute-scope candidates into the embind JS value shape. */
+NativeJsValue attributeScopesToJs(std::vector<AttributeScopeInfo> const& scopes)
+{
+    auto result = JsValue::List();
+    for (auto const& scope : scopes) {
+        result.push(JsValue::Dict({
+            {"attrName", JsValue(scope.attrName)},
+            {"attrLayerName", JsValue(scope.attrLayerName)},
+            {"featureType", JsValue(scope.featureType)},
+            {"mapId", JsValue(scope.mapId)},
+            {"layerId", JsValue(scope.layerId)}
+        }));
+    }
+    return *result;
+}
+
+/** Converts native search-style field candidates into the embind JS value shape. */
+NativeJsValue searchStyleFieldsToJs(std::vector<SearchStyleFieldInfo> const& fields)
+{
+    auto result = JsValue::List();
+    for (auto const& field : fields) {
+        result.push(JsValue::Dict({
+            {"path", JsValue(field.path)},
+            {"mapId", JsValue(field.mapId)},
+            {"layerId", JsValue(field.layerId)},
+            {"attrName", field.attrName.empty() ? JsValue::Undefined() : JsValue(field.attrName)},
+            {"featureType", field.featureType.empty() ? JsValue::Undefined() : JsValue(field.featureType)}
+        }));
+    }
+    return *result;
 }
 
 } // namespace
@@ -678,6 +1008,145 @@ bool TileLayerParser::isAttributeScopeSearchQuery(std::string const& query) cons
     }
 
     return sawAttributeOnlyIdentifier;
+}
+
+/** Returns schema contexts that can evaluate an attribute-scope search query. */
+NativeJsValue TileLayerParser::getAttributeScopeForQuery(std::string const& query) const
+{
+    auto const identifiers = topLevelIdentifiers(query);
+    auto const attributeNameLiterals = positiveStringLiteralsForIdentifier(query, "$name");
+    auto const attributeLayerLiterals = positiveStringLiteralsForIdentifier(query, "$layer");
+    auto const allScopes = collectAttributeScopes(info_);
+    std::vector<AttributeScopeInfo> matchingScopes;
+    for (auto const& scope : allScopes) {
+        if (attributeScopeMatchesQuery(scope, identifiers, attributeNameLiterals, attributeLayerLiterals)) {
+            matchingScopes.push_back(scope);
+        }
+    }
+    return attributeScopesToJs(matchingScopes);
+}
+
+/** Enumerates result fields available to search-result style rules for the requested scope. */
+NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& query, std::string const& scope) const
+{
+    auto const concreteScope = scope == "auto"
+        ? (isAttributeScopeSearchQuery(query) ? "attribute" : "feature")
+        : scope;
+
+    std::vector<SearchStyleFieldInfo> fields;
+    std::set<std::string> seen;
+    constexpr int kSearchStyleFieldDepth = 5;
+
+    if (concreteScope == "attribute") {
+        // Attribute-scope rules can style both the matched attribute value and
+        // selected feature-level fields through the `$feature` overlay.
+        auto const identifiers = topLevelIdentifiers(query);
+        auto const attributeNameLiterals = positiveStringLiteralsForIdentifier(query, "$name");
+        auto const attributeLayerLiterals = positiveStringLiteralsForIdentifier(query, "$layer");
+        auto const allScopes = collectAttributeScopes(info_);
+        std::vector<AttributeScopeInfo> matchingScopes;
+        for (auto const& attrScope : allScopes) {
+            if (attributeScopeMatchesQuery(attrScope, identifiers, attributeNameLiterals, attributeLayerLiterals)) {
+                matchingScopes.push_back(attrScope);
+            }
+        }
+        auto const& scopes = matchingScopes.empty() ? allScopes : matchingScopes;
+        for (auto const& attrScope : scopes) {
+            std::vector<std::string> paths;
+            collectSchemaFieldPaths(
+                paths,
+                attrScope.registry,
+                attrScope.attributeSchema,
+                "",
+                kSearchStyleFieldDepth);
+            for (auto const& path : paths) {
+                addSearchStyleField(
+                    fields,
+                    seen,
+                    path,
+                    attrScope.mapId,
+                    attrScope.layerId,
+                    attrScope.attrName,
+                    attrScope.featureType);
+            }
+
+            for (auto const& overlayField : {"$name", "$layer", "$validityIndex", "$validityCount"}) {
+                addSearchStyleField(
+                    fields,
+                    seen,
+                    overlayField,
+                    attrScope.mapId,
+                    attrScope.layerId,
+                    attrScope.attrName,
+                    attrScope.featureType);
+            }
+
+            addSearchStyleField(
+                fields,
+                seen,
+                "$feature",
+                attrScope.mapId,
+                attrScope.layerId,
+                attrScope.attrName,
+                attrScope.featureType);
+            std::vector<std::string> featurePaths;
+            collectSchemaFieldPaths(
+                featurePaths,
+                attrScope.registry,
+                attrScope.featureSchema,
+                "$feature",
+                kSearchStyleFieldDepth);
+            for (auto const& path : featurePaths) {
+                addSearchStyleField(
+                    fields,
+                    seen,
+                    path,
+                    attrScope.mapId,
+                    attrScope.layerId,
+                    attrScope.attrName,
+                    attrScope.featureType);
+            }
+        }
+    }
+    else {
+        // Feature-scope style fields come directly from each advertised feature schema.
+        for (auto const& [_, dataSource] : info_) {
+            for (auto const& [__, layerInfo] : dataSource.layers_) {
+                if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
+                    continue;
+                }
+                auto registry = layerInfo->schemaRegistry();
+                if (!registry) {
+                    continue;
+                }
+                for (auto const& featureType : layerInfo->featureTypes_) {
+                    std::vector<std::string> paths;
+                    collectSchemaFieldPaths(
+                        paths,
+                        registry,
+                        registry->featureSchema(featureType.name_),
+                        "",
+                        kSearchStyleFieldDepth);
+                    for (auto const& path : paths) {
+                        addSearchStyleField(
+                            fields,
+                            seen,
+                            path,
+                            dataSource.mapId_,
+                            layerInfo->layerId_,
+                            "",
+                            featureType.name_);
+                    }
+                }
+            }
+        }
+    }
+
+    std::ranges::sort(fields, [](auto const& lhs, auto const& rhs) {
+        return std::tie(lhs.path, lhs.mapId, lhs.layerId, lhs.attrName, lhs.featureType)
+            < std::tie(rhs.path, rhs.mapId, rhs.layerId, rhs.attrName, rhs.featureType);
+    });
+    return searchStyleFieldsToJs(fields);
 }
 
 JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const

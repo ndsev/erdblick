@@ -22,8 +22,36 @@ export interface SearchResultPoint {
     mapId: string;
     layerId: string;
     tileId: bigint;
+    sourceTileKey: string;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
     featureId: string;
     featureKey: string;
+}
+
+export interface SearchResultPointBucket {
+    sourceTileKey: string;
+    mapId: string;
+    layerId: string;
+    tileId: bigint;
+    points: SearchResultPoint[];
+}
+
+export interface SearchResultPinMarker {
+    coordinates: [number, number];
+    count: number;
+    mapId: string;
+    layerId: string;
+    tileId: bigint;
+    featureId: string;
+    featureKey: string;
+    featureKeys: string[];
+}
+
+export interface SearchResultPinMaterializationRequest {
+    sourceTileKeys: Iterable<string>;
+    targetLevel: number;
 }
 
 export interface FeatureSearchResultEntry {
@@ -60,8 +88,10 @@ export interface FeatureSearchSession {
     searchResultTilesBySourceKey: Map<string, SearchResultTileContribution>;
     searchResultPointsByFeatureKey: Map<string, SearchResultPoint>;
     searchResultPointsCache: SearchResultPoint[];
+    searchResultPointBucketsCache: SearchResultPointBucket[];
     searchResultPointsCacheDirty: boolean;
     searchResultPointsVersion: number;
+    searchResultPinIndex: SearchResultPinIndex;
 }
 
 interface SearchRequestProgress {
@@ -74,6 +104,9 @@ interface SearchRequestProgress {
 interface SearchResultTileContribution {
     refresh: number;
     sourceTileKey: string;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
     resultCount: number;
     results: FeatureSearchResultEntry[];
     traceResults: TraceResult[];
@@ -87,6 +120,8 @@ export interface FeatureSearchResultLayer {
     iconAtlasUrl: string;
     iconMappingUrl: string;
     points: SearchResultPoint[];
+    pointBuckets: SearchResultPointBucket[];
+    pinIndex: SearchResultPinIndex;
 }
 
 export interface CompletionOwnerState {
@@ -94,9 +129,196 @@ export interface CompletionOwnerState {
     candidateList: CompletionCandidate[];
 }
 
+interface SearchResultPinNodeDelta {
+    key: string;
+    mapId: string;
+    layerId: string;
+    tileId: bigint;
+    level: number;
+    count: number;
+    lonSum: number;
+    latSum: number;
+    samples: SearchResultPoint[];
+}
+
+interface SearchResultPinContribution {
+    maxLevel: number;
+    deltasByLevel: Map<number, Map<string, SearchResultPinNodeDelta>>;
+}
+
+/**
+ * Stores low-fidelity search pins as per-source-tile mapget-tile deltas.
+ *
+ * The index deliberately avoids a global spatial clustering rebuild. Result-tile eviction only removes the matching
+ * contribution; each view materializes visible source-tile keys into already aggregated markers.
+ */
+export class SearchResultPinIndex {
+    private static readonly MAX_SAMPLE_FEATURES = 25;
+    private readonly contributionsBySourceTileKey = new Map<string, SearchResultPinContribution>();
+
+    /** Returns whether the index currently has no source-tile contributions. */
+    get isEmpty(): boolean {
+        return this.contributionsBySourceTileKey.size === 0;
+    }
+
+    /** Replaces one source-tile contribution with tile-level marker deltas. */
+    addContribution(sourceTileKey: string, points: readonly SearchResultPoint[]): void {
+        if (!points.length) {
+            this.contributionsBySourceTileKey.delete(sourceTileKey);
+            return;
+        }
+
+        const contribution: SearchResultPinContribution = {
+            maxLevel: 0,
+            deltasByLevel: new Map<number, Map<string, SearchResultPinNodeDelta>>()
+        };
+        for (const point of points) {
+            this.addPointToContribution(contribution, point);
+        }
+        this.contributionsBySourceTileKey.set(sourceTileKey, contribution);
+    }
+
+    /** Removes one source-tile contribution without touching unrelated result tiles. */
+    removeContribution(sourceTileKey: string): boolean {
+        return this.contributionsBySourceTileKey.delete(sourceTileKey);
+    }
+
+    /** Clears every indexed pin contribution for a full search refresh or session reset. */
+    clear(): void {
+        this.contributionsBySourceTileKey.clear();
+    }
+
+    /** Materializes visible source-tile contributions into tile-aggregated pin markers for one deck view. */
+    materialize(request: SearchResultPinMaterializationRequest): SearchResultPinMarker[] {
+        const requestedLevel = Math.max(0, Math.floor(request.targetLevel));
+        const mergedDeltas = new Map<string, SearchResultPinNodeDelta>();
+        for (const sourceTileKey of request.sourceTileKeys) {
+            const contribution = this.contributionsBySourceTileKey.get(sourceTileKey);
+            if (!contribution) {
+                continue;
+            }
+            const effectiveLevel = Math.min(requestedLevel, contribution.maxLevel);
+            const deltasForLevel = contribution.deltasByLevel.get(effectiveLevel);
+            if (!deltasForLevel) {
+                continue;
+            }
+            for (const delta of deltasForLevel.values()) {
+                this.mergeMaterializedDelta(mergedDeltas, delta);
+            }
+        }
+
+        return Array.from(mergedDeltas.values())
+            .filter(delta => delta.count > 0 && delta.samples.length > 0)
+            .map(delta => this.markerFromDelta(delta))
+            .sort((lhs, rhs) => {
+                if (lhs.tileId === rhs.tileId) {
+                    return lhs.featureKey.localeCompare(rhs.featureKey);
+                }
+                return lhs.tileId < rhs.tileId ? -1 : 1;
+            });
+    }
+
+    /** Adds one point to every ancestor tile delta used for later view-level materialization. */
+    private addPointToContribution(contribution: SearchResultPinContribution, point: SearchResultPoint): void {
+        let tileId = point.sourceTileId;
+        let level = Number(coreLib.getTileLevel(tileId));
+        contribution.maxLevel = Math.max(contribution.maxLevel, level);
+
+        while (level >= 0) {
+            let deltasForLevel = contribution.deltasByLevel.get(level);
+            if (!deltasForLevel) {
+                deltasForLevel = new Map<string, SearchResultPinNodeDelta>();
+                contribution.deltasByLevel.set(level, deltasForLevel);
+            }
+
+            const nodeKey = `${point.sourceMapId}\n${point.sourceLayerId}\n${tileId.toString()}`;
+            let delta = deltasForLevel.get(nodeKey);
+            if (!delta) {
+                delta = {
+                    key: nodeKey,
+                    mapId: point.sourceMapId,
+                    layerId: point.sourceLayerId,
+                    tileId,
+                    level,
+                    count: 0,
+                    lonSum: 0,
+                    latSum: 0,
+                    samples: []
+                };
+                deltasForLevel.set(nodeKey, delta);
+            }
+            this.addPointToDelta(delta, point);
+            if (level === 0) {
+                break;
+            }
+            tileId = this.parentTileId(tileId, level);
+            level -= 1;
+        }
+    }
+
+    /** Accumulates point counts, average-position sums, and a bounded inspection sample. */
+    private addPointToDelta(delta: SearchResultPinNodeDelta, point: SearchResultPoint): void {
+        delta.count += 1;
+        delta.lonSum += point.coordinates[0];
+        delta.latSum += point.coordinates[1];
+        if (delta.samples.length < SearchResultPinIndex.MAX_SAMPLE_FEATURES) {
+            // Samples are intentionally bounded because materialized aggregate markers may cover many result features.
+            delta.samples.push(point);
+        }
+    }
+
+    /** Merges one pre-aggregated source-tile delta into the visible-view result set. */
+    private mergeMaterializedDelta(
+        mergedDeltas: Map<string, SearchResultPinNodeDelta>,
+        delta: SearchResultPinNodeDelta
+    ): void {
+        const existing = mergedDeltas.get(delta.key);
+        if (!existing) {
+            mergedDeltas.set(delta.key, {
+                ...delta,
+                samples: [...delta.samples]
+            });
+            return;
+        }
+
+        existing.count += delta.count;
+        existing.lonSum += delta.lonSum;
+        existing.latSum += delta.latSum;
+        for (const sample of delta.samples) {
+            if (existing.samples.length >= SearchResultPinIndex.MAX_SAMPLE_FEATURES) {
+                break;
+            }
+            existing.samples.push(sample);
+        }
+    }
+
+    /** Converts the internal aggregate delta into the flat marker object consumed by Deck. */
+    private markerFromDelta(delta: SearchResultPinNodeDelta): SearchResultPinMarker {
+        const representative = delta.samples[0];
+        return {
+            coordinates: [delta.lonSum / delta.count, delta.latSum / delta.count],
+            count: delta.count,
+            mapId: representative.mapId,
+            layerId: representative.layerId,
+            tileId: delta.tileId,
+            featureId: representative.featureId,
+            featureKey: representative.featureKey,
+            featureKeys: delta.samples.map(sample => sample.featureKey)
+        };
+    }
+
+    /** Computes the parent id for a mapget tile id at a known non-root level. */
+    private parentTileId(tileId: bigint, level: number): bigint {
+        const x = tileId >> 32n;
+        const y = (tileId >> 16n) & 0xffffn;
+        const parentLevel = BigInt(level - 1);
+        return ((x >> 1n) << 32n) | ((y >> 1n) << 16n) | parentLevel;
+    }
+}
+
 @Injectable({providedIn: 'root'})
 /**
- * Coordinates feature search, query completion, result clustering, and search-marker overlays.
+ * Coordinates feature search, query completion, result indexing, and search-marker overlays.
  *
  * Search execution is delegated to mapget; this service keeps server progress and UI-friendly result caches in sync.
  */
@@ -140,6 +362,8 @@ export class FeatureSearchService {
     private tintedAtlasByColor = new Map<string, string>();
     private baseAtlasImagePromise: Promise<HTMLImageElement> | null = null;
     private locationMarkerGraphicUrl: string | null = null;
+    private pendingResultDataRebuildSessionIds = new Set<string>();
+    private resultDataRebuildRaf: number | null = null;
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
@@ -224,7 +448,7 @@ export class FeatureSearchService {
     }
 
     /**
-     * Returns the static mapping JSON that pairs atlas sprites with cluster-marker states.
+     * Returns the static mapping JSON that pairs atlas sprites with numbered pin-marker states.
      */
     getSearchClusterIconMappingUrl(): string {
         return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
@@ -250,7 +474,9 @@ export class FeatureSearchService {
                 pointsVersion: session.searchResultPointsVersion,
                 iconAtlasUrl: session.clusterIconAtlasUrl,
                 iconMappingUrl: FeatureSearchService.SEARCH_ICON_MAPPING_URL,
-                points: this.getSessionSearchResultPoints(session)
+                points: this.getSessionSearchResultPoints(session),
+                pointBuckets: this.getSessionSearchResultPointBuckets(session),
+                pinIndex: session.searchResultPinIndex
             }))
             .filter(layer => layer.points.length > 0);
     }
@@ -601,8 +827,10 @@ export class FeatureSearchService {
             searchResultTilesBySourceKey: new Map<string, SearchResultTileContribution>(),
             searchResultPointsByFeatureKey: new Map<string, SearchResultPoint>(),
             searchResultPointsCache: [],
+            searchResultPointBucketsCache: [],
             searchResultPointsCacheDirty: false,
-            searchResultPointsVersion: 0
+            searchResultPointsVersion: 0,
+            searchResultPinIndex: new SearchResultPinIndex()
         };
         return session;
     }
@@ -644,6 +872,7 @@ export class FeatureSearchService {
 
     /** Clears only result-side state; the persisted search definition and UI surface stay intact. */
     private clearSessionResultData(session: FeatureSearchSession): void {
+        this.pendingResultDataRebuildSessionIds.delete(session.id);
         session.searchResultTilesBySourceKey.clear();
         if (this.clearSessionSearchResultPoints(session)) {
             this.bumpSearchResultLayersVersion();
@@ -811,7 +1040,7 @@ export class FeatureSearchService {
             this.resetSessionForServerRefresh(session, refresh);
         }
 
-        const sourceTileKey = coreLib.getTileFeatureLayerKey(
+        const sourceTileKey = payload.sourceTileKey || coreLib.getTileFeatureLayerKey(
             payload.sourceMapId,
             payload.sourceLayerId,
             payload.sourceTileId
@@ -832,9 +1061,12 @@ export class FeatureSearchService {
         for (const entry of payload.entries) {
             const {mapId, layerId} = this.parseMapLayerIds(entry.mapTileKey);
             const point = this.makeSearchResultPoint(
+                sourceTileKey,
+                payload.sourceMapId,
+                payload.sourceLayerId,
+                payload.sourceTileId,
                 mapId,
                 layerId,
-                payload.sourceTileId,
                 entry.featureId,
                 entry
             );
@@ -849,20 +1081,36 @@ export class FeatureSearchService {
             });
         }
 
-        session.searchResultTilesBySourceKey.set(sourceTileKey, {
+        const contribution: SearchResultTileContribution = {
             refresh,
             sourceTileKey,
+            sourceMapId: payload.sourceMapId,
+            sourceLayerId: payload.sourceLayerId,
+            sourceTileId: payload.sourceTileId,
             resultCount: payload.resultCount,
             results,
             traceResults,
             diagnostics: payload.diagnostics,
             points
-        });
-        this.rebuildSessionResultData(session);
+        };
+        const previousContribution = session.searchResultTilesBySourceKey.get(sourceTileKey);
+        session.searchResultTilesBySourceKey.set(sourceTileKey, contribution);
+        let emitProgressNow = true;
+        if (previousContribution) {
+            session.searchResultPinIndex.removeContribution(sourceTileKey);
+            session.searchResultPinIndex.addContribution(sourceTileKey, contribution.points);
+            this.scheduleSessionResultDataRebuild(session);
+            emitProgressNow = false;
+        } else {
+            this.appendSessionResultContribution(session, contribution);
+        }
+        this.applyProgressSnapshot(session, payload.tilesConsidered, payload.tilesCompleted);
 
         session.endTime = Date.now();
         session.timeElapsed = this.formatTime(session.endTime - session.startTime);
-        this.progress.next(session);
+        if (emitProgressNow) {
+            this.progress.next(session);
+        }
     }
 
     /** Removes UI-visible result data for one source tile that left the desired search area. */
@@ -871,8 +1119,8 @@ export class FeatureSearchService {
         if (!session || !session.searchResultTilesBySourceKey.delete(payload.sourceTileKey)) {
             return;
         }
-        this.rebuildSessionResultData(session);
-        this.progress.next(session);
+        session.searchResultPinIndex.removeContribution(payload.sourceTileKey);
+        this.scheduleSessionResultDataRebuild(session);
     }
 
     /** Applies mapget's server-side search progress status to the matching UI session. */
@@ -908,10 +1156,19 @@ export class FeatureSearchService {
         });
 
         const progressEntries = Array.from(session.progressByRequestKey.values());
-        session.progressTotal = Math.max(1, progressEntries.reduce((sum, item) => sum + item.tilesQueued, 0));
+        const diffProgressTotal = progressEntries.reduce((sum, item) => sum + item.tilesQueued, 0);
+        session.progressTotal = Math.max(
+            1,
+            this.nonNegativeNumber(status.tilesConsidered, diffProgressTotal)
+        );
+        const completedTiles = this.nonNegativeNumber(status.tilesCompleted, 0);
+        const searchedDiffTiles = progressEntries.reduce((sum, item) => sum + item.tilesSearched, 0);
+        // `tilesCompleted` is the stable full-area baseline; `tilesSearched` adds
+        // in-flight progress from the current differential request before mapget
+        // has committed those tiles into the local completed set.
         session.progressDone = Math.min(
             session.progressTotal,
-            progressEntries.reduce((sum, item) => sum + item.tilesSearched, 0)
+            Math.max(completedTiles, Math.min(session.progressTotal, completedTiles + searchedDiffTiles))
         );
         session.complete = session.paused || (progressEntries.length > 0 && progressEntries.every(item => item.terminal));
         session.totalFeatureCount = progressEntries.reduce((sum, item) => sum + item.matches, 0);
@@ -936,6 +1193,22 @@ export class FeatureSearchService {
     private nonNegativeNumber(value: unknown, fallback: number): number {
         const parsed = Number(value);
         return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
+    }
+
+    /** Applies full-coverage progress snapshots from MapDataService without losing streamed result state. */
+    private applyProgressSnapshot(
+        session: FeatureSearchSession,
+        tilesConsidered: unknown,
+        tilesCompleted: unknown
+    ): void {
+        const total = this.nonNegativeNumber(tilesConsidered, 0);
+        if (total > 0) {
+            session.progressTotal = Math.max(1, total);
+        }
+        const completed = this.nonNegativeNumber(tilesCompleted, 0);
+        if (completed > 0 || total > 0) {
+            session.progressDone = Math.min(session.progressTotal, Math.max(session.progressDone, completed));
+        }
     }
 
     /** Rebuilds derived result arrays from per-tile contributions after add, replace, or eviction. */
@@ -972,6 +1245,62 @@ export class FeatureSearchService {
         this.bumpSearchResultLayersVersion();
     }
 
+    /** Schedules one result-data rebuild after a burst of source-tile replacement or eviction events. */
+    private scheduleSessionResultDataRebuild(session: FeatureSearchSession): void {
+        this.pendingResultDataRebuildSessionIds.add(session.id);
+        if (this.resultDataRebuildRaf !== null) {
+            return;
+        }
+        this.resultDataRebuildRaf = requestAnimationFrame(() => {
+            this.resultDataRebuildRaf = null;
+            this.flushPendingSessionResultDataRebuilds();
+        });
+    }
+
+    /** Flushes coalesced result-data rebuilds and emits one UI update per affected search session. */
+    private flushPendingSessionResultDataRebuilds(): void {
+        const sessionIds = Array.from(this.pendingResultDataRebuildSessionIds);
+        this.pendingResultDataRebuildSessionIds.clear();
+        for (const sessionId of sessionIds) {
+            const session = this.getInternalSession(sessionId);
+            if (!session) {
+                continue;
+            }
+            this.rebuildSessionResultData(session);
+            this.progress.next(session);
+        }
+    }
+
+    /** Appends a new source tile contribution without touching previously aggregated result arrays. */
+    private appendSessionResultContribution(
+        session: FeatureSearchSession,
+        contribution: SearchResultTileContribution
+    ): void {
+        session.searchResults.push(...contribution.results);
+        session.traceResults.push(...contribution.traceResults);
+        if (contribution.diagnostics) {
+            session.diagnosticsBlobs.push(contribution.diagnostics);
+        }
+        session.totalFeatureCount += contribution.resultCount;
+        const pinsChanged = contribution.points.length > 0;
+        if (pinsChanged) {
+            session.searchResultPinIndex.addContribution(contribution.sourceTileKey, contribution.points);
+        }
+
+        let pointsChanged = false;
+        for (const point of contribution.points) {
+            if (!session.searchResultPointsByFeatureKey.has(point.featureKey)) {
+                session.searchResultPointsByFeatureKey.set(point.featureKey, point);
+                pointsChanged = true;
+            }
+        }
+        if (pointsChanged || pinsChanged) {
+            session.searchResultPointsCacheDirty = true;
+            session.searchResultPointsVersion += 1;
+            this.bumpSearchResultLayersVersion();
+        }
+    }
+
     /** Returns one internal live session by runtime id. */
     private getInternalSession(id: string): FeatureSearchSession | undefined {
         return this.searchSessions.find(session => session.id === id);
@@ -986,9 +1315,38 @@ export class FeatureSearchService {
     private getSessionSearchResultPoints(session: FeatureSearchSession): SearchResultPoint[] {
         if (session.searchResultPointsCacheDirty) {
             session.searchResultPointsCache = Array.from(session.searchResultPointsByFeatureKey.values());
+            session.searchResultPointBucketsCache = this.buildSearchResultPointBuckets(session);
             session.searchResultPointsCacheDirty = false;
         }
         return session.searchResultPointsCache;
+    }
+
+    /** Returns one session's cached marker list grouped by source map/layer/tile. */
+    private getSessionSearchResultPointBuckets(session: FeatureSearchSession): SearchResultPointBucket[] {
+        if (session.searchResultPointsCacheDirty) {
+            this.getSessionSearchResultPoints(session);
+        }
+        return session.searchResultPointBucketsCache;
+    }
+
+    /** Groups result-tile point contributions so the deck view can cull low-fidelity pins by source tile. */
+    private buildSearchResultPointBuckets(session: FeatureSearchSession): SearchResultPointBucket[] {
+        const buckets: SearchResultPointBucket[] = [];
+        const contributions = Array.from(session.searchResultTilesBySourceKey.values())
+            .sort((lhs, rhs) => lhs.sourceTileKey.localeCompare(rhs.sourceTileKey));
+        for (const contribution of contributions) {
+            if (!contribution.points.length) {
+                continue;
+            }
+            buckets.push({
+                sourceTileKey: contribution.sourceTileKey,
+                mapId: contribution.sourceMapId,
+                layerId: contribution.sourceLayerId,
+                tileId: contribution.sourceTileId,
+                points: contribution.points
+            });
+        }
+        return buckets;
     }
 
     /** Clears one session's marker caches and returns whether anything changed. */
@@ -1000,8 +1358,10 @@ export class FeatureSearchService {
         }
         session.searchResultPointsByFeatureKey.clear();
         session.searchResultPointsCache = [];
+        session.searchResultPointBucketsCache = [];
         session.searchResultPointsCacheDirty = false;
         session.searchResultPointsVersion += 1;
+        session.searchResultPinIndex.clear();
         return true;
     }
 
@@ -1080,9 +1440,12 @@ export class FeatureSearchService {
      * Creates a search marker if the match exposes a valid cartographic position.
      */
     private makeSearchResultPoint(
+        sourceTileKey: string,
+        sourceMapId: string,
+        sourceLayerId: string,
+        sourceTileId: bigint,
         mapId: string,
         layerId: string,
-        tileId: bigint,
         featureId: string,
         entry: SearchResultTileEntry
     ): SearchResultPoint | null {
@@ -1105,14 +1468,18 @@ export class FeatureSearchService {
             coordinates: [lon, lat],
             mapId,
             layerId,
-            tileId,
+            tileId: sourceTileId,
+            sourceTileKey,
+            sourceMapId,
+            sourceLayerId,
+            sourceTileId,
             featureId,
             featureKey
         };
     }
 
     /**
-     * Lazily recolors the cluster icon atlas so marker styling tracks the configured highlight color.
+     * Lazily recolors the numbered pin icon atlas so marker styling tracks the configured highlight color.
      */
     private async ensureTintedClusterAtlas(color: string): Promise<string> {
         const cached = this.tintedAtlasByColor.get(color);

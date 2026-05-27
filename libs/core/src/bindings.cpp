@@ -816,6 +816,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
         .function("completeSearchQuery", &TileLayerParser::completeSearchQuery)
         .function("isAttributeScopeSearchQuery", &TileLayerParser::isAttributeScopeSearchQuery)
+        .function("getAttributeScopeForQuery", &TileLayerParser::getAttributeScopeForQuery)
+        .function("searchStyleFieldsForQuery", &TileLayerParser::searchStyleFieldsForQuery)
         .function(
             "filterFeatureJumpTargets",
             std::function<

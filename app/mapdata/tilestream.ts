@@ -50,6 +50,8 @@ export interface MapTileStreamSearchStatusPayload {
     tilesQueued?: number;
     tilesLoaded?: number;
     tilesSearched?: number;
+    tilesConsidered?: number;
+    tilesCompleted?: number;
     matches?: number;
     chunksEmitted?: number;
     error?: string;

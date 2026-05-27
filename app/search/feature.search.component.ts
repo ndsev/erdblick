@@ -42,11 +42,24 @@ interface FeatureSearchGroupingOption {
 interface FeatureSearchStyleOption {
     label: string;
     value: string;
+    mapId?: string;
+    layerId?: string;
+    attrName?: string;
+    featureType?: string;
 }
 
 interface FeatureSearchScopeOption {
     label: string;
     value: FeatureSearchScope;
+}
+
+interface FeatureSearchResultTreeItem {
+    label: string;
+    mapId: string;
+    layerId: string;
+    featureId: string;
+    featureType: string;
+    tileId: number;
 }
 
 interface FeatureSearchStyleColorStop {
@@ -56,16 +69,16 @@ interface FeatureSearchStyleColorStop {
     color: string;
 }
 
-interface FeatureSearchStyleFilterMockState {
+interface FeatureSearchStyleFilterDraft {
     id: number;
     attributeField: string;
     operator: string;
     filterValue: number;
 }
 
-interface FeatureSearchStyleMockState {
+interface FeatureSearchStyleRuleDraft {
     id: number;
-    filters: FeatureSearchStyleFilterMockState[];
+    filters: FeatureSearchStyleFilterDraft[];
     visualization: string;
     lineWidth: number;
     opacity: number;
@@ -205,7 +218,11 @@ interface FeatureSearchStyleMockState {
                                         [style]="{ width: '1em', height: '1em', margin: '0' }"/>
                 </div>
             }
-            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" data-testid="feature-search-panel" scrollable>
+            <p-tabs [value]="resultPanelIndex"
+                    (valueChange)="onResultPanelIndexChange($event)"
+                    class="feature-search-tabs"
+                    data-testid="feature-search-panel"
+                    scrollable>
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results </span>
@@ -213,7 +230,7 @@ interface FeatureSearchStyleMockState {
                     </p-tab>
                     <p-tab value="style">
                         <span>Styles </span>
-                        <p-badge [value]="styleRulesMock.length"/>
+                        <p-badge [value]="styleRuleDrafts.length"/>
                     </p-tab>
                     <p-tab value="diagnostics">
                         <span>Diagnostics </span>
@@ -270,13 +287,13 @@ interface FeatureSearchStyleMockState {
                             <p-accordion class="feature-search-style-accordion"
                                          [multiple]="true"
                                          [(value)]="styleRuleAccordionValue">
-                                @for (rule of styleRulesMock; track rule.id; let ruleIndex = $index) {
+                                @for (rule of styleRuleDrafts; track rule.id; let ruleIndex = $index) {
                                     <p-accordion-panel class="feature-search-style-panel"
                                                        [value]="styleRulePanelValue(rule)"
                                                        [attr.data-testid]="'feature-search-style-panel-' + rule.id">
                                         <p-accordion-header>
                                             <div class="feature-search-style-rule-header">
-                                                <span>Rule {{ styleRulesMock.length - ruleIndex }}</span>
+                                                <span>Rule {{ styleRuleDrafts.length - ruleIndex }}</span>
                                                 <span class="feature-search-style-rule-actions">
                                                     <p-button icon="pi pi-refresh"
                                                               label="Reset Style"
@@ -307,6 +324,7 @@ interface FeatureSearchStyleMockState {
                                                                       (ngModelChange)="onStyleRulesChanged()"
                                                                       optionLabel="label"
                                                                       optionValue="value"
+                                                                      [filter]="true"
                                                                       appendTo="body">
                                                             </p-select>
                                                             <p-select class="feature-search-style-operator"
@@ -351,6 +369,7 @@ interface FeatureSearchStyleMockState {
                                                               (ngModelChange)="onStyleRulesChanged()"
                                                               optionLabel="label"
                                                               optionValue="value"
+                                                              [filter]="true"
                                                               appendTo="body">
                                                     </p-select>
                                                     <label [for]="'feature-search-style-width-' + rule.id">Width</label>
@@ -402,6 +421,7 @@ interface FeatureSearchStyleMockState {
                                                               (ngModelChange)="onStyleRulesChanged()"
                                                               optionLabel="label"
                                                               optionValue="value"
+                                                              [filter]="true"
                                                               appendTo="body">
                                                     </p-select>
                                                 </div>
@@ -567,12 +587,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         {name: 'Tiles', value: 4}
     ];
     selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
-    styleAttributeOptions: FeatureSearchStyleOption[] = [
-        {label: 'speedLimit', value: 'speedLimit'},
-        {label: 'functionalRoadClass', value: 'functionalRoadClass'},
-        {label: 'laneCount', value: 'laneCount'},
-        {label: 'elevation', value: 'elevation'}
-    ];
+    styleAttributeOptions: FeatureSearchStyleOption[] = [];
     styleOperatorOptions: FeatureSearchStyleOption[] = [
         {label: '>', value: '>'},
         {label: '>=', value: '>='},
@@ -597,8 +612,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private nextStyleRuleId = 1;
     private nextStyleConditionId = 1;
     private nextStyleColorStopId = 1;
-    styleRulesMock: FeatureSearchStyleMockState[] = [this.createDefaultStyleRule()];
-    styleRuleAccordionValue: string[] = ['1'];
+    styleRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
+    styleRuleAccordionValue: string[] = [];
     private styleRulesStateSignature = "";
 
     // Active result panel index
@@ -627,9 +642,18 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     };
     private lastSearchQuery = "";
     private activeSearchGroupId = "";
+    private completedSearchGroupId = "";
     private lastErrorAlertSignature = "";
     private surfacedDockedSearchId = "";
     private completionOwnerId = "";
+    private resultTreeInputLength = 0;
+    private resultTreeGroupingSignature = "";
+    private resultTreeRunId = "";
+    private resultTreeGroupNodesByKey = new Map<string, TreeNode>();
+    private resultTreeAppendRaf: number | null = null;
+    private readonly resultTreeAppendBatchSize = 1000;
+    private readonly resultTreeAppendFrameBudgetMs = 8;
+    private styleAttributeOptionsSessionSignature = "";
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
@@ -653,7 +677,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 return;
             }
             this.selectedGroupingOptions = nextOptions;
-            this.recalculateResultsByGroups();
+            this.rebuildResultsTreeIncrementally();
         }));
 
         this.subscriptions.add(this.searchService.progress.subscribe(updatedSession => {
@@ -669,20 +693,28 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             }
             this.syncFromSession(session);
         }));
+        this.subscriptions.add(this.mapService.maps$.subscribe(() => {
+            this.styleAttributeOptionsSessionSignature = "";
+            if (this.session) {
+                this.refreshStyleAttributeOptionsIfNeeded(this.session);
+            }
+        }));
         this.subscriptions.add(this.featureSearchQueryChanged
             .pipe(debounceTime(this.completion.completionDelay))
             .subscribe(() => this.completeFeatureSearchQuery()));
     }
 
-    private createDefaultStyleFilter(): FeatureSearchStyleFilterMockState {
+    /** Creates one empty rule condition using the current schema-backed default field when available. */
+    private createDefaultStyleFilter(): FeatureSearchStyleFilterDraft {
         return {
             id: this.nextStyleConditionId++,
-            attributeField: 'speedLimit',
+            attributeField: this.defaultStyleField(),
             operator: '>',
             filterValue: 80
         };
     }
 
+    /** Creates a UI-owned color stop with a stable row id for Angular tracking. */
     private createStyleColorStop(label: string, value: number, color: string): FeatureSearchStyleColorStop {
         return {
             id: this.nextStyleColorStopId++,
@@ -692,7 +724,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    private createStyleRule(id: number): FeatureSearchStyleMockState {
+    /** Creates the editor draft for a new search-result style rule. */
+    private createStyleRule(id: number): FeatureSearchStyleRuleDraft {
         return {
             id,
             filters: [],
@@ -700,7 +733,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             lineWidth: 10,
             opacity: 40,
             colorMode: 'gradient',
-            colorField: 'speedLimit',
+            colorField: this.defaultStyleField(),
             solidColor: '#2f73ff',
             colorStops: [
                 this.createStyleColorStop('low', 30, '#2f73ff'),
@@ -714,14 +747,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    private createDefaultStyleRule(): FeatureSearchStyleMockState {
-        return this.createStyleRule(this.nextStyleRuleId++);
+    /** Returns the first currently valid result-field path for newly created controls. */
+    private defaultStyleField(): string {
+        return this.styleAttributeOptions[0]?.value ?? "";
     }
 
+    /** Adds a new style rule to the top of the editor and persists it immediately. */
     protected addStyleRule(): void {
-        const rule = this.createDefaultStyleRule();
+        const rule = this.createStyleRule(this.nextStyleRuleId++);
         const panelValue = this.styleRulePanelValue(rule);
-        this.styleRulesMock = [rule, ...this.styleRulesMock];
+        this.styleRuleDrafts = [rule, ...this.styleRuleDrafts];
         this.styleRuleAccordionValue = [
             panelValue,
             ...this.styleRuleAccordionValue.filter(value => value !== panelValue)
@@ -729,28 +764,33 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.onStyleRulesChanged();
     }
 
-    protected deleteStyleRule(rule: FeatureSearchStyleMockState): void {
+    /** Deletes one style rule draft and persists the remaining rule list. */
+    protected deleteStyleRule(rule: FeatureSearchStyleRuleDraft): void {
         const panelValue = this.styleRulePanelValue(rule);
-        this.styleRulesMock = this.styleRulesMock.filter(candidate => candidate.id !== rule.id);
+        this.styleRuleDrafts = this.styleRuleDrafts.filter(candidate => candidate.id !== rule.id);
         this.styleRuleAccordionValue = this.styleRuleAccordionValue.filter(value => value !== panelValue);
         this.onStyleRulesChanged();
     }
 
-    protected styleRulePanelValue(rule: FeatureSearchStyleMockState): string {
+    /** Returns the stable accordion key for one draft rule. */
+    protected styleRulePanelValue(rule: FeatureSearchStyleRuleDraft): string {
         return `${rule.id}`;
     }
 
-    protected addStyleCondition(rule: FeatureSearchStyleMockState): void {
+    /** Adds a filter condition to one rule draft. */
+    protected addStyleCondition(rule: FeatureSearchStyleRuleDraft): void {
         rule.filters = [...rule.filters, this.createDefaultStyleFilter()];
         this.onStyleRulesChanged();
     }
 
-    protected deleteStyleCondition(rule: FeatureSearchStyleMockState, filter: FeatureSearchStyleFilterMockState): void {
+    /** Deletes one filter condition from one rule draft. */
+    protected deleteStyleCondition(rule: FeatureSearchStyleRuleDraft, filter: FeatureSearchStyleFilterDraft): void {
         rule.filters = rule.filters.filter(candidate => candidate.id !== filter.id);
         this.onStyleRulesChanged();
     }
 
-    protected addStyleCategory(rule: FeatureSearchStyleMockState): void {
+    /** Adds a category color stop to one rule draft. */
+    protected addStyleCategory(rule: FeatureSearchStyleRuleDraft): void {
         const nextIndex = rule.categoryStops.length + 1;
         rule.categoryStops = [
             ...rule.categoryStops,
@@ -759,12 +799,14 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.onStyleRulesChanged();
     }
 
-    protected deleteStyleCategory(rule: FeatureSearchStyleMockState, category: FeatureSearchStyleColorStop): void {
+    /** Deletes one category color stop from one rule draft. */
+    protected deleteStyleCategory(rule: FeatureSearchStyleRuleDraft, category: FeatureSearchStyleColorStop): void {
         rule.categoryStops = rule.categoryStops.filter(candidate => candidate.id !== category.id);
         this.onStyleRulesChanged();
     }
 
-    protected styleGradientPreview(rule: FeatureSearchStyleMockState): string {
+    /** Returns the CSS preview gradient for the rule's current numeric color stops. */
+    protected styleGradientPreview(rule: FeatureSearchStyleRuleDraft): string {
         if (!rule.colorStops.length) {
             return rule.solidColor;
         }
@@ -775,30 +817,33 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return `linear-gradient(90deg, ${stops})`;
     }
 
-    protected resetStyleRule(rule: FeatureSearchStyleMockState): void {
+    /** Resets one rule draft to the default visual style while preserving its UI identity. */
+    protected resetStyleRule(rule: FeatureSearchStyleRuleDraft): void {
         const resetRule = this.createStyleRule(rule.id);
-        this.styleRulesMock = this.styleRulesMock.map(candidate =>
+        this.styleRuleDrafts = this.styleRuleDrafts.map(candidate =>
             candidate.id === rule.id ? resetRule : candidate
         );
         this.onStyleRulesChanged();
     }
 
+    /** Replaces all search-result style rules with one fresh default rule. */
     protected resetStyleRules(): void {
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
-        const rule = this.createDefaultStyleRule();
-        this.styleRulesMock = [rule];
+        const rule = this.createStyleRule(this.nextStyleRuleId++);
+        this.styleRuleDrafts = [rule];
         this.styleRuleAccordionValue = [this.styleRulePanelValue(rule)];
         this.onStyleRulesChanged();
     }
 
+    /** Serializes the editor drafts into persisted search style rules if the semantic value changed. */
     protected onStyleRulesChanged(): void {
         const session = this.session;
         if (!session) {
             return;
         }
-        const searchStyleRules = this.styleRulesMock.map(rule => this.styleRuleFromMockState(rule));
+        const searchStyleRules = this.styleRuleDrafts.map(rule => this.styleRuleFromDraft(rule));
         const signature = JSON.stringify(searchStyleRules);
         if (signature === this.styleRulesStateSignature) {
             return;
@@ -807,6 +852,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.stateService.patchFeatureSearch(session.id, {searchStyleRules});
     }
 
+    /** Rebuilds local editor drafts from the persisted search style rules. */
     private syncStyleRulesFromSession(rules: FeatureSearchStyleRule[]): void {
         const signature = JSON.stringify(rules ?? []);
         if (signature === this.styleRulesStateSignature) {
@@ -816,18 +862,19 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
-        this.styleRulesMock = rules.length
-            ? rules.map(rule => this.styleRuleToMockState(rule))
-            : [this.createDefaultStyleRule()];
-        this.styleRuleAccordionValue = this.styleRulesMock.map(rule => this.styleRulePanelValue(rule));
+        this.styleRuleDrafts = rules.map(rule => this.styleRuleToDraft(rule));
+        this.styleRuleAccordionValue = this.styleRuleDrafts.map(rule => this.styleRulePanelValue(rule));
     }
 
-    private styleRuleFromMockState(rule: FeatureSearchStyleMockState): FeatureSearchStyleRule {
+    /** Converts one editor draft into the persisted/search-request style-rule shape. */
+    private styleRuleFromDraft(rule: FeatureSearchStyleRuleDraft): FeatureSearchStyleRule {
         const width = this.clampNumber(rule.lineWidth, 1, 32, 4);
-        const color = this.colorModeFromMockState(rule);
+        const color = this.colorModeFromDraft(rule);
         return {
             geometry: this.geometryFromUiValue(rule.visualization),
-            filter: rule.filters.map(filter => this.filterFromMockState(filter)),
+            filter: rule.filters
+                .filter(filter => !!filter.attributeField)
+                .map(filter => this.filterFromDraft(filter)),
             color,
             width,
             pointRadius: Math.max(3, width * 1.5),
@@ -835,13 +882,13 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    private styleRuleToMockState(rule: FeatureSearchStyleRule): FeatureSearchStyleMockState {
+    /** Converts one persisted style rule into a UI-friendly editor draft. */
+    private styleRuleToDraft(rule: FeatureSearchStyleRule): FeatureSearchStyleRuleDraft {
         const color = rule.color;
-        const colorField = color.mode === "solid" ? "speedLimit" : color.field || "speedLimit";
-        this.ensureStyleAttributeOption(colorField);
+        const colorField = color.mode === "solid" ? this.defaultStyleField() : color.field || this.defaultStyleField();
         return {
             id: this.nextStyleRuleId++,
-            filters: rule.filter.map(filter => this.filterToMockState(filter)),
+            filters: rule.filter.map(filter => this.filterToDraft(filter)),
             visualization: rule.geometry ?? "any",
             lineWidth: this.clampNumber(rule.width, 1, 32, 4),
             opacity: this.clampNumber((rule.opacity ?? 1) * 100, 0, 100, 100),
@@ -849,14 +896,14 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             colorField,
             solidColor: color.mode === "solid" ? color.color : color.fallbackColor ?? "#2f73ff",
             colorStops: color.mode === "gradient"
-                ? this.colorStopsToMockState(color.stops)
+                ? this.colorStopsToDraft(color.stops)
                 : [
                     this.createStyleColorStop('low', 30, '#2f73ff'),
                     this.createStyleColorStop('mid', 80, '#ffd43b'),
                     this.createStyleColorStop('high', 120, '#ff3347')
                 ],
             categoryStops: color.mode === "categories"
-                ? this.colorStopsToMockState(color.stops)
+                ? this.colorStopsToDraft(color.stops)
                 : [
                     this.createStyleColorStop('category 1', 30, '#2f73ff'),
                     this.createStyleColorStop('category 2', 80, '#ff3347')
@@ -864,7 +911,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    private colorModeFromMockState(rule: FeatureSearchStyleMockState): FeatureSearchColorMode {
+    /** Converts the editor's flat color controls into the persisted color-mode union. */
+    private colorModeFromDraft(rule: FeatureSearchStyleRuleDraft): FeatureSearchColorMode {
         if (rule.colorMode === "solid") {
             return {mode: "solid", color: this.normalizeUiColor(rule.solidColor, "#2f73ff")};
         }
@@ -890,7 +938,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    private filterFromMockState(filter: FeatureSearchStyleFilterMockState): FeatureSearchRuleFilter {
+    /** Converts one editor filter condition into its persisted predicate shape. */
+    private filterFromDraft(filter: FeatureSearchStyleFilterDraft): FeatureSearchRuleFilter {
         return {
             field: filter.attributeField,
             op: filter.operator,
@@ -898,17 +947,18 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    private filterToMockState(filter: FeatureSearchRuleFilter): FeatureSearchStyleFilterMockState {
-        this.ensureStyleAttributeOption(filter.field);
+    /** Converts one persisted predicate into an editor filter row. */
+    private filterToDraft(filter: FeatureSearchRuleFilter): FeatureSearchStyleFilterDraft {
         return {
             id: this.nextStyleConditionId++,
-            attributeField: filter.field || "speedLimit",
+            attributeField: filter.field || this.defaultStyleField(),
             operator: filter.op || "=",
             filterValue: this.clampNumber(Number(filter.value), 0, 300, 0)
         };
     }
 
-    private colorStopsToMockState(stops: Array<{value: unknown; color: string}>): FeatureSearchStyleColorStop[] {
+    /** Converts persisted color stops into editor rows with stable Angular ids. */
+    private colorStopsToDraft(stops: Array<{value: unknown; color: string}>): FeatureSearchStyleColorStop[] {
         return stops.map((stop, index) =>
             this.createStyleColorStop(
                 `stop ${index + 1}`,
@@ -918,16 +968,115 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         );
     }
 
-    private ensureStyleAttributeOption(field: string): void {
-        if (!field || this.styleAttributeOptions.some(option => option.value === field)) {
-            return;
+    /**
+     * Refreshes the style-rule field picker from schema metadata.
+     *
+     * Existing drafts keep their current raw values, but invalid values are not
+     * reintroduced into the picker; this prevents old demo fields from staying selectable.
+     */
+    private refreshStyleAttributeOptions(session: FeatureSearchSession, patchMissingFields = true): void {
+        const rawOptions = this.mapService.searchStyleFieldsForQuery(
+            session.definition.query,
+            session.definition.scope
+        );
+        const activeOptions = rawOptions.filter(option => this.isStyleFieldCandidateActive(option.mapId, option.layerId));
+        const sourceOptions = activeOptions.length ? activeOptions : rawOptions;
+        const byValue = new Map<string, FeatureSearchStyleOption>();
+        for (const option of sourceOptions) {
+            if (!byValue.has(option.path)) {
+                byValue.set(option.path, {
+                    label: option.path,
+                    value: option.path,
+                    mapId: option.mapId,
+                    layerId: option.layerId,
+                    attrName: option.attrName,
+                    featureType: option.featureType
+                });
+            }
         }
-        this.styleAttributeOptions = [
-            ...this.styleAttributeOptions,
-            {label: field, value: field}
-        ];
+        const nextOptions = Array.from(byValue.values()).sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
+        if (JSON.stringify(nextOptions) !== JSON.stringify(this.styleAttributeOptions)) {
+            this.styleAttributeOptions = nextOptions;
+        }
+        if (patchMissingFields
+            && (session.definition.searchStyleRules?.length ?? 0) > 0
+            && this.applyDefaultStyleFieldIfMissing()) {
+            this.onStyleRulesChanged();
+        }
     }
 
+    /** Refreshes schema-backed style fields only when the style editor can consume them. */
+    private refreshStyleAttributeOptionsIfNeeded(session: FeatureSearchSession, patchMissingFields = true): void {
+        if (this.resultPanelIndex !== "style" && this.styleAttributeOptions.length === 0) {
+            return;
+        }
+        const signature = [
+            session.definition.query,
+            session.definition.scope,
+            this.visibleMapLayerSignature()
+        ].join("\n");
+        if (signature === this.styleAttributeOptionsSessionSignature) {
+            return;
+        }
+        this.styleAttributeOptionsSessionSignature = signature;
+        this.refreshStyleAttributeOptions(session, patchMissingFields);
+    }
+
+    /** Returns a compact signature for map/layer visibility that affects preferred field-picker ordering. */
+    private visibleMapLayerSignature(): string {
+        const visibleLayerKeys: string[] = [];
+        for (const [mapId, mapInfo] of this.mapService.maps.maps) {
+            for (const layer of mapInfo.allFeatureLayers()) {
+                for (let viewIndex = 0; viewIndex < this.stateService.numViews; ++viewIndex) {
+                    if (this.mapService.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
+                        visibleLayerKeys.push(`${viewIndex}:${mapId}:${layer.id}`);
+                    }
+                }
+            }
+        }
+        return visibleLayerKeys.sort().join("|");
+    }
+
+    /** Returns whether a field candidate belongs to a currently visible map/layer context. */
+    private isStyleFieldCandidateActive(mapId: string, layerId: string): boolean {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; ++viewIndex) {
+            if (this.mapService.maps.getMapLayerVisibility(viewIndex, mapId, layerId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Returns whether an editor field should be replaced by a schema-backed default. */
+    private fieldNeedsDefault(field: string): boolean {
+        return !field
+            || (this.styleAttributeOptions.length > 0
+                && !this.styleAttributeOptions.some(option => option.value === field));
+    }
+
+    /** Applies the current default style field to drafts that still point at missing fields. */
+    private applyDefaultStyleFieldIfMissing(): boolean {
+        const field = this.defaultStyleField();
+        if (!field) {
+            return false;
+        }
+        let changed = false;
+        for (const rule of this.styleRuleDrafts) {
+            if (rule.colorMode !== "solid" && this.fieldNeedsDefault(rule.colorField)) {
+                rule.colorField = field;
+                changed = true;
+            }
+            for (const filter of rule.filters) {
+                if (this.fieldNeedsDefault(filter.attributeField)) {
+                    filter.attributeField = field;
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    /** Maps the UI geometry selector value to the persisted search-style geometry kind. */
     private geometryFromUiValue(value: string): FeatureSearchGeometryKind {
         return ["any", "point", "line", "polygon", "mesh"].includes(value)
             ? value as FeatureSearchGeometryKind
@@ -998,16 +1147,27 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private syncFromSession(session: FeatureSearchSession): void {
         this.session = session;
         this.featureSearchDialogVisible = true;
+        const previousQuery = this.lastSearchQuery;
+        const previousScope = this.featureSearchScope;
         this.lastSearchQuery = session.definition.query;
         this.featureSearchScope = session.definition.scope;
+        this.refreshStyleAttributeOptionsIfNeeded(session, false);
         this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
+        if ((session.definition.searchStyleRules?.length ?? 0) > 0 && this.applyDefaultStyleFieldIfMissing()) {
+            this.onStyleRulesChanged();
+        }
         if (this.activeSearchGroupId !== session.runId) {
             this.activeSearchGroupId = session.runId;
+            this.completedSearchGroupId = "";
             this.lastErrorAlertSignature = "";
             this.featureSearchQuery = session.definition.query;
             this.results = [];
             this.resultsTree = [];
-            this.resultPanelIndex = 'results';
+            if (previousQuery !== session.definition.query
+                || previousScope !== session.definition.scope
+                || this.resultPanelIndex !== 'style') {
+                this.resultPanelIndex = 'results';
+            }
         }
         this.percentDone = session.progressTotal > 0
             ? Math.round((session.progressDone / session.progressTotal) * 100)
@@ -1017,6 +1177,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.awaitedTilesToLoad = 0;
         this.isSearchPaused = session.paused;
         this.diagnostics = session.diagnostics;
+        this.syncStreamingResults(session);
         if (this.isDocked()) {
             this.stateService.isDockOpen = true;
             if (this.surfacedDockedSearchId !== session.id) {
@@ -1025,16 +1186,13 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             }
         }
         if (session.complete) {
-            this.searchResultReady();
+            this.searchResultReady(this.completedSearchGroupId !== session.runId);
+            this.completedSearchGroupId = session.runId;
             this.canPauseStopSearch = false;
         } else {
             this.resultsStatus = "Loading...";
             this.canPauseStopSearch = true;
-            if (session.paused) {
-                this.traces = session.traceResults;
-                this.results = session.searchResults;
-                this.recalculateResultsByGroups();
-            }
+            this.completedSearchGroupId = "";
         }
     }
 
@@ -1297,7 +1455,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     protected onFeatureSearchScopeChange(scope: FeatureSearchScope): void {
         this.featureSearchScope = scope;
         if (this.session && this.session.definition.scope !== scope) {
+            this.styleAttributeOptionsSessionSignature = "";
             this.stateService.patchFeatureSearch(this.session.id, {scope});
+        }
+    }
+
+    /** Tracks tab changes and refreshes expensive style-field metadata only when the style tab becomes visible. */
+    protected onResultPanelIndexChange(value: string | number | undefined): void {
+        this.resultPanelIndex = String(value ?? "results");
+        if (this.resultPanelIndex === "style" && this.session) {
+            this.refreshStyleAttributeOptionsIfNeeded(this.session);
         }
     }
 
@@ -1358,7 +1525,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /**
      * Finalizes the result tabs once the active search group reports completion.
      */
-    searchResultReady() {
+    searchResultReady(firstCompletionForRun = true) {
         const session = this.session;
         if (!session) {
             return;
@@ -1368,7 +1535,9 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const errors = session.errors;
 
         this.canPauseStopSearch = false;
-        this.resultPanelIndex = 'results';
+        if (firstCompletionForRun && this.resultPanelIndex !== 'style') {
+            this.resultPanelIndex = 'results';
+        }
 
         const errorSignature = Array.from(errors).join('\n');
         const errorAlertSignature = `${session.runId}:${errorSignature}`;
@@ -1379,7 +1548,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 'Feature Search Errors',
                 errorSignature);
 
-        } else if (results.length == 0) {
+        } else if (firstCompletionForRun && this.resultPanelIndex !== 'style' && results.length == 0) {
             if (this.diagnostics.length > 0)
                 this.resultPanelIndex = 'diagnostics';
             else if (traces.length > 0)
@@ -1389,7 +1558,6 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.traces = traces
         this.results = results;
         this.diagnostics = session.diagnostics;
-        this.recalculateResultsByGroups();
     }
 
     /**
@@ -1418,7 +1586,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         } else {
             this.searchService.pauseSearch(session.id);
             this.results = session.searchResults;
-            this.recalculateResultsByGroups();
+            this.rebuildResultsTreeIncrementally();
             this.isSearchPaused = true;
         }
     }
@@ -1432,7 +1600,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             this.searchService.stopSearch(session.id);
             this.canPauseStopSearch = false;
             this.results = session.searchResults;
-            this.recalculateResultsByGroups();
+            this.rebuildResultsTreeIncrementally();
 
             if (session.errors.size) {
                 this.infoMessageService.showAlertDialog(
@@ -1477,10 +1645,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
-        const styleRule = this.createDefaultStyleRule();
-        this.styleRulesMock = [styleRule];
-        this.styleRuleAccordionValue = [this.styleRulePanelValue(styleRule)];
+        this.styleRuleDrafts = [];
+        this.styleRuleAccordionValue = [];
         this.activeSearchGroupId = "";
+        this.completedSearchGroupId = "";
+        this.resultTreeInputLength = 0;
+        this.resultTreeGroupingSignature = "";
+        this.resultTreeRunId = "";
+        this.resultTreeGroupNodesByKey.clear();
+        this.cancelResultTreeAppend();
         this.lastErrorAlertSignature = "";
         this.surfacedDockedSearchId = "";
     }
@@ -1499,7 +1672,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const groupingValues = this.groupingValuesFromOptions(options);
         this.selectedGroupingOptions = this.groupingOptionsFromValues(groupingValues);
         this.stateService.featureSearchGrouping = groupingValues;
-        this.recalculateResultsByGroups();
+        this.rebuildResultsTreeIncrementally();
     }
 
     /** Converts persisted grouping values into dropdown options. */
@@ -1519,46 +1692,251 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return lhs.length === rhs.length && lhs.every((option, index) => option.value === rhs[index]?.value);
     }
 
+    /** Returns the result grouping accessors keyed by persisted grouping option id. */
+    private currentResultAccessors(): Record<number, { label: string, get: (r: FeatureSearchResultTreeItem) => string | number }> {
+        return {
+            1: { label: 'Map', get: (r) => r.mapId },
+            2: { label: 'Layer', get: (r) => r.layerId },
+            3: { label: 'Features', get: (r) => r.featureType },
+            4: { label: 'Tiles', get: (r) => r.tileId }
+        };
+    }
+
+    /** Normalizes a flat streamed result into the fields used by the result tree. */
+    private resultTreeItem(result: FeatureSearchResultEntry): FeatureSearchResultTreeItem {
+        const featureIdParts = result.featureId.split('.');
+        return {
+            label: result.label,
+            mapId: result.mapId,
+            layerId: result.layerId,
+            featureId: result.featureId,
+            featureType: featureIdParts[0] ?? "",
+            tileId: Number(featureIdParts[1] ?? 0)
+        };
+    }
+
+    /** Creates one selectable result-tree leaf for a streamed result entry. */
+    private resultLeafNode(item: FeatureSearchResultTreeItem, index: number, parentKey: string): TreeNode {
+        return {
+            key: `${parentKey}/leaf:${index}:${item.featureId}`,
+            label: item.label,
+            data: {mapId: item.mapId, featureId: item.featureId},
+            leaf: true,
+            selectable: true
+        } as TreeNode;
+    }
+
+    /** Reads the cached aggregate count stored on a grouping node. */
+    private groupNodeCount(node: TreeNode): number {
+        const data = node.data as {count?: number} | undefined;
+        return typeof data?.count === "number" ? data.count : 0;
+    }
+
+    /** Updates the displayed label and cached count for one grouping node. */
+    private setGroupNodeCount(node: TreeNode, label: string, value: string | number, count: number): void {
+        node.data = {...(node.data ?? {}), count};
+        node.label = `${label}: ${String(value)} (${count})`;
+    }
+
+    /** Appends one streamed result into the existing tree without rebuilding prior groups. */
+    private appendResultToTree(
+        item: FeatureSearchResultTreeItem,
+        index: number,
+        selectedOrder: number[],
+        accessors: Record<number, { label: string, get: (r: FeatureSearchResultTreeItem) => string | number }>
+    ): void {
+        if (selectedOrder.length === 0) {
+            this.resultsTree.push(this.resultLeafNode(item, index, 'root'));
+            return;
+        }
+        this.appendResultToGroup(this.resultsTree, item, index, selectedOrder, accessors, 0, 'root');
+    }
+
+    /**
+     * Recursively appends one streamed result to the matching grouping branch.
+     *
+     * Missing groups are created on demand and indexed by full tree key. This keeps
+     * streaming updates proportional to grouping depth instead of sibling count.
+     */
+    private appendResultToGroup(
+        nodes: TreeNode[],
+        item: FeatureSearchResultTreeItem,
+        index: number,
+        selectedOrder: number[],
+        accessors: Record<number, { label: string, get: (r: FeatureSearchResultTreeItem) => string | number }>,
+        depth: number,
+        parentKey: string
+    ): void {
+        const accessor = accessors[selectedOrder[depth]];
+        if (!accessor) {
+            nodes.push(this.resultLeafNode(item, index, parentKey));
+            return;
+        }
+
+        const value = accessor.get(item);
+        const nodeKey = `${parentKey}/${accessor.label}:${String(value)}`;
+        let node = this.resultTreeGroupNodesByKey.get(nodeKey);
+        if (!node) {
+            node = {
+                key: nodeKey,
+                selectable: false,
+                expanded: true,
+                children: [],
+                data: {count: 0}
+            } as TreeNode;
+            this.setGroupNodeCount(node, accessor.label, value, 0);
+            nodes.push(node);
+            this.resultTreeGroupNodesByKey.set(nodeKey, node);
+        }
+
+        const nextCount = this.groupNodeCount(node) + 1;
+        this.setGroupNodeCount(node, accessor.label, value, nextCount);
+        const children = node.children ?? [];
+        node.children = children;
+        if (depth + 1 >= selectedOrder.length) {
+            children.push(this.resultLeafNode(item, index, nodeKey));
+        } else {
+            this.appendResultToGroup(children, item, index, selectedOrder, accessors, depth + 1, nodeKey);
+        }
+    }
+
+    /** Cancels a scheduled streamed result-tree append pass after resets or full rebuilds. */
+    private cancelResultTreeAppend(): void {
+        if (this.resultTreeAppendRaf === null) {
+            return;
+        }
+        cancelAnimationFrame(this.resultTreeAppendRaf);
+        this.resultTreeAppendRaf = null;
+    }
+
+    /** Clears tree state so the next append pass can rebuild from the current session in chunks. */
+    private resetStreamingResultTree(runId: string, groupingSignature: string): void {
+        this.cancelResultTreeAppend();
+        this.resultsTree = [];
+        this.resultTreeGroupNodesByKey.clear();
+        this.resultTreeInputLength = 0;
+        this.resultTreeRunId = runId;
+        this.resultTreeGroupingSignature = groupingSignature;
+        this.showFilter = false;
+        this.resultsStatus = "Loading...";
+    }
+
+    /** Rebuilds the result tree from scratch through the frame-budgeted streaming path. */
+    private rebuildResultsTreeIncrementally(): void {
+        const session = this.session;
+        if (!session) {
+            this.recalculateResultsByGroups();
+            return;
+        }
+        this.results = session.searchResults;
+        this.traces = session.traceResults;
+        const groupingSignature = this.groupingValuesFromOptions(this.selectedGroupingOptions).join(',');
+        this.resetStreamingResultTree(session.runId, groupingSignature);
+        this.appendStreamingResultsChunk();
+    }
+
+    /** Schedules another frame-budgeted streamed result-tree append pass. */
+    private scheduleResultTreeAppend(): void {
+        if (this.resultTreeAppendRaf !== null) {
+            return;
+        }
+        this.resultTreeAppendRaf = requestAnimationFrame(() => {
+            this.resultTreeAppendRaf = null;
+            this.appendStreamingResultsChunk();
+        });
+    }
+
+    /** Updates the empty-message and filter state after streamed result-tree changes. */
+    private updateResultTreeStatus(searchComplete: boolean): void {
+        if (this.resultsTree.length) {
+            this.showFilter = true;
+            this.resultsStatus = "No entries found.";
+        } else if (searchComplete) {
+            this.showFilter = false;
+            this.resultsStatus = "No matches found.";
+        }
+    }
+
+    /** Appends pending streamed results for a bounded amount of work to keep the UI responsive. */
+    private appendStreamingResultsChunk(): void {
+        const session = this.session;
+        if (!session) {
+            return;
+        }
+        const results = session.searchResults;
+        if (results.length <= this.resultTreeInputLength) {
+            this.updateResultTreeStatus(session.complete);
+            return;
+        }
+
+        const selectedOrder = this.groupingValuesFromOptions(this.selectedGroupingOptions);
+        const accessors = this.currentResultAccessors();
+        const startedAt = performance.now();
+        let appended = 0;
+        while (this.resultTreeInputLength < results.length) {
+            const index = this.resultTreeInputLength;
+            this.appendResultToTree(this.resultTreeItem(results[index]), index, selectedOrder, accessors);
+            this.resultTreeInputLength = index + 1;
+            appended += 1;
+            if (appended >= this.resultTreeAppendBatchSize
+                || performance.now() - startedAt >= this.resultTreeAppendFrameBudgetMs) {
+                break;
+            }
+        }
+
+        if (appended > 0) {
+            this.resultsTree = [...this.resultsTree];
+        }
+        if (this.resultTreeInputLength < results.length) {
+            this.scheduleResultTreeAppend();
+        }
+        this.updateResultTreeStatus(session.complete);
+    }
+
+    /**
+     * Synchronizes streamed result entries into the tree incrementally.
+     *
+     * Run, grouping, and eviction changes reset the destination tree, but the
+     * expensive node creation still happens through frame-budgeted append chunks.
+     */
+    private syncStreamingResults(session: FeatureSearchSession): void {
+        this.traces = session.traceResults;
+        const results = session.searchResults;
+        const groupingSignature = this.groupingValuesFromOptions(this.selectedGroupingOptions).join(',');
+        const needsFullRebuild = this.resultTreeRunId !== session.runId
+            || this.resultTreeGroupingSignature !== groupingSignature
+            || results.length < this.resultTreeInputLength;
+
+        this.results = results;
+        if (needsFullRebuild) {
+            this.resetStreamingResultTree(session.runId, groupingSignature);
+            this.appendStreamingResultsChunk();
+            return;
+        }
+
+        if (results.length > this.resultTreeInputLength && this.resultTreeAppendRaf === null) {
+            this.appendStreamingResultsChunk();
+        }
+        this.updateResultTreeStatus(session.complete);
+    }
+
     /**
      * Rebuilds the PrimeNG tree according to the currently selected grouping dimensions.
      */
     recalculateResultsByGroups() {
+        this.cancelResultTreeAppend();
         // Convert results into PrimeNG TreeNodes based on selected grouping
-        const results = this.results.map(result => {
-            const featureIdParts = result.featureId.split('.')
-            return {
-                label: result.label,
-                mapId: result.mapId,
-                layerId: result.layerId,
-                featureId: result.featureId,
-                featureType: featureIdParts[0] ?? "",
-                tileId: Number(featureIdParts[1] ?? 0)
-            };
-        });
+        const results = this.results.map(result => this.resultTreeItem(result));
 
         // Selected grouping values as ordered list following the grouping options
-        const selected = new Set(this.selectedGroupingOptions.map(o => o.value));
-        const selectedOrder: number[] = this.grouping.filter(o => selected.has(o.value)).map(o => o.value);
-
-        type ResultItem = typeof results[number];
-
-        const accessors: Record<number, { label: string, get: (r: ResultItem) => string | number }> = {
-            1: { label: 'Map',     get: (r) => r.mapId },
-            2: { label: 'Layer',   get: (r) => r.layerId },
-            3: { label: 'Features', get: (r) => r.featureType },
-            4: { label: 'Tiles',    get: (r) => r.tileId }
-        };
+        const selectedOrder = this.groupingValuesFromOptions(this.selectedGroupingOptions);
+        const accessors = this.currentResultAccessors();
+        this.resultTreeGroupNodesByKey.clear();
 
         /** Builds the feature search result tree with aggregate counts. */
-        const buildTreeWithCounts = (items: ResultItem[], depth: number, parentKey: string): [TreeNode[], number] => {
+        const buildTreeWithCounts = (items: FeatureSearchResultTreeItem[], depth: number, parentKey: string): [TreeNode[], number] => {
             if (depth >= selectedOrder.length || selectedOrder.length === 0) {
-                const leaves = items.map((it, idx) => ({
-                    key: `${parentKey}/leaf:${idx}:${it.featureId}`,
-                    label: it.label,
-                    data: { mapId: it.mapId, featureId: it.featureId },
-                    leaf: true,
-                    selectable: true
-                } as TreeNode));
+                const leaves = items.map((it, idx) => this.resultLeafNode(it, idx, parentKey));
                 return [leaves, items.length];
             }
 
@@ -1576,7 +1954,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             }
 
             // Partition items by current accessor
-            const partitions = new Map<string | number, ResultItem[]>();
+            const partitions = new Map<string | number, FeatureSearchResultTreeItem[]>();
             for (const it of items) {
                 const k = acc.get(it);
                 const arr = partitions.get(k) || [];
@@ -1590,13 +1968,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 const nodeKey = `${parentKey}/${acc.label}:${String(value)}`;
                 const [children, childCount] = buildTreeWithCounts(groupItems, depth + 1, nodeKey);
                 total += childCount;
-                nodes.push({
+                const node = {
                     key: nodeKey,
                     label: `${acc.label}: ${String(value)} (${childCount})`,
                     selectable: false,
                     expanded: true,
+                    data: {count: childCount},
                     children
-                } as TreeNode);
+                } as TreeNode;
+                nodes.push(node);
+                this.resultTreeGroupNodesByKey.set(nodeKey, node);
             }
             return [nodes, total];
         };
@@ -1610,6 +1991,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             this.showFilter = false;
             this.resultsStatus = "No matches found.";
         }
+        this.resultTreeInputLength = this.results.length;
+        this.resultTreeGroupingSignature = selectedOrder.join(',');
     }
 
     /**

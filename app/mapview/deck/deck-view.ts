@@ -43,7 +43,7 @@ import {
     TileGridStateOverlayLayer,
     tileGridOverlayData
 } from "./deck-tile-grid-overlay.layer";
-import {SearchResultClusterLayer, SearchResultClusterPoint} from "./deck-search-result-cluster.layer";
+import {createSearchResultPinLayer} from "./deck-search-result-pin.layer";
 import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 
 /** Internal camera state deck uses while the rest of the app still speaks Cesium-like camera values. */
@@ -148,6 +148,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
+    private static readonly SEARCH_RESULT_PIN_LEVEL_OFFSET = 3;
     private static readonly HOVER_PICK_THROTTLE_MS = 75;
     private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
@@ -1494,24 +1495,54 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Rebuilds the low-fidelity search-result pin overlay. */
     private updateSearchResultsOverlay(): void {
-        const searchLayers = this.featureSearchService.getSearchResultLayers();
-        const signature = searchLayers
-            .map(layer => `${layer.id}:${layer.pointsVersion}:${layer.iconAtlasUrl}:${layer.iconMappingUrl}`)
-            .join("|");
         if (!this.deck) {
             this.removeSearchResultLayers();
             this.lastSearchResultsSignature = "";
             return;
         }
+
+        const searchLayers = this.featureSearchService.getSearchResultLayers();
+        const overlayInputs = searchLayers.map(searchLayer => {
+            const sourceTileKeys = new Set<string>();
+            const sourceTileKeyParts: string[] = [];
+            let maxLevel = 0;
+            for (const bucket of searchLayer.pointBuckets) {
+                if (!this.mapService.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)
+                    || this.mapService.prefersHighFidelityForTile(this._viewIndex, bucket.tileId)) {
+                    continue;
+                }
+                sourceTileKeys.add(bucket.sourceTileKey);
+                sourceTileKeyParts.push(bucket.sourceTileKey);
+                maxLevel = Math.max(maxLevel, Number(coreLib.getTileLevel(bucket.tileId)));
+            }
+            return {
+                searchLayer,
+                layerKey: this.searchResultLayerKey(searchLayer.id, "pin"),
+                sourceTileKeys,
+                sourceTileKeySignature: sourceTileKeyParts.sort().join(","),
+                targetLevel: this.searchResultPinTargetLevel(maxLevel)
+            };
+        });
+
+        const signature = overlayInputs
+            .map(input => [
+                input.searchLayer.id,
+                input.searchLayer.pointsVersion,
+                input.searchLayer.iconAtlasUrl,
+                input.searchLayer.iconMappingUrl,
+                input.targetLevel,
+                input.sourceTileKeySignature
+            ].join(":"))
+            .join("|");
         if (this.lastSearchResultsSignature === signature) {
             return;
         }
         this.lastSearchResultsSignature = signature;
 
         const nextKeys = new Set<string>();
-        for (const searchLayer of searchLayers) {
-            if (searchLayer.points.length) {
-                nextKeys.add(this.searchResultLayerKey(searchLayer.id, "cluster"));
+        for (const input of overlayInputs) {
+            if (input.sourceTileKeys.size > 0 && !input.searchLayer.pinIndex.isEmpty) {
+                nextKeys.add(input.layerKey);
             }
         }
         for (const layerKey of this.searchResultLayerKeys) {
@@ -1521,32 +1552,39 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.searchResultLayerKeys = nextKeys;
 
-        for (const searchLayer of searchLayers) {
-            const lowFiPoints = searchLayer.points
-                .filter(point => !this.mapService.prefersHighFidelityForTile(this._viewIndex, point.tileId));
-
-            const clusterLayerKey = this.searchResultLayerKey(searchLayer.id, "cluster");
-            if (lowFiPoints.length) {
+        for (const input of overlayInputs) {
+            const lowFiPins = input.searchLayer.pinIndex.materialize({
+                sourceTileKeys: input.sourceTileKeys,
+                targetLevel: input.targetLevel
+            });
+            if (lowFiPins.length) {
                 this.layerRegistry.upsert(
-                    clusterLayerKey,
-                    new SearchResultClusterLayer({
-                        id: clusterLayerKey,
-                        data: lowFiPoints as SearchResultClusterPoint[],
+                    input.layerKey,
+                    createSearchResultPinLayer({
+                        id: input.layerKey,
+                        data: lowFiPins,
                         pickable: false,
                         sizeScale: 40,
-                        getPosition: (point: SearchResultClusterPoint) => point.coordinates,
-                        iconAtlas: searchLayer.iconAtlasUrl,
-                        iconMapping: searchLayer.iconMappingUrl
+                        iconAtlas: input.searchLayer.iconAtlasUrl,
+                        iconMapping: input.searchLayer.iconMappingUrl
                     }),
                     650);
             } else {
-                this.layerRegistry.remove(clusterLayerKey);
+                this.layerRegistry.remove(input.layerKey);
             }
         }
     }
 
+    /** Selects a coarse mapget tile level for low-fidelity pin aggregation. */
+    private searchResultPinTargetLevel(maxVisibleLevel: number): number {
+        if (!Number.isFinite(maxVisibleLevel) || maxVisibleLevel <= 0) {
+            return 0;
+        }
+        return Math.max(0, maxVisibleLevel - DeckMapView.SEARCH_RESULT_PIN_LEVEL_OFFSET);
+    }
+
     /** Returns a stable deck-layer key for one feature-search session. */
-    private searchResultLayerKey(searchId: string, kind: "cluster"): string {
+    private searchResultLayerKey(searchId: string, kind: "pin"): string {
         return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}/${kind}`;
     }
 

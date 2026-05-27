@@ -138,11 +138,14 @@ export interface SearchResultTilePayload {
     mapId: string;
     layerId: string;
     tileId: bigint;
+    sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
     sourceTileId: bigint;
     resultCount: number;
     resultFields: string[];
+    tilesConsidered?: number;
+    tilesCompleted?: number;
     traces: Record<string, unknown> | null;
     diagnostics: Uint8Array | null;
     entries: SearchResultTileEntry[];
@@ -201,6 +204,22 @@ interface SearchResultStyleSpec {
     rules: FeatureSearchStyleRule[];
 }
 
+export interface FeatureSearchAttributeScopeCandidate {
+    attrName: string;
+    attrLayerName: string;
+    featureType: string;
+    mapId: string;
+    layerId: string;
+}
+
+export interface FeatureSearchStyleFieldCandidate {
+    path: string;
+    mapId: string;
+    layerId: string;
+    attrName?: string;
+    featureType?: string;
+}
+
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:
@@ -252,6 +271,8 @@ export class MapDataService {
     private featureSearchTileStatesById: Map<string, Map<string, FeatureSearchTileState>> = new Map();
     private searchResultRenderTilesByKey: Map<string, SearchResultRenderTile> = new Map();
     private searchResultMaxRefreshById: Map<string, number> = new Map();
+    private attributeScopesByQueryCache = new Map<string, FeatureSearchAttributeScopeCandidate[]>();
+    private searchStyleFieldsByQueryCache = new Map<string, FeatureSearchStyleFieldCandidate[]>();
     private selectionConversionRevision = 0;
     private hoverConversionRevision = 0;
     private lastHoverRequestSignature = "";
@@ -688,6 +709,52 @@ export class MapDataService {
     /** Returns whether a view currently wants high-fidelity geometry for a tile id. */
     public prefersHighFidelityForTile(viewIndex: number, tileId: bigint): boolean {
         return this.viewVisualizationState[viewIndex]?.getTileRenderPolicy(tileId).targetFidelity === "high";
+    }
+
+    /** Returns whether a feature tile id is currently inside one view's visible tile set and layer state. */
+    public showsFeatureTileInView(viewIndex: number, mapId: string, layerId: string, tileId: bigint): boolean {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState || !viewState.visibleTileIds.has(tileId)) {
+            return false;
+        }
+        return this.maps.getMapLayerVisibility(viewIndex, mapId, layerId)
+            && coreLib.getTileLevel(tileId) === this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+    }
+
+    /** Returns schema-backed attribute contexts matching a search query. */
+    public getAttributeScopeForQuery(query: string): FeatureSearchAttributeScopeCandidate[] {
+        const cacheKey = query.trim();
+        const cached = this.attributeScopesByQueryCache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        try {
+            const candidates = (this.tileLayerParser as any).getAttributeScopeForQuery(query) as unknown;
+            const normalized = this.normalizeAttributeScopeCandidates(candidates);
+            this.attributeScopesByQueryCache.set(cacheKey, normalized);
+            return normalized;
+        } catch (error) {
+            console.warn("Failed to infer feature-search attribute scope from schema metadata.", error);
+            return [];
+        }
+    }
+
+    /** Returns schema-backed field expressions available to search-result style rules. */
+    public searchStyleFieldsForQuery(query: string, scope: FeatureSearchScope): FeatureSearchStyleFieldCandidate[] {
+        const cacheKey = `${scope}\n${query.trim()}`;
+        const cached = this.searchStyleFieldsByQueryCache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        try {
+            const candidates = this.tileLayerParser.searchStyleFieldsForQuery(query, scope) as unknown;
+            const normalized = this.normalizeSearchStyleFieldCandidates(candidates);
+            this.searchStyleFieldsByQueryCache.set(cacheKey, normalized);
+            return normalized;
+        } catch (error) {
+            console.warn("Failed to enumerate feature-search style fields from schema metadata.", error);
+            return [];
+        }
     }
 
     /** Returns a snapshot of the current logical `/tiles` backend request progress. */
@@ -1256,7 +1323,12 @@ export class MapDataService {
         if (currentRefresh !== undefined && refresh !== currentRefresh) {
             return;
         }
-        this.searchStatusReceived.next(status);
+        // Mapget status frames describe the backend diff request. The UI progress bar
+        // needs the whole current search area, so merge in the local tile-state snapshot.
+        this.searchStatusReceived.next({
+            ...status,
+            ...this.featureSearchProgressSnapshot(status.searchId)
+        });
     }
 
     /** Stores one streamed result layer for queued high-fidelity rendering. */
@@ -1741,9 +1813,16 @@ export class MapDataService {
             this.dataSourceInfoJson = jsonString;
             this.tileStream!.setDataSourceInfoJson(jsonString);
             FeatureTile.clearDataSourceInfoBlobCache();
+            this.clearSearchSchemaMetadataCaches();
         } catch (err) {
             console.error("Failed to load data source info.", err);
         }
+    }
+
+    /** Clears schema-derived search UI caches after datasource metadata changes. */
+    private clearSearchSchemaMetadataCaches(): void {
+        this.attributeScopesByQueryCache.clear();
+        this.searchStyleFieldsByQueryCache.clear();
     }
 
     /** Evicts cached tiles that are neither visible nor pinned for selection/inspection. */
@@ -2221,6 +2300,49 @@ export class MapDataService {
         }
     }
 
+    /** Normalizes untyped WASM attribute-scope candidates into the TypeScript-facing shape. */
+    private normalizeAttributeScopeCandidates(value: unknown): FeatureSearchAttributeScopeCandidate[] {
+        if (!Array.isArray(value)) {
+            return [];
+        }
+        return value.flatMap(item => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return [];
+            }
+            const raw = item as Record<string, unknown>;
+            const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : "";
+            const attrLayerName = typeof raw["attrLayerName"] === "string" ? raw["attrLayerName"] : "";
+            const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : "";
+            const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
+            const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
+            return attrName && mapId && layerId
+                ? [{attrName, attrLayerName, featureType, mapId, layerId}]
+                : [];
+        });
+    }
+
+    /** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
+    private normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyleFieldCandidate[] {
+        if (!Array.isArray(value)) {
+            return [];
+        }
+        return value.flatMap(item => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return [];
+            }
+            const raw = item as Record<string, unknown>;
+            const path = typeof raw["path"] === "string" ? raw["path"] : "";
+            const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
+            const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
+            if (!path || !mapId || !layerId) {
+                return [];
+            }
+            const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
+            const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
+            return [{path, mapId, layerId, attrName, featureType}];
+        });
+    }
+
     /** Resolves persisted search scope state to the concrete token expected by mapget. */
     private resolveFeatureSearchScope(request: FeatureSearchDataPlaneRequest): "feature" | "attribute" {
         if (request.scope === "feature" || request.scope === "attribute") {
@@ -2403,6 +2525,24 @@ export class MapDataService {
         }
         state.completed = true;
         state.requested = false;
+    }
+
+    /** Returns current full-coverage search progress, independent from the latest differential backend request. */
+    private featureSearchProgressSnapshot(searchId: string): {tilesConsidered: number; tilesCompleted: number} {
+        const states = this.featureSearchTileStatesById.get(searchId);
+        if (!states) {
+            return {tilesConsidered: 0, tilesCompleted: 0};
+        }
+        let tilesCompleted = 0;
+        for (const state of states.values()) {
+            if (state.completed) {
+                tilesCompleted += 1;
+            }
+        }
+        return {
+            tilesConsidered: states.size,
+            tilesCompleted
+        };
     }
 
     /** Builds one concrete mapget search request object for a map/layer tile set. */
@@ -2837,6 +2977,9 @@ export class MapDataService {
             if (!accepted) {
                 return;
             }
+            // Result frames are often more frequent than status frames, so include the
+            // same full-area progress snapshot to keep the UI responsive while streaming.
+            const progress = this.featureSearchProgressSnapshot(searchId);
 
             this.searchResultTileReceived.next({
                 searchId,
@@ -2844,11 +2987,13 @@ export class MapDataService {
                 mapId: searchResultLayer.mapId(),
                 layerId: searchResultLayer.layerId(),
                 tileId,
+                sourceTileKey,
                 sourceMapId,
                 sourceLayerId,
                 sourceTileId,
                 resultCount: Number.isFinite(resultCountValue) ? resultCountValue : entries.length,
                 resultFields,
+                ...progress,
                 traces,
                 diagnostics,
                 entries
