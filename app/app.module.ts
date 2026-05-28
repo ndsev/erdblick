@@ -23,7 +23,10 @@ import {FieldsetModule} from "primeng/fieldset";
 import {InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
-import {MapDataService} from "./mapdata/map.service";
+import {MapInfoService} from "./mapdata/map-info.service";
+import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
+import {MapRenderService} from "./mapdata/map-render.service";
+import {InspectionSelectionService} from "./inspection/inspection-selection.service";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
@@ -154,7 +157,9 @@ export const initializeServices = () => {
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
-    const mapService = inject(MapDataService);
+    const tileStream = inject(MapTileStreamService);
+    const inspectionSelection = inject(InspectionSelectionService);
+    const mapRender = inject(MapRenderService);
     const coordService = inject(CoordinatesService);
     inject(FeatureSearchService);
 
@@ -172,7 +177,9 @@ export const initializeServices = () => {
         updateGlobalSpinner('Loading styles');
         await styleService.initializeStyles();
         updateGlobalSpinner('Initializing map data');
-        await mapService.initialize();
+        await tileStream.initialize();
+        inspectionSelection.initialize();
+        mapRender.initialize();
     })();
 }
 
@@ -282,7 +289,10 @@ export const initializeServices = () => {
     ],
     providers: [
         provideAppInitializer(initializeServices),
-        MapDataService,
+        MapInfoService,
+        MapTileStreamService,
+        InspectionSelectionService,
+        MapRenderService,
         MessageService,
         InfoMessageService,
         JumpTargetService,

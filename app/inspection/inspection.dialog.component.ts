@@ -1,6 +1,7 @@
 import {Component, OnDestroy, Renderer2, ViewChild, effect, input} from "@angular/core";
 import {Popover} from "primeng/popover";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {AppStateService, InspectionComparisonOption, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
@@ -139,7 +140,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     private dockElement?: HTMLElement;
 
     /** Wires dialog state to the active inspection panel and floating-dialog helpers. */
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: MapInfoService,
+                private inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private renderer: Renderer2,
                 private dialogStack: DialogStackService) {
@@ -250,7 +252,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!panel.features.length) {
             return;
         }
-        this.mapService.zoomToFeature(undefined, panel.features[0]);
+        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
     }
 
     /** Menu/header action wrapper for focusing the primary feature. */
@@ -339,7 +341,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     /** Rebuilds valid comparison targets for the current selection context. */
     protected refreshCompareOptions() {
-        this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
+        this.compareOptions = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -354,7 +356,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         const model = this.stateService.createComparisonModel(
             this.panel().id,
             this.selectedCompareIds,
-            this.mapService.selectionTopic.getValue()
+            this.inspectionSelection.selectionTopic.getValue()
         );
         if (!model) {
             return;

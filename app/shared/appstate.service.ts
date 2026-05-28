@@ -1938,17 +1938,17 @@ export class AppStateService implements OnDestroy {
     /*
     ## Current State
 
-      View Click Event -> MapDataService -> InspectionService -> InspectionPanel
+      View Click Event -> InspectionSelectionService -> InspectionPanel
                                                               -> AppStateService
 
-      (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
+      (Hydration) AppStateService -> InspectionSelectionService -> InspectionPanel
                                                                          -> AppStateService
 
     ## New Goal State
 
-    // View Click Event -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //         (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
+    // View Click Event -> AppStateService -> InspectionSelectionService -> InspectionPanel
+    //         (Hydration) AppStateService -> InspectionSelectionService -> InspectionPanel
+    //  InspectionPanel -> AppStateService -> InspectionSelectionService -> InspectionPanel
 
      */
     /** Updates the current selection, reusing or creating inspection panels as needed. */

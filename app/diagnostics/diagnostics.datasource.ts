@@ -1,7 +1,9 @@
 import {Injectable, OnDestroy} from '@angular/core';
 import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
-import {MapDataService} from '../mapdata/map.service';
+import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
+import {MapRenderService} from '../mapdata/map-render.service';
 import {FeatureTile} from '../mapdata/features.model';
+import {TileLoadingHudStats} from '../mapdata/map-runtime.model';
 import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {
     DiagnosticsSnapshot,
@@ -29,7 +31,7 @@ const UPDATE_EVENT_DEBOUNCE_MS = 1000;
 /**
  * Collects diagnostics snapshots, performance aggregates, and console-backed logs.
  *
- * The datasource is UI-facing but fed directly from `MapDataService`, so it
+ * The datasource is UI-facing but fed directly from the tile-stream and render services, so it
  * throttles updates to avoid turning high tile throughput into diagnostics noise.
  */
 export class DiagnosticsDatasource implements OnDestroy {
@@ -46,7 +48,8 @@ export class DiagnosticsDatasource implements OnDestroy {
     private readonly loggedStyleIssueIds = new Set<string>();
 
     constructor(
-        private readonly mapService: MapDataService,
+        private readonly mapService: MapTileStreamService,
+        private readonly mapRenderService: MapRenderService,
         private readonly appStateService: AppStateService,
         private readonly styleValidationReportService: StyleValidationReportService
     ) {
@@ -144,6 +147,40 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.refreshLogs();
     }
 
+    /** Aggregates the tile-loading HUD statistics from stream, cache, and render state. */
+    private getTileLoadingHudStats(): TileLoadingHudStats {
+        let features = 0;
+        let vertices = 0;
+        for (const tile of this.mapService.loadedTileLayers.values()) {
+            if (!tile.hasData()) {
+                continue;
+            }
+            const tileFeatures = Number(tile.numFeatures);
+            if (Number.isFinite(tileFeatures) && tileFeatures > 0) {
+                features += Math.floor(tileFeatures);
+            }
+            vertices += tile.vertexCount();
+        }
+
+        const compressionStats = this.mapService.getTileStreamTransportCompressionStats();
+        return {
+            backend: this.mapService.getBackendRequestProgress(),
+            downstreamBytesPerSecond: this.mapService.getDownstreamBytesPerSecond(),
+            pullResponses: compressionStats.totalPullResponses,
+            pullGzipResponses: compressionStats.totalPullGzipResponses,
+            pullUncompressedBytes: compressionStats.totalUncompressedBytes,
+            pullCompressedBytesKnown: compressionStats.knownCompressedBytes,
+            pullCompressionRatioPct: compressionStats.compressionRatioPct,
+            pullCompressionCoveragePct: compressionStats.knownCompressedCoveragePct,
+            features,
+            vertices,
+            parseQueueSize: this.mapService.getPendingFrameQueueSize(),
+            renderQueueSize: this.mapRenderService.getRenderQueueSize(),
+            frameTimeMs: this.mapRenderService.currentFrameTimeMs(),
+            viewportRenderSeconds: this.mapService.currentViewportRenderSeconds()
+        };
+    }
+
     /** Builds one diagnostics snapshot from the current tile pipeline state. */
     private buildSnapshot(): DiagnosticsSnapshot {
         const tiles = Array.from(this.mapService.loadedTileLayers.values());
@@ -175,14 +212,14 @@ export class DiagnosticsDatasource implements OnDestroy {
         };
 
         const backendProgress = this.mapService.getBackendRequestProgress();
-        const hudStats = this.mapService.getTileLoadingHudStats();
+        const hudStats = this.getTileLoadingHudStats();
         const progress: TilePipelineProgress = {
             stages: stageProgress,
             backend: {
                 done: backendProgress.done,
                 total: backendProgress.total,
             },
-            rendered: this.mapService.getVisualizationCounts(),
+            rendered: this.mapRenderService.getVisualizationCounts(),
             bubbles: {
                 downstreamBytesPerSecond: hudStats.downstreamBytesPerSecond,
                 pullResponses: hudStats.pullResponses,

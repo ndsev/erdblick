@@ -1,6 +1,6 @@
 import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
 import {Subscription} from 'rxjs';
-import {MapDataService} from './mapdata/map.service';
+import {MapInfoService} from './mapdata/map-info.service';
 import {
     ABOUT_DIALOG_LAYOUT_ID,
     DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
@@ -132,7 +132,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return this.stateService.mapsOpenState.getValue();
     }
 
-    constructor(public mapService: MapDataService,
+    constructor(public mapService: MapInfoService,
                 public stateService: AppStateService,
                 private diagnostics: DiagnosticsFacadeService,
                 private elementRef: ElementRef<HTMLElement>,

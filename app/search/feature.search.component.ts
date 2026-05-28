@@ -12,7 +12,8 @@ import {
 } from "@angular/core";
 import {FeatureSearchResultEntry, FeatureSearchService, FeatureSearchSession} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
@@ -717,7 +718,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
      */
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
-                public mapService: MapDataService,
+                public mapService: MapInfoService,
+                private readonly inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService) {
@@ -1654,7 +1656,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         if (!data?.mapTileKey || !data.hoverFeatureId) {
             return;
         }
-        this.mapService.setHoveredFeatures([{
+        this.inspectionSelection.setHoveredFeatures([{
             mapTileKey: data.mapTileKey,
             featureId: data.hoverFeatureId
         }]);
@@ -1662,7 +1664,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     /** Clears map hover state when leaving a result-tree row. */
     protected clearHoveredResultNode(): void {
-        this.mapService.setHoveredFeatures([]);
+        this.inspectionSelection.setHoveredFeatures([]);
     }
 
     /**

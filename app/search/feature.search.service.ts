@@ -2,11 +2,12 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, filter, Subject, take} from "rxjs";
 import {
     FeatureSearchDataPlaneRequest,
-    MapDataService,
     SearchResultTileEntry,
     SearchResultTileEvictedPayload,
     SearchResultTilePayload
-} from "../mapdata/map.service";
+} from "../mapdata/map-runtime.model";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
 import {GeoMath} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
@@ -366,7 +367,8 @@ export class FeatureSearchService {
     /**
      * Initializes marker styling and listens for staged tile updates that can unblock pending searches.
      */
-    constructor(private mapService: MapDataService,
+    constructor(private mapInfo: MapInfoService,
+                private tileStream: MapTileStreamService,
                 private stateService: AppStateService) {
         this.stateService.ready.pipe(
             filter((ready): ready is true => ready),
@@ -381,13 +383,13 @@ export class FeatureSearchService {
             }
             this.reconcileFeatureSearchState(entries);
         });
-        this.mapService.searchResultTileReceived.subscribe(payload => {
+        this.tileStream.searchResultTileReceived.subscribe(payload => {
             this.addServerSearchResultTile(payload);
         });
-        this.mapService.searchResultTileEvicted.subscribe(payload => {
+        this.tileStream.searchResultTileEvicted.subscribe(payload => {
             this.removeServerSearchResultTile(payload);
         });
-        this.mapService.searchStatusReceived.subscribe(status => {
+        this.tileStream.searchStatusReceived.subscribe(status => {
             this.applyServerSearchStatus(status);
         });
     }
@@ -856,10 +858,10 @@ export class FeatureSearchService {
         if (definition.scope === "feature") {
             return false;
         }
-        return this.mapService.getAttributeScopeForQuery(definition.query).length > 0;
+        return this.mapInfo.getAttributeScopeForQuery(definition.query).length > 0;
     }
 
-    /** Synchronizes the UI/session search state into MapDataService's `/tiles` request data plane. */
+    /** Synchronizes the UI/session search state into MapTileStreamService's `/tiles` request data plane. */
     private syncSearchRequestsToMapService(): void {
         const requests: FeatureSearchDataPlaneRequest[] = this.searchSessions.map(session => ({
             searchId: session.id,
@@ -875,7 +877,7 @@ export class FeatureSearchService {
             renderStrategy: session.definition.renderStrategy,
             withFields: this.withFieldsForSearch(session.definition)
         }));
-        this.mapService.setFeatureSearchRequests(requests);
+        this.tileStream.setFeatureSearchRequests(requests);
     }
 
     /** Clears only result-side state; the persisted search definition and UI surface stay intact. */
@@ -999,9 +1001,9 @@ export class FeatureSearchService {
     /** Produces main-thread completion candidates from LayerInfo.featureModelSchema when available. */
     private completeQueryFromSchema(query: string, point: number): CompletionCandidate[] {
         try {
-            const rawCandidates = this.mapService.tileLayerParser.completeSearchQuery(query, point, {
+            const rawCandidates = this.mapInfo.tileLayerParser.completeSearchQuery(query, point, {
                 limit: this.completionCandidateLimit
-            }) as Array<any> | null | undefined;
+            });
             if (!Array.isArray(rawCandidates)) {
                 return [];
             }
@@ -1016,21 +1018,27 @@ export class FeatureSearchService {
     }
 
     /** Normalizes one native SIMFIL completion object into the UI model. */
-    private toCompletionCandidate(sourceQuery: string, item: any): CompletionCandidate | null {
-        const range = Array.isArray(item?.range) ? item.range : [];
+    private toCompletionCandidate(sourceQuery: string, item: unknown): CompletionCandidate | null {
+        const candidate = item && typeof item === "object"
+            ? item as Record<string, unknown>
+            : null;
+        const rangeValue = candidate?.["range"];
+        const range = Array.isArray(rangeValue) ? rangeValue : [];
         const begin = Number(range[0] ?? 0);
         const end = Number(range[1] ?? 0);
-        if (!Number.isFinite(begin) || !Number.isFinite(end) || typeof item?.query !== "string") {
+        const queryValue = candidate?.["query"];
+        if (!Number.isFinite(begin) || !Number.isFinite(end) || typeof queryValue !== "string") {
             return null;
         }
+        const hintValue = candidate?.["hint"];
         return {
-            text: String(item.text ?? ""),
-            kind: String(item.type ?? "").toLowerCase(),
+            text: String(candidate?.["text"] ?? ""),
+            kind: String(candidate?.["type"] ?? "").toLowerCase(),
             begin,
             end,
-            query: item.query,
+            query: queryValue,
             source: sourceQuery,
-            hint: typeof item.hint === "string" ? item.hint : ""
+            hint: typeof hintValue === "string" ? hintValue : ""
         };
     }
 
@@ -1235,7 +1243,7 @@ export class FeatureSearchService {
             : fallback;
     }
 
-    /** Applies full-coverage progress snapshots from MapDataService without losing streamed result state. */
+    /** Applies full-coverage progress snapshots from MapTileStreamService without losing streamed result state. */
     private applyProgressSnapshot(
         session: FeatureSearchSession,
         tilesConsidered: unknown,

@@ -12,7 +12,11 @@ import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
-import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
+import {MapInfoService} from "../../mapdata/map-info.service";
+import {MapViewStateService} from "../map-view-state.service";
+import {MapTileStreamService} from "../../mapdata/map-tile-stream.service";
+import {MapRenderService, TileVisualizationRenderTask} from "../../mapdata/map-render.service";
+import {InspectionSelectionService} from "../../inspection/inspection-selection.service";
 import {
     FeatureSearchService,
     type FeatureSearchResultLayer,
@@ -262,7 +266,11 @@ export abstract class DeckMapView implements IRenderView {
     /** Creates the deck-backed view wrapper for one canvas and app-state view index. */
     constructor(id: number,
                 canvasId: string,
-                protected mapService: MapDataService,
+                protected mapInfo: MapInfoService,
+                protected mapViewState: MapViewStateService,
+                protected tileStream: MapTileStreamService,
+                protected mapRender: MapRenderService,
+                protected inspectionSelection: InspectionSelectionService,
                 protected featureSearchService: FeatureSearchService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
@@ -323,7 +331,7 @@ export abstract class DeckMapView implements IRenderView {
 
         this.setupSubscriptions();
         this.updateViewport();
-        this.mapService.refreshHighlightVisualizations();
+        this.mapRender.refreshHighlightVisualizations();
         this.requestRender();
     }
 
@@ -350,7 +358,7 @@ export abstract class DeckMapView implements IRenderView {
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
-        this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
+        this.mapRender.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
 
         if (this.deck) {
             this.deck.finalize();
@@ -525,7 +533,7 @@ export abstract class DeckMapView implements IRenderView {
             if (!tileKey) {
                 return null;
             }
-            return this.mapService.resolveTileFeatureIdByAddress(tileKey, value as number);
+            return this.tileStream.resolveTileFeatureIdByAddress(tileKey, value as number);
         };
         const resolveSearchResultAddress = (
             tileKey: string | undefined,
@@ -635,7 +643,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
-     * Builds the viewport rectangle expected by `MapDataService`.
+     * Builds the viewport rectangle expected by `MapViewStateService`.
      * Longitude sampling intentionally unwraps around the current center to survive world wrap.
      */
     computeViewport(): Viewport | undefined {
@@ -786,13 +794,13 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
-    /** Pushes the currently visible viewport rectangle back into `MapDataService`. */
+    /** Pushes the currently visible viewport rectangle back into `MapViewStateService`. */
     protected updateViewport(): void {
         const viewport = this.computeViewport();
         if (!viewport) {
             return;
         }
-        this.mapService.setViewport(this._viewIndex, viewport);
+        this.mapViewState.setViewport(this._viewIndex, viewport);
     }
 
     /**
@@ -872,17 +880,17 @@ export abstract class DeckMapView implements IRenderView {
                 .subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.mapService.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
+            this.mapInfo.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.mapService.tileDataChanged.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
+            this.tileStream.tileDataChanged.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
         );
         this.subscriptions.push(
             this.featureSearchService.progress.subscribe(() => this.scheduleSearchResultsOverlayDataRefresh())
         );
 
         this.subscriptions.push(
-            this.mapService.moveToWgs84PositionTopic.subscribe(value => {
+            this.mapViewState.moveToWgs84PositionTopic.subscribe(value => {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
@@ -896,7 +904,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.moveToRectangleTopic.subscribe(value => {
+            this.mapViewState.moveToRectangleTopic.subscribe(value => {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
@@ -918,7 +926,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
+            this.mapRender.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
                 const tileVis = task.visualization;
                 // The render task topic is shared across all views. Only the
                 // owning view may consume and complete the task.
@@ -936,7 +944,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: ITileVisualization) => {
+            this.mapRender.tileVisualizationDestructionTopic.subscribe((tileVis: ITileVisualization) => {
                 if (tileVis.viewIndex !== this._viewIndex) {
                     return;
                 }
@@ -945,7 +953,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
+            this.mapRender.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
                 if (tileVis.viewIndex !== this._viewIndex) {
                     return;
                 }
@@ -1021,7 +1029,7 @@ export abstract class DeckMapView implements IRenderView {
             this.pendingHoverInfo = null;
             this.cancelHoverPickScheduling();
             this.setFeatureHoverState(false);
-            void this.mapService.setHoveredFeatures([]);
+            void this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
@@ -1075,12 +1083,12 @@ export abstract class DeckMapView implements IRenderView {
         const featureIds = this.pickFeature({x: info.x, y: info.y});
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
-            void this.mapService.setHoveredFeatures([]);
+            void this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
         this.setFeatureHoverState(true);
-        this.mapService.setHoveredFeatures(featureIds).then(() => {
+        this.inspectionSelection.setHoveredFeatures(featureIds).then(() => {
             this.hoveredFeatureIds.next({
                 featureIds,
                 position: {x: info.x, y: info.y}
@@ -1531,10 +1539,10 @@ export abstract class DeckMapView implements IRenderView {
             const sourceTileKeyParts: string[] = [];
             let maxVisibleLevel = 0;
             for (const bucket of searchLayer.pointBuckets) {
-                if (!this.mapService.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
+                if (!this.mapViewState.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
                     continue;
                 }
-                if (this.mapService.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
+                if (this.mapRender.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
                     if (searchLayer.renderStrategy.showHighFiResultDots) {
                         highFiPointMarkers.push(...bucket.points.map(point => this.searchResultPointMarker(point)));
                     }
@@ -1918,12 +1926,12 @@ export abstract class DeckMapView implements IRenderView {
     /** Returns the effective feature levels currently visible across all enabled map layers in this view. */
     private visibleMapLayerLevels(): number[] {
         const levels = new Set<number>();
-        for (const [mapId, map] of this.mapService.maps.maps.entries()) {
+        for (const [mapId, map] of this.mapInfo.maps.maps.entries()) {
             for (const layer of map.allFeatureLayers()) {
-                if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
+                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                const level = this.mapService.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
+                const level = this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
                 if (!Number.isFinite(level)) {
                     continue;
                 }
@@ -1944,12 +1952,12 @@ export abstract class DeckMapView implements IRenderView {
             result.set(level, []);
         }
 
-        for (const [mapId, map] of this.mapService.maps.maps.entries()) {
+        for (const [mapId, map] of this.mapInfo.maps.maps.entries()) {
             for (const layer of map.allFeatureLayers()) {
-                if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
+                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                const level = this.mapService.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
+                const level = this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
                 if (!Number.isFinite(level)) {
                     continue;
                 }
@@ -1991,7 +1999,7 @@ export abstract class DeckMapView implements IRenderView {
         let hasNonEmptyData = false;
         for (const layer of visibleLayers) {
             const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.layerId, tileId);
-            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            const tile = this.tileStream.loadedTileLayers.get(tileKey);
             if (!tile) {
                 continue;
             }
