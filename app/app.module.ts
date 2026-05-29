@@ -30,6 +30,7 @@ import {InspectionSelectionService} from "./inspection/inspection-selection.serv
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
+import {SearchStyleColorComponent} from "./search/search-style-color.component";
 import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
@@ -195,6 +196,7 @@ export const initializeServices = () => {
         EditorComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
+        SearchStyleColorComponent,
         FeatureSearchDialogsComponent,
         DatasourcesComponent,
         OnEnterClickDirective,

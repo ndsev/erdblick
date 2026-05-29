@@ -37,6 +37,16 @@ import type {
     FeatureSearchScope,
     FeatureSearchStyleRule
 } from "../shared/feature-search-state";
+import {
+    defaultSearchStyleColorDraft,
+    DEFAULT_SEARCH_STYLE_SOLID_COLOR,
+    gradientStopsToDraft,
+    normalizeHexColor,
+    SearchStyleCategoryStopDraft,
+    SearchStyleColorDraft,
+    serializableCategoryStops,
+    serializableGradientStops
+} from "./search-style-color.util";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -69,13 +79,6 @@ interface FeatureSearchResultTreeItem {
     hoverFeatureId: string;
 }
 
-interface FeatureSearchStyleColorStop {
-    id: number;
-    label: string;
-    value: number;
-    color: string;
-}
-
 interface FeatureSearchStyleFilterDraft {
     id: number;
     attributeField: string;
@@ -89,11 +92,7 @@ interface FeatureSearchStyleRuleDraft {
     visualization: string;
     lineWidth: number;
     opacity: number;
-    colorMode: string;
-    colorField: string;
-    solidColor: string;
-    colorStops: FeatureSearchStyleColorStop[];
-    categoryStops: FeatureSearchStyleColorStop[];
+    color: SearchStyleColorDraft;
 }
 
 @Component({
@@ -455,93 +454,11 @@ interface FeatureSearchStyleRuleDraft {
 
                                             <section class="feature-search-style-section">
                                                 <h3>3. Color</h3>
-                                                <div class="feature-search-style-color-mode-row">
-                                                    <label [for]="'feature-search-style-color-mode-' + rule.id">Mode</label>
-                                                    <p-select [inputId]="'feature-search-style-color-mode-' + rule.id"
-                                                              class="feature-search-style-color-mode"
-                                                              [options]="styleColorModeOptions"
-                                                              [(ngModel)]="rule.colorMode"
-                                                              (ngModelChange)="onStyleRulesChanged()"
-                                                              optionLabel="label"
-                                                              optionValue="value"
-                                                              appendTo="body">
-                                                    </p-select>
-                                                    <label [for]="'feature-search-style-color-field-' + rule.id">Field</label>
-                                                    <p-select [inputId]="'feature-search-style-color-field-' + rule.id"
-                                                              class="feature-search-style-color-field"
-                                                              [options]="styleAttributeOptions"
-                                                              [(ngModel)]="rule.colorField"
-                                                              (ngModelChange)="onStyleRulesChanged()"
-                                                              optionLabel="label"
-                                                              optionValue="value"
-                                                              [filter]="true"
-                                                              appendTo="body">
-                                                    </p-select>
-                                                </div>
-
-                                                @if (rule.colorMode === 'gradient') {
-                                                    <div class="feature-search-style-gradient"
-                                                         [style.background]="styleGradientPreview(rule)"
-                                                         aria-hidden="true"></div>
-                                                    <div class="feature-search-style-gradient-stops">
-                                                        @for (stop of rule.colorStops; track stop.id) {
-                                                            <div class="feature-search-style-gradient-stop">
-                                                                <span class="feature-search-style-gradient-marker"
-                                                                      [style.border-bottom-color]="stop.color"></span>
-                                                                <div class="feature-search-style-gradient-stop-controls">
-                                                                    <p-inputNumber class="feature-search-style-stop-number"
-                                                                                   [(ngModel)]="stop.value"
-                                                                                   (ngModelChange)="onStyleRulesChanged()"
-                                                                                   [min]="0"
-                                                                                   [max]="300">
-                                                                    </p-inputNumber>
-                                                                    <p-colorpicker [(ngModel)]="stop.color"
-                                                                                   (ngModelChange)="onStyleRulesChanged()"
-                                                                                   appendTo="body"></p-colorpicker>
-                                                                </div>
-                                                            </div>
-                                                        }
-                                                    </div>
-                                                } @else if (rule.colorMode === 'solid') {
-                                                    <div class="feature-search-style-solid-color-row">
-                                                        <span>Color</span>
-                                                        <p-colorpicker [(ngModel)]="rule.solidColor"
-                                                                       (ngModelChange)="onStyleRulesChanged()"
-                                                                       appendTo="body"></p-colorpicker>
-                                                    </div>
-                                                } @else if (rule.colorMode === 'categories') {
-                                                    <div class="feature-search-style-category-actions">
-                                                        <p-button icon="pi pi-plus"
-                                                                  label="Add category"
-                                                                  severity="secondary"
-                                                                  [outlined]="true"
-                                                                  (click)="addStyleCategory(rule)">
-                                                        </p-button>
-                                                    </div>
-                                                    <div class="feature-search-style-category-list">
-                                                        @for (category of rule.categoryStops; track category.id) {
-                                                            <div class="feature-search-style-category-row">
-                                                                <p-colorpicker [(ngModel)]="category.color"
-                                                                               (ngModelChange)="onStyleRulesChanged()"
-                                                                               appendTo="body"></p-colorpicker>
-                                                                <p-inputNumber class="feature-search-style-category-value"
-                                                                               [(ngModel)]="category.value"
-                                                                               (ngModelChange)="onStyleRulesChanged()"
-                                                                               [min]="0"
-                                                                               [max]="300">
-                                                                </p-inputNumber>
-                                                                <p-button class="feature-search-style-category-delete"
-                                                                          icon="pi pi-times"
-                                                                          severity="danger"
-                                                                          [outlined]="true"
-                                                                          pTooltip="Delete category"
-                                                                          tooltipPosition="bottom"
-                                                                          (click)="deleteStyleCategory(rule, category)">
-                                                                </p-button>
-                                                            </div>
-                                                        }
-                                                    </div>
-                                                }
+                                                <search-style-color
+                                                    [draft]="rule.color"
+                                                    [fieldOptions]="styleAttributeOptions"
+                                                    (draftChange)="onRuleColorDraftChange(rule, $event)">
+                                                </search-style-color>
                                             </section>
                                         </p-accordion-content>
                                     </p-accordion-panel>
@@ -657,11 +574,6 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         {label: 'Mesh', value: 'mesh'},
         {label: 'Point', value: 'point'}
     ];
-    styleColorModeOptions: FeatureSearchStyleOption[] = [
-        {label: 'Gradient', value: 'gradient'},
-        {label: 'Solid', value: 'solid'},
-        {label: 'Categories', value: 'categories'}
-    ];
     private nextStyleRuleId = 1;
     private nextStyleConditionId = 1;
     private nextStyleColorStopId = 1;
@@ -769,16 +681,6 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    /** Creates a UI-owned color stop with a stable row id for Angular tracking. */
-    private createStyleColorStop(label: string, value: number, color: string): FeatureSearchStyleColorStop {
-        return {
-            id: this.nextStyleColorStopId++,
-            label,
-            value,
-            color
-        };
-    }
-
     /** Creates the editor draft for a new search-result style rule. */
     private createStyleRule(id: number): FeatureSearchStyleRuleDraft {
         return {
@@ -787,18 +689,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             visualization: 'any',
             lineWidth: 10,
             opacity: 40,
-            colorMode: 'gradient',
-            colorField: this.defaultStyleField(),
-            solidColor: '#2f73ff',
-            colorStops: [
-                this.createStyleColorStop('low', 30, '#2f73ff'),
-                this.createStyleColorStop('mid', 80, '#ffd43b'),
-                this.createStyleColorStop('high', 120, '#ff3347')
-            ],
-            categoryStops: [
-                this.createStyleColorStop('category 1', 30, '#2f73ff'),
-                this.createStyleColorStop('category 2', 80, '#ff3347')
-            ]
+            color: defaultSearchStyleColorDraft(this.defaultStyleField())
         };
     }
 
@@ -844,32 +735,10 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.onStyleRulesChanged();
     }
 
-    /** Adds a category color stop to one rule draft. */
-    protected addStyleCategory(rule: FeatureSearchStyleRuleDraft): void {
-        const nextIndex = rule.categoryStops.length + 1;
-        rule.categoryStops = [
-            ...rule.categoryStops,
-            this.createStyleColorStop(`category ${nextIndex}`, nextIndex * 10, '#2f73ff')
-        ];
+    /** Persists one normalized color draft emitted by the search-local color editor. */
+    protected onRuleColorDraftChange(rule: FeatureSearchStyleRuleDraft, color: SearchStyleColorDraft): void {
+        rule.color = color;
         this.onStyleRulesChanged();
-    }
-
-    /** Deletes one category color stop from one rule draft. */
-    protected deleteStyleCategory(rule: FeatureSearchStyleRuleDraft, category: FeatureSearchStyleColorStop): void {
-        rule.categoryStops = rule.categoryStops.filter(candidate => candidate.id !== category.id);
-        this.onStyleRulesChanged();
-    }
-
-    /** Returns the CSS preview gradient for the rule's current numeric color stops. */
-    protected styleGradientPreview(rule: FeatureSearchStyleRuleDraft): string {
-        if (!rule.colorStops.length) {
-            return rule.solidColor;
-        }
-        const denominator = Math.max(rule.colorStops.length - 1, 1);
-        const stops = rule.colorStops
-            .map((stop, index) => `${stop.color} ${Math.round((index / denominator) * 100)}%`)
-            .join(', ');
-        return `linear-gradient(90deg, ${stops})`;
     }
 
     /** Resets one rule draft to the default visual style while preserving its UI identity. */
@@ -964,57 +833,36 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     /** Converts one persisted style rule into a UI-friendly editor draft. */
     private styleRuleToDraft(rule: FeatureSearchStyleRule): FeatureSearchStyleRuleDraft {
-        const color = rule.color;
-        const colorField = color.mode === "solid" ? this.defaultStyleField() : color.field || this.defaultStyleField();
         return {
             id: this.nextStyleRuleId++,
             filters: rule.filter.map(filter => this.filterToDraft(filter)),
             visualization: rule.geometry ?? "any",
             lineWidth: this.clampNumber(rule.width, 1, 32, 4),
             opacity: this.clampNumber((rule.opacity ?? 1) * 100, 0, 100, 100),
-            colorMode: color.mode,
-            colorField,
-            solidColor: color.mode === "solid" ? color.color : color.fallbackColor ?? "#2f73ff",
-            colorStops: color.mode === "gradient"
-                ? this.colorStopsToDraft(color.stops)
-                : [
-                    this.createStyleColorStop('low', 30, '#2f73ff'),
-                    this.createStyleColorStop('mid', 80, '#ffd43b'),
-                    this.createStyleColorStop('high', 120, '#ff3347')
-                ],
-            categoryStops: color.mode === "categories"
-                ? this.colorStopsToDraft(color.stops)
-                : [
-                    this.createStyleColorStop('category 1', 30, '#2f73ff'),
-                    this.createStyleColorStop('category 2', 80, '#ff3347')
-                ]
+            color: this.colorDraftFromState(rule.color)
         };
     }
 
-    /** Converts the editor's flat color controls into the persisted color-mode union. */
+    /** Converts the editor's color draft into the persisted color-mode union. */
     private colorModeFromDraft(rule: FeatureSearchStyleRuleDraft): FeatureSearchColorMode {
-        if (rule.colorMode === "solid") {
-            return {mode: "solid", color: this.normalizeUiColor(rule.solidColor, "#2f73ff")};
+        const color = rule.color;
+        const fallbackColor = normalizeHexColor(color.fallbackColor, color.solidColor);
+        if (color.mode === "solid") {
+            return {mode: "solid", color: normalizeHexColor(color.solidColor)};
         }
-        if (rule.colorMode === "categories") {
+        if (color.mode === "categories") {
             return {
                 mode: "categories",
-                field: rule.colorField,
-                stops: rule.categoryStops.map(stop => ({
-                    value: stop.value,
-                    color: this.normalizeUiColor(stop.color, "#2f73ff")
-                })),
-                fallbackColor: this.normalizeUiColor(rule.solidColor, "#2f73ff")
+                field: color.field,
+                stops: serializableCategoryStops(color),
+                fallbackColor
             };
         }
         return {
             mode: "gradient",
-            field: rule.colorField,
-            stops: rule.colorStops.map(stop => ({
-                value: stop.value,
-                color: this.normalizeUiColor(stop.color, "#2f73ff")
-            })),
-            fallbackColor: this.normalizeUiColor(rule.solidColor, "#2f73ff")
+            field: color.field,
+            stops: serializableGradientStops(color) ?? [],
+            fallbackColor
         };
     }
 
@@ -1037,15 +885,51 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         };
     }
 
-    /** Converts persisted color stops into editor rows with stable Angular ids. */
-    private colorStopsToDraft(stops: Array<{value: unknown; color: string}>): FeatureSearchStyleColorStop[] {
-        return stops.map((stop, index) =>
-            this.createStyleColorStop(
-                `stop ${index + 1}`,
-                this.clampNumber(Number(stop.value), 0, 300, 0),
-                this.normalizeUiColor(stop.color, "#2f73ff")
-            )
-        );
+    /** Converts a persisted color union into the search-local color editor draft. */
+    private colorDraftFromState(color: FeatureSearchColorMode): SearchStyleColorDraft {
+        const field = color.mode === "solid" ? this.defaultStyleField() : color.field || this.defaultStyleField();
+        const draft = defaultSearchStyleColorDraft(field);
+        if (color.mode === "solid") {
+            const solidColor = normalizeHexColor(color.color, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
+            return {
+                ...draft,
+                mode: "solid",
+                solidColor,
+                fallbackColor: solidColor
+            };
+        }
+        const fallbackColor = normalizeHexColor(color.fallbackColor, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
+        if (color.mode === "categories") {
+            return {
+                ...draft,
+                mode: "categories",
+                field,
+                solidColor: fallbackColor,
+                fallbackColor,
+                categoryStops: this.categoryStopsToDraft(color.stops)
+            };
+        }
+        return {
+            ...draft,
+            mode: "gradient",
+            field,
+            solidColor: fallbackColor,
+            fallbackColor,
+            gradientStops: gradientStopsToDraft(color.stops, () => this.nextStyleColorStopId++)
+        };
+    }
+
+    /** Converts persisted category stops without numeric coercion. */
+    private categoryStopsToDraft(stops: Array<{value: unknown; color: string}>): SearchStyleCategoryStopDraft[] {
+        return stops.map(stop => {
+            const valueText = stop.value === null || stop.value === undefined ? "" : String(stop.value);
+            return {
+                id: this.nextStyleColorStopId++,
+                valueText,
+                color: normalizeHexColor(stop.color, DEFAULT_SEARCH_STYLE_SOLID_COLOR),
+                pending: valueText.trim().length === 0
+            };
+        });
     }
 
     /**
@@ -1142,8 +1026,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }
         let changed = false;
         for (const rule of this.styleRuleDrafts) {
-            if (rule.colorMode !== "solid" && this.fieldNeedsDefault(rule.colorField)) {
-                rule.colorField = field;
+            if (rule.color.mode !== "solid" && this.fieldNeedsDefault(rule.color.field)) {
+                rule.color.field = field;
                 changed = true;
             }
             for (const filter of rule.filters) {
@@ -1161,11 +1045,6 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return ["any", "point", "line", "polygon", "mesh"].includes(value)
             ? value as FeatureSearchGeometryKind
             : "any";
-    }
-
-    private normalizeUiColor(value: string | undefined, fallback: string): string {
-        const trimmed = (value ?? "").trim();
-        return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed.toLowerCase() : fallback;
     }
 
     private clampNumber(value: unknown, min: number, max: number, fallback: number): number {
