@@ -3,6 +3,8 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {MapInfoService} from "./map-info.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapTileRequestStatus, MapTileStreamClient} from "./tilestream";
+import {FeatureSearchRuntimeState} from "./feature-search-runtime-state.model";
+import {FeatureSearchSchemaService} from "./feature-search-schema.service";
 import type {
     MapTileStreamSearchStatusPayload,
     MapTileStreamStatusPayload,
@@ -11,25 +13,24 @@ import type {
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {
     BackendRequestProgress,
-    FeatureSearchDataPlaneRequest,
     FeatureSearchTileRequest,
-    FeatureSearchTileState,
+    MapTileKey,
     RequestedLayerProgressState,
     SearchLayerTileSet,
     SearchResultTileEntry,
     SearchResultTileEvictedPayload,
     SearchResultTilePayload,
+    SearchResultTileRemovedPayload,
     SelectionTileRequest,
     TileDataChange,
     TileSearchResultLayerLike
 } from "./map-runtime.model";
+import {RelationLocateRequest, RelationLocateResolution, RelationLocateResult} from "./relation-locate.model";
 import {SearchResultTile} from "./search-result-tile.model";
 import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, TileFeatureId} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
-import {
-    normalizeFeatureSearchRenderStrategy
-} from "../shared/feature-search-state";
+import {FeatureSearchStateEntry, normalizeFeatureSearchState} from "../shared/feature-search-state";
 
 interface LayerRequestEntry {
     mapId: string;
@@ -44,14 +45,15 @@ interface ExpectedLayerEntry {
     tileIdToRequestedMaxStage: Map<number, number>;
 }
 
-interface SearchResultRenderTile {
-    searchId: string;
+interface PendingFeatureSearchCancellation {
+    runtime: FeatureSearchRuntimeState;
+    layerKeys: Set<string>;
     refresh: number;
-    sourceTileKey: string;
-    sourceMapId: string;
-    sourceLayerId: string;
-    sourceTileId: bigint;
-    tile: SearchResultTile;
+}
+
+interface FeatureSearchDefinitionUpdateOptions {
+    forceGenerationIds?: Iterable<string>;
+    updateCoverageIds?: Iterable<string>;
 }
 
 /**
@@ -59,20 +61,22 @@ interface SearchResultRenderTile {
  */
 @Injectable({providedIn: "root"})
 export class MapTileStreamService {
-    public readonly loadedTileLayers: Map<string, FeatureTile> = new Map();
+    public readonly loadedTileLayers: Map<MapTileKey, FeatureTile> = new Map();
     public readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
+    /** Fine-grained feature-tile payload stream for render/selection consumers. */
     public readonly tileDataChanged = new Subject<TileDataChange>();
-    public readonly tileCacheChanged = new Subject<string>();
-    public readonly selectionTileUpdated = new Subject<string>();
+    public readonly selectionTileUpdated = new Subject<MapTileKey>();
     public readonly searchResultTileReceived = new Subject<SearchResultTilePayload>();
     public readonly searchResultTileEvicted = new Subject<SearchResultTileEvictedPayload>();
     public readonly searchStatusReceived = new Subject<MapTileStreamSearchStatusPayload>();
-    public readonly searchRenderTileChanged = new Subject<SearchResultTile>();
-    public readonly searchRenderTileRemoved = new Subject<{searchId: string; sourceTileKey: string}>();
+    /** Search-result source-tile state changed; consumers may reconcile render/UI projections. */
+    public readonly searchResultTileChanged = new Subject<SearchResultTile>();
+    /** Search-result source-tile state left the active runtime cache. */
+    public readonly searchResultTileRemoved = new Subject<SearchResultTileRemovedPayload>();
 
     private tileStream: MapTileStreamClient|null = null;
     private readonly selectionTileRequests: SelectionTileRequest[] = [];
-    private readonly selectedTileKeys: Set<string> = new Set<string>();
+    private readonly selectedTileKeys: Set<MapTileKey> = new Set<MapTileKey>();
     private updateTimer: ReturnType<typeof setTimeout> | null = null;
     private updateInProgress = false;
     private updatePending = false;
@@ -81,25 +85,21 @@ export class MapTileStreamService {
     private readonly updateDebounceMs = 50;
     private lastUpdateAt = 0;
     private stageRequestProgress: Array<{done: number; total: number}> = [];
-    private pendingRequestedTileKeysByStage: Array<Set<string>> = [];
+    private pendingRequestedTileKeysByStage: Array<Set<MapTileKey>> = [];
     private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
     private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
     private viewportLoadStartedAtMs: number | null = null;
     private viewportRenderCompletedAtMs: number | null = null;
-    private activeFeatureSearchRequests: Map<string, FeatureSearchDataPlaneRequest> = new Map();
-    private pendingFeatureSearchCancellations: Map<string, FeatureSearchDataPlaneRequest> = new Map();
-    private pendingFeatureSearchCancellationLayerKeysById: Map<string, Set<string>> = new Map();
+    /** Per-search runtime state owns differential coverage, refresh generation, and result source tiles. */
+    private activeFeatureSearches: Map<string, FeatureSearchRuntimeState> = new Map();
+    /** Deferred empty requests that tell mapget to drop removed/paused search layers. */
+    private pendingFeatureSearchCancellations: Map<string, PendingFeatureSearchCancellation> = new Map();
     private lastFeatureSearchRequestSignature = "";
-    private featureSearchRefreshById: Map<string, number> = new Map();
-    private featureSearchFingerprintById: Map<string, string> = new Map();
-    private lastFeatureSearchUpdateSerialById: Map<string, number> = new Map();
-    private featureSearchTileStatesById: Map<string, Map<string, FeatureSearchTileState>> = new Map();
-    private searchResultRenderTilesByKey: Map<string, SearchResultRenderTile> = new Map();
-    private searchResultMaxRefreshById: Map<string, number> = new Map();
 
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService,
+        private readonly searchSchema: FeatureSearchSchemaService,
         private readonly viewState: MapViewStateService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone
@@ -139,74 +139,75 @@ export class MapTileStreamService {
     }
 
     /** Replaces the active server-side feature-search definitions used by the next `/tiles` request. */
-    setFeatureSearchRequests(requests: FeatureSearchDataPlaneRequest[]): void {
-        const normalized = requests
-            .filter(request => request.searchId && request.query)
-            .map(request => ({
-                ...request,
-                autoUpdate: !!request.autoUpdate,
-                updateSerial: Number.isFinite(Number(request.updateSerial))
-                    ? Math.max(0, Math.floor(Number(request.updateSerial)))
-                    : 0,
-                generationSerial: Number.isFinite(Number(request.generationSerial))
-                    ? Math.max(0, Math.floor(Number(request.generationSerial)))
-                    : 0,
-                paused: !!request.paused,
-                showResultsOnMap: request.showResultsOnMap !== false,
-                pinColor: (request.pinColor || "").trim(),
-                searchStyleRules: [...(request.searchStyleRules ?? [])],
-                renderStrategy: normalizeFeatureSearchRenderStrategy(request.renderStrategy),
-                withFields: Array.from(new Set((request.withFields ?? []).filter(Boolean))).sort()
-            }))
-            .sort((lhs, rhs) => lhs.searchId.localeCompare(rhs.searchId));
+    setFeatureSearchDefinitions(
+        definitions: FeatureSearchStateEntry[],
+        options: FeatureSearchDefinitionUpdateOptions = {}
+    ): void {
+        const forceGenerationIds = new Set(options.forceGenerationIds ?? []);
+        const updateCoverageIds = new Set(options.updateCoverageIds ?? []);
+        const normalized = normalizeFeatureSearchState(definitions)
+            .filter(definition => definition.id && definition.query)
+            .sort((lhs, rhs) => lhs.id.localeCompare(rhs.id));
         const signature = JSON.stringify(normalized);
-        if (signature === this.lastFeatureSearchRequestSignature) {
+        if (signature === this.lastFeatureSearchRequestSignature
+            && !forceGenerationIds.size
+            && !updateCoverageIds.size) {
             return;
         }
 
-        const nextIds = new Set(normalized.map(request => request.searchId));
-        for (const [searchId, request] of this.activeFeatureSearchRequests) {
+        const nextIds = new Set(normalized.map(definition => definition.id));
+        for (const [searchId, runtime] of Array.from(this.activeFeatureSearches.entries())) {
             if (!nextIds.has(searchId)) {
-                this.pendingFeatureSearchCancellations.set(searchId, request);
-                this.pendingFeatureSearchCancellationLayerKeysById.set(
-                    searchId,
-                    this.layerKeysForFeatureSearchTileStates(searchId)
-                );
-                this.clearFeatureSearchTileStates(searchId, true);
+                this.pendingFeatureSearchCancellations.set(searchId, {
+                    runtime,
+                    layerKeys: runtime.layerKeys(),
+                    refresh: runtime.refresh + 1
+                });
+                this.disposeSearchResultTiles(runtime.clearTiles(), true);
+                this.activeFeatureSearches.delete(searchId);
             }
         }
 
-        this.activeFeatureSearchRequests = new Map(normalized.map(request => [request.searchId, request]));
-        for (const request of normalized) {
-            this.refreshForFeatureSearchDefinition(request);
+        for (const definition of normalized) {
+            let runtime = this.activeFeatureSearches.get(definition.id);
+            if (!runtime) {
+                runtime = new FeatureSearchRuntimeState(definition, this.mapInfo.tileLayerParser);
+                this.activeFeatureSearches.set(definition.id, runtime);
+            }
+            if (updateCoverageIds.has(definition.id)) {
+                runtime.requestCoverageUpdate();
+            }
+            const removedTiles = runtime.applyDefinition(
+                definition,
+                entry => this.resolveFeatureSearchScope(entry),
+                forceGenerationIds.has(definition.id)
+            );
+            this.disposeSearchResultTiles(removedTiles, true);
         }
         this.lastFeatureSearchRequestSignature = signature;
         this.scheduleUpdate();
     }
 
     /** Returns one active search request, if it still exists. */
-    activeFeatureSearchRequest(searchId: string): FeatureSearchDataPlaneRequest | undefined {
-        return this.activeFeatureSearchRequests.get(searchId);
+    activeFeatureSearchRequest(searchId: string): FeatureSearchStateEntry | undefined {
+        return this.activeFeatureSearches.get(searchId)?.definition;
     }
 
     /** Returns a stable snapshot of active search requests for render ordering. */
-    activeFeatureSearchRequestsSnapshot(): FeatureSearchDataPlaneRequest[] {
-        return Array.from(this.activeFeatureSearchRequests.values());
+    activeFeatureSearchRequestsSnapshot(): FeatureSearchStateEntry[] {
+        return Array.from(this.activeFeatureSearches.values()).map(runtime => runtime.definition);
     }
 
-    /** Iterates the current high-fidelity search-result render tiles. */
-    searchResultRenderTiles(): Iterable<SearchResultRenderTile> {
-        return this.searchResultRenderTilesByKey.values();
+    /** Iterates the current search-result source-tile states. */
+    *searchResultTiles(): Iterable<SearchResultTile> {
+        for (const runtime of this.activeFeatureSearches.values()) {
+            yield* runtime.tilesBySourceKey.values();
+        }
     }
 
-    /** Returns whether one high-fidelity search-result render tile is still cached. */
-    hasSearchResultRenderTile(searchId: string, sourceTileKey: string): boolean {
-        return this.searchResultRenderTilesByKey.has(this.searchResultRenderTileKey(searchId, sourceTileKey));
-    }
-
-    /** Builds the cache key for one search/result source tile pair. */
-    searchResultRenderTileKey(searchId: string, sourceTileKey: string): string {
-        return `${searchId}:${sourceTileKey}`;
+    /** Returns whether one search-result source tile exists and currently contains renderable layer data. */
+    hasSearchResultTile(searchId: string, sourceTileKey: string): boolean {
+        return !!this.activeFeatureSearches.get(searchId)?.tilesBySourceKey.get(sourceTileKey)?.hasResultLayer();
     }
 
     /** Replaces the tile keys currently pinned by inspection selection. */
@@ -366,7 +367,6 @@ export class MapTileStreamService {
         this.updateInProgress = true;
         this.updatePending = false;
         try {
-            this.viewState.recalculateVisibleTiles();
             await this.updateMapDataRequest();
             if (this.tilePipelinePaused) {
                 this.updatePending = true;
@@ -374,7 +374,6 @@ export class MapTileStreamService {
                 return;
             }
             this.updateEvictLoadedLayers();
-            this.tileCacheChanged.next("update");
         } finally {
             this.updateInProgress = false;
             this.lastUpdateAt = Date.now();
@@ -492,6 +491,51 @@ export class MapTileStreamService {
         }
 
         return result;
+    }
+
+    /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
+    async resolveRelationExternalTiles(requests: RelationLocateRequest[]): Promise<RelationLocateResult> {
+        if (requests.length === 0) {
+            return {responses: [], tiles: []};
+        }
+        let response: Response | undefined;
+        try {
+            response = await fetch("locate", {
+                body: JSON.stringify({requests}, (_, value) => typeof value === "bigint" ? Number(value) : value),
+                method: "POST"
+            });
+        } catch (error) {
+            console.error(`Error during /locate call for relation targets: ${error}`);
+            return {responses: [], tiles: []};
+        }
+        if (!response.ok) {
+            console.error(`Locate request for relation targets failed with status ${response.status}.`);
+            return {responses: [], tiles: []};
+        }
+        const locateResponse = await response.json() as {responses?: RelationLocateResolution[][]};
+        const tileKeys = new Set<string>();
+        for (const resolutions of locateResponse.responses ?? []) {
+            for (const resolution of resolutions) {
+                if (typeof resolution.tileId === "string" && resolution.tileId.length > 0) {
+                    tileKeys.add(resolution.tileId);
+                }
+            }
+        }
+        if (tileKeys.size === 0) {
+            return {responses: locateResponse.responses ?? [], tiles: []};
+        }
+        const loadedTiles = await this.loadTiles(tileKeys);
+        const seenTileKeys = new Set<string>();
+        const relationTiles: FeatureTile[] = [];
+        for (const tileKey of tileKeys) {
+            const tile = loadedTiles.get(tileKey) ?? null;
+            if (!tile || !tile.hasData() || seenTileKeys.has(tile.mapTileKey)) {
+                continue;
+            }
+            seenTileKeys.add(tile.mapTileKey);
+            relationTiles.push(tile);
+        }
+        return {responses: locateResponse.responses ?? [], tiles: relationTiles};
     }
 
     /**
@@ -614,7 +658,6 @@ export class MapTileStreamService {
 
         this.resolveWaitingSelectionTileRequests(tileLayer);
         this.tileDataChanged.next({tileKey: tileLayer.mapTileKey, tile: tileLayer, reason: "loaded"});
-        this.tileCacheChanged.next("loaded");
         if (this.selectedTileKeys.has(tileLayer.mapTileKey)) {
             this.selectionTileUpdated.next(tileLayer.mapTileKey);
         }
@@ -673,21 +716,22 @@ export class MapTileStreamService {
                 })
                 : null;
             const normalizedRefresh = Number.isFinite(refresh) ? refresh : 0;
-            const accepted = this.addSearchResultRenderTile(
+            const resultCount = Number.isFinite(resultCountValue) ? resultCountValue : entries.length;
+            const acceptedTile = this.acceptSearchResultTileLayer(
                 searchId,
                 normalizedRefresh,
                 sourceTileKey,
-                sourceMapId,
-                sourceLayerId,
-                sourceTileId,
                 searchResultLayer.nodeId(),
                 searchResultLayerBlob,
-                Number.isFinite(resultCountValue) ? resultCountValue : entries.length
+                resultCount
             );
-            if (!accepted) {
+            if (!acceptedTile) {
                 return;
             }
-            const progress = this.featureSearchProgressSnapshot(searchId);
+            const progress = this.activeFeatureSearches.get(searchId)?.progressSnapshot() ?? {
+                tilesConsidered: 0,
+                tilesCompleted: 0
+            };
 
             this.searchResultTileReceived.next({
                 searchId,
@@ -699,7 +743,7 @@ export class MapTileStreamService {
                 sourceMapId,
                 sourceLayerId,
                 sourceTileId,
-                resultCount: Number.isFinite(resultCountValue) ? resultCountValue : entries.length,
+                resultCount,
                 resultFields,
                 ...progress,
                 traces,
@@ -711,92 +755,21 @@ export class MapTileStreamService {
         }
     }
 
-    /** Stores one streamed result layer for queued high-fidelity rendering. */
-    private addSearchResultRenderTile(
+    /** Accepts one streamed result layer into the matching source-tile state. */
+    private acceptSearchResultTileLayer(
         searchId: string,
         refresh: number,
         sourceTileKey: string,
-        sourceMapId: string,
-        sourceLayerId: string,
-        sourceTileId: bigint,
         nodeId: string,
         layerBlob: Uint8Array,
         resultCount: number
-    ): boolean {
-        if (!this.activeFeatureSearchRequests.has(searchId)) {
-            return false;
+    ): SearchResultTile | null {
+        const runtime = this.activeFeatureSearches.get(searchId);
+        const tile = runtime?.acceptResultTile(refresh, sourceTileKey, nodeId, layerBlob, resultCount);
+        if (tile) {
+            this.searchResultTileChanged.next(tile);
         }
-        const currentRefresh = this.featureSearchRefreshById.get(searchId);
-        if (currentRefresh !== undefined && refresh !== currentRefresh) {
-            return false;
-        }
-        const previousMaxRefresh = this.searchResultMaxRefreshById.get(searchId) ?? -1;
-        if (refresh < previousMaxRefresh) {
-            return false;
-        }
-        if (refresh > previousMaxRefresh) {
-            this.clearSearchResultRenderTilesForSearch(searchId, refresh);
-            this.searchResultMaxRefreshById.set(searchId, refresh);
-        }
-        this.markFeatureSearchTileCompleted(searchId, refresh, sourceTileKey);
-        if (resultCount <= 0) {
-            this.removeSearchResultRenderTile(searchId, sourceTileKey);
-            return true;
-        }
-
-        const update = {refresh, nodeId, layerBlob};
-        const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
-        const tile = this.searchResultRenderTilesByKey.get(key)?.tile ?? new SearchResultTile(
-            this.mapInfo.tileLayerParser,
-            searchId,
-            sourceTileKey,
-            sourceMapId,
-            sourceLayerId,
-            sourceTileId,
-            update
-        );
-        if (this.searchResultRenderTilesByKey.has(key)) {
-            tile.update(update);
-        }
-        tile.setRenderOrder(this.searchResultTileRenderOrder(sourceTileId));
-        this.searchResultRenderTilesByKey.set(key, {
-            searchId,
-            refresh,
-            sourceTileKey,
-            sourceMapId,
-            sourceLayerId,
-            sourceTileId,
-            tile
-        });
-        this.searchRenderTileChanged.next(tile);
-        return true;
-    }
-
-    /** Removes one cached search-result tile and notifies render/UI consumers. */
-    private removeSearchResultRenderTile(searchId: string, sourceTileKey: string): void {
-        const key = this.searchResultRenderTileKey(searchId, sourceTileKey);
-        const renderTile = this.searchResultRenderTilesByKey.get(key);
-        if (!renderTile || !this.searchResultRenderTilesByKey.delete(key)) {
-            return;
-        }
-        renderTile.tile.dispose();
-        this.searchRenderTileRemoved.next({searchId, sourceTileKey});
-    }
-
-    /** Removes cached result tiles for a search, optionally only stale refreshes. */
-    private clearSearchResultRenderTilesForSearch(searchId: string, refreshBefore?: number): void {
-        for (const renderTile of Array.from(this.searchResultRenderTilesByKey.values())) {
-            if (renderTile.searchId !== searchId) {
-                continue;
-            }
-            if (refreshBefore !== undefined && renderTile.refresh >= refreshBefore) {
-                continue;
-            }
-            this.removeSearchResultRenderTile(searchId, renderTile.sourceTileKey);
-        }
-        if (refreshBefore === undefined) {
-            this.searchResultMaxRefreshById.delete(searchId);
-        }
+        return tile ?? null;
     }
 
     /** Evicts cached tiles that are neither visible nor pinned for selection/inspection. */
@@ -1233,7 +1206,6 @@ export class MapTileStreamService {
         });
         this.loadedTileLayers.set(tileKey, placeholder);
         this.tileDataChanged.next({tileKey, tile: placeholder, reason: "placeholder"});
-        this.tileCacheChanged.next("placeholder");
 
         return true;
     }
@@ -1352,28 +1324,23 @@ export class MapTileStreamService {
         if (!status || status.type !== "mapget.search.status") {
             return;
         }
-        if (!this.activeFeatureSearchRequests.has(status.searchId)) {
+        const runtime = this.activeFeatureSearches.get(status.searchId);
+        if (!runtime) {
             return;
         }
         const refresh = Number(status.refresh ?? 0);
-        const currentRefresh = this.featureSearchRefreshById.get(status.searchId);
-        if (currentRefresh !== undefined && refresh !== currentRefresh) {
+        if (refresh !== runtime.refresh) {
             return;
         }
-        this.searchStatusReceived.next({...status, ...this.featureSearchProgressSnapshot(status.searchId)});
+        this.searchStatusReceived.next({...status, ...runtime.progressSnapshot()});
     }
 
     /** Resolves persisted search scope state to the concrete token expected by mapget. */
-    private resolveFeatureSearchScope(request: FeatureSearchDataPlaneRequest): "feature" | "attribute" {
-        if (request.scope === "feature" || request.scope === "attribute") {
-            return request.scope;
+    private resolveFeatureSearchScope(definition: FeatureSearchStateEntry): "feature" | "attribute" {
+        if (definition.scope === "feature" || definition.scope === "attribute") {
+            return definition.scope;
         }
-        return this.mapInfo.isAttributeScopeSearchQuery(request.query) ? "attribute" : "feature";
-    }
-
-    /** Encodes map/layer ids without relying on slash splitting, since map ids may be grouped paths. */
-    private featureSearchLayerKey(mapId: string, layerId: string): string {
-        return JSON.stringify([mapId, layerId]);
+        return this.searchSchema.isAttributeScopeSearchQuery(definition.query) ? "attribute" : "feature";
     }
 
     /** Adds one source tile to the reusable visible-tile plan consumed by map loading and search. */
@@ -1384,7 +1351,7 @@ export class MapTileStreamService {
         tileId: bigint,
         priority: boolean
     ): void {
-        const key = this.featureSearchLayerKey(mapId, layerId);
+        const key = FeatureSearchRuntimeState.layerKey(mapId, layerId);
         let entry = visibleLayerTiles.get(key);
         if (!entry) {
             entry = {mapId, layerId, tileIds: new Set<number>(), priorityTileIds: new Set<number>()};
@@ -1397,245 +1364,18 @@ export class MapTileStreamService {
         }
     }
 
-    /** Decodes a key produced by featureSearchLayerKey(). */
-    private parseFeatureSearchLayerKey(key: string): {mapId: string; layerId: string} | null {
-        try {
-            const parsed = JSON.parse(key);
-            if (Array.isArray(parsed) && typeof parsed[0] === "string" && typeof parsed[1] === "string") {
-                return {mapId: parsed[0], layerId: parsed[1]};
+    /** Emits removal/eviction notifications for search-result tiles no longer owned by a runtime. */
+    private disposeSearchResultTiles(tiles: SearchResultTile[], notifyEviction: boolean): void {
+        for (const tile of tiles) {
+            const {searchId, sourceTileKey} = tile;
+            const hadResultLayer = tile.hasResultLayer();
+            tile.dispose();
+            if (hadResultLayer) {
+                this.searchResultTileRemoved.next({searchId, sourceTileKey});
             }
-        } catch (_error) {
-            // Ignore malformed legacy keys.
-        }
-        return null;
-    }
-
-    /** Builds the stable logical-search fingerprint that owns the backend refresh generation. */
-    private featureSearchDefinitionFingerprint(request: FeatureSearchDataPlaneRequest): string {
-        return JSON.stringify({
-            searchId: request.searchId,
-            generationSerial: request.generationSerial,
-            query: request.query,
-            scope: this.resolveFeatureSearchScope(request),
-            withFields: request.withFields
-        });
-    }
-
-    /** Bumps refresh only when old chunks for this search id must be treated as stale. */
-    private refreshForFeatureSearchDefinition(request: FeatureSearchDataPlaneRequest): number {
-        const fingerprint = this.featureSearchDefinitionFingerprint(request);
-        const searchId = request.searchId;
-        if (this.featureSearchFingerprintById.get(searchId) === fingerprint) {
-            return this.featureSearchRefreshById.get(searchId) ?? 0;
-        }
-        const nextRefresh = (this.featureSearchRefreshById.get(searchId) ?? 0) + 1;
-        this.featureSearchFingerprintById.set(searchId, fingerprint);
-        this.featureSearchRefreshById.set(searchId, nextRefresh);
-        this.clearFeatureSearchTileStates(searchId, true);
-        return nextRefresh;
-    }
-
-    /** Returns the mutable per-source-tile state table for one search. */
-    private featureSearchTileStates(searchId: string): Map<string, FeatureSearchTileState> {
-        let states = this.featureSearchTileStatesById.get(searchId);
-        if (!states) {
-            states = new Map<string, FeatureSearchTileState>();
-            this.featureSearchTileStatesById.set(searchId, states);
-        }
-        return states;
-    }
-
-    /** Returns all concrete source layers currently represented by one search's tile state. */
-    private layerKeysForFeatureSearchTileStates(searchId: string): Set<string> {
-        const result = new Set<string>();
-        const states = this.featureSearchTileStatesById.get(searchId);
-        if (!states) {
-            return result;
-        }
-        for (const state of states.values()) {
-            result.add(this.featureSearchLayerKey(state.mapId, state.layerId));
-        }
-        return result;
-    }
-
-    /** Removes one source tile from local search coverage and optionally from UI-facing result state. */
-    private removeFeatureSearchTileState(searchId: string, sourceTileKey: string, notifyEviction: boolean): void {
-        const states = this.featureSearchTileStatesById.get(searchId);
-        states?.delete(sourceTileKey);
-        this.removeSearchResultRenderTile(searchId, sourceTileKey);
-        if (notifyEviction) {
-            this.searchResultTileEvicted.next({searchId, sourceTileKey});
-        }
-    }
-
-    /** Clears all per-tile state for one search generation. */
-    private clearFeatureSearchTileStates(searchId: string, notifyEvictions: boolean): void {
-        const states = this.featureSearchTileStatesById.get(searchId);
-        if (states) {
-            for (const sourceTileKey of Array.from(states.keys())) {
-                this.removeFeatureSearchTileState(searchId, sourceTileKey, notifyEvictions);
+            if (notifyEviction) {
+                this.searchResultTileEvicted.next({searchId, sourceTileKey});
             }
-        }
-        this.featureSearchTileStatesById.delete(searchId);
-        this.lastFeatureSearchUpdateSerialById.delete(searchId);
-        this.clearSearchResultRenderTilesForSearch(searchId);
-    }
-
-    /** Freezes current results but makes unfinished tiles eligible for re-request after resume. */
-    private markFeatureSearchTilesPending(searchId: string): void {
-        const states = this.featureSearchTileStatesById.get(searchId);
-        if (!states) {
-            return;
-        }
-        for (const state of states.values()) {
-            if (!state.completed) {
-                state.requested = false;
-            }
-        }
-    }
-
-    /** Adopts the current visible tile plan for an auto-update or explicit area update. */
-    private adoptFeatureSearchVisibleTiles(
-        searchId: string,
-        refresh: number,
-        visibleLayerTiles: Map<string, SearchLayerTileSet>
-    ): void {
-        const states = this.featureSearchTileStates(searchId);
-        const desiredKeys = new Set<string>();
-        for (const entry of visibleLayerTiles.values()) {
-            for (const tileId of entry.tileIds) {
-                const sourceTileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, BigInt(tileId));
-                desiredKeys.add(sourceTileKey);
-                const priority = entry.priorityTileIds.has(tileId);
-                const existing = states.get(sourceTileKey);
-                if (existing && existing.refresh === refresh) {
-                    existing.priority = priority;
-                    continue;
-                }
-                states.set(sourceTileKey, {
-                    mapId: entry.mapId,
-                    layerId: entry.layerId,
-                    tileId,
-                    sourceTileKey,
-                    refresh,
-                    priority,
-                    requested: false,
-                    completed: false
-                });
-            }
-        }
-
-        for (const sourceTileKey of Array.from(states.keys())) {
-            if (!desiredKeys.has(sourceTileKey)) {
-                this.removeFeatureSearchTileState(searchId, sourceTileKey, true);
-            }
-        }
-    }
-
-    /** Marks one streamed search-result tile as completed, including zero-result tiles. */
-    private markFeatureSearchTileCompleted(searchId: string, refresh: number, sourceTileKey: string): void {
-        const state = this.featureSearchTileStatesById.get(searchId)?.get(sourceTileKey);
-        if (!state || state.refresh !== refresh) {
-            return;
-        }
-        state.completed = true;
-        state.requested = false;
-    }
-
-    /** Returns current full-coverage search progress, independent from the latest differential backend request. */
-    private featureSearchProgressSnapshot(searchId: string): {tilesConsidered: number; tilesCompleted: number} {
-        const states = this.featureSearchTileStatesById.get(searchId);
-        if (!states) {
-            return {tilesConsidered: 0, tilesCompleted: 0};
-        }
-        let tilesCompleted = 0;
-        for (const state of states.values()) {
-            if (state.completed) {
-                tilesCompleted += 1;
-            }
-        }
-        return {tilesConsidered: states.size, tilesCompleted};
-    }
-
-    /** Builds one concrete mapget search request object for a map/layer tile set. */
-    private createFeatureSearchTileRequest(
-        request: FeatureSearchDataPlaneRequest,
-        mapId: string,
-        layerId: string,
-        tileIds: number[],
-        priorityTileIds: number[],
-        refresh: number
-    ): FeatureSearchTileRequest {
-        const result: FeatureSearchTileRequest = {
-            mapId,
-            layerId,
-            tileIds,
-            searchId: request.searchId,
-            refresh,
-            searchQuery: request.query,
-            searchScope: this.resolveFeatureSearchScope(request),
-        };
-        if (priorityTileIds.length) {
-            result.priorityTileIds = priorityTileIds;
-        }
-        if (request.withFields.length) {
-            result.withFields = request.withFields;
-        }
-        return result;
-    }
-
-    /** Creates empty tile requests that cancel or pause a server-side search on its previously active layers. */
-    private createFeatureSearchCancellationRequests(
-        request: FeatureSearchDataPlaneRequest,
-        layerKeys: Iterable<string>,
-        refresh: number
-    ): FeatureSearchTileRequest[] {
-        const cancellations: FeatureSearchTileRequest[] = [];
-        for (const layerKey of layerKeys) {
-            const parsed = this.parseFeatureSearchLayerKey(layerKey);
-            if (!parsed) {
-                continue;
-            }
-            cancellations.push(this.createFeatureSearchTileRequest(request, parsed.mapId, parsed.layerId, [], [], refresh));
-        }
-        return cancellations;
-    }
-
-    /** Groups incomplete source tiles into concrete backend search requests. */
-    private appendFeatureSearchTileRequests(
-        requests: FeatureSearchTileRequest[],
-        request: FeatureSearchDataPlaneRequest,
-        refresh: number
-    ): void {
-        const states = this.featureSearchTileStatesById.get(request.searchId);
-        if (!states) {
-            return;
-        }
-        const statesByLevelLayer = new Map<string, {mapId: string; layerId: string; tileIds: number[]; priorityTileIds: number[]}>();
-        for (const state of states.values()) {
-            if (state.completed) {
-                continue;
-            }
-            const tileLevel = Math.trunc(state.tileId % 0x10000);
-            const key = `${state.mapId}/${state.layerId}/${tileLevel}`;
-            let entry = statesByLevelLayer.get(key);
-            if (!entry) {
-                entry = {mapId: state.mapId, layerId: state.layerId, tileIds: [], priorityTileIds: []};
-                statesByLevelLayer.set(key, entry);
-            }
-            entry.tileIds.push(state.tileId);
-            if (state.priority) {
-                entry.priorityTileIds.push(state.tileId);
-            }
-            state.requested = true;
-        }
-
-        const sortedEntries = Array.from(statesByLevelLayer.values())
-            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
-        for (const entry of sortedEntries) {
-            entry.tileIds.sort((lhs, rhs) => lhs - rhs);
-            entry.priorityTileIds.sort((lhs, rhs) => lhs - rhs);
-            requests.push(this.createFeatureSearchTileRequest(request, entry.mapId, entry.layerId, entry.tileIds, entry.priorityTileIds, refresh));
         }
     }
 
@@ -1643,53 +1383,36 @@ export class MapTileStreamService {
     private buildFeatureSearchTileRequests(visibleLayerTiles: Map<string, SearchLayerTileSet>): FeatureSearchTileRequest[] {
         const requests: FeatureSearchTileRequest[] = [];
 
-        for (const [searchId, request] of this.activeFeatureSearchRequests) {
-            const refresh = this.refreshForFeatureSearchDefinition(request);
-
-            if (request.paused) {
-                const cancellationLayerKeys = this.layerKeysForFeatureSearchTileStates(searchId);
-                requests.push(...this.createFeatureSearchCancellationRequests(request, cancellationLayerKeys, refresh));
-                this.markFeatureSearchTilesPending(searchId);
+        for (const runtime of this.activeFeatureSearches.values()) {
+            if (runtime.definition.paused) {
+                requests.push(...runtime.cancellationRequests(
+                    runtime.layerKeys(),
+                    runtime.refresh,
+                    req => this.resolveFeatureSearchScope(req)
+                ));
+                runtime.markPendingTilesForResume();
                 continue;
             }
 
-            const lastUpdateSerial = this.lastFeatureSearchUpdateSerialById.get(searchId);
-            const shouldAdoptVisibleTiles = request.autoUpdate
-                || lastUpdateSerial !== request.updateSerial
-                || !this.featureSearchTileStatesById.has(searchId);
-            if (shouldAdoptVisibleTiles && (visibleLayerTiles.size > 0 || request.autoUpdate)) {
-                this.adoptFeatureSearchVisibleTiles(searchId, refresh, visibleLayerTiles);
-                this.lastFeatureSearchUpdateSerialById.set(searchId, request.updateSerial);
+            if (runtime.shouldAdoptVisibleTiles() && (visibleLayerTiles.size > 0 || runtime.definition.autoUpdate)) {
+                this.disposeSearchResultTiles(runtime.adoptVisibleTiles(visibleLayerTiles), true);
             }
 
-            this.appendFeatureSearchTileRequests(requests, request, refresh);
+            requests.push(...runtime.buildPendingRequests(req => this.resolveFeatureSearchScope(req)));
         }
 
-        for (const [searchId, request] of Array.from(this.pendingFeatureSearchCancellations)) {
-            const layerKeys = this.pendingFeatureSearchCancellationLayerKeysById.get(searchId);
-            if (layerKeys?.size) {
-                const refresh = (this.featureSearchRefreshById.get(searchId) ?? 0) + 1;
-                requests.push(...this.createFeatureSearchCancellationRequests(request, layerKeys, refresh));
+        for (const [searchId, cancellation] of Array.from(this.pendingFeatureSearchCancellations)) {
+            if (cancellation.layerKeys.size) {
+                requests.push(...cancellation.runtime.cancellationRequests(
+                    cancellation.layerKeys,
+                    cancellation.refresh,
+                    req => this.resolveFeatureSearchScope(req)
+                ));
             }
             this.pendingFeatureSearchCancellations.delete(searchId);
-            this.pendingFeatureSearchCancellationLayerKeysById.delete(searchId);
-            this.lastFeatureSearchUpdateSerialById.delete(searchId);
-            this.featureSearchTileStatesById.delete(searchId);
-            this.featureSearchRefreshById.delete(searchId);
-            this.featureSearchFingerprintById.delete(searchId);
-            this.searchResultMaxRefreshById.delete(searchId);
         }
 
         return requests;
-    }
-
-    /** Uses the best visible-tile ordering rank known across views for detached result tiles. */
-    private searchResultTileRenderOrder(tileId: bigint): number {
-        let order = FeatureTile.DEFAULT_RENDER_ORDER;
-        for (const state of this.viewState.viewVisualizationState) {
-            order = Math.min(order, state.getTileOrder(tileId));
-        }
-        return order;
     }
 
     /** Closes the viewport render timer once backend requests finished. */

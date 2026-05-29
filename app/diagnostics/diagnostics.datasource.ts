@@ -175,7 +175,7 @@ export class DiagnosticsDatasource implements OnDestroy {
             features,
             vertices,
             parseQueueSize: this.mapService.getPendingFrameQueueSize(),
-            renderQueueSize: this.mapRenderService.getRenderQueueSize(),
+            renderQueueSize: this.mapRenderService.visualizationQueueLength(),
             frameTimeMs: this.mapRenderService.currentFrameTimeMs(),
             viewportRenderSeconds: this.mapService.currentViewportRenderSeconds()
         };

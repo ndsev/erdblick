@@ -1,6 +1,6 @@
 import {Component, ElementRef, HostListener, NgZone, OnDestroy, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle, UpdatedModifiedStyleEntry} from "./style.service";
 import {AppStateService, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
@@ -548,7 +548,7 @@ export class StyleComponent implements OnDestroy {
                         this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.requestViewRecalculation("style-change");
+                    this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
                 }
             },
             {
@@ -558,7 +558,7 @@ export class StyleComponent implements OnDestroy {
                         this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.requestViewRecalculation("style-change");
+                    this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
                 }
             },
             {
@@ -568,7 +568,7 @@ export class StyleComponent implements OnDestroy {
                         this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.requestViewRecalculation("style-change");
+                    this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
                 }
             },
             {
@@ -578,7 +578,7 @@ export class StyleComponent implements OnDestroy {
                         this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.requestViewRecalculation("style-change");
+                    this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
                 }
             }
         ];
@@ -601,7 +601,7 @@ export class StyleComponent implements OnDestroy {
         const restoredStyleId = this.styleService.resetModifiedBuiltinStyle(styleId);
         if (restoredStyleId) {
             this.styleService.toggleStyle(restoredStyleId, true);
-            this.mapService.requestViewRecalculation("style-change");
+            this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
             this.refreshUpdatedStylesDialogVisibility();
             return;
         }
@@ -798,7 +798,7 @@ export class StyleComponent implements OnDestroy {
             this.styleService.toggleStyle(id, enabled, true);
         }
         this.styleService.reapplyAllStyles();
-        this.mapService.requestViewRecalculation("style-change");
+        this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
     }
 
     /** Narrows a tree node to a style-group node. */
@@ -948,7 +948,7 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareStyleId = restoredStyleId;
         this.styleCompareDialogVisible = false;
         this.refreshUpdatedStylesDialogVisibility();
-        this.mapService.requestViewRecalculation("style-change");
+        this.mapService.requestViewRecalculation(ViewRecalculationReason.StyleChange);
     }
 
     /** Returns the number of issues associated with a style. */

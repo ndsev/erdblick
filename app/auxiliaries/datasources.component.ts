@@ -107,7 +107,7 @@ export class DatasourcesComponent {
                 public readonly stateService: AppStateService,
                 public readonly editorService: EditorService,
                 private readonly http: HttpClient,
-                private readonly mapService: MapInfoService,
+                private readonly mapInfo: MapInfoService,
                 private readonly dialogStack: DialogStackService) {}
 
     get dialogVisible(): boolean {
@@ -163,7 +163,7 @@ export class DatasourcesComponent {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {
                     this.loading = false;
-                    this.mapService.reloadDataSources().then();
+                    this.mapInfo.reloadDataSources().then();
                 }, 2000);
             },
             error: error => {

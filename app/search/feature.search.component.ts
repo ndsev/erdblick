@@ -13,6 +13,7 @@ import {
 import {FeatureSearchResultEntry, FeatureSearchService, FeatureSearchSession} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapInfoService} from "../mapdata/map-info.service";
+import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
@@ -719,6 +720,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapInfoService,
+                private readonly searchSchema: FeatureSearchSchemaService,
                 private readonly inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
@@ -1053,7 +1055,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
      * reintroduced into the picker; this prevents old demo fields from staying selectable.
      */
     private refreshStyleAttributeOptions(session: FeatureSearchSession, patchMissingFields = true): void {
-        const rawOptions = this.mapService.searchStyleFieldsForQuery(
+        const rawOptions = this.searchSchema.searchStyleFieldsForQuery(
             session.definition.query,
             session.definition.scope
         );

@@ -12,7 +12,6 @@ import {
     isDeckRenderWorkerPipelineEnabled
 } from "../mapview/deck/deck-render.worker.pool";
 import {FeatureTile, FeatureWrapper} from "./features.model";
-import {RelationLocateRequest, RelationLocateResolution, RelationLocateResult} from "./relation-locate.model";
 import {SearchResultTile} from "./search-result-tile.model";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
@@ -24,10 +23,10 @@ import {ViewVisualizationState} from "../mapview/view.visualization.model";
 import {
     IRenderSceneHandle,
     ITileVisualization,
-    type TileVisualizationTile
+    type RenderableTileLayer
 } from "../mapview/render-view.model";
 import type {FeatureLayerStyle, HighlightMode} from "../../build/libs/core/erdblick-core";
-import type {FeatureSearchDataPlaneRequest} from "./map-runtime.model";
+import type {FeatureSearchStateEntry} from "../shared/feature-search-state";
 
 export interface TileVisualizationRenderTask {
     visualization: ITileVisualization;
@@ -38,12 +37,14 @@ interface SearchResultStyleSpec {
     fallbackColor: string;
     fallbackWidth: number;
     fallbackPointRadius: number;
-    rules: FeatureSearchDataPlaneRequest["searchStyleRules"];
+    rules: FeatureSearchStateEntry["searchStyleRules"];
 }
 
 type FeatureLayerStyleWithFidelity = FeatureLayerStyle & {
     hasExplicitLowFidelityRules(): boolean;
 };
+
+type HighlightFeatureGroup = {features: FeatureWrapper[], color?: string, id?: number};
 
 /**
  * Owns render work scheduling, visualization lifecycle, style invalidation, and highlights.
@@ -121,7 +122,6 @@ export class MapRenderService {
             this.applyStyleOptionChange(optionNode, viewIndex);
         });
         this.viewState.viewStateChanged.subscribe(() => this.updateVisualizations());
-        this.tileStream.tileCacheChanged.subscribe(() => this.updateVisualizations());
         this.tileStream.tileDataChanged.subscribe(change => {
             if (change.reason === "loaded") {
                 const waitingUpdate = this.updateWaitingVisualizationsForTile(change.tile);
@@ -136,8 +136,8 @@ export class MapRenderService {
                 this.removeFeatureTileVisualizations(change.tile.mapTileKey);
             }
         });
-        this.tileStream.searchRenderTileChanged.subscribe(tile => this.updateSearchResultVisualizationsForTile(tile));
-        this.tileStream.searchRenderTileRemoved.subscribe(({searchId, sourceTileKey}) => {
+        this.tileStream.searchResultTileChanged.subscribe(tile => this.updateSearchResultVisualizationsForTile(tile));
+        this.tileStream.searchResultTileRemoved.subscribe(({searchId, sourceTileKey}) => {
             this.removeSearchResultVisualizations(searchId, sourceTileKey);
         });
         this.inspection.selectionTopic.subscribe(selectedPanels => {
@@ -168,21 +168,9 @@ export class MapRenderService {
         return result;
     }
 
-    /** Returns the combined queued visualization count across all views. */
-    getRenderQueueSize(): number {
-        return this.visualizationQueueLength();
-    }
-
     /** Returns the current EWMA frame time in milliseconds. */
     currentFrameTimeMs(): number {
         return Math.max(0, this.frameTimeMsEwma || 0);
-    }
-
-    /** Forces the next highlight refresh to rebuild even if the tracked signature stayed unchanged. */
-    refreshHighlightVisualizations(): void {
-        this.selectionHighlightSignature = "";
-        this.hoverHighlightSignature = "";
-        this.refreshHighlightVisualizationsForCurrentPolicies();
     }
 
     /**
@@ -217,6 +205,7 @@ export class MapRenderService {
         }
         const viewCount = this.viewStates().length;
         if (this.inFlightVisualizationRendersByView.length !== viewCount) {
+            // View count changes are rare, but the render pump is long-lived and must resize its fairness counters.
             this.inFlightVisualizationRendersByView = Array.from(
                 {length: viewCount},
                 (_, index) => this.inFlightVisualizationRendersByView[index] ?? 0
@@ -247,6 +236,7 @@ export class MapRenderService {
 
             let dispatchedInRound = false;
             blockedByInFlight = false;
+            // Rotate across views so a busy split pane cannot starve another view's visualization queue.
             for (let inspectedViews = 0; inspectedViews < viewCount; inspectedViews++) {
                 const viewIndex = (this.nextVisualizationViewIndex + inspectedViews) % viewCount;
                 const viewState = this.viewStates()[viewIndex];
@@ -259,6 +249,7 @@ export class MapRenderService {
                 }
                 const entry = this.dequeueNextRenderableVisualization(viewIndex, viewState);
                 if (entry === undefined) {
+                    // Nearby tiles may currently be rendered by another worker; retry shortly instead of busy-spinning.
                     blockedByNeighbor = true;
                     continue;
                 }
@@ -270,6 +261,7 @@ export class MapRenderService {
                         return;
                     }
                     doneCalled = true;
+                    // Worker renders can finish after style/visibility changed; requeue only if the same instance is still current.
                     if (this.shouldRequeueVisualizationAfterRender(viewIndex, entry)) {
                         entry.updateStatus(true);
                         this.queueVisualization(viewState, entry);
@@ -303,6 +295,7 @@ export class MapRenderService {
             const mapViewLayerStyleIdsRequiringMergedPointReset = new Set<string>();
             const visibleTileByKey = new Map<string, boolean>();
             const isVisibleForView = (tile: FeatureTile): boolean => {
+                // Visibility checks are repeated for every style; cache them per view/update pass.
                 const cached = visibleTileByKey.get(tile.mapTileKey);
                 if (cached !== undefined) {
                     return cached;
@@ -319,6 +312,7 @@ export class MapRenderService {
                     styleEnabled = this.styleService.styles.get(styleId)!.visible;
                 }
                 const removals: string[] = [];
+                // First reconcile existing visualizations; later we add missing visible tile/style pairs.
                 for (const tileVisu of state.getVisualizations(styleId)) {
                     if (searchRequest) {
                         this.updateExistingSearchVisualization(state, viewIndex, searchRequest, tileVisu, removals, styleEnabled);
@@ -349,6 +343,7 @@ export class MapRenderService {
                     if (previousHighFidelityStage !== tileVisu.highFidelityStage
                         || previousPrefersHighFidelity !== tileVisu.prefersHighFidelity
                         || lowFiLodPolicyChanged) {
+                        // Merged low-fi point artifacts encode fidelity policy and cannot be updated in-place safely.
                         const mapViewLayerStyleId = this.pointMergeService.makeMapViewLayerStyleId(
                             viewIndex,
                             tileVisu.tile.mapName,
@@ -393,6 +388,7 @@ export class MapRenderService {
             });
             const visibleTilesByLayer = new Map<string, FeatureTile[]>();
             for (const tile of visibleTiles) {
+                // Grouping by layer avoids testing every style against every visible tile.
                 let tilesForLayer = visibleTilesByLayer.get(tile.layerName);
                 if (!tilesForLayer) {
                     tilesForLayer = [];
@@ -430,7 +426,7 @@ export class MapRenderService {
     private updateExistingSearchVisualization(
         state: ViewVisualizationState,
         viewIndex: number,
-        searchRequest: FeatureSearchDataPlaneRequest,
+        searchRequest: FeatureSearchStateEntry,
         tileVisu: ITileVisualization,
         removals: string[],
         styleEnabled: boolean
@@ -442,11 +438,11 @@ export class MapRenderService {
         }
         const highFidelityActive = this.prefersHighFidelityForSearchResultTile(
             viewIndex,
-            searchRequest.searchId,
+            searchRequest.id,
             tileVisu.tile.sourceTileId
         );
-        const hasRenderTile = this.tileStream.hasSearchResultRenderTile(
-            searchRequest.searchId,
+        const hasRenderTile = this.tileStream.hasSearchResultTile(
+            searchRequest.id,
             tileVisu.tile.sourceTileKey
         );
         if (!hasRenderTile || !this.viewShowsSearchResultTile(viewIndex, tileVisu.tile) || !styleEnabled) {
@@ -620,7 +616,7 @@ export class MapRenderService {
             boxGrid,
             options,
             styleOrder,
-            (requests) => this.resolveRelationExternalTiles(requests),
+            (requests) => this.tileStream.resolveRelationExternalTiles(requests),
             styleSourceRef,
             (issues) => this.recordStyleValidationIssues(issues)
         );
@@ -628,21 +624,22 @@ export class MapRenderService {
 
     /** Schedules queued high-fidelity renderers for streamed search-result tiles in one view. */
     private updateSearchResultVisualizationsForView(state: ViewVisualizationState, viewIndex: number): void {
-        for (const renderTile of this.tileStream.searchResultRenderTiles()) {
-            const request = this.tileStream.activeFeatureSearchRequest(renderTile.searchId);
-            if (!request?.showResultsOnMap || !this.viewShowsSearchResultTile(viewIndex, renderTile.tile)) {
+        for (const tile of this.tileStream.searchResultTiles()) {
+            const request = this.tileStream.activeFeatureSearchRequest(tile.searchId);
+            if (!request?.showResultsOnMap || !tile.hasResultLayer() || !this.viewShowsSearchResultTile(viewIndex, tile)) {
                 continue;
             }
 
-            renderTile.tile.setRenderOrder(state.getTileOrder(renderTile.sourceTileId));
-            this.upsertSearchResultVisualization(state, viewIndex, renderTile.tile, request);
+            tile.setRenderOrder(state.getTileOrder(tile.sourceTileId));
+            this.upsertSearchResultVisualization(state, viewIndex, tile, request);
         }
     }
 
     /** Updates only the visualizations affected by one streamed search-result tile. */
     private updateSearchResultVisualizationsForTile(tile: SearchResultTile): void {
         const request = this.tileStream.activeFeatureSearchRequest(tile.searchId);
-        if (!request?.showResultsOnMap) {
+        if (!request?.showResultsOnMap || !tile.hasResultLayer()) {
+            this.removeSearchResultVisualizations(tile.searchId, tile.sourceTileKey);
             return;
         }
         for (let viewIndex = 0; viewIndex < this.viewStates().length; viewIndex++) {
@@ -661,7 +658,7 @@ export class MapRenderService {
         state: ViewVisualizationState,
         viewIndex: number,
         tile: SearchResultTile,
-        request: FeatureSearchDataPlaneRequest
+        request: FeatureSearchStateEntry
     ): void {
         const styleId = this.searchResultStyleId(tile.searchId);
         const highFidelityStage = this.mapInfo.getLayerHighFidelityStage(tile.sourceMapId, tile.sourceLayerId);
@@ -732,20 +729,21 @@ export class MapRenderService {
     }
 
     /** Rebuilds hover and selection highlights when fidelity policy changes affect their geometry. */
-    private refreshHighlightVisualizationsForCurrentPolicies(): void {
+    refreshHighlightVisualizationsForCurrentPolicies(force = false): void {
         const selectionGroups = this.inspection.selectionTopic.getValue();
-        this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectionGroups);
+        this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectionGroups, force);
         const hoveredFeatureWrappers = this.inspection.hoverTopic.getValue();
-        this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{features: hoveredFeatureWrappers}]);
+        this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{features: hoveredFeatureWrappers}], force);
     }
 
     /** Rebuilds one highlight family only when its signature differs from the last emitted one. */
     private refreshHighlightVisualizationIfNeeded(
         mode: HighlightMode,
-        groups: {features: FeatureWrapper[], color?: string, id?: number}[]
+        groups: HighlightFeatureGroup[],
+        force = false
     ): void {
         const nextSignature = this.buildHighlightVisualizationSignature(mode, groups);
-        if (nextSignature === this.getHighlightVisualizationSignature(mode)) {
+        if (!force && nextSignature === this.getHighlightVisualizationSignature(mode)) {
             return;
         }
         this.visualizeHighlights(mode, groups, nextSignature);
@@ -754,7 +752,7 @@ export class MapRenderService {
     /** Recreates all highlight visualizations for the supplied hover or selection groups. */
     private visualizeHighlights(
         mode: HighlightMode,
-        groups: {features: FeatureWrapper[], color?: string, id?: number}[],
+        groups: HighlightFeatureGroup[],
         signature: string = this.buildHighlightVisualizationSignature(mode, groups)
     ) {
         let visualizationCollection: ITileVisualization[];
@@ -770,6 +768,7 @@ export class MapRenderService {
                 return;
         }
 
+        // Highlight renderers are short-lived overlays; rebuild the whole family to preserve z/order consistency.
         while (visualizationCollection.length) {
             const visualization = visualizationCollection.pop();
             if (visualization) {
@@ -782,56 +781,44 @@ export class MapRenderService {
             const groupKey = mode.value === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value
                 ? `selection-${group.id ?? groupIndex}`
                 : `hover-${group.id ?? groupIndex}`;
-            const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
-            for (const wrapper of group.features) {
-                if (!featureWrappersForTile.has(wrapper.featureTile)) {
-                    featureWrappersForTile.set(wrapper.featureTile, []);
-                }
-                featureWrappersForTile.get(wrapper.featureTile)!.push(wrapper);
-            }
 
-            for (const [featureTile, features] of featureWrappersForTile) {
+            for (const [featureTile, features] of this.featureWrappersGroupedByTile(group.features)) {
                 const featureIds = features.map(fw => fw.featureId);
                 for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     if (!this.tileStream.viewShowsFeatureTile(viewIndex, featureTile, true)) {
                         continue;
                     }
-                    for (const [_, style] of this.styleService.styles) {
-                        if (style.visible &&
-                            style.featureLayerStyle.hasLayerAffinity(featureTile.layerName) &&
-                            this.tileSatisfiesStyleStage(featureTile, style.featureLayerStyle) &&
-                            style.featureLayerStyle.supportsHighlightMode(mode)) {
-                            const styleOptions = {
-                                ...(this.mapInfo.maps.getLayerStyleOptions(
-                                    viewIndex,
-                                    featureTile.mapName,
-                                    featureTile.layerName,
-                                    style.id
-                                ) ?? {})
-                            };
-                            if (group.color) {
-                                styleOptions["selectableFeatureHighlightColor"] = group.color;
-                            }
-                            const renderPolicy = this.tileRenderPolicyForView(viewIndex, featureTile);
-                            const visualization = this.createTileVisualization(
+                    for (const style of this.visibleStylesForHighlightTile(mode, featureTile)) {
+                        const styleOptions = {
+                            ...(this.mapInfo.maps.getLayerStyleOptions(
                                 viewIndex,
-                                featureTile,
-                                style.featureLayerStyle,
-                                style.source,
-                                this.mapInfo.getLayerHighFidelityStage(featureTile.mapName, featureTile.layerName),
-                                renderPolicy.prefersHighFidelity,
-                                renderPolicy.maxLowFiLod,
-                                mode,
-                                featureIds,
-                                groupKey,
-                                false,
-                                styleOptions,
-                                this.styleOrder(style.id),
-                                style.sourceRef
-                            );
-                            this.tileVisualizationTopic.next({visualization});
-                            visualizationCollection.push(visualization);
+                                featureTile.mapName,
+                                featureTile.layerName,
+                                style.id
+                            ) ?? {})
+                        };
+                        if (group.color) {
+                            styleOptions["selectableFeatureHighlightColor"] = group.color;
                         }
+                        const renderPolicy = this.tileRenderPolicyForView(viewIndex, featureTile);
+                        const visualization = this.createTileVisualization(
+                            viewIndex,
+                            featureTile,
+                            style.featureLayerStyle,
+                            style.source,
+                            this.mapInfo.getLayerHighFidelityStage(featureTile.mapName, featureTile.layerName),
+                            renderPolicy.prefersHighFidelity,
+                            renderPolicy.maxLowFiLod,
+                            mode,
+                            featureIds,
+                            groupKey,
+                            false,
+                            styleOptions,
+                            this.styleOrder(style.id),
+                            style.sourceRef
+                        );
+                        this.tileVisualizationTopic.next({visualization});
+                        visualizationCollection.push(visualization);
                     }
                 }
             }
@@ -842,31 +829,24 @@ export class MapRenderService {
     /** Builds a stable signature for highlight inputs and render policies. */
     private buildHighlightVisualizationSignature(
         mode: HighlightMode,
-        groups: {features: FeatureWrapper[], color?: string, id?: number}[]
+        groups: HighlightFeatureGroup[]
     ): string {
         const signatureParts = [`mode:${mode.value}`, `views:${this.stateService.numViews}`];
-        const visibleStyles = Array.from(this.styleService.styles.values())
-            .filter(style => style.visible)
-            .sort((lhs, rhs) => lhs.id.localeCompare(rhs.id));
 
         for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
             const group = groups[groupIndex];
             signatureParts.push(`group:${group.id ?? groupIndex}:${group.color ?? ""}`);
-            const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
-            for (const wrapper of group.features) {
-                let wrappers = featureWrappersForTile.get(wrapper.featureTile);
-                if (!wrappers) {
-                    wrappers = [];
-                    featureWrappersForTile.set(wrapper.featureTile, wrappers);
-                }
-                wrappers.push(wrapper);
-            }
-            const tiles = Array.from(featureWrappersForTile.entries())
-                .sort((lhs, rhs) => lhs[0].mapTileKey.localeCompare(rhs[0].mapTileKey));
+            const tiles = this.featureWrappersGroupedByTile(group.features);
 
             for (const [featureTile, features] of tiles) {
                 const featureIds = features.map(feature => feature.featureId).sort();
-                signatureParts.push(`tile:${featureTile.mapTileKey}:${featureTile.dataVersion}:${featureTile.highestLoadedStage() ?? -1}:${featureIds.join(",")}`);
+                signatureParts.push([
+                    "tile",
+                    featureTile.mapTileKey,
+                    featureTile.dataVersion,
+                    featureTile.highestLoadedStage() ?? -1,
+                    featureIds.join(",")
+                ].join(":"));
 
                 for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     if (!this.tileStream.viewShowsFeatureTile(viewIndex, featureTile, true)) {
@@ -875,13 +855,7 @@ export class MapRenderService {
                     const renderPolicy = this.tileRenderPolicyForView(viewIndex, featureTile);
                     signatureParts.push(`view:${viewIndex}:${renderPolicy.prefersHighFidelity ? 1 : 0}:${renderPolicy.maxLowFiLod ?? -1}`);
 
-                    for (const style of visibleStyles) {
-                        const wasmStyle = style.featureLayerStyle;
-                        if (!wasmStyle.hasLayerAffinity(featureTile.layerName)
-                            || !this.tileSatisfiesStyleStage(featureTile, wasmStyle)
-                            || !wasmStyle.supportsHighlightMode(mode)) {
-                            continue;
-                        }
+                    for (const style of this.visibleStylesForHighlightTile(mode, featureTile)) {
                         const styleOptions = {
                             ...(this.mapInfo.maps.getLayerStyleOptions(
                                 viewIndex,
@@ -900,6 +874,33 @@ export class MapRenderService {
         }
 
         return signatureParts.join("|");
+    }
+
+    /** Groups feature wrappers by tile in a deterministic order for highlight rendering and signatures. */
+    private featureWrappersGroupedByTile(features: FeatureWrapper[]): Array<[FeatureTile, FeatureWrapper[]]> {
+        const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
+        for (const wrapper of features) {
+            let wrappers = featureWrappersForTile.get(wrapper.featureTile);
+            if (!wrappers) {
+                wrappers = [];
+                featureWrappersForTile.set(wrapper.featureTile, wrappers);
+            }
+            wrappers.push(wrapper);
+        }
+        return Array.from(featureWrappersForTile.entries())
+            .sort((lhs, rhs) => lhs[0].mapTileKey.localeCompare(rhs[0].mapTileKey));
+    }
+
+    /** Returns visible styles that can render the supplied tile in the requested highlight mode. */
+    private visibleStylesForHighlightTile(mode: HighlightMode, featureTile: FeatureTile): ErdblickStyle[] {
+        return Array.from(this.styleService.styles.values())
+            .filter(style => {
+                const wasmStyle = style.featureLayerStyle;
+                return style.visible
+                    && wasmStyle.hasLayerAffinity(featureTile.layerName)
+                    && this.tileSatisfiesStyleStage(featureTile, wasmStyle)
+                    && wasmStyle.supportsHighlightMode(mode);
+            });
     }
 
     /** Reapplies one changed style option to all existing visualizations of the affected layer. */
@@ -939,53 +940,8 @@ export class MapRenderService {
         }
     }
 
-    /** Resolves relation targets via `/locate` and ensures the referenced tiles are loaded. */
-    private async resolveRelationExternalTiles(requests: RelationLocateRequest[]): Promise<RelationLocateResult> {
-        if (requests.length === 0) {
-            return {responses: [], tiles: []};
-        }
-        let response: Response | undefined;
-        try {
-            response = await fetch("locate", {
-                body: JSON.stringify({requests}, (_, value) => typeof value === "bigint" ? Number(value) : value),
-                method: "POST"
-            });
-        } catch (error) {
-            console.error(`Error during /locate call for relation targets: ${error}`);
-            return {responses: [], tiles: []};
-        }
-        if (!response.ok) {
-            console.error(`Locate request for relation targets failed with status ${response.status}.`);
-            return {responses: [], tiles: []};
-        }
-        const locateResponse = await response.json() as {responses?: RelationLocateResolution[][]};
-        const tileKeys = new Set<string>();
-        for (const resolutions of locateResponse.responses ?? []) {
-            for (const resolution of resolutions) {
-                if (typeof resolution.tileId === "string" && resolution.tileId.length > 0) {
-                    tileKeys.add(resolution.tileId);
-                }
-            }
-        }
-        if (tileKeys.size === 0) {
-            return {responses: locateResponse.responses ?? [], tiles: []};
-        }
-        const loadedTiles = await this.tileStream.loadTiles(tileKeys);
-        const seenTileKeys = new Set<string>();
-        const relationTiles: FeatureTile[] = [];
-        for (const tileKey of tileKeys) {
-            const tile = loadedTiles.get(tileKey) ?? null;
-            if (!tile || !tile.hasData() || seenTileKeys.has(tile.mapTileKey)) {
-                continue;
-            }
-            seenTileKeys.add(tile.mapTileKey);
-            relationTiles.push(tile);
-        }
-        return {responses: locateResponse.responses ?? [], tiles: relationTiles};
-    }
-
     /** Returns the current fidelity policy that a view wants for a given tile. */
-    private tileRenderPolicyForView(viewIndex: number, tile: TileVisualizationTile): {
+    private tileRenderPolicyForView(viewIndex: number, tile: RenderableTileLayer): {
         prefersHighFidelity: boolean;
         maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     } {
@@ -1001,7 +957,6 @@ export class MapRenderService {
         visualization.maxLowFiLod = policy.maxLowFiLod;
     }
 
-    /** Returns whether search-result geometry should be rendered for one visible source tile. */
     /** Returns whether high-fidelity search-result geometry should currently be rendered for one tile. */
     prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: bigint): boolean {
         const request = this.tileStream.activeFeatureSearchRequest(searchId);
@@ -1029,7 +984,10 @@ export class MapRenderService {
 
     /** Returns whether a tile has enough stage data for a style to render. */
     private tileSatisfiesStyleStage(tile: FeatureTile, style: FeatureLayerStyle): boolean {
-        const requiredStage = this.styleMinimumStage(style);
+        const rawRequiredStage = style.minimumStage();
+        const requiredStage = Number.isFinite(rawRequiredStage)
+            ? Math.max(0, Math.floor(rawRequiredStage))
+            : 0;
         const highestLoadedStage = tile.highestLoadedStage();
         if (highestLoadedStage === null) {
             return false;
@@ -1038,15 +996,6 @@ export class MapRenderService {
             return true;
         }
         return tile.isComplete(this.mapInfo.getLayerStageCount(tile.mapName, tile.layerName));
-    }
-
-    /** Normalizes the style's requested minimum stage to a non-negative integer. */
-    private styleMinimumStage(style: FeatureLayerStyle): number {
-        const rawValue = style.minimumStage();
-        if (!Number.isFinite(rawValue)) {
-            return 0;
-        }
-        return Math.max(0, Math.floor(rawValue));
     }
 
     /** Returns the stable current ordering index of one visible style contribution. */
@@ -1074,13 +1023,13 @@ export class MapRenderService {
     }
 
     /** Looks up the active search request represented by a visualization style id. */
-    private searchRequestForVisualizationStyle(styleId: string): FeatureSearchDataPlaneRequest | undefined {
+    private searchRequestForVisualizationStyle(styleId: string): FeatureSearchStateEntry | undefined {
         const searchId = this.searchIdFromSearchResultStyleId(styleId);
         return searchId ? this.tileStream.activeFeatureSearchRequest(searchId) : undefined;
     }
 
     /** Serializes search-result styling for the native renderer's direct result-value evaluator. */
-    private searchResultStyleSpec(request: FeatureSearchDataPlaneRequest): string {
+    private searchResultStyleSpec(request: FeatureSearchStateEntry): string {
         const spec: SearchResultStyleSpec = {
             fallbackColor: request.pinColor?.trim() || "#ea4336",
             fallbackWidth: 4,
@@ -1093,7 +1042,7 @@ export class MapRenderService {
     /** Keeps search-result layers above normal map styles while preserving session order. */
     private searchResultStyleOrder(searchId: string): number {
         const orderedSearchIds = this.tileStream.activeFeatureSearchRequestsSnapshot()
-            .map(request => request.searchId)
+            .map(request => request.id)
             .sort();
         const index = orderedSearchIds.indexOf(searchId);
         return 10_000 + Math.max(0, index);
@@ -1114,8 +1063,8 @@ export class MapRenderService {
             if (!(visualization instanceof DeckTileSearchVisualization)) {
                 return false;
             }
-            const hasRenderTile = this.tileStream.hasSearchResultRenderTile(
-                searchRequest.searchId,
+            const hasRenderTile = this.tileStream.hasSearchResultTile(
+                searchRequest.id,
                 visualization.tile.sourceTileKey
             );
             if (!hasRenderTile || !searchRequest.showResultsOnMap || !this.viewShowsSearchResultTile(viewIndex, visualization.tile)) {
@@ -1123,7 +1072,7 @@ export class MapRenderService {
             }
             visualization.prefersHighFidelity = this.prefersHighFidelityForSearchResultTile(
                 viewIndex,
-                searchRequest.searchId,
+                searchRequest.id,
                 visualization.tile.sourceTileId
             );
             return visualization.isDirty();
@@ -1206,7 +1155,7 @@ export class MapRenderService {
     }
 
     /** Returns the combined queued visualization count across all views. */
-    private visualizationQueueLength(): number {
+    visualizationQueueLength(): number {
         return this.viewStates().reduce((sum, state) => sum + state.visualizationQueue.length, 0);
     }
 

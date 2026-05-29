@@ -3,12 +3,8 @@ import type {
     MapTileStreamTransportCompressionStats
 } from "./tilestream";
 import type {FeatureTile} from "./features.model";
-import type {
-    FeatureSearchRenderStrategy,
-    FeatureSearchScope,
-    FeatureSearchStyleRule
-} from "../shared/feature-search-state";
 
+/** Promise-backed request used when selection/inspection pins a tile outside the viewport. */
 export interface SelectionTileRequest {
     remoteRequest: {
         mapId: string,
@@ -22,6 +18,7 @@ export interface SelectionTileRequest {
     reject: null | ((why: unknown) => void);
 }
 
+/** Aggregate backend request progress reported by the `/tiles` websocket. */
 export interface BackendRequestProgress {
     done: number;
     total: number;
@@ -29,6 +26,7 @@ export interface BackendRequestProgress {
     requestId?: number;
 }
 
+/** Single diagnostics snapshot consumed by the tile-loading HUD. */
 export interface TileLoadingHudStats {
     backend: BackendRequestProgress;
     downstreamBytesPerSecond: number;
@@ -46,14 +44,20 @@ export interface TileLoadingHudStats {
     viewportRenderSeconds: number;
 }
 
+/** Canonical map-tile cache key produced by the native TileLayerParser/core helpers. */
+export type MapTileKey = string;
+
+/** Fine-grained tile-data lifecycle event for consumers that need the concrete tile instance. */
 export type TileDataChangeReason = "placeholder" | "loaded" | "evicted";
 
+/** Payload for feature-tile data updates and evictions. */
 export interface TileDataChange {
-    tileKey: string;
+    tileKey: MapTileKey;
     tile: FeatureTile;
     reason: TileDataChangeReason;
 }
 
+/** Per-layer stage request bookkeeping used by progress UI and high-fidelity inspection checks. */
 export interface RequestedLayerProgressState {
     mapId: string;
     layerId: string;
@@ -61,21 +65,7 @@ export interface RequestedLayerProgressState {
     stageCount: number;
 }
 
-export interface FeatureSearchDataPlaneRequest {
-    searchId: string;
-    query: string;
-    scope: FeatureSearchScope;
-    autoUpdate: boolean;
-    updateSerial: number;
-    generationSerial: number;
-    paused: boolean;
-    showResultsOnMap: boolean;
-    pinColor: string;
-    searchStyleRules: FeatureSearchStyleRule[];
-    renderStrategy: FeatureSearchRenderStrategy;
-    withFields: string[];
-}
-
+/** UI-facing point/result entry extracted from a streamed TileSearchResultLayer. */
 export interface SearchResultTileEntry {
     mapTileKey: string;
     featureId: string;
@@ -91,6 +81,7 @@ export interface SearchResultTileEntry {
     validityCount?: number;
 }
 
+/** Narrow TypeScript shape for native TileSearchResultLayer bindings used by stream parsing. */
 export interface TileSearchResultLayerLike {
     copyDiagnostics?(buffer: unknown): void;
     info?(): unknown;
@@ -105,6 +96,7 @@ export interface TileSearchResultLayerLike {
     delete?(): void;
 }
 
+/** Compact frontend payload emitted when a search result tile arrives. */
 export interface SearchResultTilePayload {
     searchId: string;
     refresh: number;
@@ -124,11 +116,19 @@ export interface SearchResultTilePayload {
     entries: SearchResultTileEntry[];
 }
 
+/** Payload emitted when a search result tile leaves the runtime cache. */
 export interface SearchResultTileEvictedPayload {
     searchId: string;
-    sourceTileKey: string;
+    sourceTileKey: MapTileKey;
 }
 
+/** Internal render-invalidation payload for a removed high-fidelity search-result tile. */
+export interface SearchResultTileRemovedPayload {
+    searchId: string;
+    sourceTileKey: MapTileKey;
+}
+
+/** Visible source-tile coverage for one map/layer pair. */
 export interface SearchLayerTileSet {
     mapId: string;
     layerId: string;
@@ -136,17 +136,7 @@ export interface SearchLayerTileSet {
     priorityTileIds: Set<number>;
 }
 
-export interface FeatureSearchTileState {
-    mapId: string;
-    layerId: string;
-    tileId: number;
-    sourceTileKey: string;
-    refresh: number;
-    priority: boolean;
-    requested: boolean;
-    completed: boolean;
-}
-
+/** Concrete server-side search request embedded in the next `/tiles` update. */
 export interface FeatureSearchTileRequest {
     mapId: string;
     layerId: string;
@@ -159,6 +149,7 @@ export interface FeatureSearchTileRequest {
     withFields?: string[];
 }
 
+/** Schema-backed candidate indicating that a query can run in attribute scope. */
 export interface FeatureSearchAttributeScopeCandidate {
     attrName: string;
     attrLayerName: string;
@@ -167,6 +158,7 @@ export interface FeatureSearchAttributeScopeCandidate {
     layerId: string;
 }
 
+/** Schema-backed result-value field candidate for search-result style rules. */
 export interface FeatureSearchStyleFieldCandidate {
     path: string;
     mapId: string;
@@ -175,5 +167,8 @@ export interface FeatureSearchStyleFieldCandidate {
     featureType?: string;
 }
 
+/** Re-export of the native search status payload type used by feature-search UI state. */
 export type SearchStatusPayload = MapTileStreamSearchStatusPayload;
+
+/** Re-export of transport compression statistics exposed by the websocket client. */
 export type TileStreamCompressionStats = MapTileStreamTransportCompressionStats;

@@ -1,7 +1,7 @@
 import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "../styledata/style.service";
 import {
     ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
@@ -343,7 +343,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.tilesToLoadInput = limit;
         this.stateService.tilesLoadLimit = limit;
         this.tilesToLoadChanged = false;
-        this.mapService.requestViewRecalculation("tile-limit");
+        this.mapService.requestViewRecalculation(ViewRecalculationReason.TileLimit);
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
 

@@ -8,6 +8,22 @@ import {ViewVisualizationState} from "./view.visualization.model";
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {tileGridVisibleCellCount} from "./tile-grid-visibility";
 
+export enum ViewRecalculationReason {
+    AutoLevel = "auto-level",
+    BackgroundSync = "background-sync",
+    HoverPopover = "hover-popover",
+    LayerLevel = "layer-level",
+    NumViews = "num-views",
+    PinLowFi = "pin-lowfi",
+    StyleChange = "style-change",
+    SyncOptions = "sync-options",
+    TileBorder = "tile-border",
+    TileGrid = "tile-grid",
+    TileLimit = "tile-limit",
+    Viewport = "viewport",
+    Visibility = "visibility"
+}
+
 /**
  * Owns camera/view state and the unified per-view `ViewVisualizationState` instances.
  */
@@ -15,7 +31,7 @@ import {tileGridVisibleCellCount} from "./tile-grid-visibility";
 export class MapViewStateService {
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
 
-    readonly viewStateChanged = new Subject<string>();
+    readonly viewStateChanged = new Subject<ViewRecalculationReason | string>();
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
     readonly viewVisualizationState: ViewVisualizationState[] = [];
@@ -35,9 +51,9 @@ export class MapViewStateService {
             }
 
             this.mapInfo.reapplySyncOptionsForAllViews();
-            this.viewStateChanged.next("num-views");
+            this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
-        this.stateService.pinLowFiToMaxLodState.subscribe(() => this.requestViewRecalculation("pin-lowfi"));
+        this.stateService.pinLowFiToMaxLodState.subscribe(() => this.requestViewRecalculation(ViewRecalculationReason.PinLowFi));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
     }
 
@@ -54,16 +70,17 @@ export class MapViewStateService {
             return;
         }
         this.viewVisualizationState[viewIndex].viewport = viewport;
-        this.requestViewRecalculation("viewport");
+        this.requestViewRecalculation(ViewRecalculationReason.Viewport);
     }
 
-    /** Emits an explicit view recalculation request for stream/render consumers. */
-    requestViewRecalculation(reason: string) {
+    /** Recomputes visible tiles before notifying stream/render consumers. */
+    requestViewRecalculation(reason: ViewRecalculationReason | string) {
+        this.recalculateVisibleTiles();
         this.viewStateChanged.next(reason);
     }
 
     /** Recomputes visible tile ids and render policy for every view. */
-    recalculateVisibleTiles(): void {
+    private recalculateVisibleTiles(): void {
         const tileLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
         this.viewVisualizationState.forEach((state, viewIndex) => {
             state.recalculateTileIds(
@@ -126,35 +143,35 @@ export class MapViewStateService {
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         this.mapInfo.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
-        this.requestViewRecalculation("visibility");
+        this.requestViewRecalculation(ViewRecalculationReason.Visibility);
     }
 
     /** Toggles the diagnostic tile-border overlay in one view. */
     toggleViewTileBorderVisibility(viewIndex: number) {
         this.mapInfo.toggleViewTileBorderVisibility(viewIndex);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
-        this.requestViewRecalculation("tile-border");
+        this.requestViewRecalculation(ViewRecalculationReason.TileBorder);
     }
 
     /** Sets diagnostic tile-border overlay visibility in one view. */
     setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
         this.mapInfo.setViewTileBorderVisibility(viewIndex, enabled);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
-        this.requestViewRecalculation("tile-border");
+        this.requestViewRecalculation(ViewRecalculationReason.TileBorder);
     }
 
     /** Sets the tile-grid coordinate mode and refreshes affected overlays. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.mapInfo.setViewTileGridMode(viewIndex, mode);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
-        this.requestViewRecalculation("tile-grid");
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
     /** Persists an explicit layer level for one view and refreshes visible tiles. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.mapInfo.setMapLayerLevel(viewIndex, mapId, layerId, level);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
-        this.requestViewRecalculation("layer-level");
+        this.requestViewRecalculation(ViewRecalculationReason.LayerLevel);
     }
 
     /** Enables or disables auto-level, normalizing the stored level when auto mode is turned on. */
@@ -166,7 +183,7 @@ export class MapViewStateService {
         }
         this.mapInfo.setMapLayerAutoLevel(viewIndex, mapId, layerId, autoLevel);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
-        this.requestViewRecalculation("auto-level");
+        this.requestViewRecalculation(ViewRecalculationReason.AutoLevel);
     }
 
     /** Returns whether a map layer currently follows the auto-level heuristic in the given view. */
@@ -188,7 +205,7 @@ export class MapViewStateService {
         this.mapInfo.setSyncOptionsForView(viewIndex, enabled);
         if (enabled) {
             this.mapInfo.applySyncOptionsForView(viewIndex);
-            this.requestViewRecalculation("sync-options");
+            this.requestViewRecalculation(ViewRecalculationReason.SyncOptions);
         }
     }
 
@@ -203,7 +220,7 @@ export class MapViewStateService {
             return;
         }
         if (this.mapInfo.syncBackgroundSettingsFromView(viewIndex)) {
-            this.requestViewRecalculation("background-sync");
+            this.requestViewRecalculation(ViewRecalculationReason.BackgroundSync);
         }
     }
 

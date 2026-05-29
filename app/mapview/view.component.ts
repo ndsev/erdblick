@@ -14,7 +14,7 @@ import {
     InputSignal
 } from "@angular/core";
 import {MapInfoService} from "../mapdata/map-info.service";
-import {MapViewStateService} from "./map-view-state.service";
+import {MapViewStateService, ViewRecalculationReason} from "./map-view-state.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {MapRenderService} from "../mapdata/map-render.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
@@ -341,7 +341,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 }
 
             });
-            this.mapViewState.requestViewRecalculation("hover-popover");
+            this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
             this.cdr.markForCheck();
         });
     }

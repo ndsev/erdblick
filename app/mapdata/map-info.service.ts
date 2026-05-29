@@ -2,30 +2,17 @@ import {HttpClient} from "@angular/common/http";
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, firstValueFrom, Subject} from "rxjs";
 import {FeatureTile} from "./features.model";
-import {
-    FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate,
-    RequestedLayerProgressState
-} from "./map-runtime.model";
+import {RequestedLayerProgressState} from "./map-runtime.model";
 import {MapInfoItem, MapLayerTree, StyleOptionNode} from "./map.tree.model";
 import {SearchResultTile} from "./search-result-tile.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {StyleService} from "../styledata/style.service";
-import {FeatureSearchScope} from "../shared/feature-search-state";
-import type {SharedUint8Array, TileLayerParser} from "../../build/libs/core/erdblick-core";
-
-export type SearchSchemaTileLayerParser = TileLayerParser & {
-    completeSearchQuery(query: string, point: number, options: {limit: number}): unknown;
-    getAttributeScopeForQuery(query: string): unknown;
-    isAttributeScopeSearchQuery(query: string): boolean;
-    readTileSearchResultLayer(buffer: SharedUint8Array): unknown;
-    searchStyleFieldsForQuery(query: string, scope: FeatureSearchScope): unknown;
-};
+import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 
 /**
- * Owns datasource metadata, the map/layer tree, parser schema data, legal info, and layer-tree mutations.
+ * Owns datasource metadata, the map/layer tree, shared parser metadata, legal info, and layer-tree mutations.
  */
 @Injectable({providedIn: "root"})
 export class MapInfoService {
@@ -35,11 +22,13 @@ export class MapInfoService {
     public readonly styleOptionChanged = new Subject<[StyleOptionNode, number]>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
-    private parserInstance: SearchSchemaTileLayerParser | null = null;
+    /** Shared parser instance whose datasource metadata is populated from `/sources`. */
+    private parserInstance: TileLayerParser | null = null;
+    /** Raw datasource metadata retained for diagnostics/debug export. */
     private dataSourceInfoJson: string | null = null;
-    private attributeScopesByQueryCache = new Map<string, FeatureSearchAttributeScopeCandidate[]>();
-    private searchStyleFieldsByQueryCache = new Map<string, FeatureSearchStyleFieldCandidate[]>();
+    /** Last requested stage coverage per layer, used to enrich incomplete layer metadata. */
     private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
+    /** Highest stage count observed from streamed tile payloads when `/sources` did not declare it. */
     private observedLayerStageCountByKey: Map<string, number> = new Map();
 
     constructor(
@@ -59,11 +48,13 @@ export class MapInfoService {
     }
 
     /** Exposes the shared WASM tile parser used by tile hydration, search schema helpers, and inspection. */
-    get tileLayerParser(): SearchSchemaTileLayerParser {
-        if (!this.parserInstance) {
-            this.parserInstance = new coreLib.TileLayerParser() as SearchSchemaTileLayerParser;
+    get tileLayerParser(): TileLayerParser {
+        if (this.parserInstance !== null) {
+            return this.parserInstance;
         }
-        return this.parserInstance;
+        const parser = new coreLib.TileLayerParser();
+        this.parserInstance = parser;
+        return parser;
     }
 
     /** Returns datasource metadata as a JSON string for diagnostics and debug views. */
@@ -86,7 +77,6 @@ export class MapInfoService {
             }, new TextEncoder().encode(jsonString));
             FeatureTile.clearDataSourceInfoBlobCache();
             SearchResultTile.clearDataSourceInfoBlobCache();
-            this.clearSearchSchemaMetadataCaches();
             this.layerStateChanged.next("datasources");
         } catch (err) {
             console.error("Failed to load data source info.", err);
@@ -97,52 +87,6 @@ export class MapInfoService {
     /** Reapplies persisted tree parameters after style, view, or datasource state changes. */
     configureTreeParameters(): void {
         this.maps.configureTreeParameters();
-    }
-
-    /** Returns schema-backed attribute contexts matching a search query. */
-    getAttributeScopeForQuery(query: string): FeatureSearchAttributeScopeCandidate[] {
-        const cacheKey = query.trim();
-        const cached = this.attributeScopesByQueryCache.get(cacheKey);
-        if (cached) {
-            return cached;
-        }
-        try {
-            const candidates = this.tileLayerParser.getAttributeScopeForQuery(query);
-            const normalized = this.normalizeAttributeScopeCandidates(candidates);
-            this.attributeScopesByQueryCache.set(cacheKey, normalized);
-            return normalized;
-        } catch (error) {
-            console.warn("Failed to infer feature-search attribute scope from schema metadata.", error);
-            return [];
-        }
-    }
-
-    /** Returns schema-backed field expressions available to search-result style rules. */
-    searchStyleFieldsForQuery(query: string, scope: FeatureSearchScope): FeatureSearchStyleFieldCandidate[] {
-        const cacheKey = `${scope}\n${query.trim()}`;
-        const cached = this.searchStyleFieldsByQueryCache.get(cacheKey);
-        if (cached) {
-            return cached;
-        }
-        try {
-            const candidates = this.tileLayerParser.searchStyleFieldsForQuery(query, scope);
-            const normalized = this.normalizeSearchStyleFieldCandidates(candidates);
-            this.searchStyleFieldsByQueryCache.set(cacheKey, normalized);
-            return normalized;
-        } catch (error) {
-            console.warn("Failed to enumerate feature-search style fields from schema metadata.", error);
-            return [];
-        }
-    }
-
-    /** Uses the schema-aware native parser to keep auto scope aligned with completion. */
-    isAttributeScopeSearchQuery(query: string): boolean {
-        try {
-            return this.tileLayerParser.isAttributeScopeSearchQuery(query);
-        } catch (error) {
-            console.warn("Failed to infer feature-search scope from schema metadata.", error);
-            return false;
-        }
     }
 
     /** Returns the best-known stage count for a layer from metadata, requests, and observed payloads. */
@@ -451,52 +395,4 @@ export class MapInfoService {
         return isMetadata ? match[2] :`${match[1]}`.replace('-', '.');
     }
 
-    /** Clears schema-derived search UI caches after datasource metadata changes. */
-    private clearSearchSchemaMetadataCaches(): void {
-        this.attributeScopesByQueryCache.clear();
-        this.searchStyleFieldsByQueryCache.clear();
-    }
-
-    /** Normalizes untyped WASM attribute-scope candidates into the TypeScript-facing shape. */
-    private normalizeAttributeScopeCandidates(value: unknown): FeatureSearchAttributeScopeCandidate[] {
-        if (!Array.isArray(value)) {
-            return [];
-        }
-        return value.flatMap(item => {
-            if (!item || typeof item !== "object" || Array.isArray(item)) {
-                return [];
-            }
-            const raw = item as Record<string, unknown>;
-            const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : "";
-            const attrLayerName = typeof raw["attrLayerName"] === "string" ? raw["attrLayerName"] : "";
-            const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : "";
-            const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
-            const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
-            return attrName && mapId && layerId
-                ? [{attrName, attrLayerName, featureType, mapId, layerId}]
-                : [];
-        });
-    }
-
-    /** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
-    private normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyleFieldCandidate[] {
-        if (!Array.isArray(value)) {
-            return [];
-        }
-        return value.flatMap(item => {
-            if (!item || typeof item !== "object" || Array.isArray(item)) {
-                return [];
-            }
-            const raw = item as Record<string, unknown>;
-            const path = typeof raw["path"] === "string" ? raw["path"] : "";
-            const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
-            const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
-            if (!path || !mapId || !layerId) {
-                return [];
-            }
-            const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
-            const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
-            return [{path, mapId, layerId, attrName, featureType}];
-        });
-    }
 }
