@@ -107,6 +107,7 @@ export interface SearchResultTilePayload {
     sourceMapId: string;
     sourceLayerId: string;
     sourceTileId: bigint;
+    requestOrder: number;
     resultCount: number;
     resultFields: string[];
     tilesConsidered?: number;
@@ -128,12 +129,18 @@ export interface SearchResultTileRemovedPayload {
     sourceTileKey: MapTileKey;
 }
 
+/** One visible source tile in the order produced by the viewport tile planner. */
+export interface SearchLayerTileEntry {
+    tileId: number;
+    requestOrder: number;
+    priority: boolean;
+}
+
 /** Visible source-tile coverage for one map/layer pair. */
 export interface SearchLayerTileSet {
     mapId: string;
     layerId: string;
-    tileIds: Set<number>;
-    priorityTileIds: Set<number>;
+    tiles: Map<number, SearchLayerTileEntry>;
 }
 
 /** Concrete server-side search request embedded in the next `/tiles` update. */

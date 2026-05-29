@@ -8,6 +8,7 @@ import {SearchResultTile} from "./search-result-tile.model";
 import {FeatureSearchStateEntry} from "../shared/feature-search-state";
 
 export type FeatureSearchScopeResolver = (definition: FeatureSearchStateEntry) => "feature" | "attribute";
+export type FeatureSearchBackendQueryResolver = (definition: FeatureSearchStateEntry) => string;
 
 /** Extracts server-side result-field expressions needed by search-result styling. */
 export function featureSearchResultFields(
@@ -57,13 +58,14 @@ export class FeatureSearchRuntimeState {
     applyDefinition(
         definition: FeatureSearchStateEntry,
         resolveScope: FeatureSearchScopeResolver,
+        resolveBackendQuery: FeatureSearchBackendQueryResolver,
         forceGeneration = false
     ): SearchResultTile[] {
         this.definition = definition;
         if (forceGeneration) {
             this.generationSerial += 1;
         }
-        const fingerprint = this.buildDefinitionFingerprint(resolveScope);
+        const fingerprint = this.buildDefinitionFingerprint(resolveScope, resolveBackendQuery);
         if (fingerprint === this.definitionFingerprint) {
             return [];
         }
@@ -100,14 +102,15 @@ export class FeatureSearchRuntimeState {
         const removedTiles: SearchResultTile[] = [];
         const desiredKeys = new Set<string>();
         for (const entry of visibleLayerTiles.values()) {
-            for (const tileId of entry.tileIds) {
+            for (const visibleTile of entry.tiles.values()) {
+                const tileId = visibleTile.tileId;
                 const sourceTileId = BigInt(tileId);
                 const sourceTileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, sourceTileId);
                 desiredKeys.add(sourceTileKey);
-                const priority = entry.priorityTileIds.has(tileId);
                 const existing = this.tilesBySourceKey.get(sourceTileKey);
                 if (existing && existing.refresh === this.refresh) {
-                    existing.priority = priority;
+                    existing.priority = visibleTile.priority;
+                    existing.requestOrder = visibleTile.requestOrder;
                     continue;
                 }
                 if (existing) {
@@ -122,7 +125,8 @@ export class FeatureSearchRuntimeState {
                     entry.layerId,
                     sourceTileId,
                     this.refresh,
-                    priority
+                    visibleTile.priority,
+                    visibleTile.requestOrder
                 ));
             }
         }
@@ -180,8 +184,16 @@ export class FeatureSearchRuntimeState {
     }
 
     /** Groups incomplete source tiles into concrete backend search requests. */
-    buildPendingRequests(resolveScope: FeatureSearchScopeResolver): FeatureSearchTileRequest[] {
-        const statesByLevelLayer = new Map<string, {mapId: string; layerId: string; tileIds: number[]; priorityTileIds: number[]}>();
+    buildPendingRequests(
+        resolveScope: FeatureSearchScopeResolver,
+        resolveBackendQuery: FeatureSearchBackendQueryResolver
+    ): FeatureSearchTileRequest[] {
+        const statesByLevelLayer = new Map<string, {
+            mapId: string;
+            layerId: string;
+            firstRequestOrder: number;
+            tiles: Array<{tileId: number; requestOrder: number; priority: boolean}>;
+        }>();
         for (const tile of this.tilesBySourceKey.values()) {
             if (tile.completed) {
                 continue;
@@ -191,29 +203,49 @@ export class FeatureSearchRuntimeState {
             const key = `${tile.sourceMapId}/${tile.sourceLayerId}/${tileLevel}`;
             let entry = statesByLevelLayer.get(key);
             if (!entry) {
-                entry = {mapId: tile.sourceMapId, layerId: tile.sourceLayerId, tileIds: [], priorityTileIds: []};
+                entry = {
+                    mapId: tile.sourceMapId,
+                    layerId: tile.sourceLayerId,
+                    firstRequestOrder: tile.requestOrder,
+                    tiles: []
+                };
                 statesByLevelLayer.set(key, entry);
             }
-            entry.tileIds.push(tileId);
-            if (tile.priority) {
-                entry.priorityTileIds.push(tileId);
-            }
+            entry.firstRequestOrder = Math.min(entry.firstRequestOrder, tile.requestOrder);
+            entry.tiles.push({tileId, requestOrder: tile.requestOrder, priority: tile.priority});
             tile.requested = true;
         }
 
         return Array.from(statesByLevelLayer.values())
-            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId))
+            .sort((lhs, rhs) => {
+                if (lhs.firstRequestOrder !== rhs.firstRequestOrder) {
+                    return lhs.firstRequestOrder - rhs.firstRequestOrder;
+                }
+                return lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId);
+            })
             .map(entry => {
-                entry.tileIds.sort((lhs, rhs) => lhs - rhs);
-                entry.priorityTileIds.sort((lhs, rhs) => lhs - rhs);
+                const orderedTiles = entry.tiles.sort((lhs, rhs) => {
+                    if (lhs.priority !== rhs.priority) {
+                        return lhs.priority ? -1 : 1;
+                    }
+                    if (lhs.requestOrder !== rhs.requestOrder) {
+                        return lhs.requestOrder - rhs.requestOrder;
+                    }
+                    return lhs.tileId - rhs.tileId;
+                });
+                const tileIds = orderedTiles.map(tile => tile.tileId);
+                const priorityTileIds = orderedTiles
+                    .filter(tile => tile.priority)
+                    .map(tile => tile.tileId);
                 return this.createTileRequest(
                     this.definition,
                     entry.mapId,
                     entry.layerId,
-                    entry.tileIds,
-                    entry.priorityTileIds,
+                    tileIds,
+                    priorityTileIds,
                     this.refresh,
-                    resolveScope
+                    resolveScope,
+                    resolveBackendQuery
                 );
             });
     }
@@ -222,7 +254,8 @@ export class FeatureSearchRuntimeState {
     cancellationRequests(
         layerKeys: Iterable<string>,
         refresh: number,
-        resolveScope: FeatureSearchScopeResolver
+        resolveScope: FeatureSearchScopeResolver,
+        resolveBackendQuery: FeatureSearchBackendQueryResolver
     ): FeatureSearchTileRequest[] {
         const cancellations: FeatureSearchTileRequest[] = [];
         for (const layerKey of layerKeys) {
@@ -237,7 +270,8 @@ export class FeatureSearchRuntimeState {
                 [],
                 [],
                 refresh,
-                resolveScope
+                resolveScope,
+                resolveBackendQuery
             ));
         }
         return cancellations;
@@ -269,11 +303,15 @@ export class FeatureSearchRuntimeState {
     }
 
     /** Builds the stable logical-search fingerprint that owns the backend refresh generation. */
-    private buildDefinitionFingerprint(resolveScope: FeatureSearchScopeResolver): string {
+    private buildDefinitionFingerprint(
+        resolveScope: FeatureSearchScopeResolver,
+        resolveBackendQuery: FeatureSearchBackendQueryResolver
+    ): string {
         return JSON.stringify({
             searchId: this.definition.id,
             generationSerial: this.generationSerial,
             query: this.definition.query,
+            backendQuery: resolveBackendQuery(this.definition),
             scope: resolveScope(this.definition),
             withFields: featureSearchResultFields(this.definition, resolveScope)
         });
@@ -287,7 +325,8 @@ export class FeatureSearchRuntimeState {
         tileIds: number[],
         priorityTileIds: number[],
         refresh: number,
-        resolveScope: FeatureSearchScopeResolver
+        resolveScope: FeatureSearchScopeResolver,
+        resolveBackendQuery: FeatureSearchBackendQueryResolver
     ): FeatureSearchTileRequest {
         const result: FeatureSearchTileRequest = {
             mapId,
@@ -295,7 +334,7 @@ export class FeatureSearchRuntimeState {
             tileIds,
             searchId: request.id,
             refresh,
-            searchQuery: request.query,
+            searchQuery: resolveBackendQuery(request),
             searchScope: resolveScope(request),
         };
         if (priorityTileIds.length) {

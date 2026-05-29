@@ -179,7 +179,8 @@ export class MapTileStreamService {
             }
             const removedTiles = runtime.applyDefinition(
                 definition,
-                entry => this.resolveFeatureSearchScope(entry),
+                entry => this.searchSchema.resolveSearchScope(entry),
+                entry => this.searchSchema.resolveBackendQuery(entry),
                 forceGenerationIds.has(definition.id)
             );
             this.disposeSearchResultTiles(removedTiles, true);
@@ -743,6 +744,7 @@ export class MapTileStreamService {
                 sourceMapId,
                 sourceLayerId,
                 sourceTileId,
+                requestOrder: acceptedTile.requestOrder,
                 resultCount,
                 resultFields,
                 ...progress,
@@ -806,6 +808,7 @@ export class MapTileStreamService {
         const requestByLayer = new Map<string, LayerRequestEntry>();
         const expectedByLayer = new Map<string, ExpectedLayerEntry>();
         const visibleSearchLayerTiles = new Map<string, SearchLayerTileSet>();
+        let searchTileRequestOrder = 0;
         const queueTile = (
             mapId: string,
             layerId: string,
@@ -896,7 +899,13 @@ export class MapTileStreamService {
                     for (const tileId of tileIds) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
                         const isSelectedTile = this.selectedTileKeys.has(tileMapLayerKey);
-                        this.trackVisibleSearchLayerTile(visibleSearchLayerTiles, mapName, layer.id, tileId, isSelectedTile);
+                        this.trackVisibleSearchLayerTile(
+                            visibleSearchLayerTiles,
+                            mapName,
+                            layer.id,
+                            tileId,
+                            searchTileRequestOrder++,
+                            isSelectedTile);
                         const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
                         if (!existingTile) {
                             this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
@@ -1335,33 +1344,28 @@ export class MapTileStreamService {
         this.searchStatusReceived.next({...status, ...runtime.progressSnapshot()});
     }
 
-    /** Resolves persisted search scope state to the concrete token expected by mapget. */
-    private resolveFeatureSearchScope(definition: FeatureSearchStateEntry): "feature" | "attribute" {
-        if (definition.scope === "feature" || definition.scope === "attribute") {
-            return definition.scope;
-        }
-        return this.searchSchema.isAttributeScopeSearchQuery(definition.query) ? "attribute" : "feature";
-    }
-
     /** Adds one source tile to the reusable visible-tile plan consumed by map loading and search. */
     private trackVisibleSearchLayerTile(
         visibleLayerTiles: Map<string, SearchLayerTileSet>,
         mapId: string,
         layerId: string,
         tileId: bigint,
+        requestOrder: number,
         priority: boolean
     ): void {
         const key = FeatureSearchRuntimeState.layerKey(mapId, layerId);
         let entry = visibleLayerTiles.get(key);
         if (!entry) {
-            entry = {mapId, layerId, tileIds: new Set<number>(), priorityTileIds: new Set<number>()};
+            entry = {mapId, layerId, tiles: new Map<number, {tileId: number; requestOrder: number; priority: boolean}>()};
             visibleLayerTiles.set(key, entry);
         }
         const numericTileId = Number(tileId);
-        entry.tileIds.add(numericTileId);
-        if (priority) {
-            entry.priorityTileIds.add(numericTileId);
+        const existing = entry.tiles.get(numericTileId);
+        if (existing) {
+            existing.priority = existing.priority || priority;
+            return;
         }
+        entry.tiles.set(numericTileId, {tileId: numericTileId, requestOrder, priority});
     }
 
     /** Emits removal/eviction notifications for search-result tiles no longer owned by a runtime. */
@@ -1388,7 +1392,8 @@ export class MapTileStreamService {
                 requests.push(...runtime.cancellationRequests(
                     runtime.layerKeys(),
                     runtime.refresh,
-                    req => this.resolveFeatureSearchScope(req)
+                    req => this.searchSchema.resolveSearchScope(req),
+                    req => this.searchSchema.resolveBackendQuery(req)
                 ));
                 runtime.markPendingTilesForResume();
                 continue;
@@ -1398,7 +1403,10 @@ export class MapTileStreamService {
                 this.disposeSearchResultTiles(runtime.adoptVisibleTiles(visibleLayerTiles), true);
             }
 
-            requests.push(...runtime.buildPendingRequests(req => this.resolveFeatureSearchScope(req)));
+            requests.push(...runtime.buildPendingRequests(
+                req => this.searchSchema.resolveSearchScope(req),
+                req => this.searchSchema.resolveBackendQuery(req)
+            ));
         }
 
         for (const [searchId, cancellation] of Array.from(this.pendingFeatureSearchCancellations)) {
@@ -1406,7 +1414,8 @@ export class MapTileStreamService {
                 requests.push(...cancellation.runtime.cancellationRequests(
                     cancellation.layerKeys,
                     cancellation.refresh,
-                    req => this.resolveFeatureSearchScope(req)
+                    req => this.searchSchema.resolveSearchScope(req),
+                    req => this.searchSchema.resolveBackendQuery(req)
                 ));
             }
             this.pendingFeatureSearchCancellations.delete(searchId);
