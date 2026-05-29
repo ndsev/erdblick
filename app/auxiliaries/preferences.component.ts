@@ -1,7 +1,7 @@
 import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
-import {MapDataService} from "../mapdata/map.service";
+import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "../styledata/style.service";
 import {
     ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
@@ -264,7 +264,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Subscribes dialog fields to persisted preference state and runtime services. */
     constructor(private messageService: InfoMessageService,
-                public mapService: MapDataService,
+                public mapService: MapViewStateService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
                 private dialogStack: DialogStackService) {
@@ -343,7 +343,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.tilesToLoadInput = limit;
         this.stateService.tilesLoadLimit = limit;
         this.tilesToLoadChanged = false;
-        this.mapService.scheduleUpdate();
+        this.mapService.requestViewRecalculation(ViewRecalculationReason.TileLimit);
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
 

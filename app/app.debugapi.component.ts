@@ -1,6 +1,8 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
-import {MapDataService} from "./mapdata/map.service";
+import {MapInfoService} from "./mapdata/map-info.service";
+import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {AppStateService} from "./shared/appstate.service";
+import {StyleService} from "./styledata/style.service";
 
 type DebugHighlightMode = "none" | "hover" | "selection";
 type DebugRenderer = "deck";
@@ -23,7 +25,9 @@ export class ErdblickDebugApi {
     /**
      * Initialize a new ErdblickDebugApi instance.
      */
-    constructor(private mapService: MapDataService,
+    constructor(private mapInfo: MapInfoService,
+                private tileStream: MapTileStreamService,
+                private styleService: StyleService,
                 private stateService: AppStateService) {
     }
 
@@ -76,11 +80,15 @@ export class ErdblickDebugApi {
      * Generate a test TileFeatureLayer, and show it.
      */
     showTestTile() {
-        let tile = uint8ArrayFromWasm((sharedArr: any) => {
-            coreLib.generateTestTile(sharedArr, this.mapService.tileLayerParser);
+        const tile = uint8ArrayFromWasm(sharedArr => {
+            coreLib.generateTestTile(sharedArr, this.mapInfo.tileLayerParser);
         });
+        if (!tile) {
+            console.warn("Failed to generate test tile.");
+            return;
+        }
         let style = coreLib.generateTestStyle();
-        this.mapService.addTileFeatureLayer(tile, {
+        const styleEntry = {
             id: "_builtin",
             shortId: "TEST",
             modified: false,
@@ -93,9 +101,12 @@ export class ErdblickDebugApi {
             additional: false,
             sourceRef: {
                 styleName: "_builtin",
-                sourceKind: "base"
+                sourceKind: "base" as const
             }
-        }, true);
+        };
+        this.styleService.styles.set(styleEntry.id, styleEntry);
+        this.styleService.styleAddedForId.next(styleEntry.id);
+        this.tileStream.addTileFeatureLayer(tile, true);
     }
 
     /**
@@ -112,11 +123,11 @@ export class ErdblickDebugApi {
 
     /** Ensures a feature tile is loaded before a console-side debugging action uses it. */
     async ensureTileLoaded(mapTileKey: string) {
-        const existing = this.mapService.loadedTileLayers.get(mapTileKey);
+        const existing = this.tileStream.loadedTileLayers.get(mapTileKey);
         if (existing?.hasData()) {
             return existing;
         }
-        const loaded = await this.mapService.loadTiles(new Set([mapTileKey]));
+        const loaded = await this.tileStream.loadTiles(new Set([mapTileKey]));
         return loaded.get(mapTileKey) ?? null;
     }
 
@@ -125,7 +136,7 @@ export class ErdblickDebugApi {
         mapTileKey: string,
         featureId: string,
         keyFilter: string = "") {
-        const tile = this.mapService.loadedTileLayers.get(mapTileKey);
+        const tile = this.tileStream.loadedTileLayers.get(mapTileKey);
         if (!tile?.hasData()) {
             return {error: `Tile ${mapTileKey} is not loaded.`};
         }
@@ -204,11 +215,11 @@ export class ErdblickDebugApi {
         featureIdSubset: string[],
         _renderer: DebugRenderer = "deck",
         mode: DebugHighlightMode = "hover") {
-        const tile = this.mapService.loadedTileLayers.get(mapTileKey);
+        const tile = this.tileStream.loadedTileLayers.get(mapTileKey);
         if (!tile?.hasData()) {
             return {error: `Tile ${mapTileKey} is not loaded.`};
         }
-        const style = this.mapService.styleService.styles.get(styleId);
+        const style = this.styleService.styles.get(styleId);
         if (!style) {
             return {error: `Style ${styleId} is not loaded.`};
         }
@@ -219,7 +230,7 @@ export class ErdblickDebugApi {
                 ? coreLib.HighlightMode.NO_HIGHLIGHT
                 : coreLib.HighlightMode.HOVER_HIGHLIGHT;
 
-        const styleOptions = this.mapService.maps.getLayerStyleOptions(
+        const styleOptions = this.mapInfo.maps.getLayerStyleOptions(
             0,
             tile.mapName,
             tile.layerName,

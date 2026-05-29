@@ -1,6 +1,6 @@
 import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {MapDataService} from "../mapdata/map.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -66,7 +66,7 @@ export class FeaturePanelComponent implements OnDestroy {
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: MapTileStreamService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone) {
         effect(() => {

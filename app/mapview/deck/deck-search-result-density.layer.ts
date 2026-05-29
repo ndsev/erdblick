@@ -1,37 +1,37 @@
 import {IconLayer, IconLayerProps, TextLayer, TextLayerProps} from "@deck.gl/layers";
 import type {Parameters as LumaParameters} from "@luma.gl/core";
-import type {SearchResultPinMarker} from "../../search/feature.search.service";
+import type {SearchResultDensityMarker} from "../../search/search-result-density.model";
 
-/** Public props for the low-fidelity search-result pin layer. */
-export interface SearchResultPinLayerProps extends IconLayerProps<SearchResultPinMarker> {
-    data: SearchResultPinMarker[];
+/** Public props for the low-fidelity search-result density layer. */
+export interface SearchResultDensityLayerProps extends IconLayerProps<SearchResultDensityMarker> {
+    data: SearchResultDensityMarker[];
     dotColor: [number, number, number, number];
-    countDomain?: SearchResultPinCountDomain;
+    countDomain?: SearchResultDensityCountDomain;
 }
 
 /** Public props for low-fidelity search-result bucket labels. */
-export interface SearchResultPinLabelLayerProps extends TextLayerProps<SearchResultPinMarker> {
-    data: SearchResultPinMarker[];
+export interface SearchResultDensityLabelLayerProps extends TextLayerProps<SearchResultDensityMarker> {
+    data: SearchResultDensityMarker[];
 }
 
-export interface SearchResultPinLayoutEntry {
-    marker: SearchResultPinMarker;
+export interface SearchResultDensityLayoutEntry {
+    marker: SearchResultDensityMarker;
     sortKey: string;
-    countDomain?: SearchResultPinCountDomain;
+    countDomain?: SearchResultDensityCountDomain;
 }
 
-export interface SearchResultPinCountDomain {
+export interface SearchResultDensityCountDomain {
     min: number;
     max: number;
 }
 
-export const SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE = 16;
+export const SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE = 16;
 
-const SEARCH_RESULT_PIN_GRID_GAP_PX = 4;
-const SEARCH_RESULT_PIN_MIN_SIZE_FACTOR = 0.85;
-const SEARCH_RESULT_PIN_MAX_SIZE_FACTOR = 2.45;
-const SEARCH_RESULT_PIN_MAX_COUNT_FOR_SIZE = 10000;
-const SEARCH_RESULT_PIN_DEFAULT_COUNT_DOMAIN: SearchResultPinCountDomain = {min: 1, max: 1};
+const SEARCH_RESULT_DENSITY_GRID_GAP_PX = 4;
+const SEARCH_RESULT_DENSITY_MIN_SIZE_FACTOR = 0.85;
+const SEARCH_RESULT_DENSITY_MAX_SIZE_FACTOR = 2.45;
+const SEARCH_RESULT_DENSITY_MAX_COUNT_FOR_SIZE = 10000;
+const SEARCH_RESULT_DENSITY_DEFAULT_COUNT_DOMAIN: SearchResultDensityCountDomain = {min: 1, max: 1};
 const SEARCH_RESULT_DOT_ICON_ATLAS =
     "data:image/svg+xml;charset=utf-8,"
     + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -47,7 +47,7 @@ const DECK_NO_DEPTH_TEST_PARAMETERS: LumaParameters = {
 };
 
 /** Returns the min/max aggregate counts currently visible in one rendered search-dot layer. */
-export function searchResultPinCountDomain(markers: readonly SearchResultPinMarker[]): SearchResultPinCountDomain {
+export function searchResultDensityCountDomain(markers: readonly SearchResultDensityMarker[]): SearchResultDensityCountDomain {
     let min = Number.POSITIVE_INFINITY;
     let max = 0;
     for (const marker of markers) {
@@ -58,27 +58,27 @@ export function searchResultPinCountDomain(markers: readonly SearchResultPinMark
         min = Math.min(min, count);
         max = Math.max(max, count);
     }
-    return max > 0 ? {min, max} : SEARCH_RESULT_PIN_DEFAULT_COUNT_DOMAIN;
+    return max > 0 ? {min, max} : SEARCH_RESULT_DENSITY_DEFAULT_COUNT_DOMAIN;
 }
 
 /** Maps an aggregate count into the visible layer's observed min/max density range. */
-function searchResultPinSizeScale(
+function searchResultDensitySizeScale(
     size: number,
-    countDomain: SearchResultPinCountDomain = SEARCH_RESULT_PIN_DEFAULT_COUNT_DOMAIN
+    countDomain: SearchResultDensityCountDomain = SEARCH_RESULT_DENSITY_DEFAULT_COUNT_DOMAIN
 ): number {
-    const count = Math.max(1, Math.min(SEARCH_RESULT_PIN_MAX_COUNT_FOR_SIZE, Math.floor(size)));
-    const minCount = Math.max(1, Math.min(SEARCH_RESULT_PIN_MAX_COUNT_FOR_SIZE, Math.floor(countDomain.min)));
-    const maxCount = Math.max(minCount, Math.min(SEARCH_RESULT_PIN_MAX_COUNT_FOR_SIZE, Math.floor(countDomain.max)));
+    const count = Math.max(1, Math.min(SEARCH_RESULT_DENSITY_MAX_COUNT_FOR_SIZE, Math.floor(size)));
+    const minCount = Math.max(1, Math.min(SEARCH_RESULT_DENSITY_MAX_COUNT_FOR_SIZE, Math.floor(countDomain.min)));
+    const maxCount = Math.max(minCount, Math.min(SEARCH_RESULT_DENSITY_MAX_COUNT_FOR_SIZE, Math.floor(countDomain.max)));
     const normalized = maxCount > minCount
         ? (Math.log10(count) - Math.log10(minCount)) / Math.max(1e-6, Math.log10(maxCount) - Math.log10(minCount))
-        : Math.log10(count) / Math.log10(SEARCH_RESULT_PIN_MAX_COUNT_FOR_SIZE);
+        : Math.log10(count) / Math.log10(SEARCH_RESULT_DENSITY_MAX_COUNT_FOR_SIZE);
     const clamped = Math.max(0, Math.min(1, normalized));
-    return SEARCH_RESULT_PIN_MIN_SIZE_FACTOR
-        + clamped * (SEARCH_RESULT_PIN_MAX_SIZE_FACTOR - SEARCH_RESULT_PIN_MIN_SIZE_FACTOR);
+    return SEARCH_RESULT_DENSITY_MIN_SIZE_FACTOR
+        + clamped * (SEARCH_RESULT_DENSITY_MAX_SIZE_FACTOR - SEARCH_RESULT_DENSITY_MIN_SIZE_FACTOR);
 }
 
 /** Returns the compact bucket label shown inside a low-fidelity search-result dot. */
-export function searchResultPinBucketLabel(size: number): string {
+export function searchResultDensityBucketLabel(size: number): string {
     const count = Number.isFinite(size) ? Math.floor(size) : 0;
     if (count <= 0) {
         return "";
@@ -95,20 +95,20 @@ export function searchResultPinBucketLabel(size: number): string {
 }
 
 /** Returns the effective screen-space icon diameter used by Deck for one count marker. */
-export function searchResultPinRenderSizePixels(
+export function searchResultDensityRenderSizePixels(
     size: number,
-    sizeScale = SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE,
-    countDomain: SearchResultPinCountDomain = SEARCH_RESULT_PIN_DEFAULT_COUNT_DOMAIN
+    sizeScale = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
+    countDomain: SearchResultDensityCountDomain = SEARCH_RESULT_DENSITY_DEFAULT_COUNT_DOMAIN
 ): number {
-    return searchResultPinSizeScale(size, countDomain) * sizeScale;
+    return searchResultDensitySizeScale(size, countDomain) * sizeScale;
 }
 
 /** Assigns size-aware, stable screen offsets for markers sharing the same aggregate mapget tile. */
-export function layoutSearchResultPinMarkers(
-    entries: SearchResultPinLayoutEntry[],
-    sizeScale = SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE
+export function layoutSearchResultDensityMarkers(
+    entries: SearchResultDensityLayoutEntry[],
+    sizeScale = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE
 ): void {
-    const entriesByTileId = new Map<string, SearchResultPinLayoutEntry[]>();
+    const entriesByTileId = new Map<string, SearchResultDensityLayoutEntry[]>();
     for (const entry of entries) {
         const tileKey = entry.marker.tileId.toString();
         const tileEntries = entriesByTileId.get(tileKey) ?? [];
@@ -124,13 +124,13 @@ export function layoutSearchResultPinMarkers(
 
         tileEntries.sort((lhs, rhs) => lhs.sortKey.localeCompare(rhs.sortKey));
         const maxIconSize = Math.max(
-            ...tileEntries.map(entry => searchResultPinRenderSizePixels(
+            ...tileEntries.map(entry => searchResultDensityRenderSizePixels(
                 entry.marker.count,
                 sizeScale,
                 entry.countDomain
             ))
         );
-        const cellSize = Math.ceil(maxIconSize + SEARCH_RESULT_PIN_GRID_GAP_PX);
+        const cellSize = Math.ceil(maxIconSize + SEARCH_RESULT_DENSITY_GRID_GAP_PX);
         const columns = Math.ceil(Math.sqrt(tileEntries.length));
         const rows = Math.ceil(tileEntries.length / columns);
 
@@ -146,9 +146,9 @@ export function layoutSearchResultPinMarkers(
 }
 
 /** Creates one plain deck IconLayer from already aggregated search-result dot markers. */
-export function createSearchResultPinLayer(props: SearchResultPinLayerProps): IconLayer<SearchResultPinMarker> {
-    const countDomain = props.countDomain ?? searchResultPinCountDomain(props.data);
-    return new IconLayer<SearchResultPinMarker>({
+export function createSearchResultDensityLayer(props: SearchResultDensityLayerProps): IconLayer<SearchResultDensityMarker> {
+    const countDomain = props.countDomain ?? searchResultDensityCountDomain(props.data);
+    return new IconLayer<SearchResultDensityMarker>({
         ...props,
         parameters: {
             ...(props.parameters ?? {}),
@@ -159,19 +159,19 @@ export function createSearchResultPinLayer(props: SearchResultPinLayerProps): Ic
         getPosition: marker => marker.coordinates,
         getPixelOffset: marker => marker.pixelOffset ?? [0, 0],
         getIcon: () => "dot",
-        getSize: marker => searchResultPinSizeScale(marker.count, countDomain),
+        getSize: marker => searchResultDensitySizeScale(marker.count, countDomain),
         getColor: () => props.dotColor,
-        sizeScale: props.sizeScale ?? SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE,
+        sizeScale: props.sizeScale ?? SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
         sizeUnits: "pixels",
         alphaCutoff: 0.05
     });
 }
 
 /** Creates text labels for the compact count buckets shown in aggregate search-result dots. */
-export function createSearchResultPinLabelLayer(
-    props: SearchResultPinLabelLayerProps
-): TextLayer<SearchResultPinMarker> {
-    return new TextLayer<SearchResultPinMarker>({
+export function createSearchResultDensityLabelLayer(
+    props: SearchResultDensityLabelLayerProps
+): TextLayer<SearchResultDensityMarker> {
+    return new TextLayer<SearchResultDensityMarker>({
         ...props,
         parameters: {
             ...(props.parameters ?? {}),
@@ -179,7 +179,7 @@ export function createSearchResultPinLabelLayer(
         },
         getPosition: marker => marker.coordinates,
         getPixelOffset: marker => marker.pixelOffset ?? [0, 0],
-        getText: marker => marker.showBucketLabel === false ? "" : searchResultPinBucketLabel(marker.count),
+        getText: marker => marker.showBucketLabel === false ? "" : searchResultDensityBucketLabel(marker.count),
         getSize: 11,
         sizeUnits: "pixels",
         getTextAnchor: "middle",

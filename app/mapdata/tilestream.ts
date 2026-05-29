@@ -118,7 +118,7 @@ export interface MapTileStreamDebugState {
 /**
  * WebSocket client for `/tiles` plus the optional `/tiles/next` pull loop.
  * It hides frame parsing, request chunking, status tracking, and adaptive pull budgeting
- * behind callback-style hooks that `MapDataService` can consume from outside Angular.
+ * behind callback-style hooks that `MapTileStreamService` can consume from outside Angular.
  */
 export class MapTileStreamClient {
     private socket: WebSocket | null = null;
@@ -159,6 +159,7 @@ export class MapTileStreamClient {
     private knownCompressedBytes: number = 0;
     private knownCompressedUncompressedBytes: number = 0;
     private responsesWithKnownCompressedBytes: number = 0;
+    private readonly ownsParser: boolean;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
@@ -170,9 +171,10 @@ export class MapTileStreamClient {
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
-    /** Creates the parser and remembers the relative backend path for websocket and pull calls. */
-    constructor(private path: string = "tiles") {
-        this.parser = new coreLib.TileLayerParser();
+    /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
+    constructor(private path: string = "tiles", parser?: TileLayerParser) {
+        this.ownsParser = !parser;
+        this.parser = parser ?? new coreLib.TileLayerParser();
     }
 
     /** Registers the callback that receives feature payload frames without the transport header. */
@@ -267,7 +269,7 @@ export class MapTileStreamClient {
         this.stopPullLoops();
         this.clearPendingFrames();
         this.resetCompletionPromise();
-        if (this.parser) {
+        if (this.ownsParser && this.parser) {
             this.parser.delete();
         }
     }
@@ -428,7 +430,7 @@ export class MapTileStreamClient {
         stringPoolOffsets: unknown,
         requestId: number): string[]
     {
-        // Chunk only between complete request groups. map.service keeps these
+        // Chunk only between complete request groups. The stream service keeps these
         // groups disjoint by map/layer/tile-level, so the server can schedule
         // each chunk immediately while keeping one logical request id.
         const singlePayload = JSON.stringify({

@@ -31,8 +31,8 @@ export interface IRenderSceneHandle {
     readonly scene: unknown;
 }
 
-/** Minimal tile surface required by the shared visualization scheduler. */
-export interface TileVisualizationTile {
+/** Minimal tile/layer data surface required by the shared visualization scheduler. */
+export interface RenderableTileLayer {
     mapTileKey: string;
     nodeId: string;
     mapName: string;
@@ -54,7 +54,7 @@ export interface TileVisualizationTile {
 export interface ITileVisualization {
     readonly viewIndex: number;
     readonly styleId: string;
-    readonly tile: TileVisualizationTile;
+    readonly tile: RenderableTileLayer;
     styleOrder: number;
     highFidelityStage: number;
     prefersHighFidelity: boolean;

@@ -1,16 +1,17 @@
 import {TileLayerParser} from "../../build/libs/core/erdblick-core";
 import {uint8ArrayFromWasm} from "../integrations/wasm";
-import type {TileVisualizationTile} from "../mapview/render-view.model";
+import type {RenderableTileLayer} from "../mapview/render-view.model";
 import {FeatureTile} from "./features.model";
 
 export interface SearchResultTileUpdate {
     refresh: number;
     nodeId: string;
     layerBlob: Uint8Array;
+    resultCount: number;
 }
 
-/** Render-scheduler model for one streamed TileSearchResultLayer. */
-export class SearchResultTile implements TileVisualizationTile {
+/** Runtime data tile for one search/source-tile pair, optionally backed by a streamed TileSearchResultLayer. */
+export class SearchResultTile implements RenderableTileLayer {
     private static dataSourceInfoBlobCacheByMapName: Map<string, Uint8Array> = new Map<string, Uint8Array>();
 
     readonly searchId: string;
@@ -24,6 +25,10 @@ export class SearchResultTile implements TileVisualizationTile {
     layerName: string;
     tileId: bigint;
     refresh: number;
+    priority: boolean;
+    requested = false;
+    completed = false;
+    resultCount = 0;
     layerBlob: Uint8Array;
     dataVersion = 0;
     disposed = false;
@@ -41,7 +46,8 @@ export class SearchResultTile implements TileVisualizationTile {
         sourceMapId: string,
         sourceLayerId: string,
         sourceTileId: bigint,
-        update: SearchResultTileUpdate
+        refresh: number,
+        priority: boolean
     ) {
         this.parser = parser;
         this.searchId = searchId;
@@ -53,9 +59,10 @@ export class SearchResultTile implements TileVisualizationTile {
         this.mapName = sourceMapId;
         this.layerName = sourceLayerId;
         this.tileId = sourceTileId;
-        this.refresh = update.refresh;
-        this.nodeId = update.nodeId;
-        this.layerBlob = update.layerBlob;
+        this.refresh = refresh;
+        this.priority = priority;
+        this.nodeId = "";
+        this.layerBlob = new Uint8Array();
         this.stats.set(FeatureTile.statParseTime, []);
     }
 
@@ -64,21 +71,50 @@ export class SearchResultTile implements TileVisualizationTile {
         SearchResultTile.dataSourceInfoBlobCacheByMapName.clear();
     }
 
+    /** Returns whether this source tile currently has renderable search-result layer data. */
+    hasResultLayer(): boolean {
+        return !this.disposed && this.resultCount > 0 && this.layerBlob.length > 0;
+    }
+
     /** Replaces the streamed result layer payload and marks dependent renderers dirty. */
     update(update: SearchResultTileUpdate): void {
         this.refresh = update.refresh;
         this.nodeId = update.nodeId || this.nodeId;
         this.layerBlob = update.layerBlob;
+        this.resultCount = Math.max(0, Math.floor(update.resultCount));
         this.fieldDictBlobCache = null;
         this.dataVersion += 1;
         this.disposed = false;
+        this.completed = true;
+        this.requested = false;
     }
 
-    /** Marks this search-result tile as no longer renderable. */
+    /** Marks the source tile complete when mapget returned no result layer data for it. */
+    markCompletedEmpty(refresh: number): void {
+        this.refresh = refresh;
+        this.resultCount = 0;
+        this.nodeId = "";
+        this.layerBlob = new Uint8Array();
+        this.fieldDictBlobCache = null;
+        this.completed = true;
+        this.requested = false;
+        this.disposed = false;
+        this.dataVersion += 1;
+    }
+
+    /** Makes an unfinished tile eligible for another backend request. */
+    markPending(): void {
+        if (!this.completed) {
+            this.requested = false;
+        }
+    }
+
+    /** Marks this search-result tile as no longer part of the active search area. */
     dispose(): void {
         this.disposed = true;
         this.fieldDictBlobCache = null;
         this.layerBlob = new Uint8Array();
+        this.resultCount = 0;
         this.dataVersion += 1;
     }
 

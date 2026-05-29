@@ -1935,22 +1935,6 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
-    /*
-    ## Current State
-
-      View Click Event -> MapDataService -> InspectionService -> InspectionPanel
-                                                              -> AppStateService
-
-      (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-                                                                         -> AppStateService
-
-    ## New Goal State
-
-    // View Click Event -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //         (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-
-     */
     /** Updates the current selection, reusing or creating inspection panels as needed. */
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;

@@ -2,7 +2,7 @@ import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
-import {MapDataService} from "../mapdata/map.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {debounceTime, distinctUntilChanged, skip, Subject} from "rxjs";
@@ -278,7 +278,7 @@ export class SearchPanelComponent implements AfterViewInit {
      */
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapDataService,
+                public mapService: MapViewStateService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,

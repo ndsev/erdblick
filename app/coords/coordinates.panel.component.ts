@@ -1,6 +1,6 @@
 import {Component, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
-import {MapDataService} from "../mapdata/map.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {GeoMath} from "../integrations/geo";
 import {ClipboardService} from "../shared/clipboard.service";
@@ -84,7 +84,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
     private subscriptions: Subscription[] = [];
 
-    constructor(public mapService: MapDataService,
+    constructor(public mapService: MapViewStateService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public stateService: AppStateService) {

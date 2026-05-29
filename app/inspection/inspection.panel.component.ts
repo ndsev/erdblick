@@ -7,7 +7,8 @@ import {
     InspectionComparisonOption,
     InspectionPanelModel
 } from "../shared/appstate.service";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {FeaturePanelComponent} from "./feature.panel.component";
@@ -176,7 +177,8 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     private autoExpandRafSecond?: number;
     isMetadata: boolean = false;
 
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: MapInfoService,
+                private inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private renderer: Renderer2) {
         effect(() => {
@@ -334,7 +336,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         if (!panel.features.length) {
             return;
         }
-        this.mapService.zoomToFeature(undefined, panel.features[0]);
+        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
     }
 
     /** UI wrapper around the focus action for toolbar buttons and menus. */
@@ -473,7 +475,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Refreshes compare candidates and drops ids that are no longer valid. */
     protected refreshCompareOptions() {
-        this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
+        this.compareOptions = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -488,7 +490,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         const model = this.stateService.createComparisonModel(
             this.panel().id,
             this.selectedCompareIds,
-            this.mapService.selectionTopic.getValue()
+            this.inspectionSelection.selectionTopic.getValue()
         );
         if (!model) {
             return;

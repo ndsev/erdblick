@@ -1,5 +1,5 @@
 import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from "@angular/core";
-import {MapDataService} from "../mapdata/map.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {Subscription} from "rxjs";
@@ -75,7 +75,7 @@ export class InspectionContainerComponent implements OnDestroy {
     private readonly subscriptions = new Subscription();
 
     constructor(private stateService: AppStateService,
-                private mapService: MapDataService,
+                private mapService: InspectionSelectionService,
                 private renderer: Renderer2) {
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();

@@ -12,13 +12,16 @@ import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
-import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
+import {MapInfoService} from "../../mapdata/map-info.service";
+import {MapViewStateService} from "../map-view-state.service";
+import {MapTileStreamService} from "../../mapdata/map-tile-stream.service";
+import {MapRenderService, TileVisualizationRenderTask} from "../../mapdata/map-render.service";
+import {InspectionSelectionService} from "../../inspection/inspection-selection.service";
 import {
     FeatureSearchService,
-    type FeatureSearchResultLayer,
-    type SearchResultPinMarker,
-    type SearchResultPoint
+    type FeatureSearchResultLayer
 } from "../../search/feature.search.service";
+import type {SearchResultDensityMarker, SearchResultPoint} from "../../search/search-result-density.model";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
 import {
@@ -49,13 +52,13 @@ import {
     tileGridOverlayData
 } from "./deck-tile-grid-overlay.layer";
 import {
-    createSearchResultPinLabelLayer,
-    createSearchResultPinLayer,
-    layoutSearchResultPinMarkers,
-    SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE,
-    searchResultPinCountDomain,
-    type SearchResultPinLayoutEntry
-} from "./deck-search-result-pin.layer";
+    createSearchResultDensityLabelLayer,
+    createSearchResultDensityLayer,
+    layoutSearchResultDensityMarkers,
+    SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
+    searchResultDensityCountDomain,
+    type SearchResultDensityLayoutEntry
+} from "./deck-search-result-density.layer";
 import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 import {
     coarsenedTileGridLevels,
@@ -100,7 +103,7 @@ interface SearchResultOverlayInput {
     dotLayerKey: string;
     labelLayerKey: string;
     lowFiSourceTileKeys: Set<string>;
-    highFiPointMarkers: SearchResultPinMarker[];
+    highFiPointMarkers: SearchResultDensityMarker[];
     targetLevel: number;
     sourceTileKeySignature: string;
 }
@@ -164,7 +167,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
-    private static readonly SEARCH_RESULT_PIN_SIZE_SCALE = SEARCH_RESULT_PIN_DEFAULT_SIZE_SCALE;
+    private static readonly SEARCH_RESULT_DENSITY_SIZE_SCALE = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE;
     private static readonly HOVER_PICK_THROTTLE_MS = 75;
     private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
@@ -262,7 +265,11 @@ export abstract class DeckMapView implements IRenderView {
     /** Creates the deck-backed view wrapper for one canvas and app-state view index. */
     constructor(id: number,
                 canvasId: string,
-                protected mapService: MapDataService,
+                protected mapInfo: MapInfoService,
+                protected mapViewState: MapViewStateService,
+                protected tileStream: MapTileStreamService,
+                protected mapRender: MapRenderService,
+                protected inspectionSelection: InspectionSelectionService,
                 protected featureSearchService: FeatureSearchService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
@@ -323,7 +330,7 @@ export abstract class DeckMapView implements IRenderView {
 
         this.setupSubscriptions();
         this.updateViewport();
-        this.mapService.refreshHighlightVisualizations();
+        this.mapRender.refreshHighlightVisualizationsForCurrentPolicies(true);
         this.requestRender();
     }
 
@@ -350,7 +357,7 @@ export abstract class DeckMapView implements IRenderView {
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
-        this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
+        this.mapRender.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
 
         if (this.deck) {
             this.deck.finalize();
@@ -525,7 +532,7 @@ export abstract class DeckMapView implements IRenderView {
             if (!tileKey) {
                 return null;
             }
-            return this.mapService.resolveTileFeatureIdByAddress(tileKey, value as number);
+            return this.tileStream.resolveTileFeatureIdByAddress(tileKey, value as number);
         };
         const resolveSearchResultAddress = (
             tileKey: string | undefined,
@@ -635,7 +642,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
-     * Builds the viewport rectangle expected by `MapDataService`.
+     * Builds the viewport rectangle expected by `MapViewStateService`.
      * Longitude sampling intentionally unwraps around the current center to survive world wrap.
      */
     computeViewport(): Viewport | undefined {
@@ -786,13 +793,13 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
-    /** Pushes the currently visible viewport rectangle back into `MapDataService`. */
+    /** Pushes the currently visible viewport rectangle back into `MapViewStateService`. */
     protected updateViewport(): void {
         const viewport = this.computeViewport();
         if (!viewport) {
             return;
         }
-        this.mapService.setViewport(this._viewIndex, viewport);
+        this.mapViewState.setViewport(this._viewIndex, viewport);
     }
 
     /**
@@ -872,17 +879,17 @@ export abstract class DeckMapView implements IRenderView {
                 .subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.mapService.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
+            this.mapInfo.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.mapService.tileDataChanged.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
+            this.tileStream.tileDataChanged.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
         );
         this.subscriptions.push(
             this.featureSearchService.progress.subscribe(() => this.scheduleSearchResultsOverlayDataRefresh())
         );
 
         this.subscriptions.push(
-            this.mapService.moveToWgs84PositionTopic.subscribe(value => {
+            this.mapViewState.moveToWgs84PositionTopic.subscribe(value => {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
@@ -896,7 +903,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.moveToRectangleTopic.subscribe(value => {
+            this.mapViewState.moveToRectangleTopic.subscribe(value => {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
@@ -918,7 +925,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
+            this.mapRender.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
                 const tileVis = task.visualization;
                 // The render task topic is shared across all views. Only the
                 // owning view may consume and complete the task.
@@ -936,7 +943,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: ITileVisualization) => {
+            this.mapRender.tileVisualizationDestructionTopic.subscribe((tileVis: ITileVisualization) => {
                 if (tileVis.viewIndex !== this._viewIndex) {
                     return;
                 }
@@ -945,7 +952,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
+            this.mapRender.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
                 if (tileVis.viewIndex !== this._viewIndex) {
                     return;
                 }
@@ -1021,7 +1028,7 @@ export abstract class DeckMapView implements IRenderView {
             this.pendingHoverInfo = null;
             this.cancelHoverPickScheduling();
             this.setFeatureHoverState(false);
-            void this.mapService.setHoveredFeatures([]);
+            void this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
@@ -1075,12 +1082,12 @@ export abstract class DeckMapView implements IRenderView {
         const featureIds = this.pickFeature({x: info.x, y: info.y});
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
-            void this.mapService.setHoveredFeatures([]);
+            void this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
         this.setFeatureHoverState(true);
-        this.mapService.setHoveredFeatures(featureIds).then(() => {
+        this.inspectionSelection.setHoveredFeatures(featureIds).then(() => {
             this.hoveredFeatureIds.next({
                 featureIds,
                 position: {x: info.x, y: info.y}
@@ -1509,7 +1516,7 @@ export abstract class DeckMapView implements IRenderView {
         }
     }
 
-    /** Rebuilds the low-fidelity search-result pin overlay. */
+    /** Rebuilds the search-result dot/density overlay. */
     private updateSearchResultsOverlay(): void {
         if (!this.deck) {
             this.removeSearchResultLayers();
@@ -1527,14 +1534,14 @@ export abstract class DeckMapView implements IRenderView {
         const searchLayers = this.featureSearchService.getSearchResultLayers();
         const overlayInputs: SearchResultOverlayInput[] = searchLayers.map(searchLayer => {
             const lowFiSourceTileKeys = new Set<string>();
-            const highFiPointMarkers: SearchResultPinMarker[] = [];
+            const highFiPointMarkers: SearchResultDensityMarker[] = [];
             const sourceTileKeyParts: string[] = [];
             let maxVisibleLevel = 0;
             for (const bucket of searchLayer.pointBuckets) {
-                if (!this.mapService.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
+                if (!this.mapViewState.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
                     continue;
                 }
-                if (this.mapService.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
+                if (this.mapRender.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
                     if (searchLayer.renderStrategy.showHighFiResultDots) {
                         highFiPointMarkers.push(...bucket.points.map(point => this.searchResultPointMarker(point)));
                     }
@@ -1547,7 +1554,7 @@ export abstract class DeckMapView implements IRenderView {
                 sourceTileKeyParts.push(bucket.sourceTileKey);
                 maxVisibleLevel = Math.max(maxVisibleLevel, Number(coreLib.getTileLevel(bucket.tileId)));
             }
-            const targetLevel = this.searchResultPinTargetLevel(searchLayer, maxVisibleLevel, viewport);
+            const targetLevel = this.searchResultDensityTargetLevel(searchLayer, maxVisibleLevel, viewport);
             return {
                 searchLayer,
                 dotLayerKey: this.searchResultLayerKey(searchLayer.id, "dot"),
@@ -1574,31 +1581,31 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.lastSearchResultsSignature = signature;
 
-        const pinsByLayerKey = new Map<string, SearchResultPinMarker[]>();
-        const layoutEntries: SearchResultPinLayoutEntry[] = [];
+        const densityMarkersByLayerKey = new Map<string, SearchResultDensityMarker[]>();
+        const layoutEntries: SearchResultDensityLayoutEntry[] = [];
         for (const input of overlayInputs) {
-            const lowFiPins = input.lowFiSourceTileKeys.size > 0 && !input.searchLayer.pinIndex.isEmpty
-                ? input.searchLayer.pinIndex.materialize({
+            const lowFiDensityMarkers = input.lowFiSourceTileKeys.size > 0 && !input.searchLayer.densityIndex.isEmpty
+                ? input.searchLayer.densityIndex.materialize({
                     sourceTileKeys: input.lowFiSourceTileKeys,
                     targetLevel: input.targetLevel
                 })
                 : [];
-            const layerPins = [...lowFiPins, ...input.highFiPointMarkers];
-            const countDomain = searchResultPinCountDomain(layerPins);
-            for (const marker of lowFiPins) {
+            const layerMarkers = [...lowFiDensityMarkers, ...input.highFiPointMarkers];
+            const countDomain = searchResultDensityCountDomain(layerMarkers);
+            for (const marker of lowFiDensityMarkers) {
                 layoutEntries.push({
                     marker,
                     sortKey: `${input.searchLayer.id}\n${marker.resultKey}`,
                     countDomain
                 });
             }
-            pinsByLayerKey.set(input.dotLayerKey, layerPins);
+            densityMarkersByLayerKey.set(input.dotLayerKey, layerMarkers);
         }
-        layoutSearchResultPinMarkers(layoutEntries, DeckMapView.SEARCH_RESULT_PIN_SIZE_SCALE);
+        layoutSearchResultDensityMarkers(layoutEntries, DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE);
 
         const nextKeys = new Set<string>();
         for (const input of overlayInputs) {
-            if ((pinsByLayerKey.get(input.dotLayerKey)?.length ?? 0) > 0) {
+            if ((densityMarkersByLayerKey.get(input.dotLayerKey)?.length ?? 0) > 0) {
                 nextKeys.add(input.dotLayerKey);
                 if (input.searchLayer.renderStrategy.showBucketLabels) {
                     nextKeys.add(input.labelLayerKey);
@@ -1613,16 +1620,16 @@ export abstract class DeckMapView implements IRenderView {
         this.searchResultLayerKeys = nextKeys;
 
         for (const input of overlayInputs) {
-            const layerPins = pinsByLayerKey.get(input.dotLayerKey) ?? [];
-            if (layerPins.length) {
-                const countDomain = searchResultPinCountDomain(layerPins);
+            const layerMarkers = densityMarkersByLayerKey.get(input.dotLayerKey) ?? [];
+            if (layerMarkers.length) {
+                const countDomain = searchResultDensityCountDomain(layerMarkers);
                 this.layerRegistry.upsert(
                     input.dotLayerKey,
-                    createSearchResultPinLayer({
+                    createSearchResultDensityLayer({
                         id: input.dotLayerKey,
-                        data: layerPins,
+                        data: layerMarkers,
                         pickable: false,
-                        sizeScale: DeckMapView.SEARCH_RESULT_PIN_SIZE_SCALE,
+                        sizeScale: DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE,
                         dotColor: input.searchLayer.pointColorRgba,
                         countDomain
                     }),
@@ -1630,9 +1637,9 @@ export abstract class DeckMapView implements IRenderView {
                 if (input.searchLayer.renderStrategy.showBucketLabels) {
                     this.layerRegistry.upsert(
                         input.labelLayerKey,
-                        createSearchResultPinLabelLayer({
+                        createSearchResultDensityLabelLayer({
                             id: input.labelLayerKey,
-                            data: layerPins,
+                            data: layerMarkers,
                             pickable: false
                         }),
                         651);
@@ -1645,11 +1652,11 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
-     * Selects a mapget tile level for low-fidelity pins using the same visible-grid-cell basis as the fidelity switch.
+     * Selects a mapget tile level for low-fidelity density using the same visible-grid-cell basis as the fidelity switch.
      * The search's high/low threshold is used as the aggregation budget, then relaxed by one level because dots are
      * cheaper than high-fidelity geometry and benefit from a denser spatial distribution.
      */
-    private searchResultPinTargetLevel(
+    private searchResultDensityTargetLevel(
         searchLayer: FeatureSearchResultLayer,
         maxVisibleLevel: number,
         viewport: Viewport
@@ -1672,7 +1679,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Converts an individual high-fidelity search result into a positioned dot marker. */
-    private searchResultPointMarker(point: SearchResultPoint): SearchResultPinMarker {
+    private searchResultPointMarker(point: SearchResultPoint): SearchResultDensityMarker {
         return {
             coordinates: point.coordinates,
             count: 1,
@@ -1918,12 +1925,12 @@ export abstract class DeckMapView implements IRenderView {
     /** Returns the effective feature levels currently visible across all enabled map layers in this view. */
     private visibleMapLayerLevels(): number[] {
         const levels = new Set<number>();
-        for (const [mapId, map] of this.mapService.maps.maps.entries()) {
+        for (const [mapId, map] of this.mapInfo.maps.maps.entries()) {
             for (const layer of map.allFeatureLayers()) {
-                if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
+                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                const level = this.mapService.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
+                const level = this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
                 if (!Number.isFinite(level)) {
                     continue;
                 }
@@ -1944,12 +1951,12 @@ export abstract class DeckMapView implements IRenderView {
             result.set(level, []);
         }
 
-        for (const [mapId, map] of this.mapService.maps.maps.entries()) {
+        for (const [mapId, map] of this.mapInfo.maps.maps.entries()) {
             for (const layer of map.allFeatureLayers()) {
-                if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
+                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                const level = this.mapService.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
+                const level = this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
                 if (!Number.isFinite(level)) {
                     continue;
                 }
@@ -1991,7 +1998,7 @@ export abstract class DeckMapView implements IRenderView {
         let hasNonEmptyData = false;
         for (const layer of visibleLayers) {
             const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.layerId, tileId);
-            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            const tile = this.tileStream.loadedTileLayers.get(tileKey);
             if (!tile) {
                 continue;
             }

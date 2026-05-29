@@ -1,6 +1,7 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
@@ -74,7 +75,8 @@ export class JumpTargetService {
     /**
      * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
      */
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: MapInfoService,
+                private inspectionSelection: InspectionSelectionService,
                 private messageService: InfoMessageService,
                 private menuService: RightClickMenuService,
                 private stateService: AppStateService,
@@ -410,7 +412,7 @@ export class JumpTargetService {
                 featureId: featureId
             } as TileFeatureId]);
         } else {
-            await this.mapService.setHoveredFeatures([{
+            await this.inspectionSelection.setHoveredFeatures([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
             }]);
@@ -418,7 +420,7 @@ export class JumpTargetService {
 
         // Center the camera on the feature if a view index was passed.
         if (cameraMoveViewIndex !== undefined) {
-            await this.mapService.focusOnFeature(cameraMoveViewIndex, {
+            await this.inspectionSelection.focusOnFeature(cameraMoveViewIndex, {
                 featureId: featureId,
                 mapTileKey: selectThisFeature.tileId,
             });

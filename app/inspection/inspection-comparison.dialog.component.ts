@@ -2,7 +2,8 @@ import {Component, effect, input, OnDestroy, QueryList, Renderer2, ViewChild, Vi
 import {ContextMenu} from 'primeng/contextmenu';
 import {MenuItem} from 'primeng/api';
 import {Subscription} from 'rxjs';
-import {MapDataService} from '../mapdata/map.service';
+import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
+import {InspectionSelectionService} from './inspection-selection.service';
 import {
     AppStateService,
     DEFAULT_EM_HEIGHT,
@@ -137,7 +138,8 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     private detachPointerUpListener?: () => void;
     private selectionTopicSubscription: Subscription;
 
-    constructor(private mapService: MapDataService,
+    constructor(private tileStream: MapTileStreamService,
+                private inspectionSelection: InspectionSelectionService,
                 private stateService: AppStateService,
                 private dialogStack: DialogStackService,
                 private renderer: Renderer2) {
@@ -147,7 +149,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             this.refreshCompareOptions();
             this.buildColumns(model);
         });
-        this.selectionTopicSubscription = this.mapService.selectionTopic.subscribe(() => {
+        this.selectionTopicSubscription = this.inspectionSelection.selectionTopic.subscribe(() => {
             this.refreshCompareOptions();
             this.refreshColumnSelectionColors();
         });
@@ -214,7 +216,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         const nextModel = this.stateService.createComparisonModel(
             nextBasePanelId,
             nextOtherPanelIds,
-            this.mapService.selectionTopic.getValue()
+            this.inspectionSelection.selectionTopic.getValue()
         );
         if (!nextModel) {
             this.stateService.closeInspectionComparison();
@@ -253,7 +255,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Rebuilds the selectable panel list from the current global inspection selection. */
     refreshCompareOptions() {
-        const options = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue());
+        const options = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
         this.compareOptions = options;
         const model = this.stateService.inspectionComparison;
         if (!model) {
@@ -277,7 +279,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             const nextModel = this.stateService.createComparisonModel(
                 normalizedPanelIds[0],
                 normalizedPanelIds.slice(1),
-                this.mapService.selectionTopic.getValue()
+                this.inspectionSelection.selectionTopic.getValue()
             );
             if (!nextModel) {
                 this.stateService.closeInspectionComparison();
@@ -371,7 +373,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     private async resolveFeatures(entry: InspectionComparisonEntry): Promise<FeatureWrapper[]> {
-        return await this.mapService.loadFeatures(entry.featureIds);
+        return await this.tileStream.loadFeatures(entry.featureIds);
     }
 
     private buildColumnMenuItems(column: ComparisonColumn): MenuItem[] {
@@ -387,7 +389,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                     if (!focusFeature) {
                         return;
                     }
-                    this.mapService.zoomToFeature(undefined, focusFeature);
+                    this.inspectionSelection.zoomToFeature(undefined, focusFeature);
                 }
             },
             {
@@ -422,7 +424,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     private selectionColorForPanel(panelId: number): string {
-        return this.mapService.selectionTopic.getValue().find(panel => panel.id === panelId)?.color ?? '#ffffff';
+        return this.inspectionSelection.selectionTopic.getValue().find(panel => panel.id === panelId)?.color ?? '#ffffff';
     }
 
     private panelIdOrderEquals(a: number[], b: number[]): boolean {

@@ -1,6 +1,6 @@
 import {Component, OnDestroy} from "@angular/core";
 import {Subscription} from "rxjs";
-import {MapDataService} from "../mapdata/map.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
 
@@ -26,7 +26,7 @@ export class InspectionDialogsComponent implements OnDestroy {
 
     private readonly subscriptions = new Subscription();
 
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: InspectionSelectionService,
                 private stateService: AppStateService) {
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             this.undockedPanels = panels.filter(panel => panel.undocked);

@@ -3,7 +3,7 @@ import {combineLatest, map, scan} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import {DiagnosticsSnapshot, ProgressCounter} from './diagnostics.model';
-import {MapDataService} from '../mapdata/map.service';
+import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 
 @Component({
     selector: 'diagnostics-indicator',
@@ -73,7 +73,7 @@ export class DiagnosticsIndicatorComponent {
     );
 
     constructor(private readonly diagnostics: DiagnosticsFacadeService,
-                private readonly mapService: MapDataService) {}
+                private readonly mapService: MapTileStreamService) {}
 
     /** Toggles the diagnostics popover. */
     togglePopover(event: MouseEvent) {
