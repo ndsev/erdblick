@@ -26,6 +26,7 @@ export class SearchResultTile implements RenderableTileLayer {
     tileId: bigint;
     refresh: number;
     priority: boolean;
+    requestOrder: number;
     requested = false;
     completed = false;
     resultCount = 0;
@@ -47,7 +48,8 @@ export class SearchResultTile implements RenderableTileLayer {
         sourceLayerId: string,
         sourceTileId: bigint,
         refresh: number,
-        priority: boolean
+        priority: boolean,
+        requestOrder: number
     ) {
         this.parser = parser;
         this.searchId = searchId;
@@ -61,6 +63,9 @@ export class SearchResultTile implements RenderableTileLayer {
         this.tileId = sourceTileId;
         this.refresh = refresh;
         this.priority = priority;
+        this.requestOrder = Number.isFinite(requestOrder)
+            ? Math.max(0, Math.floor(requestOrder))
+            : FeatureTile.DEFAULT_RENDER_ORDER;
         this.nodeId = "";
         this.layerBlob = new Uint8Array();
         this.stats.set(FeatureTile.statParseTime, []);

@@ -86,6 +86,7 @@ interface SearchResultTileContribution {
     sourceMapId: string;
     sourceLayerId: string;
     sourceTileId: bigint;
+    requestOrder: number;
     resultCount: number;
     resultFields: string[];
     results: FeatureSearchResultEntry[];
@@ -306,8 +307,8 @@ export class FeatureSearchService {
     private applyFeatureSearchDefinition(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
         const previous = session.definition;
         const normalizedColor = this.normalizeHexColor(definition.pinColor);
-        const previousFields = featureSearchResultFields(previous, entry => this.resolveFeatureSearchScope(entry));
-        const nextFields = featureSearchResultFields(definition, entry => this.resolveFeatureSearchScope(entry));
+        const previousFields = featureSearchResultFields(previous, entry => this.searchSchema.resolveSearchScope(entry));
+        const nextFields = featureSearchResultFields(definition, entry => this.searchSchema.resolveSearchScope(entry));
         const selectedLayersChanged = JSON.stringify(previous.selectedMapLayers)
             !== JSON.stringify(definition.selectedMapLayers);
 
@@ -730,17 +731,6 @@ export class FeatureSearchService {
         return session;
     }
 
-    /** Resolves auto scope exactly as the tile stream will resolve it for mapget requests. */
-    private resolveFeatureSearchScope(definition: FeatureSearchStateEntry): "feature" | "attribute" {
-        if (definition.scope === "attribute") {
-            return "attribute";
-        }
-        if (definition.scope === "feature") {
-            return "feature";
-        }
-        return this.searchSchema.getAttributeScopeForQuery(definition.query).length > 0 ? "attribute" : "feature";
-    }
-
     /** Synchronizes the UI/session search state into MapTileStreamService's `/tiles` request data plane. */
     private syncSearchRequestsToMapService(options: {
         forceGenerationIds?: Iterable<string>;
@@ -789,6 +779,7 @@ export class FeatureSearchService {
         session.startTime = Date.now();
         session.endTime = 0;
         session.timeElapsed = this.formatTime(0);
+        session.diagnostics = [];
     }
 
     /** Prepares an existing session to receive result chunks for a newer mapget refresh. */
@@ -837,7 +828,8 @@ export class FeatureSearchService {
             session.definition.query,
             Array.from(session.diagnosticsBlobs)
         );
-        session.diagnostics = messages.slice(0, this.diagnosticsMessageLimit);
+        const executionMessages = Array.isArray(messages) ? messages : [];
+        session.diagnostics = executionMessages.slice(0, this.diagnosticsMessageLimit);
         this.progress.next(session);
     }
 
@@ -917,14 +909,17 @@ export class FeatureSearchService {
             return null;
         }
         const hintValue = candidate?.["hint"];
+        const rawKind = String(candidate?.["type"] ?? "").toLowerCase();
+        const rawHint = typeof hintValue === "string" ? hintValue : "";
+        const enumKind = rawKind === "constant" && rawHint.startsWith("enum ") ? rawHint : "";
         return {
             text: String(candidate?.["text"] ?? ""),
-            kind: String(candidate?.["type"] ?? "").toLowerCase(),
+            kind: enumKind || rawKind,
             begin,
             end,
             query: queryValue,
             source: sourceQuery,
-            hint: typeof hintValue === "string" ? hintValue : ""
+            hint: enumKind ? "" : rawHint
         };
     }
 
@@ -1008,6 +1003,7 @@ export class FeatureSearchService {
             sourceMapId: payload.sourceMapId,
             sourceLayerId: payload.sourceLayerId,
             sourceTileId: payload.sourceTileId,
+            requestOrder: this.nonNegativeNumber(payload.requestOrder, Number.MAX_SAFE_INTEGER),
             resultCount: payload.resultCount,
             resultFields,
             results,
@@ -1117,6 +1113,17 @@ export class FeatureSearchService {
         return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
     }
 
+    /** Sorts streamed result-tile data by the same first-seen tile order used for backend search requests. */
+    private compareSearchResultTileContributions(
+        lhs: SearchResultTileContribution,
+        rhs: SearchResultTileContribution
+    ): number {
+        if (lhs.requestOrder !== rhs.requestOrder) {
+            return lhs.requestOrder - rhs.requestOrder;
+        }
+        return lhs.sourceTileKey.localeCompare(rhs.sourceTileKey);
+    }
+
     /** Returns whether an optional backend index is usable in UI labels and hover feature ids. */
     private hasFiniteIndex(value: unknown): value is number {
         return Number.isFinite(Number(value));
@@ -1154,7 +1161,7 @@ export class FeatureSearchService {
         let totalFeatureCount = 0;
 
         const contributions = Array.from(session.searchResultTilesBySourceKey.values())
-            .sort((lhs, rhs) => lhs.sourceTileKey.localeCompare(rhs.sourceTileKey));
+            .sort((lhs, rhs) => this.compareSearchResultTileContributions(lhs, rhs));
         for (const contribution of contributions) {
             totalFeatureCount += contribution.resultCount;
             nextResults.push(...contribution.results);
@@ -1267,7 +1274,7 @@ export class FeatureSearchService {
     private buildSearchResultPointBuckets(session: FeatureSearchSession): SearchResultPointBucket[] {
         const buckets: SearchResultPointBucket[] = [];
         const contributions = Array.from(session.searchResultTilesBySourceKey.values())
-            .sort((lhs, rhs) => lhs.sourceTileKey.localeCompare(rhs.sourceTileKey));
+            .sort((lhs, rhs) => this.compareSearchResultTileContributions(lhs, rhs));
         for (const contribution of contributions) {
             if (!contribution.points.length) {
                 continue;

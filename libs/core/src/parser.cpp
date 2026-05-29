@@ -268,6 +268,7 @@ struct FeatureSchemaInfo
     std::string featureType;
     std::string mapId;
     std::string layerId;
+    std::shared_ptr<mapget::LayerInfo const> layerInfo;
     std::shared_ptr<mapget::SchemaRegistry const> registry;
     simfil::SchemaId featureSchema = simfil::NoSchemaId;
 };
@@ -458,6 +459,7 @@ std::vector<FeatureSchemaInfo> collectFeatureSchemaScopes(std::map<std::string, 
                     featureType.name_,
                     dataSource.mapId_,
                     layerInfo->layerId_,
+                    layerInfo,
                     registry,
                     featureSchema
                 });
@@ -632,6 +634,7 @@ tl::expected<FeatureScopeAstDebug, simfil::Error> compileFeatureScopeQueryAstDeb
             owner.attribute_.featureType_,
             featureScope.mapId,
             featureScope.layerId,
+            featureScope.layerInfo,
             featureScope.registry,
             owner.attribute_.attributeSchema_,
             featureScope.featureSchema};

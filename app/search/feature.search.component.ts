@@ -15,6 +15,10 @@ import {JumpTargetService} from "./jump.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import type {
+    FeatureSearchAttributeScopeCandidate,
+    FeatureSearchStyleFieldCandidate
+} from "../mapdata/map-runtime.model";
 import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
@@ -208,6 +212,12 @@ interface FeatureSearchStyleRuleDraft {
                                 [disabled]="!searchEnabled()"
                                 (ngModelChange)="onFeatureSearchScopeChange($event)">
                 </p-selectbutton>
+                @if (featureSearchScopeSummary) {
+                    <span class="feature-search-scope-summary"
+                          [title]="featureSearchScopeSummaryTitle">
+                        {{ featureSearchScopeSummary }}
+                    </span>
+                }
             </div>
             <div class="feature-search-layer-control">
                 <span>Map layers</span>
@@ -664,6 +674,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     featureSearchQuery = "";
     featureSearchQueryExpanded = false;
     featureSearchScope: FeatureSearchScope = 'auto';
+    featureSearchScopeSummary = "";
+    featureSearchScopeSummaryTitle = "";
     featureSearchScopeOptions: FeatureSearchScopeOption[] = [
         {label: 'Feature', value: 'feature'},
         {label: 'Attribute', value: 'attribute'},
@@ -742,6 +754,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             this.styleAttributeOptionsSessionSignature = "";
             this.refreshMapLayerOptions();
             if (this.session) {
+                this.refreshFeatureSearchScopeSummary(this.session);
                 this.refreshStyleAttributeOptionsIfNeeded(this.session);
                 this.syncSelectedMapLayersFromSession(this.session);
             }
@@ -806,6 +819,81 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             return this.styleOperatorOptions;
         }
         return this.styleOperatorOptions.filter(option => ["=", "!=", "contains"].includes(option.value));
+    }
+
+    /** Refreshes the compact scope label from the same schema metadata used by the style field picker. */
+    private refreshFeatureSearchScopeSummary(session: FeatureSearchSession): void {
+        this.updateFeatureSearchScopeSummary(session.definition.query, session.definition.scope);
+    }
+
+    /** Updates the scope label for the current query and selected persisted scope mode. */
+    private updateFeatureSearchScopeSummary(query: string, scope: FeatureSearchScope): void {
+        if (scope === "feature") {
+            this.featureSearchScopeSummary = "Feature scope";
+            this.featureSearchScopeSummaryTitle = "Search runs over feature-level fields.";
+            return;
+        }
+
+        const attributeScopes = this.searchSchema.getAttributeScopeForQuery(query);
+        if (attributeScopes.length > 0) {
+            this.featureSearchScopeSummary = this.attributeScopeSummaryLabel(scope, attributeScopes);
+            this.featureSearchScopeSummaryTitle = this.attributeScopeSummaryTitle(attributeScopes);
+            return;
+        }
+
+        if (scope === "attribute") {
+            this.featureSearchScopeSummary = "Attribute scope: all attributes";
+            this.featureSearchScopeSummaryTitle =
+                "No single attribute was inferred from the query; attribute fields from all schema-backed attributes remain available.";
+            return;
+        }
+
+        this.featureSearchScopeSummary = "Auto: feature scope";
+        this.featureSearchScopeSummaryTitle =
+            "No single attribute was inferred from the query; auto scope resolves to feature-level search.";
+    }
+
+    /** Builds the user-facing summary for an inferred attribute scope. */
+    private attributeScopeSummaryLabel(
+        scope: FeatureSearchScope,
+        attributeScopes: FeatureSearchAttributeScopeCandidate[]
+    ): string {
+        const representative = attributeScopes[0];
+        const prefix = scope === "auto" ? "Auto: attribute" : "Attribute";
+        const attributeNames = this.uniqueAttributeScopeNames(attributeScopes);
+        if (attributeNames.length > 1) {
+            const visibleNames = attributeNames.slice(0, 3).join(", ");
+            const remaining = attributeNames.length > 3 ? `, +${attributeNames.length - 3}` : "";
+            return `${prefix}s: ${visibleNames}${remaining} (${attributeScopes.length} scopes)`;
+        }
+
+        const attributeName = this.attributeScopeDisplayName(representative);
+        const contextSuffix = attributeScopes.length > 1
+            ? ` across ${attributeScopes.length} layers`
+            : "";
+        return `${prefix}: ${attributeName}${contextSuffix}`;
+    }
+
+    /** Builds the tooltip with the concrete map/layer contexts behind an inferred attribute scope. */
+    private attributeScopeSummaryTitle(attributeScopes: FeatureSearchAttributeScopeCandidate[]): string {
+        return attributeScopes
+            .map(scope => {
+                const featureType = scope.featureType ? `, feature ${scope.featureType}` : "";
+                return `${this.attributeScopeDisplayName(scope)} in ${scope.mapId}/${scope.layerId}${featureType}`;
+            })
+            .join("\n");
+    }
+
+    /** Formats the attribute and attribute-layer names without inventing display aliases. */
+    private attributeScopeDisplayName(scope: FeatureSearchAttributeScopeCandidate): string {
+        return scope.attrLayerName
+            ? `${scope.attrName} (${scope.attrLayerName})`
+            : scope.attrName;
+    }
+
+    /** Returns sorted distinct attribute names inferred for one query. */
+    private uniqueAttributeScopeNames(attributeScopes: FeatureSearchAttributeScopeCandidate[]): string[] {
+        return Array.from(new Set(attributeScopes.map(scope => scope.attrName).filter(Boolean))).sort();
     }
 
     /** Adds a new style rule to the top of the editor and persists it immediately. */
@@ -1090,22 +1178,36 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         );
         const activeOptions = rawOptions.filter(option => this.isStyleFieldCandidateActive(option.mapId, option.layerId));
         const sourceOptions = activeOptions.length ? activeOptions : rawOptions;
-        const byValue = new Map<string, FeatureSearchStyleOption>();
+        const byValue = new Map<string, {option: FeatureSearchStyleOption, contexts: Set<string>}>();
         for (const option of sourceOptions) {
-            if (!byValue.has(option.path)) {
-                byValue.set(option.path, {
-                    label: option.path,
-                    value: option.path,
-                    mapId: option.mapId,
-                    layerId: option.layerId,
-                    attrName: option.attrName,
-                    featureType: option.featureType,
-                    valueKind: option.valueKind,
-                    enumValues: option.enumValues
-                });
+            let entry = byValue.get(option.path);
+            if (!entry) {
+                entry = {
+                    option: {
+                        label: option.path,
+                        value: option.path,
+                        mapId: option.mapId,
+                        layerId: option.layerId,
+                        attrName: option.attrName,
+                        featureType: option.featureType,
+                        valueKind: option.valueKind,
+                        enumValues: option.enumValues
+                    },
+                    contexts: new Set<string>()
+                };
+                byValue.set(option.path, entry);
+            }
+            const context = this.searchStyleFieldContextLabel(option);
+            if (context) {
+                entry.contexts.add(context);
             }
         }
-        const nextOptions = Array.from(byValue.values()).sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
+        const nextOptions = Array.from(byValue.values())
+            .map(entry => ({
+                ...entry.option,
+                label: this.searchStyleFieldOptionLabel(entry.option.value, entry.contexts)
+            }))
+            .sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
         if (JSON.stringify(nextOptions) !== JSON.stringify(this.styleAttributeOptions)) {
             this.styleAttributeOptions = nextOptions;
         }
@@ -1114,6 +1216,26 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             && this.applyDefaultStyleFieldIfMissing()) {
             this.onStyleRulesChanged();
         }
+    }
+
+    /** Returns the attribute context suffix shown in search-style field pickers. */
+    private searchStyleFieldContextLabel(option: FeatureSearchStyleFieldCandidate): string {
+        if (!option.attrName) {
+            return "";
+        }
+        return option.featureType ? `${option.attrName}/${option.featureType}` : option.attrName;
+    }
+
+    /** Builds a field-picker label that makes multi-attribute scope explicit. */
+    private searchStyleFieldOptionLabel(path: string, contexts: Set<string>): string {
+        if (contexts.size === 0) {
+            return path;
+        }
+        const sortedContexts = Array.from(contexts).sort();
+        if (sortedContexts.length === 1) {
+            return `${path} (${sortedContexts[0]})`;
+        }
+        return `${path} (${sortedContexts.length} scopes)`;
     }
 
     /** Refreshes schema-backed style fields only when the style editor can consume them. */
@@ -1323,6 +1445,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.lastSearchQuery = session.definition.query;
         this.featureSearchScope = session.definition.scope;
         this.syncSelectedMapLayersFromSession(session);
+        this.refreshFeatureSearchScopeSummary(session);
         this.refreshStyleAttributeOptionsIfNeeded(session, false);
         this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
         if ((session.definition.searchStyleRules?.length ?? 0) > 0 && this.applyDefaultStyleFieldIfMissing()) {
@@ -1630,6 +1753,9 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     protected onFeatureSearchScopeChange(scope: FeatureSearchScope): void {
         this.featureSearchScope = scope;
+        if (this.session) {
+            this.updateFeatureSearchScopeSummary(this.session.definition.query, scope);
+        }
         if (this.session && this.searchEnabled() && this.session.definition.scope !== scope) {
             this.styleAttributeOptionsSessionSignature = "";
             this.stateService.patchFeatureSearch(this.session.id, {scope});
@@ -1801,6 +1927,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const results = session.searchResults;
         const traces = session.traceResults;
         const errors = session.errors;
+        this.diagnostics = session.diagnostics;
 
         this.canPauseStopSearch = false;
         if (firstCompletionForRun && this.resultPanelIndex !== 'style') {
@@ -1825,7 +1952,6 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
         this.traces = traces
         this.results = results;
-        this.diagnostics = session.diagnostics;
     }
 
     /**
