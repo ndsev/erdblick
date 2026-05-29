@@ -28,6 +28,14 @@ import {
     SearchHistoryStateEntrySchema,
     serializeSearchStateValue
 } from "./search-history";
+import {
+    createFeatureSearchStateEntry,
+    FeatureSearchStateEntry,
+    FeatureSearchStatePatch,
+    FeatureSearchStateSchema,
+    normalizeFeatureSearchState,
+    serializeFeatureSearchState
+} from "./feature-search-state";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -62,6 +70,8 @@ export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
 export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
 export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
 export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
+export const INSPECTION_DOCK_TAB_ID = 'inspection';
+export const SEARCH_DOCK_TAB_ID = 'search';
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -116,6 +126,7 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
     locked: boolean;
+    focused?: boolean;
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
@@ -139,6 +150,12 @@ export interface AppDialogLayout {
     position: AppDialogPosition;
     size: AppDialogSize;
     open?: boolean;
+    docked?: boolean;
+    dockTab?: string;
+    dockOrder?: number;
+    panelSize?: AppDialogSize;
+    panelCollapsed?: boolean;
+    panelExpanded?: boolean;
 }
 
 /** Persisted layout for floating inspection dialogs, including dock preference. */
@@ -385,7 +402,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    // 2~0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
+    // 2~0f~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 1~0~sourcedata:map:layer:tile~address~...features...~size
     // 0~1~...
     readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
@@ -394,7 +411,7 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
-                let s = `${state.id}~${state.locked ? 1 : 0}~`;
+                let s = `${state.id}~${state.locked ? 1 : 0}${state.focused ? 'f' : ''}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
@@ -416,7 +433,9 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
                 const id = Number(parts.shift()!);
-                const lockState = parts.shift() === "1";
+                const panelFlags = parts.shift()!;
+                const lockState = panelFlags.startsWith("1");
+                const focused = panelFlags.includes("f");
                 const undocked = parts.pop()! === "1";
                 const colorToken = parts.pop()!;
                 const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
@@ -428,6 +447,7 @@ export class AppStateService implements OnDestroy {
                     id: id,
                     features: [],
                     locked: lockState || !undocked,
+                    focused: focused || undefined,
                     size: size as [number, number],
                     color: color,
                     undocked: undocked
@@ -697,6 +717,15 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
+    readonly featureSearchState = this.createState<FeatureSearchStateEntry[]>({
+        name: 'featureSearchState',
+        defaultValue: [],
+        schema: FeatureSearchStateSchema,
+        toStorage: (value: FeatureSearchStateEntry[]) => serializeFeatureSearchState(value),
+        fromStorage: (payload: any): FeatureSearchStateEntry[] => normalizeFeatureSearchState(payload),
+        snapshotPersist: false
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -728,6 +757,12 @@ export class AppStateService implements OnDestroy {
         name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly dockActiveTabState = this.createState<string>({
+        name: 'dockActiveTabState',
+        defaultValue: INSPECTION_DOCK_TAB_ID,
+        schema: z.string()
     });
 
     readonly dockAutoCollapse = this.createState<boolean>({
@@ -796,7 +831,16 @@ export class AppStateService implements OnDestroy {
             }),
             open: Boolish.optional(),
             panelId: z.coerce.number().optional(),
-            slot: z.coerce.number().optional()
+            slot: z.coerce.number().optional(),
+            docked: Boolish.optional(),
+            dockTab: z.string().optional(),
+            dockOrder: z.coerce.number().optional(),
+            panelSize: z.object({
+                width: z.coerce.number().positive(),
+                height: z.coerce.number().positive()
+            }).optional(),
+            panelCollapsed: Boolish.optional(),
+            panelExpanded: Boolish.optional()
         }))
     });
 
@@ -855,6 +899,7 @@ export class AppStateService implements OnDestroy {
 
         this.selectionState.subscribe(panels => {
             this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+            this.sanitizeFocusedInspectionPanel(panels);
         });
     }
 
@@ -1667,6 +1712,12 @@ export class AppStateService implements OnDestroy {
     set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
     set focusedView(val: number) {this.focusedViewState.next(val);};
+    get focusedInspectionPanelId() {
+        return this.selectionState.getValue().find(panel => panel.focused)?.id;
+    }
+    set focusedInspectionPanelId(val: number | undefined) {
+        this.setFocusedInspectionPanel(val);
+    };
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
@@ -1687,6 +1738,8 @@ export class AppStateService implements OnDestroy {
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
+    get dockActiveTab() {return this.dockActiveTabState.getValue();}
+    set dockActiveTab(val: string) {this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID);};
     get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
     set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
@@ -1706,6 +1759,8 @@ export class AppStateService implements OnDestroy {
     };
     get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
+    get featureSearches() {return this.featureSearchState.getValue();}
+    set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -1880,22 +1935,6 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
-    /*
-    ## Current State
-
-      View Click Event -> MapDataService -> InspectionService -> InspectionPanel
-                                                              -> AppStateService
-
-      (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-                                                                         -> AppStateService
-
-    ## New Goal State
-
-    // View Click Event -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //         (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-
-     */
     /** Updates the current selection, reusing or creating inspection panels as needed. */
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
@@ -1904,6 +1943,9 @@ export class AppStateService implements OnDestroy {
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
+        const duplicateFeaturePanelId = !isSourceDataSelection && featureSelection.length
+            ? this.findPanelIdContainingFeatureSelection(allPanels, featureSelection)
+            : undefined;
         if (!isSourceDataSelection && id === undefined && featureSelection.length > 0) {
             this.isDockOpen = true;
         }
@@ -1923,6 +1965,7 @@ export class AppStateService implements OnDestroy {
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
             if (!featureSelection.length && !isClearSourceDataRequest) {
+                this.setFocusedInspectionPanel(duplicateFeaturePanelId);
                 this._replaceUrl = true;
                 return;
             }
@@ -2012,6 +2055,7 @@ export class AppStateService implements OnDestroy {
                 undocked: isSourceDataSelection
             });
             this.selectionState.next(allPanels);
+            this.setFocusedInspectionPanel(newId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return newId;
         }
@@ -2032,6 +2076,7 @@ export class AppStateService implements OnDestroy {
                 allPanels[panelIndex].sourceData = undefined;
             }
             this.selectionState.next(allPanels);
+            this.setFocusedInspectionPanel(targetPanelId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return targetPanelId;
         }
@@ -2075,8 +2120,41 @@ export class AppStateService implements OnDestroy {
         ];
         if (!undocked) {
             allPanels[index].locked = true;
+            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+            this.isDockOpen = true;
         }
         this.selectionState.next(allPanels);
+        this.setFocusedInspectionPanel(id);
+    }
+
+    /** Marks one inspection panel as the active target for inspection-level shortcuts. */
+    setFocusedInspectionPanel(id: number | undefined): void {
+        const allPanels = this.selectionState.getValue();
+        const fallbackId = allPanels.length ? allPanels[allPanels.length - 1].id : undefined;
+        const nextId = id !== undefined && allPanels.some(panel => panel.id === id)
+            ? id
+            : fallbackId;
+        let changed = false;
+        for (const panel of allPanels) {
+            const nextFocused = panel.id === nextId;
+            if ((panel.focused ?? false) === nextFocused) {
+                continue;
+            }
+            changed = true;
+            if (nextFocused) {
+                panel.focused = true;
+            } else {
+                delete panel.focused;
+            }
+        }
+        if (changed) {
+            this.selectionState.next(allPanels);
+        }
+    }
+
+    /** Returns whether the supplied inspection panel is the active shortcut target. */
+    isInspectionPanelFocused(id: number): boolean {
+        return this.focusedInspectionPanelId === id;
     }
 
     /** Returns the persisted layout for a dialog if one exists. */
@@ -2121,6 +2199,124 @@ export class AppStateService implements OnDestroy {
     /** Convenience helper that closes one persisted dialog. */
     closeDialog(id: string): void {
         this.setDialogOpen(id, false);
+    }
+
+    /** Returns whether a persisted surface is currently represented in the dock. */
+    isSurfaceDocked(id: string): boolean {
+        return this.getDialogLayout(id)?.docked ?? false;
+    }
+
+    /** Switches a generic surface between docked and floating representations. */
+    setSurfaceDocked(id: string, docked: boolean, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
+        const current = this.getDialogLayout(id);
+        const fallbackSize = {
+            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+        };
+        const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
+        this.upsertDialogLayout(id, {
+            position: current?.position ?? {left: 0, top: 0},
+            size: current?.size ?? fallbackSize,
+            open: current?.open ?? false,
+            docked,
+            dockTab,
+            ...(nextDockOrder !== undefined ? {dockOrder: nextDockOrder} : {})
+        });
+        if (docked) {
+            this.dockActiveTab = dockTab;
+            this.isDockOpen = true;
+        }
+    }
+
+    /** Toggles the docked representation for a generic surface. */
+    toggleSurfaceDocked(id: string, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
+        this.setSurfaceDocked(id, !this.isSurfaceDocked(id), dockTab);
+    }
+
+    /** Persists generic docked-panel metadata without changing floating dialog geometry. */
+    setPanelLayout(id: string, layout: Partial<Pick<AppDialogLayout, 'panelSize' | 'panelCollapsed' | 'panelExpanded' | 'dockOrder'>>): void {
+        const current = this.getDialogLayout(id);
+        if (!current) {
+            this.upsertDialogLayout(id, {
+                position: {left: 0, top: 0},
+                size: {
+                    width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+                    height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+                },
+                ...layout
+            });
+            return;
+        }
+        this.upsertDialogLayout(id, {
+            ...current,
+            ...layout
+        });
+    }
+
+    /** Returns whether any generic surface is docked, optionally filtered by tab id. */
+    hasDockedSurface(tabId?: string): boolean {
+        return Object.values(this.dialogLayoutsState.getValue()).some(layout =>
+            (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
+        );
+    }
+
+    /** Reorders generic docked surfaces within one dock tab. */
+    reorderDockedSurfaces(tabId: string, displayOrder: string[]): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const dockedIds = Object.entries(currentLayouts)
+            .filter(([, layout]) => (layout.docked ?? false) && layout.dockTab === tabId)
+            .map(([id]) => id);
+        if (dockedIds.length < 2) {
+            return;
+        }
+        const dockedIdSet = new Set(dockedIds);
+        const normalizedOrder = displayOrder.filter(id => dockedIdSet.has(id));
+        for (const id of dockedIds) {
+            if (!normalizedOrder.includes(id)) {
+                normalizedOrder.push(id);
+            }
+        }
+        let changed = false;
+        const nextLayouts = {...currentLayouts};
+        normalizedOrder.forEach((id, index) => {
+            const layout = currentLayouts[id];
+            if (!layout || layout.dockOrder === index) {
+                return;
+            }
+            nextLayouts[id] = {
+                ...layout,
+                dockOrder: index
+            };
+            changed = true;
+        });
+        if (changed) {
+            this.dialogLayoutsState.next(nextLayouts);
+        }
+    }
+
+    /** Stores the next floating position for a generic surface. */
+    setDialogPosition(id: string, position: AppDialogPosition): void {
+        const current = this.getDialogLayout(id);
+        const fallbackSize = {
+            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+        };
+        this.upsertDialogLayout(id, {
+            position,
+            size: current?.size ?? fallbackSize,
+            open: current?.open ?? false,
+            docked: current?.docked,
+            dockTab: current?.dockTab,
+            ...(current?.dockOrder !== undefined ? {dockOrder: current.dockOrder} : {})
+        });
+    }
+
+    private nextSurfaceDockOrder(dockTab: string): number {
+        const orders = Object.values(this.dialogLayoutsState.getValue())
+            .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)
+            .map(layout => layout.dockOrder)
+            .filter((order): order is number => typeof order === 'number' && Number.isFinite(order));
+        return orders.length ? Math.max(...orders) + 1 : 0;
     }
 
     /** Returns or creates the persisted layout record for a dialog. */
@@ -2174,6 +2370,19 @@ export class AppStateService implements OnDestroy {
             ...current,
             open
         });
+    }
+
+    /** Removes one persisted generic dialog layout and any pending open marker for it. */
+    removeDialogLayout(id: string): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        if (!(id in currentLayouts)) {
+            this.pendingOpenDialogs.delete(id);
+            return;
+        }
+        const nextLayouts = {...currentLayouts};
+        delete nextLayouts[id];
+        this.dialogLayoutsState.next(nextLayouts);
+        this.pendingOpenDialogs.delete(id);
     }
 
     /** Returns the floating layout record for one inspection panel, if present. */
@@ -2326,6 +2535,43 @@ export class AppStateService implements OnDestroy {
         allPanels.splice(index, 1);
         this.selectionState.next(allPanels);
         this.sanitizeInspectionComparisonForSelection(allPanels);
+    }
+
+    /** Finds the first regular inspection panel containing any of the requested feature identities. */
+    private findPanelIdContainingFeatureSelection(
+        panels: InspectionPanelModel<TileFeatureId>[],
+        features: TileFeatureId[]
+    ): number | undefined {
+        return panels.find(panel =>
+            panel.sourceData === undefined &&
+            panel.features.some(existing =>
+                features.some(feature =>
+                    feature.featureId === existing.featureId &&
+                    feature.mapTileKey === existing.mapTileKey
+                )
+            )
+        )?.id;
+    }
+
+    /** Keeps the focused inspection panel id aligned with the current selection set. */
+    private sanitizeFocusedInspectionPanel(panels: InspectionPanelModel<TileFeatureId>[]): void {
+        let focusedSeen = false;
+        const fallbackId = panels.length ? panels[panels.length - 1].id : undefined;
+        for (const panel of panels) {
+            if (panel.focused && !focusedSeen) {
+                focusedSeen = true;
+                continue;
+            }
+            if (panel.focused) {
+                delete panel.focused;
+            }
+        }
+        if (!focusedSeen && fallbackId !== undefined) {
+            const fallbackPanel = panels.find(panel => panel.id === fallbackId);
+            if (fallbackPanel) {
+                fallbackPanel.focused = true;
+            }
+        }
     }
 
     /** Returns whether two inspection-panel orderings are identical by panel id. */
@@ -2518,6 +2764,42 @@ export class AppStateService implements OnDestroy {
         this.lastSearchHistoryEntryState.next(trimmed);
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
+    }
+
+    /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
+    addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
+        const entry = createFeatureSearchStateEntry(value);
+        this.featureSearchState.next([...this.featureSearches, entry]);
+        return entry;
+    }
+
+    /** Patches one persisted feature-search definition. */
+    patchFeatureSearch(id: string, patch: FeatureSearchStatePatch): FeatureSearchStateEntry | undefined {
+        let updated: FeatureSearchStateEntry | undefined;
+        const next = this.featureSearches.map(entry => {
+            if (entry.id !== id) {
+                return entry;
+            }
+            updated = createFeatureSearchStateEntry({
+                ...entry,
+                ...patch,
+                id: entry.id,
+                query: patch.query ?? entry.query
+            });
+            return updated;
+        });
+        if (updated) {
+            this.featureSearchState.next(next);
+        }
+        return updated;
+    }
+
+    /** Removes one persisted feature-search definition. */
+    removeFeatureSearch(id: string): void {
+        const next = this.featureSearches.filter(entry => entry.id !== id);
+        if (next.length !== this.featureSearches.length) {
+            this.featureSearchState.next(next);
+        }
     }
 
     /** Rewrites search state during legacy migration without saving another history row. */

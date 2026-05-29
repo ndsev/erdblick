@@ -368,6 +368,42 @@ bool validateNestedRule(
     return validateStyleRuleYaml(node, sourceRuleIndex, rulePath + "." + property, source, report);
 }
 
+bool validateBranchRules(
+    YAML::Node const& parent,
+    std::string const& property,
+    uint32_t sourceRuleIndex,
+    std::string const& rulePath,
+    std::string const& source,
+    StyleValidationReport& report)
+{
+    auto branch = parent[property];
+    if (!branch.IsDefined()) {
+        return true;
+    }
+    if (!branch.IsSequence() || branch.size() == 0) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            property + " must be a non-empty sequence.",
+            locationForNode(branch));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = property;
+        return false;
+    }
+
+    bool ok = true;
+    uint32_t nestedIndex = 0;
+    for (auto const& nested : branch) {
+        auto nestedPath = rulePath + "." + property + "[" + std::to_string(nestedIndex++) + "]";
+        if (!validateStyleRuleYaml(nested, sourceRuleIndex, nestedPath, source, report)) {
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 }
 
 JsValue StyleSourceLocation::toJsValue() const
@@ -595,6 +631,7 @@ bool validateStyleRuleYaml(
     markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "attribute-validity-geom", {"any", "required", "none"}, rulePath, report, sourceRuleIndex));
+    markInvalid(validateEnumValue(ruleYaml, "offset-type", {"miter"}, rulePath, report, sourceRuleIndex));
 
     if (ruleYaml["stage"].IsDefined()) {
         int stage = 0;
@@ -623,6 +660,7 @@ bool validateStyleRuleYaml(
     }
 
     markInvalid(validateNumericRange(ruleYaml, "opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
+    markInvalid(readScalar<double>(ruleYaml, "lateral-offset", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "type", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "relation-type", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "attribute-type", rulePath, report, sourceRuleIndex));
@@ -653,22 +691,20 @@ bool validateStyleRuleYaml(
     markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "label-text-expression", false, false, rulePath, source, report, sourceRuleIndex));
 
-    if (auto firstOf = ruleYaml["first-of"]; firstOf.IsDefined()) {
-        if (!firstOf.IsSequence()) {
-            auto& issue = report.addIssue("error", "schema", "rule-skipped", "first-of must be a sequence.", locationForNode(firstOf));
-            issue.ruleIndex = sourceRuleIndex;
-            issue.rulePath = rulePath;
-            issue.property = "first-of";
-            ok = false;
-        } else {
-            uint32_t nestedIndex = 0;
-            for (auto const& nested : firstOf) {
-                auto nestedPath = rulePath + ".first-of[" + std::to_string(nestedIndex++) + "]";
-                if (!validateStyleRuleYaml(nested, sourceRuleIndex, nestedPath, source, report)) {
-                    ok = false;
-                }
-            }
-        }
+    if (ruleYaml["first-of"].IsDefined() && ruleYaml["all-of"].IsDefined()) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            "first-of and all-of cannot be defined on the same rule.",
+            locationForNode(ruleYaml["all-of"]));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "all-of";
+        ok = false;
+    } else {
+        markInvalid(validateBranchRules(ruleYaml, "first-of", sourceRuleIndex, rulePath, source, report));
+        markInvalid(validateBranchRules(ruleYaml, "all-of", sourceRuleIndex, rulePath, source, report));
     }
 
     markInvalid(validateNestedRule(ruleYaml, "relation-line-end-markers", sourceRuleIndex, rulePath, source, report));

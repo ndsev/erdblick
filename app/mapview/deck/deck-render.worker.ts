@@ -1,22 +1,25 @@
-import {initializeLibrary, coreLib, type ErdblickCore_, uint8ArrayToWasm} from "../../integrations/wasm";
+import {coreLib, type ErdblickCore_, initializeLibrary, uint8ArrayToWasm} from "../../integrations/wasm";
 import {
     DeckFeatureLayerVisualization,
+    DeckTileSearchResultLayerVisualization,
     FeatureLayerStyle,
     HighlightMode,
     RuleFidelity,
     TileFeatureLayer,
-    TileLayerParser
+    TileLayerParser,
+    TileSearchResultLayer
 } from "../../../build/libs/core/erdblick-core";
 import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
     DeckGeometryBucketBuffers,
-    DeckGeometryOutputMode,
     DeckLowFiBundleBuffers,
+    DeckSearchTileRenderTask,
     DeckTileRenderResult,
     DeckTileRenderTask,
     DeckVisualizationBufferResult,
+    DeckWorkerDataSourceInfoMessage,
     DeckWorkerInboundMessage,
     DeckWorkerReadyMessage
 } from "./deck-render.worker.protocol";
@@ -25,21 +28,28 @@ import {StyleValidationIssue} from "../../styledata/style-validation.model";
 const styleTextEncoder = new TextEncoder();
 /** Parser cache keyed by datasource metadata so workers do not rebuild parser state for every tile. */
 const parserCache = new Map<string, TileLayerParser>();
+/** Datasource metadata preloaded by map id before tile tasks use it. */
+const dataSourceInfoByMapName = new Map<string, Uint8Array>();
+/** Per-map generation number used to invalidate parser caches when datasource metadata changes. */
+const dataSourceInfoRevisionByMapName = new Map<string, number>();
 /** Style cache keyed by raw YAML source so repeated renders reuse parsed wasm style objects. */
 const styleCache = new Map<string, FeatureLayerStyle>();
 
 /** Strongly typed handle for the wasm deck visualization constructor exposed after init. */
 type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
+/** Strongly typed handle for the wasm search-result visualization constructor exposed after init. */
+type DeckTileSearchResultLayerVisualizationCtor = ErdblickCore_["DeckTileSearchResultLayerVisualization"];
 /** Strongly typed handle for the wasm `RuleFidelity` enum object. */
 type RuleFidelityEnum = ErdblickCore_["RuleFidelity"];
-/** Deck visualization variant that exposes the packed binary render result to the worker. */
-type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
-    renderResult(): DeckVisualizationBufferResult;
-};
 
 /** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
 function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
     return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
+}
+
+/** Returns the wasm constructor for deck search-result visualizations after the core library is initialized. */
+function deckTileSearchResultLayerVisualizationCtor(): DeckTileSearchResultLayerVisualizationCtor {
+    return coreLib.DeckTileSearchResultLayerVisualization as DeckTileSearchResultLayerVisualizationCtor;
 }
 
 /** Returns the wasm fidelity enum used by the deck render worker. */
@@ -59,10 +69,10 @@ function blobSignature(blob: Uint8Array): string {
 /** Builds the parser-cache key from the datasource node and parser-context blobs. */
 function parserCacheKey(task: DeckTileRenderTask): string {
     return [
-        task.nodeId,
         task.mapName,
+        task.nodeId,
         blobSignature(task.fieldDictBlob),
-        blobSignature(task.dataSourceInfoBlob)
+        dataSourceInfoRevisionByMapName.get(task.mapName) ?? 0
     ].join("|");
 }
 
@@ -73,11 +83,37 @@ function getOrCreateParser(task: DeckTileRenderTask): TileLayerParser {
     if (cached) {
         return cached;
     }
+    const dataSourceInfoBlob = dataSourceInfoByMapName.get(task.mapName);
+    if (!dataSourceInfoBlob) {
+        throw new Error(`Deck render worker has no datasource info for map '${task.mapName}'.`);
+    }
     const parser = new coreLib.TileLayerParser();
-    uint8ArrayToWasm((data) => parser.setDataSourceInfo(data), task.dataSourceInfoBlob);
+    uint8ArrayToWasm((data) => parser.setDataSourceInfo(data), dataSourceInfoBlob);
     uint8ArrayToWasm((data) => parser.addFieldDict(data), task.fieldDictBlob);
     parserCache.set(key, parser);
     return parser;
+}
+
+/** Drops parser cache entries for one map when its datasource metadata is refreshed. */
+function clearParserCacheForMap(mapName: string): void {
+    const keyPrefix = `${mapName}|`;
+    for (const [key, parser] of parserCache.entries()) {
+        if (!key.startsWith(keyPrefix)) {
+            continue;
+        }
+        (parser as any).delete?.();
+        parserCache.delete(key);
+    }
+}
+
+/** Stores map-level datasource metadata sent separately from tile render tasks. */
+function cacheDataSourceInfo(message: DeckWorkerDataSourceInfoMessage): void {
+    dataSourceInfoByMapName.set(message.mapName, message.dataSourceInfoBlob);
+    dataSourceInfoRevisionByMapName.set(
+        message.mapName,
+        (dataSourceInfoRevisionByMapName.get(message.mapName) ?? 0) + 1
+    );
+    clearParserCacheForMap(message.mapName);
 }
 
 /** Reuses parsed `FeatureLayerStyle` objects keyed by the raw style source text. */
@@ -215,10 +251,8 @@ function readRuntimeStyleIssues(
     deckVisu: DeckFeatureLayerVisualization,
     task: DeckTileRenderTask
 ): StyleValidationIssue[] {
-    const rawIssues = typeof (deckVisu as any).runtimeStyleIssues === "function"
-        ? ((deckVisu as any).runtimeStyleIssues() as StyleValidationIssue[])
-        : [];
-    return (rawIssues ?? []).map(issue => ({
+    const rawIssues = (deckVisu.runtimeStyleIssues() as StyleValidationIssue[]) ?? [];
+    return rawIssues.map(issue => ({
         ...issue,
         source: {...(issue.source ?? {}), ...task.styleSourceRef},
         runtimeContext: {
@@ -236,7 +270,7 @@ function readRenderResult(
     deckVisu: DeckFeatureLayerVisualization,
     task: DeckTileRenderTask
 ): DeckVisualizationBufferResult {
-    const renderResult = (deckVisu as DeckFeatureLayerVisualizationWithRenderResult).renderResult();
+    const renderResult = deckVisu.renderResult() as DeckVisualizationBufferResult;
     return {
         ...renderResult,
         styleIssues: readRuntimeStyleIssues(deckVisu, task)
@@ -325,6 +359,55 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     }
 }
 
+/** Executes one search-result tile render inside the worker and returns deck-ready buffers. */
+function processSearchTileRenderTask(task: DeckSearchTileRenderTask): DeckTileRenderResult {
+    const totalStart = performance.now();
+    let searchLayer: TileSearchResultLayer | null = null;
+    let deckVisu: DeckTileSearchResultLayerVisualization | null = null;
+    try {
+        const parser = getOrCreateParser({
+            mapName: task.mapName,
+            nodeId: task.nodeId,
+            fieldDictBlob: task.fieldDictBlob
+        } as DeckTileRenderTask);
+        const deserializeStart = performance.now();
+        searchLayer = uint8ArrayToWasm((data) => parser.readTileSearchResultLayer(data), task.searchResultLayerBlob) as
+            TileSearchResultLayer | null;
+        const deserializeMs = performance.now() - deserializeStart;
+        if (!searchLayer) {
+            throw new Error("Worker render requested with an invalid search-result layer.");
+        }
+
+        const renderStart = performance.now();
+        const deckSearchCtor = deckTileSearchResultLayerVisualizationCtor();
+        deckVisu = new deckSearchCtor(
+            task.viewIndex,
+            task.tileKey,
+            task.styleSpecJson
+        );
+        deckVisu.addTileSearchResultLayer(searchLayer);
+        deckVisu.run();
+        const renderResult = deckVisu.renderResult() as DeckVisualizationBufferResult;
+        const renderMs = performance.now() - renderStart;
+
+        return {
+            type: "DeckTileRenderResult",
+            taskId: task.taskId,
+            tileKey: task.tileKey,
+            vertexCount: Math.max(0, Math.floor(Number(deckVisu.vertexCount()))),
+            ...renderResult,
+            timings: {
+                deserializeMs,
+                renderMs,
+                totalMs: performance.now() - totalStart
+            }
+        };
+    } finally {
+        deckVisu?.delete();
+        searchLayer?.delete();
+    }
+}
+
 /** Creates empty geometry buffers used in the worker error path. */
 function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
     return {
@@ -383,7 +466,8 @@ function emptyResult(): Omit<DeckTileRenderResult, "type" | "taskId" | "tileKey"
         vertexCount: 0,
         coordinateOrigin: new Float64Array(),
         lowFiBundles: [] as DeckLowFiBundleBuffers[],
-        mergedPointFeatures: {} as Record<string, any[]>
+        mergedPointFeatures: {} as Record<string, any[]>,
+        resultFeatureIds: []
     };
 }
 
@@ -395,7 +479,7 @@ function toErrorMessage(error: unknown): string {
     return String(error);
 }
 
-/** Worker entry point: initialize on handshake, otherwise render one tile task and transfer its buffers. */
+/** Worker entry point for init, datasource-cache updates, and tile render tasks. */
 addEventListener("message", async ({data}) => {
     const message = data as DeckWorkerInboundMessage;
 
@@ -406,12 +490,18 @@ addEventListener("message", async ({data}) => {
         } as DeckWorkerReadyMessage);
         return;
     }
+    if (message.type === "DeckWorkerDataSourceInfo") {
+        cacheDataSourceInfo(message);
+        return;
+    }
 
-    const task = message as DeckTileRenderTask;
+    const task = message as DeckTileRenderTask | DeckSearchTileRenderTask;
     try {
         // `initializeLibrary()` is idempotent; awaiting it here keeps the worker bootstrap simple.
         await initializeLibrary();
-        const result = processTileRenderTask(task);
+        const result = task.type === "DeckSearchTileRenderTask"
+            ? processSearchTileRenderTask(task)
+            : processTileRenderTask(task);
         postMessage(result, transferVisualizationResult(result));
     } catch (error) {
         const failure: DeckTileRenderResult = {

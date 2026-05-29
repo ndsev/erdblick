@@ -15,7 +15,7 @@ import {toObservable} from "@angular/core/rxjs-interop";
 import {Subscription} from "rxjs";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "../shared/info.service";
-import {MapDataService} from "../mapdata/map.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
@@ -260,7 +260,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     constructor(private cdr: ChangeDetectorRef,
                 private clipboardService: ClipboardService,
-                public mapService: MapDataService,
+                public mapService: InspectionSelectionService,
                 private jumpService: JumpTargetService,
                 private stateService: AppStateService,
                 private messageService: InfoMessageService) {

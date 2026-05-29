@@ -2,6 +2,7 @@
 
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
+#include "mapget/model/searchresultlayer.h"
 #include "interop/js-object.h"
 #include "buffer.h"
 #include "mapget/model/sourcedata.h"
@@ -153,6 +154,55 @@ struct TileSourceDataLayer
 
     /** Shared pointer to the underlying `mapget::TileSourceDataLayer`. */
     std::shared_ptr<mapget::TileSourceDataLayer> model_;
+};
+
+/** Wrapper class around the mapget `TileSearchResultLayer` smart pointer. */
+struct TileSearchResultLayer
+{
+    /** Constructor accepting a shared pointer to the original `TileSearchResultLayer` class. */
+    TileSearchResultLayer(std::shared_ptr<mapget::TileSearchResultLayer> self);
+
+    /** Retrieves the ID of the source tile as a string. */
+    std::string id() const;
+
+    /** Retrieves the source node id. */
+    std::string nodeId() const;
+
+    /** Retrieves the source map id. */
+    std::string mapId() const;
+
+    /** Retrieves the source layer id. */
+    std::string layerId() const;
+
+    /** Retrieves the source tile id. */
+    uint64_t tileId() const;
+
+    /** Retrieves the staged-loading index of the source feature tile. */
+    uint32_t stage() const;
+
+    /** Number of search result roots. */
+    uint32_t numResults() const;
+
+    /** Result field expressions aligned with every result values array. */
+    NativeJsValue resultFields() const;
+
+    /** Layer metadata such as search id, refresh, traces, and result count. */
+    NativeJsValue info() const;
+
+    /** Compact entries consumed by the TypeScript search UI and low-fi marker path. */
+    NativeJsValue resultEntries() const;
+
+    /** JSON representation for diagnostics and tests. */
+    std::string toJson() const;
+
+    /** Copy serialized SIMFIL diagnostics into a JS-visible byte buffer. */
+    bool copyDiagnostics(SharedUint8Array& output) const;
+
+    /** Release the wrapped smart pointer. */
+    ~TileSearchResultLayer();
+
+    /** Shared pointer to the underlying `mapget::TileSearchResultLayer`. */
+    mapget::TileSearchResultLayer::Ptr model_;
 };
 
 } // namespace erdblick

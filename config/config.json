@@ -1,6 +1,40 @@
 {
+  "extensionModules": {
+    "jumpTargets": "nds_jump_plugin",
+    "distribVersions": "distribution_versions"
+  },
+  "surveys": [
+    {
+      "id": "tooling-days-2026",
+      "start": "2026-01-01",
+      "end": "2026-06-09",
+      "emoji": "🚀",
+      "link": "https://nds.to/tooling-days2026",
+      "linkHtml": "Let's meet @ <b>NDS Tooling Days&nbsp;2026</b><br><small>Learn|Connect|Build - June 10th-11th - Gröbenzell</small>",
+      "background": "indigo"
+    }
+  ],
   "styles": [
-    {"id":  "Default Style", "url": "default-style.yaml"}
+    {"url": "nds_live_display.yaml"},
+    {"url": "nds_live_drivepath.yaml"},
+    {"url": "nds_live_lanes.yaml"},
+    {"url": "nds_live_roadsurface.yaml"},
+    {"url": "nds_live_localization.yaml"},
+    {"url": "nds_live_pois.yaml"},
+    {"url": "nds_live_roads.yaml"},
+    {"url": "nds_classic_bmd.yaml"},
+       {"url": "nds_classic_landmarks.yaml"},
+       {"url": "nds_classic_lane.yaml"},
+       {"url": "nds_classic_poi.yaml"},
+       {"url": "nds_classic_routing.yaml"},
+    {"url": "geojson.yaml"},
+    {"url": "attributes.yaml"},
+    {"url": "highlights.yaml" },
+    {"url": "custom_enhancements.yaml"},
+    {"url": "generic.yaml"},
+    {"url": "devsrc_buildings.yaml"},
+    {"url": "devsrc_intersections.yaml"},
+    {"url": "devsrc_roads.yaml"}
   ],
   "backgroundLayers": [
     {
@@ -24,7 +58,7 @@
       "minZoom": 0,
       "maxZoom": 19,
       "tileSize": 256
-    }
-  ],
-  "defaultBackgroundLayerId": "world-overview"
+      }
+    ],
+    "defaultBackgroundLayerId": "world-overview"
 }

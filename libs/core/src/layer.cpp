@@ -1,8 +1,11 @@
 #include "layer.h"
 
+#include "geo/point-conversion.h"
+#include "geometry.h"
 #include "mapget/log.h"
 #include "mapget/model/feature.h"
 #include <iostream>
+#include <sstream>
 
 namespace
 {
@@ -13,6 +16,45 @@ auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
     if (auto decoded = value.decodeBigEndianI64())
         return std::to_string(*decoded);
     return "0x" + value.toHex(false);
+}
+
+/** Convert nlohmann JSON into the small JS value helper used by embind-facing APIs. */
+auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
+{
+    using erdblick::JsValue;
+    if (json.is_null()) {
+        return JsValue();
+    }
+    if (json.is_boolean()) {
+        return JsValue(json.get<bool>());
+    }
+    if (json.is_number_integer()) {
+        return JsValue(static_cast<double>(json.get<int64_t>()));
+    }
+    if (json.is_number_unsigned()) {
+        return JsValue(static_cast<double>(json.get<uint64_t>()));
+    }
+    if (json.is_number_float()) {
+        return JsValue(json.get<double>());
+    }
+    if (json.is_string()) {
+        return JsValue(json.get<std::string>());
+    }
+    if (json.is_array()) {
+        auto result = JsValue::List();
+        for (auto const& item : json) {
+            result.push(jsonToJsValue(item));
+        }
+        return result;
+    }
+    if (json.is_object()) {
+        auto result = JsValue::Dict();
+        for (auto const& [key, value] : json.items()) {
+            result.set(key, jsonToJsValue(value));
+        }
+        return result;
+    }
+    return JsValue();
 }
 
 /** Returns the last GLB attachment found along the staged overlay chain, if any. */
@@ -27,6 +69,53 @@ auto findGlbAttachment(std::shared_ptr<mapget::TileFeatureLayer> const& layer) -
         current = current->overlay();
     }
     return attachment;
+}
+
+/** Pick a representative WGS84 center for copied search-result geometry. */
+auto searchResultGeometryCenter(mapget::model_ptr<mapget::SearchResult> const& result) -> mapget::Point
+{
+    if (!result) {
+        return {};
+    }
+    auto geometryCollection = result->geometry();
+    if (!geometryCollection) {
+        return {};
+    }
+
+    mapget::model_ptr<mapget::Geometry> geometry;
+    geometryCollection->forEachGeometryAtPreferredStage(
+        std::nullopt,
+        [&geometry](auto&& candidate)
+        {
+            geometry = candidate;
+            return false;
+        });
+    if (!geometry) {
+        geometryCollection->forEachGeometry(
+            [&geometry](auto&& candidate)
+            {
+                geometry = candidate;
+                return false;
+            });
+    }
+    if (!geometry) {
+        return {};
+    }
+
+    switch (geometry->geomType()) {
+    case mapget::GeomType::AABB: {
+        auto const origin = geometry->aabbOrigin();
+        auto const size = geometry->aabbSize();
+        return {origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
+    }
+    case mapget::GeomType::GltfNodeIndex: {
+        auto const origin = geometry->gltfNodeAabbOrigin();
+        auto const size = geometry->gltfNodeAabbSize();
+        return {origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
+    }
+    default:
+        return erdblick::geometryCenter(geometry->toSelfContained());
+    }
 }
 
 }
@@ -365,5 +454,123 @@ std::string TileSourceDataLayer::getError() const
 {
     return model_->error() ? *model_->error() : "";
 }
+
+TileSearchResultLayer::TileSearchResultLayer(std::shared_ptr<mapget::TileSearchResultLayer> self)
+    : model_(std::move(self)) {}
+
+std::string TileSearchResultLayer::id() const
+{
+    return model_->id().toString();
+}
+
+std::string TileSearchResultLayer::nodeId() const
+{
+    return model_->nodeId();
+}
+
+std::string TileSearchResultLayer::mapId() const
+{
+    return model_->mapId();
+}
+
+std::string TileSearchResultLayer::layerId() const
+{
+    return model_->layerInfo() ? model_->layerInfo()->layerId_ : "";
+}
+
+uint64_t TileSearchResultLayer::tileId() const
+{
+    return model_->tileId().value_;
+}
+
+uint32_t TileSearchResultLayer::stage() const
+{
+    return model_->stage().value_or(0U);
+}
+
+uint32_t TileSearchResultLayer::numResults() const
+{
+    return static_cast<uint32_t>(model_->size());
+}
+
+NativeJsValue TileSearchResultLayer::resultFields() const
+{
+    auto result = JsValue::List();
+    for (auto const& field : model_->resultFields()) {
+        result.push(JsValue(field));
+    }
+    return *result;
+}
+
+NativeJsValue TileSearchResultLayer::info() const
+{
+    return *jsonToJsValue(model_->info());
+}
+
+NativeJsValue TileSearchResultLayer::resultEntries() const
+{
+    auto entries = JsValue::List();
+    auto const layerInfo = model_->info();
+    auto const sourceMapId = layerInfo.value("sourceMapId", model_->mapId());
+    auto const sourceLayerId = layerInfo.value(
+        "sourceLayerId",
+        model_->layerInfo() ? model_->layerInfo()->layerId_ : std::string{});
+    auto const sourceTileId = layerInfo.value("sourceTileId", model_->tileId().value_);
+    auto const sourceTileKey = mapget::MapTileKey(
+        mapget::LayerType::Features,
+        sourceMapId,
+        sourceLayerId,
+        mapget::TileId(sourceTileId)).toString();
+
+    for (size_t index = 0; index < model_->size(); ++index) {
+        auto result = model_->at(index);
+        if (!result) {
+            continue;
+        }
+
+        auto const center = searchResultGeometryCenter(result);
+        auto const cartesian = wgsToCartesian<mapget::Point>(center);
+        auto entry = JsValue::Dict({
+            {"mapTileKey", JsValue(sourceTileKey)},
+            {"featureId", JsValue(result->featureId() ? result->featureId()->toString() : std::string{})},
+            {"resultIndex", JsValue(static_cast<double>(index))},
+            {"position", JsValue::Dict({
+                {"cartesian", JsValue(cartesian)},
+                {"cartographic", JsValue(center)}
+            })},
+            {"values", jsonToJsValue(result->toJson().value("values", nlohmann::json::array()))},
+        });
+        if (auto attributeIndex = result->attributeIndex()) {
+            entry.set("attributeIndex", JsValue(static_cast<double>(*attributeIndex)));
+        }
+        if (auto validityIndex = result->validityIndex()) {
+            entry.set("validityIndex", JsValue(static_cast<double>(*validityIndex)));
+        }
+        if (auto validityCount = result->validityCount()) {
+            entry.set("validityCount", JsValue(static_cast<double>(*validityCount)));
+        }
+        entries.push(entry);
+    }
+
+    return *entries;
+}
+
+std::string TileSearchResultLayer::toJson() const
+{
+    return model_->toJson().dump(2);
+}
+
+bool TileSearchResultLayer::copyDiagnostics(SharedUint8Array& output) const
+{
+    std::stringstream stream;
+    auto written = model_->diagnostics().write(stream);
+    if (!written) {
+        return false;
+    }
+    output.writeToArray(stream.str());
+    return true;
+}
+
+TileSearchResultLayer::~TileSearchResultLayer() = default;
 
 } // namespace erdblick

@@ -5,7 +5,8 @@ import {
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
 } from '../shared/appstate.service';
-import {MapDataService} from '../mapdata/map.service';
+import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
+import {MapRenderService} from '../mapdata/map-render.service';
 import {DiagnosticsDatasource} from './diagnostics.datasource';
 import {
     DiagnosticsExportBundle,
@@ -35,10 +36,11 @@ interface MapgetStatusDataResponse {
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
 
-    constructor(mapService: MapDataService,
+    constructor(mapService: MapTileStreamService,
+                mapRenderService: MapRenderService,
                 private readonly stateService: AppStateService,
                 styleValidationReportService: StyleValidationReportService) {
-        super(mapService, stateService, styleValidationReportService);
+        super(mapService, mapRenderService, stateService, styleValidationReportService);
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */

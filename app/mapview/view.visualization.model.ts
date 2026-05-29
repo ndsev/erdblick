@@ -70,7 +70,7 @@ function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean):
 
 /**
  * Ordered per-view queue for pending visualizations.
- * Membership and sort invalidation live here so `MapDataService` cannot accidentally desynchronize them.
+ * Membership and sort invalidation live here so render scheduling cannot accidentally desynchronize them.
  */
 export class VisualizationQueue {
     private readonly queue: ITileVisualization[] = [];
@@ -200,7 +200,7 @@ export class VisualizationQueue {
 
 /**
  * Per-view cache of visible tiles, tile render policies, and active visualizations.
- * This is the local working set that `MapDataService` mutates during every viewport refresh.
+ * This is the local working set owned by `MapViewStateService` and mutated by `MapRenderService`.
  */
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;

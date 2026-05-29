@@ -9,7 +9,7 @@ import {
     MapTileRequestStatus,
     MapTileStreamClient,
 } from "../mapdata/tilestream";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
 
 @Component({
@@ -59,7 +59,7 @@ export class SourceDataPanelComponent {
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private mapService: MapDataService) {
+    constructor(private mapService: MapInfoService) {
         effect(() => {
             if (!this.panel().sourceData) {
                 return;

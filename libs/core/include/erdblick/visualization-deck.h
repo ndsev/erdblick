@@ -2,6 +2,9 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "visualization-base.h"
@@ -50,6 +53,72 @@ public:
     [[nodiscard]] NativeJsValue externalRelationReferences() const;
     /** Resolve previously deferred external relation targets and finish rendering them. */
     void processResolvedExternalReferences(NativeJsValue const& resolvedReferences);
+    /** Raw deck buffers for point primitives. */
+    struct PointBuffers {
+        std::vector<float> positions;
+        std::vector<uint8_t> colors;
+        std::vector<float> radii;
+        std::vector<uint8_t> depthTests;
+        std::vector<uint32_t> featureAddresses;
+    };
+    /** Raw deck buffers for polygon and mesh primitives. */
+    struct SurfaceBuffers {
+        std::vector<float> surfacePositions;
+        std::vector<uint32_t> surfaceStartIndices;
+        std::vector<uint8_t> surfaceColors;
+        std::vector<uint8_t> depthTests;
+        std::vector<uint32_t> surfaceFeatureAddresses;
+    };
+    /** Raw deck buffers for path-like primitives. */
+    struct PathBuffers {
+        std::vector<float> positions;
+        std::vector<uint32_t> startIndices;
+        std::vector<uint8_t> colors;
+        std::vector<float> widths;
+        std::vector<uint8_t> depthTests;
+        std::vector<uint32_t> featureAddresses;
+        std::vector<float> dashArray;
+    };
+    /** Raw deck buffers for GLTF-backed node references. */
+    struct GltfBuffers {
+        std::vector<uint32_t> nodeIndices;
+        std::vector<uint8_t> colors;
+        std::vector<uint8_t> depthTests;
+        std::vector<uint32_t> featureAddresses;
+    };
+    /** Raw deck buffers for simplified GLTF picking proxies. */
+    struct GltfPickProxyBuffers {
+        std::vector<float> positions;
+        std::vector<uint32_t> startIndices;
+        std::vector<uint32_t> nodeIndices;
+        std::vector<uint32_t> featureAddresses;
+    };
+    /** Complete geometry buffer set for one render bucket. */
+    struct GeometryBuffers {
+        PointBuffers pointWorld;
+        PointBuffers pointBillboard;
+        std::vector<JsValue> labelWorld;
+        std::vector<JsValue> labelBillboard;
+        SurfaceBuffers surfaces;
+        PathBuffers pathWorld;
+        PathBuffers pathBillboard;
+        PathBuffers arrowWorld;
+        PathBuffers arrowBillboard;
+        GltfBuffers gltfNodes;
+        GltfPickProxyBuffers gltfPickProxies;
+    };
+    /** Convert point buffers into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue pointBuffersToJs(PointBuffers const& buffers);
+    /** Convert surface buffers into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue surfaceBuffersToJs(SurfaceBuffers const& buffers);
+    /** Convert path buffers into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue pathBuffersToJs(PathBuffers const& buffers, bool withDashArrays);
+    /** Convert GLTF node buffers into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue gltfBuffersToJs(GltfBuffers const& buffers);
+    /** Convert GLTF picking-proxy buffers into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue gltfPickProxyBuffersToJs(GltfPickProxyBuffers const& buffers);
+    /** Convert a full geometry buffer set into the JS object expected by the deck worker. */
+    [[nodiscard]] static JsValue geometryBuffersToJs(GeometryBuffers const& buffers);
 
 private:
     /** Convert WGS84 positions to the point format expected by deck geometry buffers. */
@@ -180,61 +249,6 @@ private:
     [[nodiscard]] bool emitToAggregateForCurrentFeatureLod() const;
     /** Return the active low-fi LOD bucket for the feature currently being emitted. */
     [[nodiscard]] uint8_t activeLodBucket() const;
-public:
-    /** Raw deck buffers for point primitives. */
-    struct PointBuffers {
-        std::vector<float> positions;
-        std::vector<uint8_t> colors;
-        std::vector<float> radii;
-        std::vector<uint8_t> depthTests;
-        std::vector<uint32_t> featureAddresses;
-    };
-    /** Raw deck buffers for polygon and mesh primitives. */
-    struct SurfaceBuffers {
-        std::vector<float> surfacePositions;
-        std::vector<uint32_t> surfaceStartIndices;
-        std::vector<uint8_t> surfaceColors;
-        std::vector<uint8_t> depthTests;
-        std::vector<uint32_t> surfaceFeatureAddresses;
-    };
-    /** Raw deck buffers for path-like primitives. */
-    struct PathBuffers {
-        std::vector<float> positions;
-        std::vector<uint32_t> startIndices;
-        std::vector<uint8_t> colors;
-        std::vector<float> widths;
-        std::vector<uint8_t> depthTests;
-        std::vector<uint32_t> featureAddresses;
-        std::vector<float> dashArray;
-    };
-    /** Raw deck buffers for GLTF-backed node references. */
-    struct GltfBuffers {
-        std::vector<uint32_t> nodeIndices;
-        std::vector<uint8_t> colors;
-        std::vector<uint8_t> depthTests;
-        std::vector<uint32_t> featureAddresses;
-    };
-    /** Raw deck buffers for simplified GLTF picking proxies. */
-    struct GltfPickProxyBuffers {
-        std::vector<float> positions;
-        std::vector<uint32_t> startIndices;
-        std::vector<uint32_t> nodeIndices;
-        std::vector<uint32_t> featureAddresses;
-    };
-    /** Complete geometry buffer set for one render bucket. */
-    struct GeometryBuffers {
-        PointBuffers pointWorld;
-        PointBuffers pointBillboard;
-        std::vector<JsValue> labelWorld;
-        std::vector<JsValue> labelBillboard;
-        SurfaceBuffers surfaces;
-        PathBuffers pathWorld;
-        PathBuffers pathBillboard;
-        PathBuffers arrowWorld;
-        PathBuffers arrowBillboard;
-        GltfBuffers gltfNodes;
-        GltfPickProxyBuffers gltfPickProxies;
-    };
 private:
     /** Check whether any point geometry has been appended. */
     [[nodiscard]] static bool hasGeometry(PointBuffers const& buffers);
@@ -252,18 +266,6 @@ private:
     [[nodiscard]] bool hasLowFiGeometryForLod(size_t lod) const;
     /** Return the mutable low-fi buffer set for a specific LOD bucket. */
     GeometryBuffers& lowFiBuffersForLod(size_t lod);
-    /** Convert point buffers into the JS object expected by the deck worker. */
-    [[nodiscard]] static JsValue pointBuffersToJs(PointBuffers const& buffers);
-    /** Convert surface buffers into the JS object expected by the deck worker. */
-    [[nodiscard]] static JsValue surfaceBuffersToJs(SurfaceBuffers const& buffers);
-    /** Convert path buffers into the JS object expected by the deck worker. */
-    [[nodiscard]] static JsValue pathBuffersToJs(PathBuffers const& buffers, bool withDashArrays);
-    /** Convert GLTF node buffers into the JS object expected by the deck worker. */
-    [[nodiscard]] static JsValue gltfBuffersToJs(GltfBuffers const& buffers);
-    /** Convert GLTF picking-proxy buffers into the JS object expected by the deck worker. */
-    [[nodiscard]] static JsValue gltfPickProxyBuffersToJs(GltfPickProxyBuffers const& buffers);
-    /** Convert a full geometry buffer set into the JS object expected by the deck worker. */
-    [[nodiscard]] static JsValue geometryBuffersToJs(GeometryBuffers const& buffers);
     /** Return the coordinate origin used for path precision-preserving deck buffers. */
     [[nodiscard]] JsValue coordinateOriginToJs() const;
     /** Materialize all low-fi bundle results for deferred frontend use. */
@@ -274,6 +276,142 @@ private:
     uint8_t activeFeatureLod_ = 0;
     mutable bool hasPathCoordinateOriginWgs_ = false;
     mutable mapget::Point pathCoordinateOriginWgs_ = {.0, .0, .0};
+};
+
+/**
+ * Deck visualization for one streamed TileSearchResultLayer.
+ *
+ * This deliberately does not reuse FeatureLayerVisualizationBase: search-result
+ * styling is driven by the search UI state and pre-materialized result values,
+ * not by the normal map feature stylesheet.
+ */
+class DeckTileSearchResultLayerVisualization
+{
+public:
+    DeckTileSearchResultLayerVisualization(
+        int viewIndex,
+        std::string const& mapTileKey,
+        std::string const& styleSpecJson);
+    ~DeckTileSearchResultLayerVisualization();
+
+    [[nodiscard]] uint32_t abiVersion() const;
+    void addTileSearchResultLayer(TileSearchResultLayer const& tile);
+    void run();
+    [[nodiscard]] NativeJsValue renderResult() const;
+    [[nodiscard]] uint32_t vertexCount() const;
+
+public:
+    enum class SearchGeometryKind {
+        Any,
+        Point,
+        Line,
+        Polygon,
+        Mesh
+    };
+
+    enum class SearchColorMode {
+        Solid,
+        Gradient,
+        Categories
+    };
+
+    enum class SearchOperator {
+        Eq,
+        Ne,
+        Lt,
+        Le,
+        Gt,
+        Ge,
+        Contains
+    };
+
+    struct SearchStyleValue {
+        enum class Kind {
+            Null,
+            Bool,
+            Number,
+            String
+        };
+
+        Kind kind = Kind::Null;
+        bool boolValue = false;
+        double numberValue = 0.0;
+        std::string stringValue;
+    };
+
+    struct SearchStyleFilter {
+        std::string field;
+        SearchOperator op = SearchOperator::Eq;
+        SearchStyleValue value;
+    };
+
+    struct SearchColorStop {
+        SearchStyleValue value;
+        std::optional<double> numericValue;
+        std::array<uint8_t, 4> color = {234, 67, 54, 190};
+    };
+
+    struct SearchStyleRule {
+        SearchGeometryKind geometry = SearchGeometryKind::Any;
+        SearchColorMode colorMode = SearchColorMode::Solid;
+        std::vector<SearchStyleFilter> filters;
+        std::string colorField;
+        std::vector<SearchColorStop> stops;
+        std::array<uint8_t, 4> solidColor = {234, 67, 54, 190};
+        std::array<uint8_t, 4> fallbackGeometryColor = {234, 67, 54, 190};
+        std::array<uint8_t, 4> fallbackSurfaceColor = {234, 67, 54, 85};
+        std::optional<float> width;
+        std::optional<float> pointRadius;
+        std::optional<float> opacity;
+    };
+
+    struct SearchResolvedStyle {
+        std::array<uint8_t, 4> geometryColor = {234, 67, 54, 190};
+        std::array<uint8_t, 4> surfaceColor = {234, 67, 54, 85};
+        float lineWidth = 4.0f;
+        float pointRadius = 6.0f;
+    };
+
+private:
+    void appendResultGeometry(
+        mapget::model_ptr<mapget::Geometry> const& geometry,
+        mapget::model_ptr<mapget::SearchResult> const& result,
+        uint32_t resultIndex);
+    void appendPoint(mapget::Point const& pointWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
+    void appendPath(std::vector<mapget::Point> const& pointsWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
+    void appendSurface(std::vector<mapget::Point> const& pointsWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
+    void appendAabbFootprint(
+        mapget::Point const& originWgs,
+        mapget::Point const& sizeWgs,
+        uint32_t resultIndex,
+        SearchResolvedStyle const& style);
+    [[nodiscard]] SearchResolvedStyle styleForResultGeometry(
+        mapget::model_ptr<mapget::SearchResult> const& result,
+        mapget::GeomType geomType) const;
+    [[nodiscard]] bool ruleMatches(
+        SearchStyleRule const& rule,
+        mapget::model_ptr<mapget::SearchResult> const& result,
+        mapget::GeomType geomType) const;
+    [[nodiscard]] std::optional<SearchStyleValue> valueForField(
+        mapget::model_ptr<mapget::SearchResult> const& result,
+        std::string const& field) const;
+    [[nodiscard]] std::array<uint8_t, 4> colorForRule(
+        SearchStyleRule const& rule,
+        mapget::model_ptr<mapget::SearchResult> const& result,
+        std::array<uint8_t, 4> fallback) const;
+    [[nodiscard]] mapget::Point projectWgsPoint(mapget::Point const& wgsPoint) const;
+    [[nodiscard]] JsValue coordinateOriginToJs() const;
+    [[nodiscard]] JsValue resultFeatureIdsToJs() const;
+
+    std::vector<SearchStyleRule> styleRules_;
+    SearchResolvedStyle fallbackStyle_;
+    uint32_t vertexCount_ = 0;
+    mapget::TileSearchResultLayer::Ptr searchResultLayer_;
+    std::unordered_map<std::string, size_t> resultFieldIndexByName_;
+    std::vector<std::string> resultFeatureIds_;
+    DeckFeatureLayerVisualization::GeometryBuffers buffers_;
+    mutable bool hasCoordinateOriginWgs_ = false;
+    mutable mapget::Point coordinateOriginWgs_ = {.0, .0, .0};
 };
 
 }  // namespace erdblick

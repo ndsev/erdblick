@@ -1,427 +1,239 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
-import {MapDataService} from "../mapdata/map.service";
-import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
-import {Cartographic, Cartesian3, GeoMath, Rectangle} from "../integrations/geo";
-import {FeatureTile} from "../mapdata/features.model";
-import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
-import {JobGroup, JobGroupManager, JobGroupType} from "./job-group";
-import {AppStateService} from "../shared/appstate.service";
+import {BehaviorSubject, filter, Subject, take} from "rxjs";
+import {
+    SearchResultTileEntry,
+    SearchResultTileEvictedPayload,
+    SearchResultTilePayload
+} from "../mapdata/map-runtime.model";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {featureSearchResultFields} from "../mapdata/feature-search-runtime-state.model";
+import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
+import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
+import {GeoMath} from "../integrations/geo";
+import {coreLib} from "../integrations/wasm";
+import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
+import {FeatureSearchStateEntry, FeatureSearchRenderStrategy} from "../shared/feature-search-state";
+import {MapTileStreamSearchStatusPayload} from "../mapdata/tilestream";
+import {
+    SearchResultDensityIndex,
+    SearchResultPoint,
+    SearchResultPointBucket
+} from "./search-result-density.model";
 
-export const MAX_VISIBLE_TILES_PER_LEVEL = 69;
-export const MAX_ZOOM_LEVEL = 15;
-export const SAFE_ZOOM_LEVEL = 10;
-
-/**
- * Synthetic primitive id used to correlate clustered markers back to search results.
- */
-export interface SearchResultPrimitiveId {
-    type: string,
-    index: number
-}
-
-/**
- * Flat marker datum exposed to the deck overlay that visualizes search results.
- */
-export interface SearchResultPoint {
-    coordinates: [number, number];
+export interface FeatureSearchResultEntry {
+    label: string;
     mapId: string;
     layerId: string;
     featureId: string;
-    featureKey: string;
+    resultIndex: number;
+    resultKey: string;
+    mapTileKey: string;
+    sourceTileKey: string;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
+    hoverFeatureId: string;
+    attributeIndex?: number;
+    validityIndex?: number;
+    validityCount?: number;
 }
 
-const TASK_SEARCH = 'SearchWorkerTask' as const;
-const TASK_COMPLETION = 'CompletionWorkerTask' as const;
-
-/**
- * Expands one quadtree tile id into its four children using the mapget tile-id bit layout.
- */
-function generateChildrenIds(parentTileId: bigint) {
-    if (parentTileId == -1n) {
-        return [0n, 4294967296n];
-    }
-
-    let level = parentTileId & 0xFFFFn;
-    let y = (parentTileId >> 16n) & 0xFFFFn;
-    let x = parentTileId >> 32n;
-
-    level += 1n;
-
-    return [
-        (x*2n << 32n)|(y*2n << 16n)|level,
-        (x*2n + 1n << 32n)|(y*2n << 16n)|level,
-        (x*2n << 32n)|(y*2n + 1n << 16n)|level,
-        (x*2n + 1n << 32n)|(y*2n + 1n << 16n)|level
-    ]
+export interface FeatureSearchSession {
+    id: string;
+    layoutId: string;
+    definition: FeatureSearchStateEntry;
+    runId: string;
+    refresh: number;
+    paused: boolean;
+    progressDone: number;
+    progressTotal: number;
+    complete: boolean;
+    startTime: number;
+    endTime: number;
+    pointColor: string;
+    timeElapsed: string;
+    totalFeatureCount: number;
+    searchResults: FeatureSearchResultEntry[];
+    traceResults: TraceResult[];
+    diagnostics: DiagnosticsMessage[];
+    diagnosticsBlobs: Uint8Array[];
+    errors: Set<string>;
+    progressByRequestKey: Map<string, SearchRequestProgress>;
+    searchResultTilesBySourceKey: Map<string, SearchResultTileContribution>;
+    searchResultPointsByFeatureKey: Map<string, SearchResultPoint>;
+    searchResultPointsCache: SearchResultPoint[];
+    searchResultPointBucketsCache: SearchResultPointBucket[];
+    searchResultPointsCacheDirty: boolean;
+    searchResultPointsVersion: number;
+    searchResultDensityIndex: SearchResultDensityIndex;
 }
 
-/**
- * Internal quadtree node used to cluster search-result markers by visible tile level.
- */
-class FeatureSearchQuadTreeNode {
-    tileId: bigint;
-    parentId: bigint | null;
-    level: number;
-    children: Array<FeatureSearchQuadTreeNode>;
-    countPerLayer: Map<string, number>;
-    markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
-    rectangle: Rectangle;
-    center: Cartesian3 | null;
-
-    /**
-     * Creates a quadtree node and derives its WGS84 rectangle from the mapget tile id.
-     */
-    constructor(tileId: bigint,
-                parentTileId: bigint | null,
-                level: number,
-                countPerLayer: Map<string, number>,
-                children: Array<FeatureSearchQuadTreeNode> = [],
-                markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = []) {
-        this.tileId = tileId;
-        this.parentId = parentTileId;
-        this.level = level;
-        this.children = children;
-        this.countPerLayer = new Map(countPerLayer.entries());
-        this.markers = markers;
-
-        const tileBox = tileId >= 0 ? coreLib.getTileBox(tileId) as Array<number> : [0, 0, 0, 0];
-        this.rectangle = Rectangle.fromDegrees(tileBox[0], tileBox[1], tileBox[2], tileBox[3]);
-        this.center = null;
-    }
-
-    /**
-     * Returns true if the given cartographic position lies inside this node's bounds.
-     */
-    containsPoint(point: Cartographic) {
-       return Rectangle.contains(this.rectangle, point);
-    }
-
-    /**
-     * Returns true if any of the provided markers falls inside this node.
-     */
-    contains(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
-        return markers.some(marker =>
-            this.containsPoint(marker[1].cartographicRad as Cartographic)
-        );
-    }
-
-    /**
-     * Returns only those markers that belong to this node's rectangle.
-     */
-    filterPointsForNode(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
-        return markers.filter(marker =>
-            this.containsPoint(marker[1].cartographicRad as Cartographic)
-        );
-    }
-
-    /**
-     * Lazily creates only those child nodes that are relevant for the provided markers or center point.
-     */
-    addChildren(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> | Cartographic) {
-        const existingIds = this.children.map(child => child.tileId);
-        const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
-        for (const id of missingIds) {
-            const child = new FeatureSearchQuadTreeNode(id, this.tileId, this.level + 1, new Map());
-            if (Array.isArray(markers)) {
-                if (child.contains(markers)) {
-                    this.children.push(child);
-                }
-            } else {
-                if (child.containsPoint(markers)) {
-                    this.children.push(child);
-                }
-            }
-        }
-    }
-
-    /**
-     * Accumulates the number of results that this node contributes for one map/layer pair.
-     */
-    incrementCountForMapLayer(mapLayer: string, increment: number) {
-        if (this.countPerLayer.has(mapLayer)) {
-            const currentCount = this.countPerLayer.get(mapLayer)!;
-            this.countPerLayer.set(mapLayer, currentCount + increment);
-            return;
-        }
-        this.countPerLayer.set(mapLayer, increment);
-    }
+interface SearchRequestProgress {
+    tilesQueued: number;
+    tilesSearched: number;
+    matches: number;
+    terminal: boolean;
 }
 
-/**
- * Lightweight quadtree used to aggregate search matches into zoom-dependent clusters.
- */
-class FeatureSearchQuadTree {
-    root: FeatureSearchQuadTreeNode;
-    private maxDepth: number = MAX_ZOOM_LEVEL;
-
-    /**
-     * Starts with a synthetic root that represents the full globe.
-     */
-    constructor() {
-        this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, new Map());
-    }
-
-    /**
-     * Uses the average cartesian position as a stable center for clustered markers.
-     */
-    private calculateAveragePosition(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>): Cartesian3 {
-        const sum = markers.reduce(
-            (acc, marker) => {
-                acc.x += marker[1].cartesian.x;
-                acc.y += marker[1].cartesian.y;
-                acc.z += marker[1].cartesian.z;
-                return acc;
-            },
-            { x: 0, y: 0, z: 0 }
-        );
-
-        return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
-    }
-
-    /**
-     * Inserts all matches from one tile into the quadtree and propagates aggregate counts upward.
-     */
-    insert(tileId: bigint, mapLayerId: string, results: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
-        const markersCenter = this.calculateAveragePosition(results);
-        const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
-        let currentLevel = 0;
-        this.root.addChildren(results);
-        let targetNode: FeatureSearchQuadTreeNode | null = this.root;
-        let nodes = this.root.children;
-
-        mainLoop: while (nodes.length > 0) {
-            const next: Array<FeatureSearchQuadTreeNode> = [];
-            for (let node of nodes) {
-                if (node.tileId == tileId) {
-                    targetNode = node;
-                    break mainLoop;
-                }
-                if (node.containsPoint(markersCenterCartographic)) {
-                    node.incrementCountForMapLayer(mapLayerId, results.length);
-                    node.center = node.center ? new Cartesian3(
-                        (node.center.x + markersCenter.x) / 2,
-                        (node.center.y + markersCenter.y) / 2,
-                        (node.center.z + markersCenter.z) / 2
-                    ) : markersCenter;
-                    node.addChildren(markersCenterCartographic);
-                    next.push(...node.children);
-                }
-            }
-
-            nodes = next;
-            currentLevel++;
-            if (currentLevel > this.maxDepth) {
-                targetNode = null;
-                break;
-            }
-        }
-
-        if (targetNode) {
-            targetNode.incrementCountForMapLayer(mapLayerId, results.length);
-            targetNode.center = markersCenter;
-            targetNode.addChildren(results);
-            nodes = targetNode.children;
-            while (currentLevel <= this.maxDepth) {
-                const next: Array<FeatureSearchQuadTreeNode> = [];
-                for (const node of nodes) {
-                    const containedMarkers = node.filterPointsForNode(results);
-                    if (containedMarkers.length) {
-                        const subMarkersCenter = this.calculateAveragePosition(containedMarkers);
-                        node.incrementCountForMapLayer(mapLayerId, containedMarkers.length);
-                        node.center = subMarkersCenter;
-                        if (node.level == this.maxDepth) {
-                            node.markers.push(...containedMarkers);
-                        } else {
-                            node.addChildren(results);
-                            next.push(...node.children);
-                        }
-                    }
-                }
-                nodes = next;
-                currentLevel++;
-            }
-        }
-    }
-
-    /**
-     * Iterates over all nodes that exist at the requested clustering depth.
-     */
-    *getNodesAtLevel(level: number): IterableIterator<FeatureSearchQuadTreeNode> {
-        if (level < 0 || !this.root.children.length) {
-            return;
-        }
-
-        let currentLevel = 0;
-        let nodes = this.root.children;
-
-        while (nodes.length > 0) {
-            if (currentLevel == level) {
-                for (const node of nodes) {
-                    yield node;
-                }
-                return;
-            }
-
-            const next: Array<FeatureSearchQuadTreeNode> = [];
-            for (const node of nodes) {
-                next.push(...node.children);
-            }
-
-            nodes = next;
-            currentLevel++;
-        }
-    }
+interface SearchResultTileContribution {
+    refresh: number;
+    sourceTileKey: string;
+    sourceMapId: string;
+    sourceLayerId: string;
+    sourceTileId: bigint;
+    requestOrder: number;
+    resultCount: number;
+    resultFields: string[];
+    results: FeatureSearchResultEntry[];
+    traceResults: TraceResult[];
+    diagnostics: Uint8Array | null;
+    points: SearchResultPoint[];
 }
 
-/**
- * Search-specific job group that also tracks tiles whose staged data is still loading.
- *
- * Search progress intentionally stays incomplete while these tiles are pending so the UI can show
- * "Awaited tiles to load" instead of finishing too early.
- */
-export class SearchState extends JobGroup {
-    private pendingTileKeys: Set<string> = new Set<string>();
+export interface FeatureSearchResultLayer {
+    id: string;
+    pointsVersion: number;
+    pointColor: string;
+    pointColorRgba: [number, number, number, number];
+    renderStrategy: FeatureSearchRenderStrategy;
+    points: SearchResultPoint[];
+    pointBuckets: SearchResultPointBucket[];
+    densityIndex: SearchResultDensityIndex;
+}
 
-    /**
-     * Creates a search group and optionally starts it in paused mode.
-     */
-    constructor(query: string, id: string, public paused = false) {
-        super('search', query, id);
-    }
-
-    /**
-     * Adds a tile to the outstanding-data set that blocks search completion.
-     */
-    markTilePending(tileKey: string): void {
-        if (!tileKey) {
-            return;
-        }
-        this.pendingTileKeys.add(tileKey);
-    }
-
-    /**
-     * Removes a tile from the outstanding-data set once it can be searched or is no longer expected.
-     */
-    markTileReady(tileKey: string): void {
-        if (!tileKey) {
-            return;
-        }
-        this.pendingTileKeys.delete(tileKey);
-    }
-
-    /**
-     * Returns how many tiles are still awaited before the search can truly finish.
-     */
-    getPendingTileCount(): number {
-        return this.pendingTileKeys.size;
-    }
-
-    /**
-     * Cancels the search and clears any pending-tile bookkeeping at the same time.
-     */
-    override stop(): void {
-        this.pendingTileKeys.clear();
-        super.stop();
-    }
-
-    /**
-     * Treats the search as complete only after worker tasks finish and no awaited tile remains.
-     */
-    override isComplete(): boolean {
-        return super.isComplete() && !this.pendingTileKeys.size;
-    }
-
-    /**
-     * Extends the visible task count with still-pending tiles so the progress UI stays honest.
-     */
-    override getTaskCount(): number {
-        return super.getTaskCount() + this.pendingTileKeys.size;
-    }
+export interface CompletionOwnerState {
+    candidates: BehaviorSubject<CompletionCandidate[]>;
+    candidateList: CompletionCandidate[];
 }
 
 @Injectable({providedIn: 'root'})
 /**
- * Coordinates feature search, query completion, result clustering, and search-marker overlays.
+ * Coordinates feature search, query completion, result indexing, and search-marker overlays.
  *
- * The service keeps worker scheduling, staged tile readiness, and UI-friendly result caches in sync.
+ * Search execution is delegated to mapget; this service keeps server progress and UI-friendly result caches in sync.
  */
 export class FeatureSearchService {
-    private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
-    private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
     private static readonly LOCATION_MARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48"><path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="white"/></svg>`;
+    private static readonly FLOATING_DIALOG_WIDTH_EM = 42;
+    private static readonly FLOATING_DIALOG_HEIGHT_EM = 42;
+    private static readonly FLOATING_DIALOG_HORIZONTAL_MARGIN_EM = 2;
+    private static readonly FLOATING_DIALOG_VERTICAL_MARGIN_EM = 5;
+    private static readonly DEFAULT_SEARCH_COLORS = [
+        "#ea4336",
+        "#3474ff",
+        "#ff04d6",
+        "#ffa600",
+        "#4ad6d6",
+        "#8f52ff"
+    ];
+    private static readonly DEFAULT_COMPLETION_OWNER_ID = "omnibox";
 
-    workers: Array<Worker> = []
-    private workerBusy: Array<boolean> = [];
-    private workersReady: Promise<void> | null = null;
+    static layoutIdForSearch(searchId: string): string {
+        return `${FEATURE_SEARCH_DIALOG_LAYOUT_ID}:${searchId}`;
+    }
 
-    jobGroupManager: JobGroupManager = new JobGroupManager();
-    currentCompletion: JobGroup | null = null;
-    taskIdCounter: number = 0;
-    taskGroupIdCounter: number = 0;
+    private searchRunCounter = 0;
+    private searchSessionCounter = 0;
 
-    resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
-    resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
-    private pendingSearchTilesByKey = new Map<string, FeatureTile>();
-    private searchResultPointsByFeatureKey = new Map<string, SearchResultPoint>();
-    private searchResultPointsCache: SearchResultPoint[] = [];
-    private searchResultPointsCacheDirty = false;
-    private searchResultPointsVersionValue = 0;
-
-    currentSearch: SearchState|null = null;
-    pointColor: string = "#ea4336";
-    timeElapsed: string = this.formatTime(0);
-    totalFeatureCount: number = 0;
-    progress: Subject<SearchState|null> = new Subject<SearchState|null>();
-    searchResults: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
-    traceResults: Array<any> = [];
-
-    diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
+    readonly sessionsChanged = new BehaviorSubject<FeatureSearchSession[]>([]);
+    readonly progress: BehaviorSubject<FeatureSearchSession|null> = new BehaviorSubject<FeatureSearchSession|null>(null);
     diagnosticsMessageLimit: number = 25;
 
-    completionPending: Subject<boolean> = new Subject<boolean>();
-    completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
+    private readonly completionStates = new Map<string, CompletionOwnerState>();
+    readonly completionCandidates = this.completionStateForOwner(FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID).candidates;
     completionCandidateLimit: number = 15;
-    private completionCandidateList: CompletionCandidate[] = [];
 
     showFeatureSearchDialog: boolean = false;
 
-    private startTime: number = 0;
-    private endTime: number = 0;
-    public errors: Set<string> = new Set();
-    private tintedAtlasByColor = new Map<string, string>();
-    private baseAtlasImagePromise: Promise<HTMLImageElement> | null = null;
-    private clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+    private readonly searchSessions: FeatureSearchSession[] = [];
+    private searchResultLayersVersionValue = 0;
     private locationMarkerGraphicUrl: string | null = null;
+    private pendingResultDataRebuildSessionIds = new Set<string>();
+    private resultDataRebuildRaf: number | null = null;
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
     /**
      * Initializes marker styling and listens for staged tile updates that can unblock pending searches.
      */
-    constructor(private mapService: MapDataService,
+    constructor(private mapInfo: MapInfoService,
+                private searchSchema: FeatureSearchSchemaService,
+                private tileStream: MapTileStreamService,
                 private stateService: AppStateService) {
-        this.updatePointColor();
-        this.mapService.tileDataChanged.subscribe(change => {
-            if (!this.pendingSearchTilesByKey.has(change.tileKey)) {
+        this.stateService.ready.pipe(
+            filter((ready): ready is true => ready),
+            take(1)
+        ).subscribe(() => {
+            this.resetStaleDockState();
+            this.reconcileFeatureSearchState(this.stateService.featureSearches);
+        });
+        this.stateService.featureSearchState.subscribe(entries => {
+            if (!this.stateService.ready.getValue()) {
                 return;
             }
-            this.enqueueReadyPendingSearchTiles();
+            this.reconcileFeatureSearchState(entries);
+        });
+        this.tileStream.searchResultTileReceived.subscribe(payload => {
+            this.addServerSearchResultTile(payload);
+        });
+        this.tileStream.searchResultTileEvicted.subscribe(payload => {
+            this.removeServerSearchResultTile(payload);
+        });
+        this.tileStream.searchStatusReceived.subscribe(status => {
+            this.applyServerSearchStatus(status);
         });
     }
 
-    /**
-     * Returns the icon atlas currently used for clustered search markers.
-     */
-    getSearchClusterIconAtlasUrl(): string {
-        return this.clusterIconAtlasUrl;
+    /** Removes persisted dock chrome for searches that cannot survive a page reload. */
+    private resetStaleDockState(): void {
+        const activeLayoutIds = new Set(
+            this.stateService.featureSearches.map(entry => FeatureSearchService.layoutIdForSearch(entry.id))
+        );
+        for (const layoutId of Object.keys(this.stateService.dialogLayoutsState.getValue())) {
+            if ((layoutId === FEATURE_SEARCH_DIALOG_LAYOUT_ID || layoutId.startsWith(`${FEATURE_SEARCH_DIALOG_LAYOUT_ID}:`))
+                && !activeLayoutIds.has(layoutId)) {
+                this.stateService.removeDialogLayout(layoutId);
+            }
+        }
     }
 
-    /**
-     * Returns the static mapping JSON that pairs atlas sprites with cluster-marker states.
-     */
-    getSearchClusterIconMappingUrl(): string {
-        return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
+    /** Returns a stable snapshot of all live feature-search sessions. */
+    getSessions(): FeatureSearchSession[] {
+        return [...this.searchSessions];
+    }
+
+    /** Returns one live session by runtime id. */
+    getSession(id: string): FeatureSearchSession | undefined {
+        return this.getInternalSession(id);
+    }
+
+    /** Returns all live sessions currently represented inside the dock. */
+    getDockedSessions(): FeatureSearchSession[] {
+        return this.searchSessions
+            .filter(session => this.isSessionDocked(session.id))
+            .sort((a, b) => this.sessionDockOrder(a) - this.sessionDockOrder(b));
+    }
+
+    /** Returns all live sessions currently represented as floating dialogs. */
+    getUndockedSessions(): FeatureSearchSession[] {
+        return this.searchSessions.filter(session => !this.isSessionDocked(session.id));
+    }
+
+    /** Returns whether a session is currently represented inside the dock. */
+    isSessionDocked(sessionId: string): boolean {
+        const session = this.getInternalSession(sessionId);
+        return !!session && this.stateService.isSurfaceDocked(session.layoutId);
+    }
+
+    /** Returns the persisted dock position for one session, falling back to creation order. */
+    private sessionDockOrder(session: FeatureSearchSession): number {
+        const order = this.stateService.getDialogLayout(session.layoutId)?.dockOrder;
+        if (typeof order === 'number' && Number.isFinite(order)) {
+            return order;
+        }
+        const index = this.searchSessions.findIndex(candidate => candidate.id === session.id);
+        return index === -1 ? Number.MAX_SAFE_INTEGER : index;
     }
 
     /**
@@ -435,580 +247,952 @@ export class FeatureSearchService {
         return this.locationMarkerGraphicUrl;
     }
 
-    get searchResultPointsVersion(): number {
-        return this.searchResultPointsVersionValue;
+    /** Returns one marker-layer descriptor per search so colors stay independent. */
+    getSearchResultLayers(): FeatureSearchResultLayer[] {
+        return this.searchSessions
+            .filter(session => session.definition.showResultsOnMap)
+            .map(session => ({
+                id: session.id,
+                pointsVersion: session.searchResultPointsVersion,
+                pointColor: session.pointColor,
+                pointColorRgba: this.parseSearchResultColor(session.pointColor),
+                renderStrategy: session.definition.renderStrategy,
+                points: this.getSessionSearchResultPoints(session),
+                pointBuckets: this.getSessionSearchResultPointBuckets(session),
+                densityIndex: session.searchResultDensityIndex
+            }))
+            .filter(layer => layer.points.length > 0);
     }
 
-    /**
-     * Returns the cached flat search-marker list, rebuilding it only when the underlying map changes.
-     */
-    getSearchResultPoints(): SearchResultPoint[] {
-        if (this.searchResultPointsCacheDirty) {
-            this.searchResultPointsCache = Array.from(this.searchResultPointsByFeatureKey.values());
-            this.searchResultPointsCacheDirty = false;
-        }
-        return this.searchResultPointsCache;
-    }
+    /** Reconciles persisted feature-search definitions with runtime sessions. */
+    private reconcileFeatureSearchState(definitions: FeatureSearchStateEntry[]): void {
+        const definitionById = new Map(definitions.map(definition => [definition.id, definition]));
+        let structuralChange = false;
 
-    /**
-     * Lazily initializes the worker pool the first time search or completion is used.
-     */
-    public initializeWorkers(): Promise<void> {
-        if (!this.workersReady) {
-            this.workersReady = this.initWorkers();
-        }
-        return this.workersReady;
-    }
-
-    /**
-     * Boots the first module worker, then clones its script into additional workers via a blob URL.
-     */
-    private async initWorkers(): Promise<void> {
-        const maxWorkers = navigator.hardwareConcurrency || 4;
-        if (maxWorkers <= 0) {
-            return;
-        }
-
-        const firstWorker = new Worker(new URL('./search.worker', import.meta.url), {type: 'module'});
-        const workerModuleUrl = await this.waitForWorkerReady(firstWorker);
-        this.registerWorker(firstWorker, 0);
-
-        const workerBlobUrl = await this.fetchWorkerBlobUrl(workerModuleUrl);
-        for (let i = 1; i < maxWorkers; i++) {
-            const worker = new Worker(workerBlobUrl, {type: 'module'});
-            this.registerWorker(worker, i);
-        }
-    }
-
-    /**
-     * Waits for the worker handshake that reveals the resolved module URL.
-     */
-    private waitForWorkerReady(worker: Worker): Promise<string> {
-        return new Promise((resolve) => {
-            const handler = (event: MessageEvent<any>) => {
-                const result = event.data;
-                if (result?.type !== 'WorkerReady') {
-                    return;
-                }
-                worker.removeEventListener('message', handler);
-                resolve(result.scriptUrl as string);
-            };
-            worker.addEventListener('message', handler);
-            worker.postMessage({type: 'WorkerInit'});
-        });
-    }
-
-    /**
-     * Fetches the compiled worker module once so subsequent workers can reuse a cached blob URL.
-     */
-    private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
-        const response = await fetch(workerModuleUrl, {cache: 'force-cache'});
-        if (!response.ok) {
-            throw new Error(`Failed to fetch search worker module (${response.status} ${response.statusText})`);
-        }
-        const blob = await response.blob();
-        return URL.createObjectURL(blob);
-    }
-
-    /**
-     * Installs the common message handler that feeds worker results back into the active job groups.
-     */
-    private registerWorker(worker: Worker, index: number) {
-        this.workers[index] = worker;
-        this.workerBusy[index] = false;
-        worker.onmessage = (event: MessageEvent<any>) => {
-            const result = event.data;
-            this.workerBusy[index] = false;
-
-            // Notify the job-group if the task has an id
-            if (result.taskId) {
-                this.jobGroupManager.completeTask(result.taskId, result);
+        for (const session of [...this.searchSessions]) {
+            if (!definitionById.has(session.id)) {
+                structuralChange = this.closeRuntimeSearch(session.id) || structuralChange;
             }
+        }
 
-            switch (result.type) {
-                case 'SearchResultForTile':
-                    this.addSearchResult(result as SearchResultForTile);
-                    break;
-                case 'CompletionCandidatesForTile':
-                    this.addCompletionCandidates(result as CompletionCandidatesForTile);
-                    break;
-            }
-
-            this.scheduleNextTask(index);
-        };
-    }
-
-    /**
-     * Starts a fresh feature search over the currently prioritized tiles.
-     *
-     * Tiles whose staged data is still incomplete remain in a pending set until tileDataChanged says they are ready.
-     */
-    run(query: string) {
-        // Fresh search.
-        this.clear();
-        this.startTime = Date.now();
-
-        this.currentSearch = new SearchState(query, this.generateTaskGroupId());
-        this.jobGroupManager.addGroup(this.currentSearch);
-
-        this.pendingSearchTilesByKey.clear();
-
-        for (const tile of this.orderedTilesForSearchProcessing()) {
-            if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                if (this.isTileStillExpected(tile)) {
-                    this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
-                    this.currentSearch.markTilePending(tile.mapTileKey);
-                }
+        for (const definition of definitions) {
+            const session = this.getInternalSession(definition.id);
+            if (!session) {
+                const nextSession = this.createSession(definition);
+                this.searchSessions.push(nextSession);
+                structuralChange = true;
+                this.updateSessionColor(nextSession, definition.pinColor);
+                this.startSessionSearch(nextSession, definition);
                 continue;
             }
-            this.enqueueSearchTask(tile, this.currentSearch);
+            this.applyFeatureSearchDefinition(session, definition);
         }
 
-        // Set up completion callback to trigger diagnostics after
-        // all tasks of the group are done. Note: This will only ever
-        // be called if a search truly finishes (is not superseded by a newer one).
-        this.currentSearch.onComplete((group: JobGroup) => {
-            this.getDiagnosticsForCompletedSearch(group.id);
-        });
-
-        this.progress.next(this.currentSearch);
-        this.enqueueReadyPendingSearchTiles();
-        this.maybeStartDiagnosticsForCompletedSearch(this.currentSearch);
-        this.runWorkers();
+        if (structuralChange) {
+            this.notifySessionsChanged();
+        }
+        this.syncSearchRequestsToMapService();
     }
 
-    // Send a task to each worker to start processing.
-    // Further tasks will be picked up in the worker's
-    // onMessage callback.
-    /**
-     * Fills idle workers with the next available search or completion task.
-     */
-    private runWorkers() {
-        this.workers.forEach((worker, index) => {
-            if (this.workerBusy[index]) {
-                return;
+    /** Applies non-structural definition changes to an existing runtime session. */
+    private applyFeatureSearchDefinition(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
+        const previous = session.definition;
+        const normalizedColor = this.normalizeHexColor(definition.pinColor);
+        const previousFields = featureSearchResultFields(previous, entry => this.searchSchema.resolveSearchScope(entry));
+        const nextFields = featureSearchResultFields(definition, entry => this.searchSchema.resolveSearchScope(entry));
+        const searchGenerationChanged = previous.query !== definition.query
+            || previous.scope !== definition.scope
+            || JSON.stringify(previousFields) !== JSON.stringify(nextFields);
+
+        if (searchGenerationChanged) {
+            this.resetSessionSearch(session, definition);
+            this.updateSessionColor(session, normalizedColor);
+            this.startSessionSearch(session, definition);
+            return;
+        }
+
+        session.definition = definition;
+        if (session.pointColor !== normalizedColor) {
+            this.updateSessionColor(session, normalizedColor);
+        }
+        if (session.paused !== definition.paused) {
+            if (definition.paused) {
+                this.applySearchPause(session);
+            } else {
+                this.applySearchResume(session);
             }
-            this.scheduleNextTask(index);
+        }
+        if (previous.showResultsOnMap !== definition.showResultsOnMap) {
+            this.bumpSearchResultLayersVersion();
+            this.progress.next(session);
+        }
+        if (JSON.stringify(previous.renderStrategy) !== JSON.stringify(definition.renderStrategy)) {
+            this.bumpSearchResultLayersVersion();
+            this.progress.next(session);
+        }
+        if (previous.autoUpdate !== definition.autoUpdate) {
+            this.progress.next(session);
+        }
+        if (JSON.stringify(previous.searchStyleRules ?? []) !== JSON.stringify(definition.searchStyleRules ?? [])) {
+            this.bumpSearchResultLayersVersion();
+            this.progress.next(session);
+        }
+        this.syncSearchRequestsToMapService();
+    }
+
+    /** Selects the next default result color for a newly created search. */
+    private nextDefaultSearchColor(): string {
+        const color = FeatureSearchService.DEFAULT_SEARCH_COLORS[
+            this.searchSessionCounter % FeatureSearchService.DEFAULT_SEARCH_COLORS.length
+        ];
+        this.searchSessionCounter += 1;
+        return color;
+    }
+
+    /** Starts a new feature search over the currently prioritized tiles. */
+    run(query: string): FeatureSearchSession {
+        const entry = this.stateService.addFeatureSearch({
+            query,
+            pinColor: this.nextDefaultSearchColor()
+        });
+        const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
+        if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
+            this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
+            this.moveDockedSurfaceToTop(layoutId);
+            this.notifySessionsChanged();
+        }
+        let session = this.getInternalSession(entry.id);
+        if (!session) {
+            this.reconcileFeatureSearchState(this.stateService.featureSearches);
+            session = this.getInternalSession(entry.id);
+        }
+        return session!;
+    }
+
+    /** Replaces one session's query/results while preserving its surface and color. */
+    rerunSearch(sessionId: string, query: string): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        const nextDefinition: FeatureSearchStateEntry = {
+            ...session.definition,
+            query,
+            paused: false
+        };
+        this.resetSessionSearch(session, nextDefinition);
+        this.startSessionSearch(session, nextDefinition, {forceGenerationIds: [session.id]});
+        this.stateService.patchFeatureSearch(sessionId, {query, paused: false});
+    }
+
+    /** Requests one differential refresh over the currently visible map area. */
+    updateSearchInArea(sessionId: string): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        session.paused = false;
+        session.definition = {
+            ...session.definition,
+            paused: false
+        };
+        this.resetServerSearchProgress(session, session.refresh);
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService({updateCoverageIds: [session.id]});
+        this.stateService.patchFeatureSearch(sessionId, {paused: false});
+    }
+
+    /** Toggles whether viewport changes automatically update this search's tile coverage. */
+    setSearchAutoUpdate(sessionId: string, autoUpdate: boolean): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {autoUpdate})) {
+            session.definition = {
+                ...session.definition,
+                autoUpdate
+            };
+            this.syncSearchRequestsToMapService();
+            this.progress.next(session);
+        }
+    }
+
+    /** Applies a pause to runtime server dispatch for one session. */
+    private applySearchPause(session: FeatureSearchSession): void {
+        session.paused = true;
+        session.complete = true;
+        session.progressDone = session.progressTotal;
+        session.endTime = Date.now();
+        session.timeElapsed = this.formatTime(session.endTime - session.startTime);
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService();
+    }
+
+    /** Resumes runtime server dispatch for one session. */
+    private applySearchResume(session: FeatureSearchSession): void {
+        session.paused = false;
+        session.progressDone = 0;
+        session.progressTotal = 1;
+        session.complete = false;
+        session.startTime = Date.now();
+        session.endTime = 0;
+        session.timeElapsed = this.formatTime(0);
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService();
+    }
+
+    /** Pauses dispatch of further search tasks for one session. */
+    pauseSearch(sessionId: string): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {paused: true})) {
+            this.applySearchPause(session);
+        }
+    }
+
+    /** Resumes one paused search and hands it back to mapget. */
+    resumeSearch(sessionId: string): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {paused: false})) {
+            this.applySearchResume(session);
+        }
+    }
+
+    /** Stops one search without clearing its partial result state. */
+    stopSearch(sessionId: string): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        session.complete = true;
+        session.progressDone = session.progressTotal;
+        session.endTime = Date.now();
+        session.timeElapsed = this.formatTime(session.endTime - session.startTime);
+        session.paused = false;
+        session.definition = {
+            ...session.definition,
+            paused: true
+        };
+        if (!this.stateService.patchFeatureSearch(sessionId, {paused: true})) {
+            this.progress.next(session);
+        }
+        this.syncSearchRequestsToMapService();
+    }
+
+    /** Updates one search session's marker color. */
+    setSearchColor(sessionId: string, color: string): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {pinColor: color})) {
+            this.updateSessionColor(session, color);
+        }
+    }
+
+    /** Switches one session between docked and floating representations. */
+    setSessionDocked(sessionId: string, docked: boolean): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!docked) {
+            this.ensureInitialFloatingDialogLayout(session.layoutId);
+        }
+        this.stateService.setSurfaceDocked(session.layoutId, docked, SEARCH_DOCK_TAB_ID);
+        if (docked) {
+            this.moveDockedSurfaceToTop(session.layoutId);
+            this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
+            this.stateService.isDockOpen = true;
+        }
+        this.notifySessionsChanged();
+    }
+
+    /** Places a newly docked search before older docked searches, matching inspection dock behavior. */
+    private moveDockedSurfaceToTop(layoutId: string): void {
+        const existingOrder = this.getDockedSessions()
+            .map(session => session.layoutId)
+            .filter(id => id !== layoutId);
+        this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, [layoutId, ...existingOrder]);
+    }
+
+    /** Centers searches that were first created in the dock and only have the generic dock fallback position. */
+    private ensureInitialFloatingDialogLayout(layoutId: string): void {
+        const current = this.stateService.getDialogLayout(layoutId);
+        if (current && (current.position.left !== 0 || current.position.top !== 0)) {
+            return;
+        }
+        const baseFontSize = this.stateService.baseFontSize || 16;
+        const width = Math.round(Math.min(
+            FeatureSearchService.FLOATING_DIALOG_WIDTH_EM * baseFontSize,
+            Math.max(baseFontSize, window.innerWidth - FeatureSearchService.FLOATING_DIALOG_HORIZONTAL_MARGIN_EM * baseFontSize)
+        ));
+        const height = Math.round(Math.min(
+            FeatureSearchService.FLOATING_DIALOG_HEIGHT_EM * baseFontSize,
+            Math.max(baseFontSize, window.innerHeight - FeatureSearchService.FLOATING_DIALOG_VERTICAL_MARGIN_EM * baseFontSize)
+        ));
+        this.stateService.upsertDialogLayout(layoutId, {
+            ...(current ?? {
+                position: {left: 0, top: 0},
+                size: {width, height},
+                open: false,
+                docked: false,
+                dockTab: SEARCH_DOCK_TAB_ID
+            }),
+            position: {
+                left: Math.max(0, Math.round((window.innerWidth - width) / 2)),
+                top: Math.max(0, Math.round((window.innerHeight - height) / 2))
+            },
+            size: {width, height}
         });
     }
 
-    /**
-     * Pauses dispatch of further search tasks while preserving current partial results.
-     */
-    pause() {
-        if (!this.currentSearch) {
+    /** Closes one search session and removes its dock and marker state. */
+    closeSearch(sessionId: string): void {
+        if (this.stateService.featureSearches.some(entry => entry.id === sessionId)) {
+            this.stateService.removeFeatureSearch(sessionId);
             return;
         }
-        this.currentSearch.paused = true;
-        this.endTime = Date.now();
-        this.timeElapsed = this.formatTime(this.endTime - this.startTime);
-        this.progress.next(this.currentSearch);
+        this.closeRuntimeSearch(sessionId);
     }
 
-    /**
-     * Resumes a paused search and hands queued work back to idle workers.
-     */
-    resume() {
-        if (!this.currentSearch) {
-            return;
+    /** Closes one runtime search session without mutating persisted search definitions. */
+    private closeRuntimeSearch(sessionId: string): boolean {
+        const index = this.searchSessions.findIndex(session => session.id === sessionId);
+        if (index === -1) {
+            return false;
         }
-        this.currentSearch.paused = false;
-        this.progress.next(this.currentSearch);
-        this.runWorkers();
-    }
-
-    /**
-     * Stops the active search without clearing the partial result state.
-     */
-    stop() {
-        if (!this.currentSearch) {
-            return;
-        }
-        this.pendingSearchTilesByKey.clear();
-        this.currentSearch.stop();
-        this.endTime = Date.now();
-        this.timeElapsed = this.formatTime(this.endTime - this.startTime);
-        this.currentSearch.paused = false;
-        this.progress.next(this.currentSearch);
-    }
-
-    /**
-     * Resets all search, completion, diagnostics, and overlay state to the idle baseline.
-     */
-    clear() {
-        if (this.currentSearch) {
-            this.jobGroupManager.removeGroup(this.currentSearch.id);
-        }
-        this.currentSearch = null;
-        this.resultTree = new FeatureSearchQuadTree();
-        this.resultsPerTile.clear();
-        this.pendingSearchTilesByKey.clear();
-        this.clearSearchResultPoints();
-        this.searchResults = [];
-        this.traceResults = [];
-        this.diagnosticsMessages.next([]);
-        this.totalFeatureCount = 0;
-        this.startTime = 0;
-        this.endTime = 0;
-        this.timeElapsed = this.formatTime(0);
-        this.errors.clear();
-        this.completionCandidateList = [];
-        this.completionPending.next(false);
-        this.completionCandidates.next([]);
+        const [session] = this.searchSessions.splice(index, 1);
+        this.stateService.removeDialogLayout(session.layoutId);
+        this.bumpSearchResultLayersVersion();
+        this.notifySessionsChanged();
         this.progress.next(null);
-        this.jobGroupManager.clearCompleted();
-        this.currentCompletion = null;
+        this.syncSearchRequestsToMapService();
+        if (this.stateService.isDockAutoCollapsible
+            && !this.stateService.selection.some(panel => !panel.undocked)
+            && this.getDockedSessions().length === 0) {
+            this.stateService.isDockOpen = false;
+        }
+        return true;
     }
 
-    /// Generate a new task id
-    /**
-     * Generates a unique task id for worker bookkeeping and callback routing.
-     */
-    private generateTaskId(): string {
-        return `task_${Date.now()}_${++this.taskIdCounter}`;
+    /** Creates a runtime session with independent result, diagnostics, and marker state. */
+    private createSession(definition: FeatureSearchStateEntry): FeatureSearchSession {
+        const paused = definition.paused;
+        const session: FeatureSearchSession = {
+            id: definition.id,
+            layoutId: FeatureSearchService.layoutIdForSearch(definition.id),
+            definition,
+            runId: this.generateRunId(),
+            refresh: 0,
+            paused,
+            progressDone: paused ? 1 : 0,
+            progressTotal: 1,
+            complete: paused,
+            startTime: 0,
+            endTime: 0,
+            pointColor: this.normalizeHexColor(definition.pinColor),
+            timeElapsed: this.formatTime(0),
+            totalFeatureCount: 0,
+            searchResults: [],
+            traceResults: [],
+            diagnostics: [],
+            diagnosticsBlobs: [],
+            errors: new Set<string>(),
+            progressByRequestKey: new Map<string, SearchRequestProgress>(),
+            searchResultTilesBySourceKey: new Map<string, SearchResultTileContribution>(),
+            searchResultPointsByFeatureKey: new Map<string, SearchResultPoint>(),
+            searchResultPointsCache: [],
+            searchResultPointBucketsCache: [],
+            searchResultPointsCacheDirty: false,
+            searchResultPointsVersion: 0,
+            searchResultDensityIndex: new SearchResultDensityIndex()
+        };
+        return session;
     }
 
-    /// Generate a new task-group id
-    /**
-     * Generates a unique group id so stale worker responses can be ignored safely.
-     */
-    private generateTaskGroupId(): string {
-        return `group_${Date.now()}_${++this.taskGroupIdCounter}`;
+    /** Synchronizes the UI/session search state into MapTileStreamService's `/tiles` request data plane. */
+    private syncSearchRequestsToMapService(options: {
+        forceGenerationIds?: Iterable<string>;
+        updateCoverageIds?: Iterable<string>;
+    } = {}): void {
+        this.tileStream.setFeatureSearchDefinitions(
+            this.searchSessions.map(session => session.definition),
+            options
+        );
+    }
+
+    /** Clears only result-side state; the persisted search definition and UI surface stay intact. */
+    private clearSessionResultData(session: FeatureSearchSession): void {
+        this.pendingResultDataRebuildSessionIds.delete(session.id);
+        session.searchResultTilesBySourceKey.clear();
+        if (this.clearSessionSearchResultPoints(session)) {
+            this.bumpSearchResultLayersVersion();
+        }
+        session.searchResults = [];
+        session.traceResults = [];
+        session.diagnostics = [];
+        session.diagnosticsBlobs = [];
+        session.errors.clear();
+        session.totalFeatureCount = 0;
+    }
+
+    /** Starts a fresh server progress run for a new query or mapget refresh. */
+    private resetServerSearchProgress(session: FeatureSearchSession, refresh: number): void {
+        session.runId = this.generateRunId();
+        session.refresh = refresh;
+        session.paused = session.definition.paused;
+        session.progressDone = session.paused ? 1 : 0;
+        session.progressTotal = 1;
+        session.progressByRequestKey.clear();
+        session.complete = session.paused;
+        session.startTime = Date.now();
+        session.endTime = 0;
+        session.timeElapsed = this.formatTime(0);
+        session.diagnostics = [];
+    }
+
+    /** Prepares an existing session to receive result chunks for a newer mapget refresh. */
+    private resetSessionForServerRefresh(session: FeatureSearchSession, refresh: number): void {
+        this.clearSessionResultData(session);
+        this.resetServerSearchProgress(session, refresh);
+    }
+
+    /** Clears one session and installs a fresh search group for the supplied query. */
+    private resetSessionSearch(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
+        session.definition = definition;
+        this.clearSessionResultData(session);
+        session.refresh = 0;
+        session.paused = definition.paused;
+        session.progressDone = definition.paused ? 1 : 0;
+        session.progressTotal = 1;
+        session.progressByRequestKey.clear();
+        session.complete = definition.paused;
+        session.startTime = 0;
+        session.endTime = 0;
+        session.timeElapsed = this.formatTime(0);
+    }
+
+    /** Starts or refreshes one server-side search session. */
+    private startSessionSearch(
+        session: FeatureSearchSession,
+        definition: FeatureSearchStateEntry,
+        options: {forceGenerationIds?: Iterable<string>} = {}
+    ): void {
+        session.definition = definition;
+        this.resetServerSearchProgress(session, session.refresh);
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService(options);
+    }
+
+    /** Generates a unique runtime id for one server-search run. */
+    private generateRunId(): string {
+        return `search_${Date.now()}_${++this.searchRunCounter}`;
     }
 
     /**
      * Aggregates all raw diagnostics blobs for the completed search that is still current in the UI.
      */
-    private getDiagnosticsForCompletedSearch(searchGroupId: string) {
-        const completedSearchGroup = this.jobGroupManager.getGroup(searchGroupId);
-        if (!completedSearchGroup || this.currentSearch?.id !== searchGroupId) {
-            return;
-        }
+    private updateDiagnosticsForCompletedSearch(session: FeatureSearchSession): void {
+        const messages = coreLib.simfilGetDiagnostics(
+            session.definition.query,
+            Array.from(session.diagnosticsBlobs)
+        );
+        const executionMessages = Array.isArray(messages) ? messages : [];
+        session.diagnostics = executionMessages.slice(0, this.diagnosticsMessageLimit);
+        this.progress.next(session);
+    }
 
-        const messages = coreLib.simfilGetDiagnostics(completedSearchGroup.query, Array.from(completedSearchGroup.getDiagnostics()))
-        this.diagnosticsMessages.next(messages.slice(0, this.diagnosticsMessageLimit));
+    /** Returns the completion stream pair owned by one input surface. */
+    public completionStateForOwner(ownerId: string): CompletionOwnerState {
+        const normalizedOwnerId = ownerId || FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID;
+        let state = this.completionStates.get(normalizedOwnerId);
+        if (!state) {
+            state = {
+                candidates: new BehaviorSubject<CompletionCandidate[]>([]),
+                candidateList: []
+            };
+            this.completionStates.set(normalizedOwnerId, state);
+        }
+        return state;
     }
 
     /**
-     * Starts diagnostics aggregation only when the completed group still matches the visible search.
+     * Clears the currently shown completion list for one input surface.
      */
-    private maybeStartDiagnosticsForCompletedSearch(group: JobGroup): void {
-        if (group.type !== 'search' || !group.isComplete()) {
-            return;
-        }
-        if (!this.currentSearch || this.currentSearch.id !== group.id) {
-            return;
-        }
-        console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
-        this.getDiagnosticsForCompletedSearch(group.id);
+    public clearCurrentCompletion(ownerId: string = FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID) {
+        const normalizedOwnerId = ownerId || FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID;
+        const state = this.completionStateForOwner(normalizedOwnerId);
+        state.candidateList = [];
+        state.candidates.next([]);
     }
 
     /**
-     * Cancels any in-flight completion job before a newer query supersedes it.
-     */
-    public clearCurrentCompletion() {
-        // Remove all pending completion tasks
-        this.currentCompletion?.stop();
-        this.currentCompletion = null;
-    }
-
-    /**
-     * Starts a completion fan-out across the currently prioritized tiles.
+     * Completes a query for the legacy omnibox owner.
      */
     public completeQuery(query: string, point: number | undefined) {
-        this.clearCurrentCompletion();
-
-        // Create completion job group
-        const completionGroup = this.jobGroupManager.createGroup('completion', query, this.generateTaskGroupId());
-        this.currentCompletion = completionGroup
-        completionGroup.onComplete((group: JobGroup) => {
-            console.debug(`Completion group completed (id: ${group.id}, current: ${this.currentCompletion?.id})`)
-            if (this.currentCompletion?.id === group.id)
-                this.completionPending.next(false);
-        })
-
-        // Build one task per tile
-        const tileParser = this.mapService.tileLayerParser;
-        const limit = this.completionCandidateLimit;
-        const makeTask = (tile: FeatureTile): CompletionWorkerTask | null => {
-            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
-            if (!tileBlobs.length) {
-                return null;
-            }
-            const taskId = this.generateTaskId();
-            const task: CompletionWorkerTask = {
-                type: TASK_COMPLETION,
-                tileBlobs,
-                fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getFieldDict(buf, tile.nodeId)
-                })!,
-                dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getDataSourceInfo(buf, tile.mapName)
-                })!,
-                query: query,
-                point: point || query.length,
-                nodeId: tile.nodeId,
-                limit: limit,
-                taskId: taskId,
-                groupId: completionGroup.id
-            };
-
-            this.jobGroupManager.addTask(task);
-            return task;
-        };
-
-        this.completionCandidateList = [];
-        this.completionPending.next(true);
-        this.completionCandidates.next([]);
-
-        for (const tile of this.orderedTilesForSearchProcessing()) {
-            makeTask(tile);
-        }
-        this.runWorkers();
+        this.completeQueryForOwner(FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID, query, point);
     }
 
     /**
-     * Merges completion candidates from one tile, deduplicating by final query text.
+     * Completes a query from schema metadata. Datasources without feature-model schema provide no candidates.
      */
-    private addCompletionCandidates(candidates: CompletionCandidatesForTile) {
-        if (candidates.groupId !== this.currentCompletion?.id)
-            return;
-
-        this.completionCandidateList = this.completionCandidateList
-            .concat(candidates.candidates)
-            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
-            .slice(0, this.completionCandidateLimit);
-
-        this.completionCandidates.next(this.completionCandidateList);
+    public completeQueryForOwner(ownerId: string, query: string, point: number | undefined) {
+        const normalizedOwnerId = ownerId || FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID;
+        this.clearCurrentCompletion(normalizedOwnerId);
+        const state = this.completionStateForOwner(normalizedOwnerId);
+        const caret = point ?? query.length;
+        state.candidateList = this.completeQueryFromSchema(query, caret).slice(0, this.completionCandidateLimit);
+        state.candidates.next(state.candidateList);
     }
 
-    /**
-     * Integrates one tile's matches into the visible result tree, overlays, traces, and diagnostics.
-     */
-    private addSearchResult(tileResult: SearchResultForTile) {
-        if (!this.currentSearch) {
-            return;
-        }
-
-        // Ignore results that are not related to the ongoing query.
-        if (tileResult.groupId !== this.currentSearch.id) {
-            return;
-        }
-
-        if (tileResult.error) {
-            this.errors.add(tileResult.error);
-        }
-
-        // Add trace results
-        for (let [key, trace] of Object.entries(tileResult.traces || {})) {
-            this.traceResults.push({
-                name: `${key}`,
-                calls: trace.calls,
-                totalus: trace.totalus,
-                values: trace.values,
-            })
-        }
-
-        // Add diagnostics to the current search group
-        if (tileResult.diagnostics) {
-            this.currentSearch.addDiagnostics(tileResult.diagnostics);
-        }
-
-        const seenFeatureKeys = new Set<string>();
-        const dedupedMatches = tileResult.matches.filter(([mapTileKey, featureId]) => {
-            const canonicalTileKey = (() => {
-                try {
-                    const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
-                    return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
-                } catch {
-                    return mapTileKey;
-                }
-            })();
-            const dedupeKey = `${canonicalTileKey}|${featureId}`;
-            if (seenFeatureKeys.has(dedupeKey)) {
-                return false;
-            }
-            seenFeatureKeys.add(dedupeKey);
-            return true;
-        });
-
-        // Add visualizations and register the search result.
-        if (dedupedMatches.length && tileResult.tileId) {
-            const mapTileKey = dedupedMatches[0][0];
-            const {mapId, layerId} = this.parseMapLayerIds(mapTileKey);
-            const mapLayerId = `${mapId}/${layerId}`;
-            this.resultsPerTile.set(mapTileKey, {
-                ...tileResult,
-                matches: dedupedMatches
+    /** Produces main-thread completion candidates from LayerInfo.featureModelSchema when available. */
+    private completeQueryFromSchema(query: string, point: number): CompletionCandidate[] {
+        try {
+            const rawCandidates = this.mapInfo.tileLayerParser.completeSearchQuery(query, point, {
+                limit: this.completionCandidateLimit
             });
-            let addedPoint = false;
-            const treeResults: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
-            for (const result of dedupedMatches) {
-                if (result[2].cartographic) {
-                    result[2].cartographicRad = Cartographic.fromDegrees(
-                        result[2].cartographic.x,
-                        result[2].cartographic.y,
-                        result[2].cartographic.z
-                    );
-                }
-                result[2].cartographic = null;
-                addedPoint = this.tryAddSearchResultPoint(mapId, layerId, result[1], result[2]) || addedPoint;
-                const featureId = result[1];
-                const id: SearchResultPrimitiveId = {type: "SearchResult", index: this.searchResults.length};
-                this.searchResults.push({label: `${featureId}`, mapId: mapId, layerId: layerId, featureId: featureId});
-                treeResults.push([id, result[2], mapLayerId]);
+            if (!Array.isArray(rawCandidates)) {
+                return [];
             }
-            if (addedPoint) {
-                this.searchResultPointsVersionValue += 1;
-            }
-            this.resultTree.insert(tileResult.tileId, mapLayerId, treeResults);
-        }
 
-        // Broadcast the search progress.
-        this.endTime = Date.now();
-        this.timeElapsed = this.formatTime(this.endTime - this.startTime);
-        this.totalFeatureCount += tileResult.numFeatures;
-        this.progress.next(this.currentSearch);
-    }
-
-    /**
-     * Chooses the next task for a worker, preferring search over completion while a search is active.
-     */
-    private scheduleNextTask(workerIndex: number) {
-        let nextTask = undefined;
-        if (this.currentSearch && !this.currentSearch.isComplete() && !this.currentSearch.paused) {
-            nextTask = this.currentSearch.takeTask();
-        }
-        else if (this.currentCompletion && !this.currentCompletion.isComplete()) {
-            nextTask = this.currentCompletion.takeTask();
-        }
-
-        if (!nextTask) {
-            return;
-        }
-        console.debug(`Scheduling task id=${nextTask.taskId || 'null'} group=${nextTask.groupId || 'null'}`);
-        this.workerBusy[workerIndex] = true;
-        this.workers[workerIndex].postMessage(nextTask);
-    }
-
-    /**
-     * Rebuilds the cluster marker atlas for the current highlight color and notifies listeners.
-     */
-    updatePointColor() {
-        const normalizedColor = this.normalizeHexColor(this.pointColor);
-        this.pointColor = normalizedColor;
-        this.ensureTintedClusterAtlas(normalizedColor)
-            .then(atlasUrl => {
-                this.clusterIconAtlasUrl = atlasUrl;
-                this.progress.next(this.currentSearch);
-            })
-            .catch(() => {
-                this.clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
-                this.progress.next(this.currentSearch);
-            });
-    }
-
-    /**
-     * Returns the currently focused view's prioritized tile list, which also defines search order.
-     */
-    private orderedTilesForSearchProcessing(): FeatureTile[] {
-        const viewCount = this.stateService.numViewsState.getValue();
-        if (viewCount <= 0) {
+            return rawCandidates
+                .map(item => this.toCompletionCandidate(query, item))
+                .filter((candidate): candidate is CompletionCandidate => candidate !== null);
+        } catch (error) {
+            console.warn("Failed to complete search query from schema metadata.", error);
             return [];
         }
-        const focusedView = this.stateService.focusedView;
-        const viewIndex = Math.max(0, Math.min(viewCount - 1, focusedView));
-        return this.mapService.getPrioritisedTiles(viewIndex);
     }
 
-    /**
-     * Returns whether the viewport still expects this tile, even if its data has not finished loading yet.
-     */
-    private isTileStillExpected(tile: FeatureTile): boolean {
-        return this.mapService.getRequestedMaxStageForTile(tile) !== null;
-    }
-
-    /**
-     * Builds a search-worker payload from the currently loaded stage blobs for one tile.
-     */
-    private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
-        const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
-        if (!tileBlobs.length) {
+    /** Normalizes one native SIMFIL completion object into the UI model. */
+    private toCompletionCandidate(sourceQuery: string, item: unknown): CompletionCandidate | null {
+        const candidate = item && typeof item === "object"
+            ? item as Record<string, unknown>
+            : null;
+        const rangeValue = candidate?.["range"];
+        const range = Array.isArray(rangeValue) ? rangeValue : [];
+        const begin = Number(range[0] ?? 0);
+        const end = Number(range[1] ?? 0);
+        const queryValue = candidate?.["query"];
+        if (!Number.isFinite(begin) || !Number.isFinite(end) || typeof queryValue !== "string") {
             return null;
         }
-        const tileParser = this.mapService.tileLayerParser;
+        const hintValue = candidate?.["hint"];
+        const rawKind = String(candidate?.["type"] ?? "").toLowerCase();
+        const rawHint = typeof hintValue === "string" ? hintValue : "";
+        const enumKind = rawKind === "constant" && rawHint.startsWith("enum ") ? rawHint : "";
         return {
-            type: TASK_SEARCH,
-            tileId: tile.tileId,
-            tileBlobs,
-            fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                tileParser?.getFieldDict(buf, tile.nodeId)
-            })!,
-            query: search.query,
-            dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                tileParser?.getDataSourceInfo(buf, tile.mapName)
-            })!,
-            nodeId: tile.nodeId,
-            taskId: this.generateTaskId(),
-            groupId: search.id
+            text: String(candidate?.["text"] ?? ""),
+            kind: enumKind || rawKind,
+            begin,
+            end,
+            query: queryValue,
+            source: sourceQuery,
+            hint: enumKind ? "" : rawHint
         };
     }
 
-    /**
-     * Adds a search task to the job manager if the tile currently exposes any searchable blobs.
-     */
-    private enqueueSearchTask(tile: FeatureTile, search: SearchState): boolean {
-        const task = this.createSearchTask(tile, search);
-        if (!task) {
+    /** Integrates one streamed mapget search-result tile into the matching session. */
+    private addServerSearchResultTile(payload: SearchResultTilePayload): void {
+        const session = this.getInternalSession(payload.searchId);
+        if (!session) {
+            return;
+        }
+        const refresh = Number(payload.refresh ?? 0);
+        if (refresh < session.refresh) {
+            return;
+        }
+        if (refresh > session.refresh) {
+            this.resetSessionForServerRefresh(session, refresh);
+        }
+
+        const sourceTileKey = payload.sourceTileKey || coreLib.getTileFeatureLayerKey(
+            payload.sourceMapId,
+            payload.sourceLayerId,
+            payload.sourceTileId
+        );
+        const traceResults: TraceResult[] = [];
+        for (const [name, value] of Object.entries(payload.traces || {})) {
+            const trace = value as Partial<TraceResult>;
+            traceResults.push({
+                name,
+                calls: trace.calls ?? 0n,
+                totalus: trace.totalus ?? 0n,
+                values: trace.values ?? []
+            });
+        }
+
+        const results: FeatureSearchResultEntry[] = [];
+        const points: SearchResultPoint[] = [];
+        const resultFields = payload.resultFields ?? [];
+        for (const entry of payload.entries) {
+            const {mapId, layerId} = this.parseMapLayerIds(entry.mapTileKey);
+            const resultIndex = this.entryResultIndex(entry, results.length);
+            const resultKey = this.searchResultEntryKey(sourceTileKey, entry.mapTileKey, resultIndex);
+            const hoverFeatureId = this.searchResultHoverFeatureId(entry.featureId, entry);
+            const point = this.makeSearchResultPoint(
+                sourceTileKey,
+                payload.sourceMapId,
+                payload.sourceLayerId,
+                payload.sourceTileId,
+                mapId,
+                layerId,
+                entry.mapTileKey,
+                entry.featureId,
+                resultIndex,
+                resultKey,
+                hoverFeatureId,
+                entry
+            );
+            if (point) {
+                points.push(point);
+            }
+            results.push({
+                label: this.searchResultEntryLabel(entry, resultFields, resultIndex),
+                mapId,
+                layerId,
+                featureId: entry.featureId,
+                resultIndex,
+                resultKey,
+                mapTileKey: entry.mapTileKey,
+                sourceTileKey,
+                sourceMapId: payload.sourceMapId,
+                sourceLayerId: payload.sourceLayerId,
+                sourceTileId: payload.sourceTileId,
+                hoverFeatureId,
+                ...(this.hasFiniteIndex(entry.attributeIndex) ? {attributeIndex: Math.floor(entry.attributeIndex)} : {}),
+                ...(this.hasFiniteIndex(entry.validityIndex) ? {validityIndex: Math.floor(entry.validityIndex)} : {}),
+                ...(this.hasFiniteIndex(entry.validityCount) ? {validityCount: Math.floor(entry.validityCount)} : {})
+            });
+        }
+
+        const contribution: SearchResultTileContribution = {
+            refresh,
+            sourceTileKey,
+            sourceMapId: payload.sourceMapId,
+            sourceLayerId: payload.sourceLayerId,
+            sourceTileId: payload.sourceTileId,
+            requestOrder: this.nonNegativeNumber(payload.requestOrder, Number.MAX_SAFE_INTEGER),
+            resultCount: payload.resultCount,
+            resultFields,
+            results,
+            traceResults,
+            diagnostics: payload.diagnostics,
+            points
+        };
+        const previousContribution = session.searchResultTilesBySourceKey.get(sourceTileKey);
+        session.searchResultTilesBySourceKey.set(sourceTileKey, contribution);
+        let emitProgressNow = true;
+        if (previousContribution) {
+            session.searchResultDensityIndex.removeContribution(sourceTileKey);
+            session.searchResultDensityIndex.addContribution(sourceTileKey, contribution.points);
+            this.scheduleSessionResultDataRebuild(session);
+            emitProgressNow = false;
+        } else {
+            this.appendSessionResultContribution(session, contribution);
+        }
+        this.applyProgressSnapshot(session, payload.tilesConsidered, payload.tilesCompleted);
+
+        session.endTime = Date.now();
+        session.timeElapsed = this.formatTime(session.endTime - session.startTime);
+        if (emitProgressNow) {
+            this.progress.next(session);
+        }
+    }
+
+    /** Removes UI-visible result data for one source tile that left the desired search area. */
+    private removeServerSearchResultTile(payload: SearchResultTileEvictedPayload): void {
+        const session = this.getInternalSession(payload.searchId);
+        if (!session || !session.searchResultTilesBySourceKey.delete(payload.sourceTileKey)) {
+            return;
+        }
+        session.searchResultDensityIndex.removeContribution(payload.sourceTileKey);
+        this.scheduleSessionResultDataRebuild(session);
+    }
+
+    /** Applies mapget's server-side search progress status to the matching UI session. */
+    private applyServerSearchStatus(status: MapTileStreamSearchStatusPayload): void {
+        const session = this.getInternalSession(status.searchId);
+        if (!session) {
+            return;
+        }
+        const refresh = Number(status.refresh ?? 0);
+        if (refresh < session.refresh) {
+            return;
+        }
+        if (refresh > session.refresh) {
+            this.resetSessionForServerRefresh(session, refresh);
+        }
+
+        if (status.error) {
+            session.errors.add(status.error);
+        }
+
+        const isTerminal = status.state === "Success" || status.state === "Aborted" || status.state === "Failed";
+        const key = this.serverSearchStatusKey(status);
+        const previous = session.progressByRequestKey.get(key);
+        const queuedRaw = this.nonNegativeNumber(status.tilesQueued, previous?.tilesQueued ?? 0);
+        const queued = isTerminal && queuedRaw === 0 ? Math.max(1, previous?.tilesQueued ?? 0) : queuedRaw;
+        const searched = this.nonNegativeNumber(status.tilesSearched, previous?.tilesSearched ?? 0);
+        const matches = this.nonNegativeNumber(status.matches, previous?.matches ?? 0);
+        session.progressByRequestKey.set(key, {
+            tilesQueued: queued,
+            tilesSearched: isTerminal ? queued : Math.min(queued, searched),
+            matches,
+            terminal: isTerminal
+        });
+
+        const progressEntries = Array.from(session.progressByRequestKey.values());
+        const diffProgressTotal = progressEntries.reduce((sum, item) => sum + item.tilesQueued, 0);
+        session.progressTotal = Math.max(
+            1,
+            this.nonNegativeNumber(status.tilesConsidered, diffProgressTotal)
+        );
+        const completedTiles = this.nonNegativeNumber(status.tilesCompleted, 0);
+        const searchedDiffTiles = progressEntries.reduce((sum, item) => sum + item.tilesSearched, 0);
+        // `tilesCompleted` is the stable full-area baseline; `tilesSearched` adds
+        // in-flight progress from the current differential request before mapget
+        // has committed those tiles into the local completed set.
+        session.progressDone = Math.min(
+            session.progressTotal,
+            Math.max(completedTiles, Math.min(session.progressTotal, completedTiles + searchedDiffTiles))
+        );
+        session.complete = session.paused || (progressEntries.length > 0 && progressEntries.every(item => item.terminal));
+        session.totalFeatureCount = progressEntries.reduce((sum, item) => sum + item.matches, 0);
+        if (session.complete) {
+            session.endTime = Date.now();
+            session.timeElapsed = this.formatTime(session.endTime - session.startTime);
+            this.updateDiagnosticsForCompletedSearch(session);
+        }
+        this.progress.next(session);
+    }
+
+    /** Groups mapget search statuses by concrete backend request so per-layer statuses aggregate instead of replacing each other. */
+    private serverSearchStatusKey(status: MapTileStreamSearchStatusPayload): string {
+        return [
+            status.mapId || "",
+            status.layerId || "",
+            status.requestKey || "",
+            status.refresh ?? 0
+        ].join("\n");
+    }
+
+    private nonNegativeNumber(value: unknown, fallback: number): number {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
+    }
+
+    /** Sorts streamed result-tile data by the same first-seen tile order used for backend search requests. */
+    private compareSearchResultTileContributions(
+        lhs: SearchResultTileContribution,
+        rhs: SearchResultTileContribution
+    ): number {
+        if (lhs.requestOrder !== rhs.requestOrder) {
+            return lhs.requestOrder - rhs.requestOrder;
+        }
+        return lhs.sourceTileKey.localeCompare(rhs.sourceTileKey);
+    }
+
+    /** Returns whether an optional backend index is usable in UI labels and hover feature ids. */
+    private hasFiniteIndex(value: unknown): value is number {
+        return Number.isFinite(Number(value));
+    }
+
+    /** Normalizes the backend result index, falling back to the streamed array position for older payloads. */
+    private entryResultIndex(entry: SearchResultTileEntry, fallback: number): number {
+        return this.hasFiniteIndex(entry.resultIndex)
+            ? Math.max(0, Math.floor(entry.resultIndex))
+            : fallback;
+    }
+
+    /** Applies full-coverage progress snapshots from MapTileStreamService without losing streamed result state. */
+    private applyProgressSnapshot(
+        session: FeatureSearchSession,
+        tilesConsidered: unknown,
+        tilesCompleted: unknown
+    ): void {
+        const total = this.nonNegativeNumber(tilesConsidered, 0);
+        if (total > 0) {
+            session.progressTotal = Math.max(1, total);
+        }
+        const completed = this.nonNegativeNumber(tilesCompleted, 0);
+        if (completed > 0 || total > 0) {
+            session.progressDone = Math.min(session.progressTotal, Math.max(session.progressDone, completed));
+        }
+    }
+
+    /** Rebuilds derived result arrays from per-tile contributions after add, replace, or eviction. */
+    private rebuildSessionResultData(session: FeatureSearchSession): void {
+        const nextResults: FeatureSearchResultEntry[] = [];
+        const nextTraces: TraceResult[] = [];
+        const nextDiagnosticsBlobs: Uint8Array[] = [];
+        const nextPoints = new Map<string, SearchResultPoint>();
+        let totalFeatureCount = 0;
+
+        const contributions = Array.from(session.searchResultTilesBySourceKey.values())
+            .sort((lhs, rhs) => this.compareSearchResultTileContributions(lhs, rhs));
+        for (const contribution of contributions) {
+            totalFeatureCount += contribution.resultCount;
+            nextResults.push(...contribution.results);
+            nextTraces.push(...contribution.traceResults);
+            if (contribution.diagnostics) {
+                nextDiagnosticsBlobs.push(contribution.diagnostics);
+            }
+            for (const point of contribution.points) {
+                if (!nextPoints.has(point.resultKey)) {
+                    nextPoints.set(point.resultKey, point);
+                }
+            }
+        }
+
+        session.searchResults = nextResults;
+        session.traceResults = nextTraces;
+        session.diagnosticsBlobs = nextDiagnosticsBlobs;
+        session.totalFeatureCount = totalFeatureCount;
+        session.searchResultPointsByFeatureKey = nextPoints;
+        session.searchResultPointsCacheDirty = true;
+        session.searchResultPointsVersion += 1;
+        this.bumpSearchResultLayersVersion();
+    }
+
+    /** Schedules one result-data rebuild after a burst of source-tile replacement or eviction events. */
+    private scheduleSessionResultDataRebuild(session: FeatureSearchSession): void {
+        this.pendingResultDataRebuildSessionIds.add(session.id);
+        if (this.resultDataRebuildRaf !== null) {
+            return;
+        }
+        this.resultDataRebuildRaf = requestAnimationFrame(() => {
+            this.resultDataRebuildRaf = null;
+            this.flushPendingSessionResultDataRebuilds();
+        });
+    }
+
+    /** Flushes coalesced result-data rebuilds and emits one UI update per affected search session. */
+    private flushPendingSessionResultDataRebuilds(): void {
+        const sessionIds = Array.from(this.pendingResultDataRebuildSessionIds);
+        this.pendingResultDataRebuildSessionIds.clear();
+        for (const sessionId of sessionIds) {
+            const session = this.getInternalSession(sessionId);
+            if (!session) {
+                continue;
+            }
+            this.rebuildSessionResultData(session);
+            this.progress.next(session);
+        }
+    }
+
+    /** Appends a new source tile contribution without touching previously aggregated result arrays. */
+    private appendSessionResultContribution(
+        session: FeatureSearchSession,
+        contribution: SearchResultTileContribution
+    ): void {
+        session.searchResults.push(...contribution.results);
+        session.traceResults.push(...contribution.traceResults);
+        if (contribution.diagnostics) {
+            session.diagnosticsBlobs.push(contribution.diagnostics);
+        }
+        session.totalFeatureCount += contribution.resultCount;
+        const densityChanged = contribution.points.length > 0;
+        if (densityChanged) {
+            session.searchResultDensityIndex.addContribution(contribution.sourceTileKey, contribution.points);
+        }
+
+        let pointsChanged = false;
+        for (const point of contribution.points) {
+            if (!session.searchResultPointsByFeatureKey.has(point.resultKey)) {
+                session.searchResultPointsByFeatureKey.set(point.resultKey, point);
+                pointsChanged = true;
+            }
+        }
+        if (pointsChanged || densityChanged) {
+            session.searchResultPointsCacheDirty = true;
+            session.searchResultPointsVersion += 1;
+            this.bumpSearchResultLayersVersion();
+        }
+    }
+
+    /** Returns one internal live session by runtime id. */
+    private getInternalSession(id: string): FeatureSearchSession | undefined {
+        return this.searchSessions.find(session => session.id === id);
+    }
+
+    /** Emits a shallow session snapshot so structural UI can re-render. */
+    private notifySessionsChanged(): void {
+        this.sessionsChanged.next([...this.searchSessions]);
+    }
+
+    /** Returns one session's cached marker list, rebuilding it only after mutations. */
+    private getSessionSearchResultPoints(session: FeatureSearchSession): SearchResultPoint[] {
+        if (session.searchResultPointsCacheDirty) {
+            session.searchResultPointsCache = Array.from(session.searchResultPointsByFeatureKey.values());
+            session.searchResultPointBucketsCache = this.buildSearchResultPointBuckets(session);
+            session.searchResultPointsCacheDirty = false;
+        }
+        return session.searchResultPointsCache;
+    }
+
+    /** Returns one session's cached marker list grouped by source map/layer/tile. */
+    private getSessionSearchResultPointBuckets(session: FeatureSearchSession): SearchResultPointBucket[] {
+        if (session.searchResultPointsCacheDirty) {
+            this.getSessionSearchResultPoints(session);
+        }
+        return session.searchResultPointBucketsCache;
+    }
+
+    /** Groups result-tile point contributions so the deck view can materialize low-fidelity density by source tile. */
+    private buildSearchResultPointBuckets(session: FeatureSearchSession): SearchResultPointBucket[] {
+        const buckets: SearchResultPointBucket[] = [];
+        const contributions = Array.from(session.searchResultTilesBySourceKey.values())
+            .sort((lhs, rhs) => this.compareSearchResultTileContributions(lhs, rhs));
+        for (const contribution of contributions) {
+            if (!contribution.points.length) {
+                continue;
+            }
+            buckets.push({
+                sourceTileKey: contribution.sourceTileKey,
+                mapId: contribution.sourceMapId,
+                layerId: contribution.sourceLayerId,
+                tileId: contribution.sourceTileId,
+                points: contribution.points
+            });
+        }
+        return buckets;
+    }
+
+    /** Clears one session's marker caches and returns whether anything changed. */
+    private clearSessionSearchResultPoints(session: FeatureSearchSession): boolean {
+        if (!session.searchResultPointsByFeatureKey.size
+            && !session.searchResultPointsCache.length
+            && !session.searchResultPointsCacheDirty) {
             return false;
         }
-        this.jobGroupManager.addTask(task);
+        session.searchResultPointsByFeatureKey.clear();
+        session.searchResultPointsCache = [];
+        session.searchResultPointBucketsCache = [];
+        session.searchResultPointsCacheDirty = false;
+        session.searchResultPointsVersion += 1;
+        session.searchResultDensityIndex.clear();
         return true;
     }
 
-    /**
-     * Revisits tiles that were waiting for staged data and enqueues them as soon as they become searchable.
-     */
-    private enqueueReadyPendingSearchTiles() {
-        const activeSearch = this.currentSearch;
-        if (!activeSearch || !this.pendingSearchTilesByKey.size) {
-            return;
-        }
+    /** Bumps the aggregate marker-layer version consumed by the map overlay. */
+    private bumpSearchResultLayersVersion(): void {
+        this.searchResultLayersVersionValue += 1;
+    }
 
-        let stateChanged = false;
-        let enqueuedTask = false;
-
-        for (const [tileKey] of Array.from(this.pendingSearchTilesByKey.entries())) {
-            const tile = this.mapService.loadedTileLayers.get(tileKey);
-            if (!tile || tile.disposed) {
-                this.pendingSearchTilesByKey.delete(tileKey);
-                activeSearch.markTileReady(tileKey);
-                stateChanged = true;
-                continue;
-            }
-            if (!this.mapService.isTileInspectionDataComplete(tile)) {
-                if (!this.isTileStillExpected(tile)) {
-                    this.pendingSearchTilesByKey.delete(tileKey);
-                    activeSearch.markTileReady(tileKey);
-                    stateChanged = true;
-                }
-                continue;
-            }
-            this.pendingSearchTilesByKey.delete(tileKey);
-            activeSearch.markTileReady(tileKey);
-            enqueuedTask = this.enqueueSearchTask(tile, activeSearch) || enqueuedTask;
-            stateChanged = true;
-        }
-
-        if (!stateChanged) {
-            return;
-        }
-
-        this.progress.next(activeSearch);
-        this.maybeStartDiagnosticsForCompletedSearch(activeSearch);
-        if (enqueuedTask) {
-            this.runWorkers();
-        }
+    /** Updates one session's configured marker color and refreshes dependent map overlays. */
+    private updateSessionColor(session: FeatureSearchSession, color: string): void {
+        const normalizedColor = this.normalizeHexColor(color);
+        session.pointColor = normalizedColor;
+        this.bumpSearchResultLayersVersion();
+        this.progress.next(session);
     }
 
     /**
@@ -1039,6 +1223,12 @@ export class FeatureSearchService {
         ];
     }
 
+    /** Converts a normalized search color into the RGBA tuple consumed by Deck marker layers. */
+    private parseSearchResultColor(color: string): [number, number, number, number] {
+        const [r, g, b] = this.parseHexRgb(color);
+        return [r, g, b, 235];
+    }
+
     /**
      * Extracts map and layer ids from a tile key, falling back to a plain split if parsing fails.
      */
@@ -1052,110 +1242,129 @@ export class FeatureSearchService {
         }
     }
 
+    /** Builds the stable UI identity for one streamed search result, independent of its feature id. */
+    private searchResultEntryKey(sourceTileKey: string, mapTileKey: string, resultIndex: number): string {
+        return `${sourceTileKey}\n${mapTileKey}\n${resultIndex}`;
+    }
+
+    /** Builds the feature-id suffix consumed by native highlight code for attribute/validity hover. */
+    private searchResultHoverFeatureId(featureId: string, entry: SearchResultTileEntry): string {
+        let hoverFeatureId = featureId;
+        if (this.hasFiniteIndex(entry.attributeIndex)) {
+            hoverFeatureId += `:attribute#${Math.max(0, Math.floor(entry.attributeIndex))}`;
+        }
+        if (this.hasFiniteIndex(entry.validityIndex)) {
+            hoverFeatureId += `:validity#${Math.max(0, Math.floor(entry.validityIndex))}`;
+        }
+        return hoverFeatureId;
+    }
+
+    /** Creates a compact human-readable label that keeps multiple hits on the same feature distinguishable. */
+    private searchResultEntryLabel(
+        entry: SearchResultTileEntry,
+        resultFields: readonly string[],
+        resultIndex: number
+    ): string {
+        const attributeName = this.searchResultFieldValue(entry, resultFields, "$name");
+        const attributeSuffix = attributeName
+            || (this.hasFiniteIndex(entry.attributeIndex)
+                ? `attribute ${Math.max(0, Math.floor(entry.attributeIndex)) + 1}`
+                : "");
+        const validitySuffix = this.searchResultValidityLabel(entry);
+        const detail = [attributeSuffix, validitySuffix].filter(Boolean).join(" ");
+        if (detail) {
+            return `${entry.featureId} - ${detail}`;
+        }
+        return resultIndex > 0 ? `${entry.featureId} #${resultIndex + 1}` : entry.featureId;
+    }
+
+    /** Formats one optional validity ordinal using one-based values for users. */
+    private searchResultValidityLabel(entry: SearchResultTileEntry): string {
+        if (!this.hasFiniteIndex(entry.validityIndex)) {
+            return "";
+        }
+        const validityIndex = Math.max(0, Math.floor(entry.validityIndex));
+        if (this.hasFiniteIndex(entry.validityCount) && entry.validityCount > 0) {
+            return `validity ${validityIndex + 1}/${Math.floor(entry.validityCount)}`;
+        }
+        return `validity ${validityIndex + 1}`;
+    }
+
+    /** Reads and stringifies one backend-provided result field value. */
+    private searchResultFieldValue(
+        entry: SearchResultTileEntry,
+        resultFields: readonly string[],
+        field: string
+    ): string {
+        const fieldIndex = resultFields.indexOf(field);
+        if (fieldIndex < 0 || !entry.values || fieldIndex >= entry.values.length) {
+            return "";
+        }
+        const value = entry.values[fieldIndex];
+        if (value === null || value === undefined) {
+            return "";
+        }
+        if (typeof value === "string") {
+            return value;
+        }
+        if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+            return String(value);
+        }
+        try {
+            return JSON.stringify(value);
+        } catch (_error) {
+            return String(value);
+        }
+    }
+
     /**
-     * Adds a unique search marker if the match exposes a valid cartographic position.
+     * Creates a search marker if the match exposes a valid cartographic position.
      */
-    private tryAddSearchResultPoint(
+    private makeSearchResultPoint(
+        sourceTileKey: string,
+        sourceMapId: string,
+        sourceLayerId: string,
+        sourceTileId: bigint,
         mapId: string,
         layerId: string,
+        mapTileKey: string,
         featureId: string,
-        position: SearchResultPosition
-    ): boolean {
-        const cartographicRad = position.cartographicRad;
-        if (!cartographicRad) {
-            return false;
+        resultIndex: number,
+        resultKey: string,
+        hoverFeatureId: string,
+        entry: SearchResultTileEntry
+    ): SearchResultPoint | null {
+        const cartographicRad = entry.position.cartographicRad;
+        const cartographic = entry.position.cartographic;
+        const lon = cartographicRad
+            ? GeoMath.toDegrees(cartographicRad.longitude)
+            : cartographic?.x;
+        const lat = cartographicRad
+            ? GeoMath.toDegrees(cartographicRad.latitude)
+            : cartographic?.y;
+        if (lon === undefined || lat === undefined) {
+            return null;
         }
-        const lon = GeoMath.toDegrees(cartographicRad.longitude);
-        const lat = GeoMath.toDegrees(cartographicRad.latitude);
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-            return false;
+            return null;
         }
         const featureKey = `${mapId}/${layerId}/${featureId}`;
-        if (this.searchResultPointsByFeatureKey.has(featureKey)) {
-            return false;
-        }
-        this.searchResultPointsByFeatureKey.set(featureKey, {
+        return {
             coordinates: [lon, lat],
             mapId,
             layerId,
+            tileId: sourceTileId,
+            mapTileKey,
+            sourceTileKey,
+            sourceMapId,
+            sourceLayerId,
+            sourceTileId,
             featureId,
-            featureKey
-        });
-        this.searchResultPointsCacheDirty = true;
-        return true;
-    }
-
-    /**
-     * Clears the marker caches and bumps the version only when something actually changed.
-     */
-    private clearSearchResultPoints(): void {
-        if (!this.searchResultPointsByFeatureKey.size
-            && !this.searchResultPointsCache.length
-            && !this.searchResultPointsCacheDirty) {
-            return;
-        }
-        this.searchResultPointsByFeatureKey.clear();
-        this.searchResultPointsCache = [];
-        this.searchResultPointsCacheDirty = false;
-        this.searchResultPointsVersionValue += 1;
-    }
-
-    /**
-     * Lazily recolors the cluster icon atlas so marker styling tracks the configured highlight color.
-     */
-    private async ensureTintedClusterAtlas(color: string): Promise<string> {
-        const cached = this.tintedAtlasByColor.get(color);
-        if (cached) {
-            return cached;
-        }
-        const baseAtlasImage = await this.loadBaseClusterAtlasImage();
-        const [targetR, targetG, targetB] = this.parseHexRgb(color);
-        const canvas = document.createElement("canvas");
-        canvas.width = baseAtlasImage.naturalWidth || baseAtlasImage.width;
-        canvas.height = baseAtlasImage.naturalHeight || baseAtlasImage.height;
-        const context = canvas.getContext("2d", {willReadFrequently: true});
-        if (!context) {
-            return FeatureSearchService.SEARCH_ICON_ATLAS_URL;
-        }
-        context.drawImage(baseAtlasImage, 0, 0);
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            const alpha = data[i + 3];
-            if (alpha === 0) {
-                continue;
-            }
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            if (r > 235 && g > 235 && b > 235) {
-                continue;
-            }
-            data[i] = Math.round((r / 255) * targetR);
-            data[i + 1] = Math.round((g / 255) * targetG);
-            data[i + 2] = Math.round((b / 255) * targetB);
-        }
-        context.putImageData(imageData, 0, 0);
-        const tintedAtlasUrl = canvas.toDataURL("image/png");
-        this.tintedAtlasByColor.set(color, tintedAtlasUrl);
-        return tintedAtlasUrl;
-    }
-
-    /**
-     * Loads the shared base atlas once and reuses the promise across recoloring passes.
-     */
-    private loadBaseClusterAtlasImage(): Promise<HTMLImageElement> {
-        if (this.baseAtlasImagePromise) {
-            return this.baseAtlasImagePromise;
-        }
-        this.baseAtlasImagePromise = new Promise((resolve, reject) => {
-            const image = new Image();
-            image.decoding = "async";
-            image.onload = () => resolve(image);
-            image.onerror = () => reject(new Error("Failed to load search cluster icon atlas."));
-            image.src = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
-        });
-        return this.baseAtlasImagePromise;
+            resultIndex,
+            resultKey,
+            featureKey,
+            hoverFeatureId
+        };
     }
 
     /**

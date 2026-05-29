@@ -47,6 +47,11 @@ public:
      */
     TileSourceDataLayer readTileSourceDataLayer(SharedUint8Array const& buffer);
 
+    /**
+     * Parse a TileSearchResultLayer from a buffer.
+     */
+    TileSearchResultLayer readTileSearchResultLayer(SharedUint8Array const& buffer);
+
     /** Cheap metadata view read from a tile blob without fully parsing the tile. */
     struct TileLayerMetadata {
         std::string id;
@@ -89,6 +94,42 @@ public:
      * Add a serialized field dictionary that is not wrapped in a message frame.
      */
     void addFieldDict(SharedUint8Array const& buffer);
+
+    /**
+     * Complete a SIMFIL search query using only LayerInfo.featureModelSchema metadata.
+     *
+     * Returns an empty list when no schema metadata is available. This deliberately
+     * does not fall back to loaded tile blobs.
+     */
+    NativeJsValue completeSearchQuery(std::string const& query, int point, NativeJsValue const& options);
+
+    /**
+     * Conservative schema-backed inference for search scope auto mode.
+     *
+     * Returns true when the query references one or more concrete attribute
+     * contexts without requiring feature-owned or broad dynamic fields.
+     */
+    bool isAttributeScopeSearchQuery(std::string const& query) const;
+
+    /**
+     * Return attribute contexts whose schema can evaluate the supplied query.
+     *
+     * The result is a list of `{attrName, featureType, attrLayerName, mapId, layerId}` dictionaries.
+     */
+    NativeJsValue getAttributeScopeForQuery(std::string const& query) const;
+
+    /**
+     * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
+     */
+    NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope) const;
+
+    /**
+     * Enumerate schema-backed result fields usable by search-result style rules.
+     *
+     * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
+     * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was inferred.
+     */
+    NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope) const;
 
     /**
      * Set layer info which will be used if the external doesn't fit.

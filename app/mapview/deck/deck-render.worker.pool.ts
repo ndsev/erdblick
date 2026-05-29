@@ -1,9 +1,11 @@
 import {
     DeckGeometryOutputMode,
     DeckLowFiBundleBuffers,
+    DeckSearchTileRenderTask,
     DeckTileRenderBuffers,
     DeckTileRenderResult,
     DeckTileRenderTask,
+    DeckWorkerDataSourceInfoMessage,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
 import {StyleSourceRef} from "../../styledata/style-validation.model";
@@ -34,6 +36,18 @@ export interface DeckTileRenderRequest {
     mergeCountSnapshot: Record<string, number>;
 }
 
+/** Main-thread request payload for rendering one streamed search-result tile. */
+export interface DeckSearchTileRenderRequest {
+    viewIndex: number;
+    tileKey: string;
+    searchResultLayerBlob: Uint8Array;
+    fieldDictBlob: Uint8Array;
+    dataSourceInfoBlob: Uint8Array;
+    nodeId: string;
+    mapName: string;
+    styleSpecJson: string;
+}
+
 /** Runtime settings that decide whether worker rendering is used and how many workers are spawned. */
 export interface DeckRenderWorkerSettings {
     threadedRenderingEnabled: boolean;
@@ -42,7 +56,7 @@ export interface DeckRenderWorkerSettings {
 
 /** Promise bookkeeping kept until one worker finishes rendering a specific tile task. */
 type PendingTask = {
-    task: DeckTileRenderTask;
+    task: DeckTileRenderTask | DeckSearchTileRenderTask;
     resolve: (value: DeckTileRenderBuffers) => void;
     reject: (reason?: unknown) => void;
 };
@@ -55,6 +69,7 @@ export class DeckRenderWorkerPool {
     private readonly workers: Worker[] = [];
     private readonly workerBusy: boolean[] = [];
     private readonly runningTaskIdByWorker: Array<string | null> = [];
+    private readonly dataSourceInfoBlobsByWorker: Array<Map<string, Uint8Array>> = [];
     private readonly inFlightByTaskId = new Map<string, PendingTask>();
     private readonly availableWorkerWaiters: Array<{
         resolve: (workerIndex: number) => void;
@@ -72,16 +87,56 @@ export class DeckRenderWorkerPool {
         await this.ensureInitialized();
         const workerIndex = await this.acquireWorkerSlot();
         return await new Promise<DeckTileRenderBuffers>((resolve, reject) => {
+            const {dataSourceInfoBlob, ...taskRequest} = request;
+            this.sendDataSourceInfoIfNeeded(workerIndex, request.mapName, dataSourceInfoBlob);
             const task: DeckTileRenderTask = {
                 type: "DeckTileRenderTask",
                 taskId: this.makeTaskId(),
-                ...request
+                ...taskRequest
             };
             const pendingTask: PendingTask = {task, resolve, reject};
             this.inFlightByTaskId.set(task.taskId, pendingTask);
             this.runningTaskIdByWorker[workerIndex] = task.taskId;
             this.workers[workerIndex]!.postMessage(task);
         });
+    }
+
+    /** Queues one search-result tile render request onto the next free worker. */
+    async renderSearchTile(request: DeckSearchTileRenderRequest): Promise<DeckTileRenderBuffers> {
+        await this.ensureInitialized();
+        const workerIndex = await this.acquireWorkerSlot();
+        return await new Promise<DeckTileRenderBuffers>((resolve, reject) => {
+            const {dataSourceInfoBlob, ...taskRequest} = request;
+            this.sendDataSourceInfoIfNeeded(workerIndex, request.mapName, dataSourceInfoBlob);
+            const task: DeckSearchTileRenderTask = {
+                type: "DeckSearchTileRenderTask",
+                taskId: this.makeTaskId(),
+                ...taskRequest
+            };
+            const pendingTask: PendingTask = {task, resolve, reject};
+            this.inFlightByTaskId.set(task.taskId, pendingTask);
+            this.runningTaskIdByWorker[workerIndex] = task.taskId;
+            this.workers[workerIndex]!.postMessage(task);
+        });
+    }
+
+    /** Sends map-level datasource metadata to a worker once, before tasks for that map use it. */
+    private sendDataSourceInfoIfNeeded(workerIndex: number, mapName: string, dataSourceInfoBlob: Uint8Array): void {
+        let blobsByMap = this.dataSourceInfoBlobsByWorker[workerIndex];
+        if (!blobsByMap) {
+            blobsByMap = new Map<string, Uint8Array>();
+            this.dataSourceInfoBlobsByWorker[workerIndex] = blobsByMap;
+        }
+        if (blobsByMap.get(mapName) === dataSourceInfoBlob) {
+            return;
+        }
+        const message: DeckWorkerDataSourceInfoMessage = {
+            type: "DeckWorkerDataSourceInfo",
+            mapName,
+            dataSourceInfoBlob
+        };
+        this.workers[workerIndex]!.postMessage(message);
+        blobsByMap.set(mapName, dataSourceInfoBlob);
     }
 
     /** Initializes workers once and shares the same promise across concurrent callers. */
@@ -154,6 +209,7 @@ export class DeckRenderWorkerPool {
         this.workers[index] = worker;
         this.workerBusy[index] = false;
         this.runningTaskIdByWorker[index] = null;
+        this.dataSourceInfoBlobsByWorker[index] = new Map<string, Uint8Array>();
         worker.onmessage = (event: MessageEvent<DeckWorkerOutboundMessage>) => {
             const msg = event.data;
             this.runningTaskIdByWorker[index] = null;
@@ -214,6 +270,7 @@ export class DeckRenderWorkerPool {
                 gltfPickProxies: bundle.gltfPickProxies
             })),
             mergedPointFeatures: result.mergedPointFeatures ?? {},
+            resultFeatureIds: result.resultFeatureIds ?? [],
             styleIssues: result.styleIssues ?? [],
             workerTimings: result.timings
         });
@@ -260,6 +317,7 @@ export class DeckRenderWorkerPool {
         this.inFlightByTaskId.clear();
         this.workerBusy.length = 0;
         this.runningTaskIdByWorker.length = 0;
+        this.dataSourceInfoBlobsByWorker.length = 0;
         for (const worker of this.workers) {
             worker.terminate();
         }

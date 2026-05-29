@@ -105,6 +105,27 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('hydrates the focused inspection panel from selection URL state', async () => {
+        const routerStub = createRouterStub({ sel: '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0' });
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.focusedInspectionPanelId).toBe(5);
+        expect(service.selection[0].focused).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('serializes active search state URLs as compact action tuples', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
@@ -689,6 +710,34 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('focuses inspection panels when selections create, reuse, or target an existing panel', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const selected = feature('new-feature', 'map/layer/new-tile');
+        expect(service.setSelection([selected])).toBe(2);
+        expect(service.focusedInspectionPanelId).toBe(2);
+        expect(service.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+
+        service.focusedInspectionPanelId = 1;
+        expect(service.setSelection([selected])).toBeUndefined();
+        expect(service.focusedInspectionPanelId).toBe(2);
+        expect(service.selection.find(panel => panel.id === 1)?.focused).toBeUndefined();
+        expect(service.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+
+        const serializedSelection = service.selectionState.serialize(false)?.['selected'] ?? '';
+        expect(serializedSelection).toContain('2~0f~');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('reopens the dock for default feature selections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -769,6 +818,26 @@ describe('AppStateService', () => {
         expect(newPanel?.undocked).toBe(true);
         expect(newPanel?.locked).toBe(false);
         expect(newPanel?.features).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('falls back to a remaining inspection panel when the focused panel is removed', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('remove-me')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('fallback')], locked: true, size: [30, 20], color: '#222222', undocked: false },
+        ];
+        service.focusedInspectionPanelId = 1;
+
+        service.unsetPanel(1);
+
+        expect(service.focusedInspectionPanelId).toBe(2);
+        expect(service.selection.find(panel => panel.id === 2)?.focused).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();

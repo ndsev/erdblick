@@ -1,6 +1,7 @@
 import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
-import {MapDataService} from "./mapdata/map.service";
+import {MapInfoService} from "./mapdata/map-info.service";
+import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {
     AppStateService,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
@@ -15,6 +16,7 @@ import {DialogStackService} from "./shared/dialog-stack.service";
 import {Title} from "@angular/platform-browser";
 import {KeyboardService} from "./shared/keyboard.service";
 import {AppConfigService} from "./shared/app-config.service";
+import {StyleService} from "./styledata/style.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -37,7 +39,8 @@ declare let window: DebugWindow;
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
-            <feature-search></feature-search>
+            <inspection-dialogs></inspection-dialogs>
+            <feature-search-dialogs></feature-search-dialogs>
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
             <survey></survey>
@@ -81,7 +84,9 @@ export class AppComponent implements OnDestroy {
 
     constructor(public stateService: AppStateService,
                 private httpClient: HttpClient,
-                private mapService: MapDataService,
+                private mapInfo: MapInfoService,
+                private tileStream: MapTileStreamService,
+                private styleService: StyleService,
                 private keyboardService: KeyboardService,
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
@@ -94,7 +99,9 @@ export class AppComponent implements OnDestroy {
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
         window.ebDebug = new ErdblickDebugApi(
-            this.mapService,
+            this.mapInfo,
+            this.tileStream,
+            this.styleService,
             this.stateService
         );
 
