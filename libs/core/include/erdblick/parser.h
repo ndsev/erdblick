@@ -106,8 +106,8 @@ public:
     /**
      * Conservative schema-backed inference for search scope auto mode.
      *
-     * Returns true only when the query references attribute-context fields or
-     * overlay variables unambiguously.
+     * Returns true when the query references one or more concrete attribute
+     * contexts without requiring feature-owned or broad dynamic fields.
      */
     bool isAttributeScopeSearchQuery(std::string const& query) const;
 
@@ -119,10 +119,15 @@ public:
     NativeJsValue getAttributeScopeForQuery(std::string const& query) const;
 
     /**
+     * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
+     */
+    NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope) const;
+
+    /**
      * Enumerate schema-backed result fields usable by search-result style rules.
      *
      * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
-     * getAttributeScopeForQuery(query), falling back to all attribute contexts if the query is ambiguous.
+     * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was inferred.
      */
     NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope) const;
 
