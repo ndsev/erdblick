@@ -68,6 +68,37 @@ describe('AppState', () => {
         });
     });
 
+    it('serializes empty URL arrays as query parameter removals', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'selection',
+            defaultValue: [] as string[],
+            schema: z.array(z.string()),
+            urlParamName: 'sel',
+        });
+
+        expect(state.serialize(true)).toEqual({
+            sel: null,
+        });
+    });
+
+    it('ignores stale empty URL array encodings during hydration', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        const state = new AppState<string[]>(pool, {
+            name: 'selection',
+            defaultValue: [] as string[],
+            schema: z.array(z.string()),
+            urlParamName: 'sel',
+        });
+        state.next(['feature-panel']);
+
+        state.deserialize({sel: ''});
+        expect(state.getValue()).toEqual(['feature-panel']);
+
+        state.deserialize({sel: '[]'});
+        expect(state.getValue()).toEqual(['feature-panel']);
+    });
+
     it('serializes arrays of primitive arrays using colon-separated CSV groups', () => {
         const pool = new Map<string, AppState<unknown>>();
         const state = new AppState(pool, {

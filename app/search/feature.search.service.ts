@@ -13,7 +13,11 @@ import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.mod
 import {GeoMath} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
-import {FeatureSearchStateEntry, FeatureSearchRenderStrategy} from "../shared/feature-search-state";
+import {
+    FeatureSearchMapLayerRef,
+    FeatureSearchRenderStrategy,
+    FeatureSearchStateEntry
+} from "../shared/feature-search-state";
 import {MapTileStreamSearchStatusPayload} from "../mapdata/tilestream";
 import {
     SearchResultDensityIndex,
@@ -149,6 +153,7 @@ export class FeatureSearchService {
     private searchResultLayersVersionValue = 0;
     private locationMarkerGraphicUrl: string | null = null;
     private pendingResultDataRebuildSessionIds = new Set<string>();
+    private pendingForcedGenerationIds = new Set<string>();
     private resultDataRebuildRaf: number | null = null;
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
@@ -281,7 +286,11 @@ export class FeatureSearchService {
                 this.searchSessions.push(nextSession);
                 structuralChange = true;
                 this.updateSessionColor(nextSession, definition.pinColor);
-                this.startSessionSearch(nextSession, definition);
+                if (definition.enabled) {
+                    this.startSessionSearch(nextSession, definition);
+                } else {
+                    this.applySearchDisabled(nextSession, definition);
+                }
                 continue;
             }
             this.applyFeatureSearchDefinition(session, definition);
@@ -299,8 +308,31 @@ export class FeatureSearchService {
         const normalizedColor = this.normalizeHexColor(definition.pinColor);
         const previousFields = featureSearchResultFields(previous, entry => this.resolveFeatureSearchScope(entry));
         const nextFields = featureSearchResultFields(definition, entry => this.resolveFeatureSearchScope(entry));
+        const selectedLayersChanged = JSON.stringify(previous.selectedMapLayers)
+            !== JSON.stringify(definition.selectedMapLayers);
+
+        if (previous.enabled !== definition.enabled) {
+            if (!definition.enabled) {
+                this.applySearchDisabled(session, definition);
+                return;
+            }
+            this.resetSessionSearch(session, definition);
+            this.updateSessionColor(session, normalizedColor);
+            this.startSessionSearch(session, definition, {forceGenerationIds: [session.id]});
+            return;
+        }
+
+        if (!definition.enabled) {
+            session.definition = definition;
+            this.updateSessionColor(session, normalizedColor);
+            this.progress.next(session);
+            this.syncSearchRequestsToMapService();
+            return;
+        }
+
         const searchGenerationChanged = previous.query !== definition.query
             || previous.scope !== definition.scope
+            || selectedLayersChanged
             || JSON.stringify(previousFields) !== JSON.stringify(nextFields);
 
         if (searchGenerationChanged) {
@@ -329,7 +361,10 @@ export class FeatureSearchService {
             this.bumpSearchResultLayersVersion();
             this.progress.next(session);
         }
-        if (previous.autoUpdate !== definition.autoUpdate) {
+        if (previous.autoUpdate !== definition.autoUpdate
+            || previous.bookmarked !== definition.bookmarked
+            || previous.enabled !== definition.enabled
+            || selectedLayersChanged) {
             this.progress.next(session);
         }
         if (JSON.stringify(previous.searchStyleRules ?? []) !== JSON.stringify(definition.searchStyleRules ?? [])) {
@@ -348,11 +383,30 @@ export class FeatureSearchService {
         return color;
     }
 
+    /** Returns all feature map/layers that are visible in at least one view. */
+    private activeFeatureSearchLayers(): FeatureSearchMapLayerRef[] {
+        const selected = new Map<string, FeatureSearchMapLayerRef>();
+        for (const [mapId, map] of this.mapInfo.maps.maps) {
+            for (const layer of map.allFeatureLayers()) {
+                for (let viewIndex = 0; viewIndex < this.stateService.numViews; ++viewIndex) {
+                    if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
+                        continue;
+                    }
+                    selected.set(JSON.stringify([mapId, layer.id]), {mapId, layerId: layer.id});
+                    break;
+                }
+            }
+        }
+        return Array.from(selected.values())
+            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
+    }
+
     /** Starts a new feature search over the currently prioritized tiles. */
     run(query: string): FeatureSearchSession {
         const entry = this.stateService.addFeatureSearch({
             query,
-            pinColor: this.nextDefaultSearchColor()
+            pinColor: this.nextDefaultSearchColor(),
+            selectedMapLayers: this.activeFeatureSearchLayers()
         });
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
         if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
@@ -371,7 +425,12 @@ export class FeatureSearchService {
     /** Replaces one session's query/results while preserving its surface and color. */
     rerunSearch(sessionId: string, query: string): void {
         const session = this.getInternalSession(sessionId);
-        if (!session) {
+        if (!session || !session.definition.enabled) {
+            return;
+        }
+        this.pendingForcedGenerationIds.add(session.id);
+        const patched = this.stateService.patchFeatureSearch(sessionId, {query, paused: false});
+        if (patched) {
             return;
         }
         const nextDefinition: FeatureSearchStateEntry = {
@@ -381,13 +440,12 @@ export class FeatureSearchService {
         };
         this.resetSessionSearch(session, nextDefinition);
         this.startSessionSearch(session, nextDefinition, {forceGenerationIds: [session.id]});
-        this.stateService.patchFeatureSearch(sessionId, {query, paused: false});
     }
 
     /** Requests one differential refresh over the currently visible map area. */
     updateSearchInArea(sessionId: string): void {
         const session = this.getInternalSession(sessionId);
-        if (!session) {
+        if (!session || !session.definition.enabled) {
             return;
         }
         session.paused = false;
@@ -428,6 +486,20 @@ export class FeatureSearchService {
         this.syncSearchRequestsToMapService();
     }
 
+    /** Removes one search from backend dispatch while keeping its persisted panel state. */
+    private applySearchDisabled(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
+        session.definition = definition;
+        session.paused = false;
+        session.complete = true;
+        session.progressDone = session.progressTotal;
+        session.endTime = Date.now();
+        session.timeElapsed = session.startTime > 0
+            ? this.formatTime(session.endTime - session.startTime)
+            : this.formatTime(0);
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService();
+    }
+
     /** Resumes runtime server dispatch for one session. */
     private applySearchResume(session: FeatureSearchSession): void {
         session.paused = false;
@@ -444,7 +516,7 @@ export class FeatureSearchService {
     /** Pauses dispatch of further search tasks for one session. */
     pauseSearch(sessionId: string): void {
         const session = this.getInternalSession(sessionId);
-        if (!session) {
+        if (!session || !session.definition.enabled) {
             return;
         }
         if (!this.stateService.patchFeatureSearch(sessionId, {paused: true})) {
@@ -455,7 +527,7 @@ export class FeatureSearchService {
     /** Resumes one paused search and hands it back to mapget. */
     resumeSearch(sessionId: string): void {
         const session = this.getInternalSession(sessionId);
-        if (!session) {
+        if (!session || !session.definition.enabled) {
             return;
         }
         if (!this.stateService.patchFeatureSearch(sessionId, {paused: false})) {
@@ -466,7 +538,7 @@ export class FeatureSearchService {
     /** Stops one search without clearing its partial result state. */
     stopSearch(sessionId: string): void {
         const session = this.getInternalSession(sessionId);
-        if (!session) {
+        if (!session || !session.definition.enabled) {
             return;
         }
         session.complete = true;
@@ -492,6 +564,48 @@ export class FeatureSearchService {
         }
         if (!this.stateService.patchFeatureSearch(sessionId, {pinColor: color})) {
             this.updateSessionColor(session, color);
+        }
+    }
+
+    /** Toggles close protection for one persisted search panel. */
+    setSearchBookmarked(sessionId: string, bookmarked: boolean): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {bookmarked})) {
+            session.definition = {...session.definition, bookmarked};
+            this.progress.next(session);
+        }
+    }
+
+    /** Enables or disables one persisted search without removing the panel. */
+    setSearchEnabled(sessionId: string, enabled: boolean): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {enabled, paused: enabled ? session.definition.paused : false})) {
+            const definition = {...session.definition, enabled, paused: enabled ? session.definition.paused : false};
+            if (enabled) {
+                this.resetSessionSearch(session, definition);
+                this.startSessionSearch(session, definition, {forceGenerationIds: [session.id]});
+            } else {
+                this.applySearchDisabled(session, definition);
+            }
+        }
+    }
+
+    /** Replaces the selected source map/layers for one search. */
+    setSearchMapLayers(sessionId: string, selectedMapLayers: FeatureSearchMapLayerRef[]): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {selectedMapLayers})) {
+            session.definition = {...session.definition, selectedMapLayers};
+            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+            this.progress.next(session);
         }
     }
 
@@ -632,9 +746,19 @@ export class FeatureSearchService {
         forceGenerationIds?: Iterable<string>;
         updateCoverageIds?: Iterable<string>;
     } = {}): void {
+        const forceGenerationIds = new Set(options.forceGenerationIds ?? []);
+        for (const id of this.pendingForcedGenerationIds) {
+            forceGenerationIds.add(id);
+        }
+        this.pendingForcedGenerationIds.clear();
         this.tileStream.setFeatureSearchDefinitions(
-            this.searchSessions.map(session => session.definition),
-            options
+            this.searchSessions
+                .filter(session => session.definition.enabled)
+                .map(session => session.definition),
+            {
+                ...options,
+                forceGenerationIds
+            }
         );
     }
 

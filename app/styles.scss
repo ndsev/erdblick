@@ -4330,8 +4330,27 @@ inspection-tree {
     display: flex;
     flex: 0 0 auto;
     flex-direction: row;
+    flex-wrap: wrap;
     gap: 0.5em;
     font-size: 0.9em;
+  }
+
+  .feature-search-content-disabled {
+    opacity: 0.52;
+    pointer-events: none;
+  }
+
+  .feature-search-layer-control {
+    align-items: center;
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.5em;
+    font-size: 0.9em;
+
+    p-multiselect {
+      flex: 1 1 18em;
+      min-width: 12em;
+    }
   }
 
   .feature-search-style-rules {
@@ -4391,6 +4410,22 @@ inspection-tree {
     display: flex;
     flex: 0 0 auto;
     gap: 0.35em;
+  }
+
+  .feature-search-style-rule-name {
+    background: var(--p-inputtext-background);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--p-text-color);
+    flex: 1 1 auto;
+    font-weight: 700;
+    min-width: 8em;
+    padding: 0.25em 0.35em;
+  }
+
+  .feature-search-style-rule-name:focus {
+    border-color: var(--p-primary-color);
+    outline: none;
   }
 
   .feature-search-style-section {
@@ -4469,6 +4504,21 @@ inspection-tree {
       width: 5.5em;
       text-align: center;
     }
+  }
+
+  .feature-search-style-value-input {
+    background: var(--p-inputtext-background);
+    border: 1px solid var(--p-inputtext-border-color);
+    border-radius: 4px;
+    color: var(--p-inputtext-color);
+    min-height: 2.25em;
+    padding: 0.45em 0.6em;
+    width: 9em;
+  }
+
+  .feature-search-style-value-select,
+  .search-style-color-value-select {
+    min-width: 9em;
   }
 
   .feature-search-style-opacity {
@@ -4578,6 +4628,10 @@ inspection-tree {
     width: 8em;
   }
 
+  .search-style-color-value-select {
+    flex: 0 0 auto;
+  }
+
   .search-style-color-value-input[type="number"] {
     text-align: center;
     width: 6.5em;
@@ -4622,6 +4676,13 @@ inspection-tree {
     display: grid;
     gap: 0.6em 1em;
     grid-template-columns: minmax(9em, 1fr) auto;
+  }
+
+  .feature-search-lowfi-controls {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.55em;
+    justify-content: flex-end;
   }
 
   .feature-search-tree-node-label {

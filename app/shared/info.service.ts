@@ -1,6 +1,7 @@
 import {Injectable, Injector, ViewContainerRef} from "@angular/core";
 import {MessageService} from "primeng/api";
 import {AlertDialogComponent} from "./alert.component";
+import {ConfirmDialogComponent} from "./confirm-dialog.component";
 
 
 @Injectable({providedIn: 'root'})
@@ -62,5 +63,24 @@ export class InfoMessageService {
             return;
         }
         this.showAlertDialog(this.defaultViewContainerRef, header, message, selectText, hint);
+    }
+
+    /** Creates a modal confirmation dialog and resolves true only for explicit acceptance. */
+    showConfirmDialog(viewContainerRef: ViewContainerRef, header: string, message: string): Promise<boolean> {
+        const componentRef = viewContainerRef.createComponent(
+            ConfirmDialogComponent, { injector: this.injector }
+        );
+        componentRef.setInput('headerText', header);
+        componentRef.setInput('messageText', message);
+        const instance = componentRef.instance;
+        instance.display = true;
+
+        return new Promise(resolve => {
+            const subscription = instance.result.subscribe(result => {
+                subscription.unsubscribe();
+                componentRef.destroy();
+                resolve(result);
+            });
+        });
     }
 }

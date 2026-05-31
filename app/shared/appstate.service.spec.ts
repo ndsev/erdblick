@@ -126,6 +126,105 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('keeps stored inspections and search state when stale empty URL params exist', async () => {
+        localStorage.setItem('selected', JSON.stringify([
+            '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
+        ]));
+        localStorage.setItem('search', JSON.stringify(['features', '**.speed > 80']));
+        localStorage.setItem('featureSearchState', JSON.stringify([
+            {id: 'feature-search-1', query: '**.speed > 80'}
+        ]));
+        const routerStub = createRouterStub({sel: '', s: '[]'});
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
+        expect(service.search).toEqual({
+            version: 2,
+            actionId: 'features',
+            input: '**.speed > 80'
+        });
+        expect(service.featureSearches).toHaveLength(1);
+        expect(service.featureSearches[0].query).toBe('**.speed > 80');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('explicitly restores persisted dialogs and panels without waiting for NavigationEnd', async () => {
+        localStorage.setItem('dialogLayouts', JSON.stringify({
+            'preferences-dialog': {
+                position: {left: 10, top: 20},
+                size: {width: 400, height: 300},
+                open: true
+            }
+        }));
+        localStorage.setItem('dockOpenState', '1');
+        localStorage.setItem('dockActiveTabState', JSON.stringify('search'));
+        localStorage.setItem('selected', JSON.stringify([
+            '7~1f~Features:map:layer:tile~feature-7~30:20~abcdef~0'
+        ]));
+        localStorage.setItem('featureSearchState', JSON.stringify([
+            {id: 'feature-search-7', query: '**.speed > 80'}
+        ]));
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.initializePersistence();
+        await flushMicrotasks();
+
+        expect(service.ready.getValue()).toBe(true);
+        expect(service.isDialogOpen('preferences-dialog')).toBe(true);
+        expect(service.isDockOpen).toBe(true);
+        expect(service.dockActiveTab).toBe('search');
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].id).toBe(7);
+        expect(service.featureSearches).toHaveLength(1);
+        expect(service.featureSearches[0].id).toBe('feature-search-7');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('always persists feature-search map-layer selection explicitly', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.initializePersistence();
+        service.addFeatureSearch({query: '**.speed > 80'});
+        await flushMicrotasks();
+
+        const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
+        expect(stored[0].selectedMapLayers).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('serializes active search state URLs as compact action tuples', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {

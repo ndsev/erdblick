@@ -147,6 +147,7 @@ export class MapTileStreamService {
         const updateCoverageIds = new Set(options.updateCoverageIds ?? []);
         const normalized = normalizeFeatureSearchState(definitions)
             .filter(definition => definition.id && definition.query)
+            .filter(definition => definition.enabled)
             .sort((lhs, rhs) => lhs.id.localeCompare(rhs.id));
         const signature = JSON.stringify(normalized);
         if (signature === this.lastFeatureSearchRequestSignature
@@ -1394,8 +1395,9 @@ export class MapTileStreamService {
                 continue;
             }
 
-            if (runtime.shouldAdoptVisibleTiles() && (visibleLayerTiles.size > 0 || runtime.definition.autoUpdate)) {
-                this.disposeSearchResultTiles(runtime.adoptVisibleTiles(visibleLayerTiles), true);
+            const runtimeVisibleLayerTiles = runtime.filterVisibleLayerTiles(visibleLayerTiles);
+            if (runtime.shouldAdoptVisibleTiles()) {
+                this.disposeSearchResultTiles(runtime.adoptVisibleTiles(runtimeVisibleLayerTiles), true);
             }
 
             requests.push(...runtime.buildPendingRequests(req => this.resolveFeatureSearchScope(req)));

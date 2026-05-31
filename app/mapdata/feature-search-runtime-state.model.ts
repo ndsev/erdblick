@@ -5,7 +5,7 @@ import {
     SearchLayerTileSet
 } from "./map-runtime.model";
 import {SearchResultTile} from "./search-result-tile.model";
-import {FeatureSearchStateEntry} from "../shared/feature-search-state";
+import {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
 
 export type FeatureSearchScopeResolver = (definition: FeatureSearchStateEntry) => "feature" | "attribute";
 
@@ -30,6 +30,16 @@ export function featureSearchResultFields(
         }
     }
     return Array.from(fields).sort();
+}
+
+function selectedLayerKey(ref: FeatureSearchMapLayerRef): string {
+    return FeatureSearchRuntimeState.layerKey(ref.mapId, ref.layerId);
+}
+
+function normalizedSelectedLayerRefs(definition: FeatureSearchStateEntry): FeatureSearchMapLayerRef[] {
+    return [...definition.selectedMapLayers]
+        .filter(ref => !!ref.mapId && !!ref.layerId)
+        .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
 }
 
 /** Runtime state for one logical server-side feature search. */
@@ -81,6 +91,26 @@ export class FeatureSearchRuntimeState {
             result.add(FeatureSearchRuntimeState.layerKey(tile.sourceMapId, tile.sourceLayerId));
         }
         return result;
+    }
+
+    /** Returns whether the source map/layer is selected for this search. */
+    acceptsLayer(mapId: string, layerId: string): boolean {
+        const selectedRefs = normalizedSelectedLayerRefs(this.definition);
+        const key = FeatureSearchRuntimeState.layerKey(mapId, layerId);
+        return selectedRefs.some(ref => selectedLayerKey(ref) === key);
+    }
+
+    /** Filters global visible source-tile coverage down to this search's selected layers. */
+    filterVisibleLayerTiles(visibleLayerTiles: Map<string, SearchLayerTileSet>): Map<string, SearchLayerTileSet> {
+        const selectedRefs = normalizedSelectedLayerRefs(this.definition);
+        const selectedKeys = new Set(selectedRefs.map(selectedLayerKey));
+        const filtered = new Map<string, SearchLayerTileSet>();
+        for (const [key, entry] of visibleLayerTiles) {
+            if (selectedKeys.has(key)) {
+                filtered.set(key, entry);
+            }
+        }
+        return filtered;
     }
 
     /** Returns whether the current visible tile set should replace this search's desired coverage. */
@@ -275,6 +305,7 @@ export class FeatureSearchRuntimeState {
             generationSerial: this.generationSerial,
             query: this.definition.query,
             scope: resolveScope(this.definition),
+            selectedMapLayers: normalizedSelectedLayerRefs(this.definition),
             withFields: featureSearchResultFields(this.definition, resolveScope)
         });
     }

@@ -164,6 +164,7 @@ struct AttributeScopeInfo
     std::string featureType;
     std::string mapId;
     std::string layerId;
+    std::shared_ptr<mapget::LayerInfo const> layerInfo;
     std::shared_ptr<mapget::SchemaRegistry const> registry;
     simfil::SchemaId attributeSchema = simfil::NoSchemaId;
     simfil::SchemaId featureSchema = simfil::NoSchemaId;
@@ -176,6 +177,16 @@ struct SearchStyleFieldInfo
     std::string layerId;
     std::string attrName;
     std::string featureType;
+    std::string valueKind = "unknown";
+    std::vector<std::string> enumValues;
+};
+
+struct SearchStyleFieldPath
+{
+    std::string path;
+    simfil::SchemaId schemaId = simfil::NoSchemaId;
+    std::string valueKind = "unknown";
+    std::vector<std::string> enumValues;
 };
 
 void addFields(std::set<std::string, std::less<>>& target, std::span<const std::string> fields)
@@ -429,6 +440,7 @@ std::vector<AttributeScopeInfo> collectAttributeScopes(std::map<std::string, map
                             featureType.name_,
                             dataSource.mapId_,
                             layerInfo->layerId_,
+                            layerInfo,
                             registry,
                             attributeSchema,
                             featureSchema
@@ -531,11 +543,258 @@ std::string appendFieldPathSegment(std::string const& base, std::string const& f
         : base + segment;
 }
 
-/** Recursively enumerates nested schema paths that mapget can return through `withFields`. */
-void collectSchemaFieldPaths(
-    std::vector<std::string>& paths,
+struct SearchStyleSchemaMetadata
+{
+    std::string valueKind = "unknown";
+    std::vector<std::string> enumValues;
+};
+
+bool jsonSchemaHasType(nlohmann::json const& schema, std::string_view type)
+{
+    auto const typeIt = schema.find("type");
+    if (typeIt == schema.end()) {
+        return false;
+    }
+    if (typeIt->is_string()) {
+        return typeIt->get_ref<std::string const&>() == type;
+    }
+    if (typeIt->is_array()) {
+        return std::ranges::any_of(*typeIt, [&](auto const& item) {
+            return item.is_string() && item.template get_ref<std::string const&>() == type;
+        });
+    }
+    return false;
+}
+
+nlohmann::json const* resolveSchemaRef(nlohmann::json const& root, nlohmann::json const& schema)
+{
+    auto const refIt = schema.find("$ref");
+    if (refIt == schema.end() || !refIt->is_string()) {
+        return &schema;
+    }
+    auto const ref = refIt->get<std::string>();
+    if (ref.empty() || ref.front() != '#') {
+        return &schema;
+    }
+    try {
+        return &root.at(nlohmann::json::json_pointer(ref.substr(1)));
+    } catch (...) {
+        return &schema;
+    }
+}
+
+std::string_view schemaCombinerKey(nlohmann::json const& schema)
+{
+    for (std::string_view key : {"oneOf", "anyOf", "allOf"}) {
+        auto const it = schema.find(std::string(key));
+        if (it != schema.end() && it->is_array()) {
+            return key;
+        }
+    }
+    return {};
+}
+
+nlohmann::json const* resolveSchema(nlohmann::json const& root, nlohmann::json const* schema, int depth = 8)
+{
+    if (!schema || depth <= 0 || !schema->is_object()) {
+        return schema;
+    }
+    auto const* resolved = resolveSchemaRef(root, *schema);
+    return resolved == schema ? schema : resolveSchema(root, resolved, depth - 1);
+}
+
+nlohmann::json const* schemaChildForField(nlohmann::json const& root, nlohmann::json const* schema, std::string const& field, int depth = 8)
+{
+    auto const* resolved = resolveSchema(root, schema, depth);
+    if (!resolved || !resolved->is_object() || depth <= 0) {
+        return nullptr;
+    }
+
+    if (auto const combiner = schemaCombinerKey(*resolved); !combiner.empty()) {
+        for (auto const& branch : resolved->at(std::string(combiner))) {
+            if (auto const* child = schemaChildForField(root, &branch, field, depth - 1)) {
+                return child;
+            }
+        }
+    }
+
+    if (auto const itemsIt = resolved->find("items"); itemsIt != resolved->end()) {
+        if (auto const* child = schemaChildForField(root, &*itemsIt, field, depth - 1)) {
+            return child;
+        }
+    }
+
+    auto const propertiesIt = resolved->find("properties");
+    if (propertiesIt == resolved->end() || !propertiesIt->is_object()) {
+        return nullptr;
+    }
+    auto const childIt = propertiesIt->find(field);
+    return childIt == propertiesIt->end() ? nullptr : &*childIt;
+}
+
+void appendUniqueEnumValues(std::vector<std::string>& target, std::vector<std::string> const& values)
+{
+    for (auto const& value : values) {
+        if (std::ranges::find(target, value) == target.end()) {
+            target.push_back(value);
+        }
+    }
+}
+
+SearchStyleSchemaMetadata schemaMetadata(
+    nlohmann::json const& root,
+    nlohmann::json const* schema,
     std::shared_ptr<mapget::SchemaRegistry const> const& registry,
     simfil::SchemaId schemaId,
+    int depth = 8)
+{
+    SearchStyleSchemaMetadata metadata;
+    auto const* resolved = resolveSchema(root, schema, depth);
+    if (!resolved || !resolved->is_object() || depth <= 0) {
+        if (registry && schemaId != simfil::NoSchemaId) {
+            if (registry->kind(schemaId) == simfil::Schema::Kind::Object) {
+                metadata.valueKind = "object";
+            }
+            else if (registry->kind(schemaId) == simfil::Schema::Kind::Array) {
+                metadata.valueKind = "array";
+            }
+            else {
+                auto const enumSymbols = registry->nestedEnumSymbols(schemaId);
+                metadata.enumValues.assign(enumSymbols.begin(), enumSymbols.end());
+                metadata.valueKind = metadata.enumValues.empty() ? "unknown" : "enum";
+            }
+        }
+        return metadata;
+    }
+
+    if (auto const combiner = schemaCombinerKey(*resolved); !combiner.empty()) {
+        std::string combinedKind;
+        for (auto const& branch : resolved->at(std::string(combiner))) {
+            auto branchMetadata = schemaMetadata(root, &branch, registry, simfil::NoSchemaId, depth - 1);
+            appendUniqueEnumValues(metadata.enumValues, branchMetadata.enumValues);
+            if (branchMetadata.valueKind == "unknown") {
+                continue;
+            }
+            if (combinedKind.empty()) {
+                combinedKind = branchMetadata.valueKind;
+            }
+            else if (combinedKind != branchMetadata.valueKind) {
+                combinedKind = "unknown";
+            }
+        }
+        metadata.valueKind = metadata.enumValues.empty() ? (combinedKind.empty() ? "unknown" : combinedKind) : "enum";
+        return metadata;
+    }
+
+    auto addStringEnum = [&](nlohmann::json const& value) {
+        if (value.is_string()) {
+            metadata.enumValues.push_back(value.get<std::string>());
+        }
+    };
+    if (auto const constIt = resolved->find("const"); constIt != resolved->end()) {
+        addStringEnum(*constIt);
+        if (constIt->is_boolean()) {
+            metadata.valueKind = "boolean";
+            return metadata;
+        }
+        if (constIt->is_number_integer()) {
+            metadata.valueKind = "integer";
+            return metadata;
+        }
+        if (constIt->is_number()) {
+            metadata.valueKind = "number";
+            return metadata;
+        }
+    }
+    if (auto const enumIt = resolved->find("enum"); enumIt != resolved->end() && enumIt->is_array()) {
+        for (auto const& value : *enumIt) {
+            addStringEnum(value);
+        }
+    }
+    if (!metadata.enumValues.empty()) {
+        std::ranges::sort(metadata.enumValues);
+        auto duplicates = std::ranges::unique(metadata.enumValues);
+        metadata.enumValues.erase(duplicates.begin(), duplicates.end());
+        metadata.valueKind = "enum";
+        return metadata;
+    }
+
+    if (jsonSchemaHasType(*resolved, "integer")) {
+        metadata.valueKind = "integer";
+    }
+    else if (jsonSchemaHasType(*resolved, "number")) {
+        metadata.valueKind = "number";
+    }
+    else if (jsonSchemaHasType(*resolved, "boolean")) {
+        metadata.valueKind = "boolean";
+    }
+    else if (jsonSchemaHasType(*resolved, "string")) {
+        metadata.valueKind = "string";
+    }
+    else if (jsonSchemaHasType(*resolved, "array") || resolved->contains("items")) {
+        metadata.valueKind = "array";
+    }
+    else if (jsonSchemaHasType(*resolved, "object") || resolved->contains("properties")) {
+        metadata.valueKind = "object";
+    }
+    else if (registry && schemaId != simfil::NoSchemaId) {
+        if (registry->kind(schemaId) == simfil::Schema::Kind::Object) {
+            metadata.valueKind = "object";
+        }
+        else if (registry->kind(schemaId) == simfil::Schema::Kind::Array) {
+            metadata.valueKind = "array";
+        }
+    }
+    return metadata;
+}
+
+SearchStyleSchemaMetadata overlayFieldMetadata(std::string const& path)
+{
+    if (path == "$validityIndex" || path == "$validityCount") {
+        return {"integer", {}};
+    }
+    if (path == "$feature") {
+        return {"object", {}};
+    }
+    if (path == "$name" || path == "$layer") {
+        return {"string", {}};
+    }
+    return {};
+}
+
+nlohmann::json const* schemaForRegistryKey(
+    mapget::LayerInfo const& layerInfo,
+    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::string const& key)
+{
+    if (!registry || layerInfo.featureModelSchema_.is_null()) {
+        return nullptr;
+    }
+    auto const* entry = registry->getSchema(key);
+    if (!entry) {
+        return nullptr;
+    }
+    auto const& pointer = entry->jsonPointer_;
+    try {
+        if (pointer == "#") {
+            return &layerInfo.featureModelSchema_;
+        }
+        if (!pointer.empty() && pointer.front() == '#') {
+            return &layerInfo.featureModelSchema_.at(nlohmann::json::json_pointer(pointer.substr(1)));
+        }
+        return &layerInfo.featureModelSchema_.at(nlohmann::json::json_pointer(pointer));
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+/** Recursively enumerates nested schema paths that mapget can return through `withFields`. */
+void collectSchemaFieldPaths(
+    std::vector<SearchStyleFieldPath>& paths,
+    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    simfil::SchemaId schemaId,
+    nlohmann::json const* schemaJson,
+    nlohmann::json const& rootSchema,
     std::string const& basePath,
     int depth)
 {
@@ -545,10 +804,12 @@ void collectSchemaFieldPaths(
 
     for (auto const& field : registry->directFields(schemaId)) {
         auto const path = appendFieldPathSegment(basePath, field);
-        paths.push_back(path);
         auto const childSchema = registry->childSchema(schemaId, field);
+        auto const* childJson = schemaChildForField(rootSchema, schemaJson, field);
+        auto metadata = schemaMetadata(rootSchema, childJson, registry, childSchema);
+        paths.push_back({path, childSchema, metadata.valueKind, metadata.enumValues});
         if (childSchema != simfil::NoSchemaId && registry->kind(childSchema) == simfil::Schema::Kind::Object) {
-            collectSchemaFieldPaths(paths, registry, childSchema, path, depth - 1);
+            collectSchemaFieldPaths(paths, registry, childSchema, childJson, rootSchema, path, depth - 1);
         }
     }
 }
@@ -561,7 +822,8 @@ void addSearchStyleField(
     std::string const& mapId,
     std::string const& layerId,
     std::string const& attrName,
-    std::string const& featureType)
+    std::string const& featureType,
+    SearchStyleSchemaMetadata metadata = {})
 {
     if (path.empty()) {
         return;
@@ -570,7 +832,7 @@ void addSearchStyleField(
     if (!seen.insert(key).second) {
         return;
     }
-    fields.push_back({path, mapId, layerId, attrName, featureType});
+    fields.push_back({path, mapId, layerId, attrName, featureType, metadata.valueKind, metadata.enumValues});
 }
 
 /** Converts native attribute-scope candidates into the embind JS value shape. */
@@ -594,13 +856,20 @@ NativeJsValue searchStyleFieldsToJs(std::vector<SearchStyleFieldInfo> const& fie
 {
     auto result = JsValue::List();
     for (auto const& field : fields) {
-        result.push(JsValue::Dict({
+        auto item = JsValue::Dict({
             {"path", JsValue(field.path)},
             {"mapId", JsValue(field.mapId)},
             {"layerId", JsValue(field.layerId)},
             {"attrName", field.attrName.empty() ? JsValue::Undefined() : JsValue(field.attrName)},
-            {"featureType", field.featureType.empty() ? JsValue::Undefined() : JsValue(field.featureType)}
-        }));
+            {"featureType", field.featureType.empty() ? JsValue::Undefined() : JsValue(field.featureType)},
+            {"valueKind", JsValue(field.valueKind)}
+        });
+        auto enumValues = JsValue::List();
+        for (auto const& value : field.enumValues) {
+            enumValues.push(JsValue(value));
+        }
+        item.set("enumValues", enumValues);
+        result.push(item);
     }
     return *result;
 }
@@ -1052,22 +1321,45 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
         }
         auto const& scopes = matchingScopes.empty() ? allScopes : matchingScopes;
         for (auto const& attrScope : scopes) {
-            std::vector<std::string> paths;
+            auto const* attributeSchemaJson = attrScope.layerInfo
+                ? schemaForRegistryKey(
+                    *attrScope.layerInfo,
+                    attrScope.registry,
+                    "Attribute:" + attrScope.featureType + ":" + attrScope.attrLayerName + ":" + attrScope.attrName)
+                : nullptr;
+            if (!attributeSchemaJson && attrScope.layerInfo) {
+                auto const* layerMapJson = schemaForRegistryKey(
+                    *attrScope.layerInfo,
+                    attrScope.registry,
+                    "AttributeLayerMap:" + attrScope.featureType);
+                auto const* attrLayerJson = schemaChildForField(
+                    attrScope.layerInfo->featureModelSchema_,
+                    layerMapJson,
+                    attrScope.attrLayerName);
+                attributeSchemaJson = schemaChildForField(
+                    attrScope.layerInfo->featureModelSchema_,
+                    attrLayerJson,
+                    attrScope.attrName);
+            }
+            std::vector<SearchStyleFieldPath> paths;
             collectSchemaFieldPaths(
                 paths,
                 attrScope.registry,
                 attrScope.attributeSchema,
+                attributeSchemaJson,
+                attrScope.layerInfo ? attrScope.layerInfo->featureModelSchema_ : nlohmann::json::object(),
                 "",
                 kSearchStyleFieldDepth);
             for (auto const& path : paths) {
                 addSearchStyleField(
                     fields,
                     seen,
-                    path,
+                    path.path,
                     attrScope.mapId,
                     attrScope.layerId,
                     attrScope.attrName,
-                    attrScope.featureType);
+                    attrScope.featureType,
+                    {path.valueKind, path.enumValues});
             }
 
             for (auto const& overlayField : {"$name", "$layer", "$validityIndex", "$validityCount"}) {
@@ -1078,7 +1370,8 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                     attrScope.mapId,
                     attrScope.layerId,
                     attrScope.attrName,
-                    attrScope.featureType);
+                    attrScope.featureType,
+                    overlayFieldMetadata(overlayField));
             }
 
             addSearchStyleField(
@@ -1088,23 +1381,30 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                 attrScope.mapId,
                 attrScope.layerId,
                 attrScope.attrName,
-                attrScope.featureType);
-            std::vector<std::string> featurePaths;
+                attrScope.featureType,
+                overlayFieldMetadata("$feature"));
+            auto const* featureSchemaJson = attrScope.layerInfo
+                ? schemaForRegistryKey(*attrScope.layerInfo, attrScope.registry, "Feature:" + attrScope.featureType)
+                : nullptr;
+            std::vector<SearchStyleFieldPath> featurePaths;
             collectSchemaFieldPaths(
                 featurePaths,
                 attrScope.registry,
                 attrScope.featureSchema,
+                featureSchemaJson,
+                attrScope.layerInfo ? attrScope.layerInfo->featureModelSchema_ : nlohmann::json::object(),
                 "$feature",
                 kSearchStyleFieldDepth);
             for (auto const& path : featurePaths) {
                 addSearchStyleField(
                     fields,
                     seen,
-                    path,
+                    path.path,
                     attrScope.mapId,
                     attrScope.layerId,
                     attrScope.attrName,
-                    attrScope.featureType);
+                    attrScope.featureType,
+                    {path.valueKind, path.enumValues});
             }
         }
     }
@@ -1120,22 +1420,26 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                     continue;
                 }
                 for (auto const& featureType : layerInfo->featureTypes_) {
-                    std::vector<std::string> paths;
+                    auto const* featureSchemaJson = schemaForRegistryKey(*layerInfo, registry, "Feature:" + featureType.name_);
+                    std::vector<SearchStyleFieldPath> paths;
                     collectSchemaFieldPaths(
                         paths,
                         registry,
                         registry->featureSchema(featureType.name_),
+                        featureSchemaJson,
+                        layerInfo->featureModelSchema_,
                         "",
                         kSearchStyleFieldDepth);
                     for (auto const& path : paths) {
                         addSearchStyleField(
                             fields,
                             seen,
-                            path,
+                            path.path,
                             dataSource.mapId_,
                             layerInfo->layerId_,
                             "",
-                            featureType.name_);
+                            featureType.name_,
+                            {path.valueKind, path.enumValues});
                     }
                 }
             }

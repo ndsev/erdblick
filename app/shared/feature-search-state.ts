@@ -13,6 +13,11 @@ export interface FeatureSearchColorStop {
     value: unknown;
 }
 
+export interface FeatureSearchMapLayerRef {
+    mapId: string;
+    layerId: string;
+}
+
 export type FeatureSearchGeometryKind = "any" | "point" | "line" | "polygon" | "mesh";
 
 export type FeatureSearchColorMode =
@@ -21,6 +26,7 @@ export type FeatureSearchColorMode =
     | {mode: "categories"; field: string; stops: FeatureSearchColorStop[]; fallbackColor?: string};
 
 export interface FeatureSearchStyleRule {
+    name?: string;
     geometry: FeatureSearchGeometryKind;
     filter: FeatureSearchRuleFilter[];
     color: FeatureSearchColorMode;
@@ -42,9 +48,12 @@ export interface FeatureSearchStateEntry {
     query: string;
     scope: FeatureSearchScope;
     autoUpdate: boolean;
+    bookmarked: boolean;
+    enabled: boolean;
     paused: boolean;
     showResultsOnMap: boolean;
     pinColor: string;
+    selectedMapLayers: FeatureSearchMapLayerRef[];
     searchStyleRules: FeatureSearchStyleRule[];
     renderStrategy: FeatureSearchRenderStrategy;
 }
@@ -59,6 +68,7 @@ const MAX_FEATURE_SEARCHES = 50;
 const MAX_STYLE_RULES_PER_SEARCH = 50;
 const MAX_FILTERS_PER_RULE = 25;
 const MAX_COLOR_STOPS_PER_RULE = 25;
+const MAX_SELECTED_SEARCH_LAYERS = 500;
 const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "polygon", "mesh"]);
 const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
 const MIN_HIGH_FIDELITY_VISIBLE_TILES = 1;
@@ -181,6 +191,32 @@ function normalizeColorStops(value: unknown): FeatureSearchColorStop[] {
     });
 }
 
+function normalizeSearchMapLayerRefs(value: unknown): FeatureSearchMapLayerRef[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seen = new Set<string>();
+    const refs: FeatureSearchMapLayerRef[] = [];
+    for (const item of value.slice(0, MAX_SELECTED_SEARCH_LAYERS)) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            continue;
+        }
+        const raw = item as Record<string, unknown>;
+        const mapId = normalizeString(raw["mapId"]);
+        const layerId = normalizeString(raw["layerId"]);
+        if (!mapId || !layerId) {
+            continue;
+        }
+        const key = JSON.stringify([mapId, layerId]);
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        refs.push({mapId, layerId});
+    }
+    return refs;
+}
+
 function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchColorMode {
     const nested = raw["color"];
     if (nested && typeof nested === "object" && !Array.isArray(nested)) {
@@ -274,6 +310,7 @@ function normalizeStyleRule(value: unknown): FeatureSearchStyleRule | null {
     const pointRadius = normalizePositiveNumber(raw["pointRadius"]);
     const opacity = normalizePositiveNumber(raw["opacity"]);
     return {
+        ...(normalizeString(raw["name"]) ? {name: normalizeString(raw["name"])} : {}),
         geometry: normalizeGeometry(raw["geometry"] ?? raw["type"]),
         filter: normalizeRuleFilters(raw["filter"]),
         color: normalizeSearchColorMode(raw),
@@ -293,6 +330,7 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         return null;
     }
     const id = normalizeString(raw["id"]) ?? createFeatureSearchId();
+    const selectedMapLayers = normalizeSearchMapLayerRefs(raw["selectedMapLayers"]);
     const styleRules = Array.isArray(raw["searchStyleRules"])
         ? raw["searchStyleRules"]
             .slice(0, MAX_STYLE_RULES_PER_SEARCH)
@@ -304,9 +342,12 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         query,
         scope: normalizeScope(raw["scope"]),
         autoUpdate: normalizeBoolean(raw["autoUpdate"], false),
+        bookmarked: normalizeBoolean(raw["bookmarked"], false),
+        enabled: normalizeBoolean(raw["enabled"], true),
         paused: normalizeBoolean(raw["paused"], false),
         showResultsOnMap: normalizeBoolean(raw["showResultsOnMap"], true),
         pinColor: normalizeHexColor(raw["pinColor"]),
+        selectedMapLayers,
         searchStyleRules: styleRules,
         renderStrategy: normalizeFeatureSearchRenderStrategy(raw["renderStrategy"])
     };
@@ -337,9 +378,12 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
         id: createFeatureSearchId(),
         scope: "auto",
         autoUpdate: false,
+        bookmarked: false,
+        enabled: true,
         paused: false,
         showResultsOnMap: true,
         pinColor: DEFAULT_PIN_COLOR,
+        selectedMapLayers: [],
         searchStyleRules: [],
         renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
         ...value

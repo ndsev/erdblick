@@ -1,7 +1,8 @@
 import {Injectable} from "@angular/core";
 import {
     FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate
+    FeatureSearchStyleFieldCandidate,
+    FeatureSearchStyleValueKind
 } from "./map-runtime.model";
 import {MapInfoService} from "./map-info.service";
 import type {FeatureSearchScope} from "../shared/feature-search-state";
@@ -116,7 +117,28 @@ export class FeatureSearchSchemaService {
             }
             const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
             const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
-            return [{path, mapId, layerId, attrName, featureType}];
+            const valueKind = this.normalizeStyleFieldValueKind(raw["valueKind"]);
+            const enumValues = Array.isArray(raw["enumValues"])
+                ? raw["enumValues"].filter((item): item is string => typeof item === "string")
+                : [];
+            return [{path, mapId, layerId, attrName, featureType, valueKind, enumValues}];
         });
+    }
+
+    /** Normalizes native value-kind strings while keeping old WASM builds usable. */
+    private normalizeStyleFieldValueKind(value: unknown): FeatureSearchStyleValueKind {
+        switch (value) {
+            case "number":
+            case "integer":
+            case "string":
+            case "boolean":
+            case "enum":
+            case "object":
+            case "array":
+            case "unknown":
+                return value;
+            default:
+                return "unknown";
+        }
     }
 }

@@ -7,6 +7,7 @@ import {environment} from "../environments/environment";
 export type AppStateToStorageFun<T> = (value: T) => unknown;
 /** Restores an app-state value from persisted storage using the current value as context. */
 export type AppStateFromStorageFun<T> = (value: ZodTypeAny, currentValue: T) => T;
+export type AppStateSerializedValue = string | null;
 
 /** Describes one persisted application state slot. */
 export interface AppStateOptions<T> {
@@ -385,20 +386,56 @@ export class AppState<T> extends BehaviorSubject<T> {
             !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false);
     }
 
+    /** Returns URL keys that must be cleared when this state encodes an empty value. */
+    private urlKeys(): string[] {
+        if (this.urlFormEncode) {
+            if (this.isArray() && this.arrayIsFormObject()) {
+                const elementSchema = this.arrayElemSchema() as z.ZodObject<any>;
+                const shape = (unwrapScalar(elementSchema) as z.ZodObject<any>).shape as Record<string, ZodTypeAny>;
+                return Object.keys(shape);
+            }
+            const formFieldNames = this.getFormFieldNames();
+            if (formFieldNames.length) {
+                return [...formFieldNames];
+            }
+        }
+        return [this.urlParamName ?? this.name];
+    }
+
+    /** Returns whether the URL value is an old empty-array encoding that should not override storage. */
+    private isEmptyArrayUrlValue(value: unknown): boolean {
+        if (value === undefined || value === null) {
+            return false;
+        }
+        const defaultPayload = this.preprocess ? this.preprocess(this.defaultValue) : this.defaultValue;
+        if (!Array.isArray(defaultPayload) || defaultPayload.length !== 0) {
+            return false;
+        }
+        const text = String(value).trim();
+        return text === "" || text === "[]";
+    }
+
     /**
      * Serialize current state either for URL parameters (`forUrl=true`) or
      * for local storage payload (`forUrl=false`).
      */
     /** Serializes the state slot into URL or storage key/value pairs. */
-    serialize(forUrl: boolean): Record<string, string> | undefined {
+    serialize(forUrl: boolean): Record<string, AppStateSerializedValue> | undefined {
         if (forUrl && !this.isUrlState()) {
             return undefined;
         }
 
         try {
-            const result: Record<string, string> = {};
+            const result: Record<string, AppStateSerializedValue> = {};
             const value = this.getValue();
             const payload = this.preprocess ? this.preprocess(value) : value;
+
+            if (forUrl && Array.isArray(payload) && payload.length === 0) {
+                for (const key of this.urlKeys()) {
+                    result[key] = null;
+                }
+                return result;
+            }
 
             // Array-aware URL encoding
             if (forUrl && this.isArray()) {
@@ -479,6 +516,9 @@ export class AppState<T> extends BehaviorSubject<T> {
 
             let parsed: unknown = undefined;
             const base = this.urlParamName ?? this.name;
+            if (this.isEmptyArrayUrlValue(raw[base])) {
+                return;
+            }
 
             // Array path
             if (this.isArray()) {
@@ -545,6 +585,9 @@ export class AppState<T> extends BehaviorSubject<T> {
             }
             // Accept `"0"` and `""` etc. (only skip if truly undefined)
             else if (raw[this.urlParamName!] !== undefined) {
+                if (this.isEmptyArrayUrlValue(raw[this.urlParamName!])) {
+                    return;
+                }
                 parsed = isScalar(this.schema) ? raw[this.urlParamName!] : JSON.parse(raw[this.urlParamName!]);
             }
 

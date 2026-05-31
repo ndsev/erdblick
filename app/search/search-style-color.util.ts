@@ -1,8 +1,11 @@
 export type SearchStyleColorMode = "solid" | "gradient" | "categories";
+export type SearchStyleFieldValueKind = "number" | "integer" | "string" | "boolean" | "enum" | "object" | "array" | "unknown";
 
 export interface SearchStyleFieldOption {
     label: string;
     value: string;
+    valueKind?: SearchStyleFieldValueKind;
+    enumValues?: string[];
 }
 
 export interface SearchStyleGradientStopDraft {
@@ -235,10 +238,35 @@ export function gradientValueTags(draft: SearchStyleColorDraft): SearchStyleGrad
     });
 }
 
-export function serializableCategoryStops(draft: SearchStyleColorDraft): Array<{value: string; color: string}> {
+export function isNumericStyleValueKind(kind: SearchStyleFieldValueKind | undefined): boolean {
+    return kind === "number" || kind === "integer";
+}
+
+function serializableValue(valueText: string, valueKind: SearchStyleFieldValueKind | undefined): unknown {
+    const trimmed = valueText.trim();
+    if (isNumericStyleValueKind(valueKind)) {
+        const numeric = Number(trimmed);
+        return Number.isFinite(numeric) ? numeric : trimmed;
+    }
+    if (valueKind === "boolean") {
+        const lower = trimmed.toLowerCase();
+        if (lower === "true") {
+            return true;
+        }
+        if (lower === "false") {
+            return false;
+        }
+    }
+    return trimmed;
+}
+
+export function serializableCategoryStops(
+    draft: SearchStyleColorDraft,
+    valueKind?: SearchStyleFieldValueKind
+): Array<{value: unknown; color: string}> {
     return draft.categoryStops
         .map(stop => ({
-            value: stop.valueText.trim(),
+            value: serializableValue(stop.valueText, valueKind),
             color: normalizeHexColor(stop.color, draft.fallbackColor || draft.solidColor)
         }));
 }

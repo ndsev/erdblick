@@ -32,6 +32,7 @@ import {DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY} from "../shared/feature-search-s
 import type {
     FeatureSearchColorMode,
     FeatureSearchGeometryKind,
+    FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
     FeatureSearchRuleFilter,
     FeatureSearchScope,
@@ -41,12 +42,21 @@ import {
     defaultSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,
     gradientStopsToDraft,
+    isNumericStyleValueKind,
     normalizeHexColor,
     SearchStyleCategoryStopDraft,
     SearchStyleColorDraft,
+    SearchStyleFieldValueKind,
     serializableCategoryStops,
     serializableGradientStops
 } from "./search-style-color.util";
+import {
+    featureSearchDefinitionExport,
+    featureSearchJsonReplacer,
+    featureSearchResultsExport,
+    safeFeatureSearchExportId,
+    type FeatureSearchGroupingExportOption
+} from "./feature-search-export.util";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -60,6 +70,13 @@ interface FeatureSearchStyleOption {
     layerId?: string;
     attrName?: string;
     featureType?: string;
+    valueKind?: SearchStyleFieldValueKind;
+    enumValues?: string[];
+}
+
+interface FeatureSearchLayerOption extends FeatureSearchMapLayerRef {
+    key: string;
+    label: string;
 }
 
 interface FeatureSearchScopeOption {
@@ -83,11 +100,12 @@ interface FeatureSearchStyleFilterDraft {
     id: number;
     attributeField: string;
     operator: string;
-    filterValue: number;
+    filterValue: unknown;
 }
 
 interface FeatureSearchStyleRuleDraft {
     id: number;
+    name: string;
     filters: FeatureSearchStyleFilterDraft[];
     visualization: string;
     lineWidth: number;
@@ -135,8 +153,7 @@ interface FeatureSearchStyleRuleDraft {
             <app-surface-header class="feature-search-surface-header"
                                 title="Search Loaded Features"
                                 titleIcon="search"
-                                [hasColorPicker]="true"
-                                [color]="session?.pointColor ?? '#ea4336'"
+                                [hasColorPicker]="false"
                                 [dockMode]="isDocked() ? 'undock' : 'dock'"
                                 [sizeToggleVisible]="isDocked()"
                                 [sizeToggleDisabled]="dockedPanelCount <= 1"
@@ -144,7 +161,6 @@ interface FeatureSearchStyleRuleDraft {
                                 [dragEnabled]="isDocked()"
                                 [extraActions]="featureSearchHeaderActions()"
                                 (focusRequest)="bringSurfaceToFront()"
-                                (colorChange)="onSearchColorChange($event)"
                                 (dockRequest)="toggleDocked()"
                                 (sizeToggleRequest)="toggleExpanded()"
                                 (closeRequest)="closeSearch()"
@@ -153,11 +169,13 @@ interface FeatureSearchStyleRuleDraft {
         </ng-template>
 
         <ng-template #searchContent>
+            <div class="feature-search-content" [class.feature-search-content-disabled]="!searchEnabled()">
             <div class="feature-search-query search-input">
                 <textarea #featureSearchQueryTextarea
                           class="feature-search-query-input"
                           [class.single-line]="!featureSearchQueryExpanded"
                           pTextarea
+                          [disabled]="!searchEnabled()"
                           [rows]="featureSearchQueryExpanded ? 3 : 1"
                           [(ngModel)]="featureSearchQuery"
                           (click)="expandFeatureSearchQueryInput()"
@@ -187,12 +205,29 @@ interface FeatureSearchStyleRuleDraft {
                                 optionLabel="label"
                                 optionValue="value"
                                 [allowEmpty]="false"
+                                [disabled]="!searchEnabled()"
                                 (ngModelChange)="onFeatureSearchScopeChange($event)">
                 </p-selectbutton>
+            </div>
+            <div class="feature-search-layer-control">
+                <span>Map layers</span>
+                <p-multiSelect [options]="mapLayerOptions"
+                               [(ngModel)]="selectedMapLayerOptions"
+                               (ngModelChange)="onSearchMapLayersChange($event)"
+                               optionLabel="label"
+                               placeholder="Select Map Layers"
+                               [filter]="true"
+                               [showToggleAll]="true"
+                               [maxSelectedLabels]="3"
+                               [disabled]="!searchEnabled()"
+                               display="chip"
+                               appendTo="body">
+                </p-multiSelect>
             </div>
             <div class="feature-search-area-control">
                 <label for="feature-search-auto-update-toggle">Auto-update area</label>
                 <p-toggleswitch [ngModel]="session?.definition?.autoUpdate"
+                                [disabled]="!searchEnabled()"
                                 (ngModelChange)="onFeatureSearchAutoUpdateChange($event)"
                                 inputId="feature-search-auto-update-toggle"
                                 data-testid="feature-search-auto-update-toggle">
@@ -202,6 +237,7 @@ interface FeatureSearchStyleRuleDraft {
                               label="Update Area"
                               severity="secondary"
                               [outlined]="true"
+                              [disabled]="!searchEnabled()"
                               data-testid="feature-search-update-area-button"
                               (click)="updateSearchInArea()">
                     </p-button>
@@ -272,6 +308,7 @@ interface FeatureSearchStyleRuleDraft {
                                         filterPlaceholder="Filter matched features"
                                         [scrollHeight]="scrollHeight"
                                         [highlightOnSelect]="true"
+                                        (onFilter)="onResultTreeFilter($event)"
                                         (onNodeSelect)="selectResult($event)"
                                         [emptyMessage]="resultsStatus">
                                     <ng-template let-node pTemplate="default">
@@ -294,10 +331,21 @@ interface FeatureSearchStyleRuleDraft {
                                 <h3>Render Strategy</h3>
                                 <div class="feature-search-render-strategy-grid">
                                     <label for="feature-search-show-lowfi-dots">Low-fi dots</label>
-                                    <p-toggleswitch [ngModel]="searchRenderStrategy().showLowFiDots"
-                                                    inputId="feature-search-show-lowfi-dots"
-                                                    (ngModelChange)="patchRenderStrategy('showLowFiDots', $event)">
-                                    </p-toggleswitch>
+                                    <div class="feature-search-lowfi-controls">
+                                        <p-toggleswitch [ngModel]="searchRenderStrategy().showLowFiDots"
+                                                        inputId="feature-search-show-lowfi-dots"
+                                                        (ngModelChange)="patchRenderStrategy('showLowFiDots', $event)">
+                                        </p-toggleswitch>
+                                        @if (searchRenderStrategy().showLowFiDots) {
+                                            <p-colorpicker inputId="feature-search-pin-color"
+                                                           [ngModel]="session?.pointColor ?? '#ea4336'"
+                                                           appendTo="body"
+                                                           pTooltip="Pin color"
+                                                           tooltipPosition="bottom"
+                                                           (ngModelChange)="onSearchColorChange($event)">
+                                            </p-colorpicker>
+                                        }
+                                    </div>
 
                                     <label for="feature-search-show-bucket-labels">Bucket labels</label>
                                     <p-toggleswitch [ngModel]="searchRenderStrategy().showBucketLabels"
@@ -345,7 +393,14 @@ interface FeatureSearchStyleRuleDraft {
                                                        [attr.data-testid]="'feature-search-style-panel-' + rule.id">
                                         <p-accordion-header>
                                             <div class="feature-search-style-rule-header">
-                                                <span>Rule {{ styleRuleDrafts.length - ruleIndex }}</span>
+                                                <input class="feature-search-style-rule-name"
+                                                       type="text"
+                                                       [ngModel]="rule.name"
+                                                       [placeholder]="'Rule ' + (styleRuleDrafts.length - ruleIndex)"
+                                                       [attr.aria-label]="'Rule name ' + (styleRuleDrafts.length - ruleIndex)"
+                                                       (ngModelChange)="setStyleRuleName(rule, $event)"
+                                                       (click)="$event.stopPropagation()"
+                                                       (mousedown)="$event.stopPropagation()">
                                                 <span class="feature-search-style-rule-actions">
                                                     <p-button icon="pi pi-refresh"
                                                               label="Reset Style"
@@ -380,19 +435,34 @@ interface FeatureSearchStyleRuleDraft {
                                                                       appendTo="body">
                                                             </p-select>
                                                             <p-select class="feature-search-style-operator"
-                                                                      [options]="styleOperatorOptions"
+                                                                      [options]="styleOperatorOptionsForFilter(filter)"
                                                                       [(ngModel)]="filter.operator"
                                                                       (ngModelChange)="onStyleRulesChanged()"
                                                                       optionLabel="label"
                                                                       optionValue="value"
                                                                       appendTo="body">
                                                             </p-select>
-                                                            <p-inputNumber class="feature-search-style-number"
-                                                                           [(ngModel)]="filter.filterValue"
-                                                                           (ngModelChange)="onStyleRulesChanged()"
-                                                                           [min]="0"
-                                                                           [max]="300">
-                                                            </p-inputNumber>
+                                                            @if (filterFieldIsNumeric(filter)) {
+                                                                <p-inputNumber class="feature-search-style-number"
+                                                                               [(ngModel)]="filter.filterValue"
+                                                                               (ngModelChange)="onStyleRulesChanged()">
+                                                                </p-inputNumber>
+                                                            } @else if (filterFieldEnumOptions(filter).length > 0) {
+                                                                <p-select class="feature-search-style-value-select"
+                                                                          [options]="filterFieldEnumOptions(filter)"
+                                                                          [editable]="true"
+                                                                          [(ngModel)]="filter.filterValue"
+                                                                          (ngModelChange)="onStyleRulesChanged()"
+                                                                          optionLabel="label"
+                                                                          optionValue="value"
+                                                                          appendTo="body">
+                                                                </p-select>
+                                                            } @else {
+                                                                <input class="feature-search-style-value-input"
+                                                                       type="text"
+                                                                       [(ngModel)]="filter.filterValue"
+                                                                       (ngModelChange)="onStyleRulesChanged()">
+                                                            }
                                                             <p-button class="feature-search-style-condition-delete"
                                                                       icon="pi pi-times"
                                                                       severity="danger"
@@ -521,6 +591,7 @@ interface FeatureSearchStyleRuleDraft {
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
+            </div>
         </ng-template>
         <div #alert></div>
     `,
@@ -558,6 +629,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     ];
     selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
     styleAttributeOptions: FeatureSearchStyleOption[] = [];
+    mapLayerOptions: FeatureSearchLayerOption[] = [];
+    selectedMapLayerOptions: FeatureSearchLayerOption[] = [];
     styleOperatorOptions: FeatureSearchStyleOption[] = [
         {label: '>', value: '>'},
         {label: '>=', value: '>='},
@@ -614,11 +687,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private resultTreeInputLength = 0;
     private resultTreeGroupingSignature = "";
     private resultTreeRunId = "";
+    private resultTreeFilterValue = "";
     private resultTreeGroupNodesByKey = new Map<string, TreeNode>();
     private resultTreeAppendRaf: number | null = null;
     private readonly resultTreeAppendBatchSize = 1000;
     private readonly resultTreeAppendFrameBudgetMs = 8;
     private styleAttributeOptionsSessionSignature = "";
+    private mapLayerOptionsSignature = "";
+    private selectedMapLayersSignature = "";
+    private confirmingClose = false;
+    private confirmedCloseSessionIds = new Set<string>();
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
@@ -662,8 +740,10 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }));
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
+            this.refreshMapLayerOptions();
             if (this.session) {
                 this.refreshStyleAttributeOptionsIfNeeded(this.session);
+                this.syncSelectedMapLayersFromSession(this.session);
             }
         }));
         this.subscriptions.add(this.featureSearchQueryChanged
@@ -673,11 +753,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     /** Creates one empty rule condition using the current schema-backed default field when available. */
     private createDefaultStyleFilter(): FeatureSearchStyleFilterDraft {
+        const field = this.defaultStyleField();
         return {
             id: this.nextStyleConditionId++,
-            attributeField: this.defaultStyleField(),
+            attributeField: field,
             operator: '>',
-            filterValue: 80
+            filterValue: this.defaultFilterValue(field)
         };
     }
 
@@ -685,6 +766,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private createStyleRule(id: number): FeatureSearchStyleRuleDraft {
         return {
             id,
+            name: "",
             filters: [],
             visualization: 'any',
             lineWidth: 10,
@@ -696,6 +778,34 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /** Returns the first currently valid result-field path for newly created controls. */
     private defaultStyleField(): string {
         return this.styleAttributeOptions[0]?.value ?? "";
+    }
+
+    /** Returns a non-destructive default filter value for the selected field type. */
+    private defaultFilterValue(field: string): unknown {
+        const option = this.styleFieldOption(field);
+        if (isNumericStyleValueKind(option?.valueKind)) {
+            return 80;
+        }
+        return option?.enumValues?.[0] ?? "";
+    }
+
+    private styleFieldOption(field: string): FeatureSearchStyleOption | undefined {
+        return this.styleAttributeOptions.find(option => option.value === field);
+    }
+
+    protected filterFieldIsNumeric(filter: FeatureSearchStyleFilterDraft): boolean {
+        return isNumericStyleValueKind(this.styleFieldOption(filter.attributeField)?.valueKind);
+    }
+
+    protected filterFieldEnumOptions(filter: FeatureSearchStyleFilterDraft): Array<{label: string; value: string}> {
+        return (this.styleFieldOption(filter.attributeField)?.enumValues ?? []).map(value => ({label: value, value}));
+    }
+
+    protected styleOperatorOptionsForFilter(filter: FeatureSearchStyleFilterDraft): FeatureSearchStyleOption[] {
+        if (this.filterFieldIsNumeric(filter)) {
+            return this.styleOperatorOptions;
+        }
+        return this.styleOperatorOptions.filter(option => ["=", "!=", "contains"].includes(option.value));
     }
 
     /** Adds a new style rule to the top of the editor and persists it immediately. */
@@ -738,6 +848,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /** Persists one normalized color draft emitted by the search-local color editor. */
     protected onRuleColorDraftChange(rule: FeatureSearchStyleRuleDraft, color: SearchStyleColorDraft): void {
         rule.color = color;
+        this.onStyleRulesChanged();
+    }
+
+    /** Persists an optional user-facing name for one style rule. */
+    protected setStyleRuleName(rule: FeatureSearchStyleRuleDraft, value: string): void {
+        rule.name = value ?? "";
         this.onStyleRulesChanged();
     }
 
@@ -820,6 +936,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const width = this.clampNumber(rule.lineWidth, 1, 32, 4);
         const color = this.colorModeFromDraft(rule);
         return {
+            ...(rule.name.trim() ? {name: rule.name.trim()} : {}),
             geometry: this.geometryFromUiValue(rule.visualization),
             filter: rule.filters
                 .filter(filter => !!filter.attributeField)
@@ -835,6 +952,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private styleRuleToDraft(rule: FeatureSearchStyleRule): FeatureSearchStyleRuleDraft {
         return {
             id: this.nextStyleRuleId++,
+            name: rule.name ?? "",
             filters: rule.filter.map(filter => this.filterToDraft(filter)),
             visualization: rule.geometry ?? "any",
             lineWidth: this.clampNumber(rule.width, 1, 32, 4),
@@ -851,10 +969,19 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             return {mode: "solid", color: normalizeHexColor(color.solidColor)};
         }
         if (color.mode === "categories") {
+            const valueKind = this.styleFieldOption(color.field)?.valueKind;
             return {
                 mode: "categories",
                 field: color.field,
-                stops: serializableCategoryStops(color),
+                stops: serializableCategoryStops(color, valueKind),
+                fallbackColor
+            };
+        }
+        if (!isNumericStyleValueKind(this.styleFieldOption(color.field)?.valueKind)) {
+            return {
+                mode: "categories",
+                field: color.field,
+                stops: serializableCategoryStops(color, this.styleFieldOption(color.field)?.valueKind),
                 fallbackColor
             };
         }
@@ -871,7 +998,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return {
             field: filter.attributeField,
             op: filter.operator,
-            value: filter.filterValue
+            value: this.filterValueFromDraft(filter)
         };
     }
 
@@ -881,8 +1008,26 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             id: this.nextStyleConditionId++,
             attributeField: filter.field || this.defaultStyleField(),
             operator: filter.op || "=",
-            filterValue: this.clampNumber(Number(filter.value), 0, 300, 0)
+            filterValue: filter.value ?? ""
         };
+    }
+
+    private filterValueFromDraft(filter: FeatureSearchStyleFilterDraft): unknown {
+        const valueKind = this.styleFieldOption(filter.attributeField)?.valueKind;
+        if (isNumericStyleValueKind(valueKind)) {
+            const numeric = Number(filter.filterValue);
+            return Number.isFinite(numeric) ? numeric : filter.filterValue;
+        }
+        if (valueKind === "boolean") {
+            const lower = String(filter.filterValue ?? "").trim().toLowerCase();
+            if (lower === "true") {
+                return true;
+            }
+            if (lower === "false") {
+                return false;
+            }
+        }
+        return String(filter.filterValue ?? "");
     }
 
     /** Converts a persisted color union into the search-local color editor draft. */
@@ -954,7 +1099,9 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                     mapId: option.mapId,
                     layerId: option.layerId,
                     attrName: option.attrName,
-                    featureType: option.featureType
+                    featureType: option.featureType,
+                    valueKind: option.valueKind,
+                    enumValues: option.enumValues
                 });
             }
         }
@@ -1011,6 +1158,61 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return false;
     }
 
+    private searchLayerKey(mapId: string, layerId: string): string {
+        return JSON.stringify([mapId, layerId]);
+    }
+
+    private refreshMapLayerOptions(): void {
+        const options: FeatureSearchLayerOption[] = [];
+        for (const [mapId, map] of this.mapService.maps.maps) {
+            for (const layer of map.allFeatureLayers()) {
+                options.push({
+                    mapId,
+                    layerId: layer.id,
+                    key: this.searchLayerKey(mapId, layer.id),
+                    label: `${mapId} - ${layer.id}`
+                });
+            }
+        }
+        options.sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
+        const signature = JSON.stringify(options.map(option => option.key));
+        if (signature === this.mapLayerOptionsSignature) {
+            return;
+        }
+        this.mapLayerOptionsSignature = signature;
+        this.mapLayerOptions = options;
+    }
+
+    private activeMapLayerOptions(): FeatureSearchLayerOption[] {
+        return this.mapLayerOptions.filter(option => this.isStyleFieldCandidateActive(option.mapId, option.layerId));
+    }
+
+    private syncSelectedMapLayersFromSession(session: FeatureSearchSession): void {
+        this.refreshMapLayerOptions();
+        const selectedRefs = session.definition.selectedMapLayers;
+        const selectedKeys = new Set(selectedRefs.map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
+        const nextOptions = this.mapLayerOptions.filter(option => selectedKeys.has(option.key));
+        const signature = JSON.stringify(nextOptions.map(option => option.key));
+        if (signature === this.selectedMapLayersSignature) {
+            return;
+        }
+        this.selectedMapLayersSignature = signature;
+        this.selectedMapLayerOptions = nextOptions;
+    }
+
+    protected onSearchMapLayersChange(options: FeatureSearchLayerOption[]): void {
+        const session = this.session;
+        if (!session || !this.searchEnabled()) {
+            return;
+        }
+        this.selectedMapLayerOptions = options ?? [];
+        this.selectedMapLayersSignature = JSON.stringify(this.selectedMapLayerOptions.map(option => option.key));
+        this.searchService.setSearchMapLayers(
+            session.id,
+            this.selectedMapLayerOptions.map(option => ({mapId: option.mapId, layerId: option.layerId}))
+        );
+    }
+
     /** Returns whether an editor field should be replaced by a schema-backed default. */
     private fieldNeedsDefault(field: string): boolean {
         return !field
@@ -1030,9 +1232,19 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 rule.color.field = field;
                 changed = true;
             }
+            if (rule.color.mode === "gradient"
+                && !isNumericStyleValueKind(this.styleFieldOption(rule.color.field)?.valueKind)) {
+                rule.color.mode = "categories";
+                changed = true;
+            }
             for (const filter of rule.filters) {
                 if (this.fieldNeedsDefault(filter.attributeField)) {
                     filter.attributeField = field;
+                    filter.filterValue = this.defaultFilterValue(field);
+                    changed = true;
+                }
+                if (!this.styleOperatorOptionsForFilter(filter).some(option => option.value === filter.operator)) {
+                    filter.operator = "=";
                     changed = true;
                 }
             }
@@ -1110,6 +1322,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const previousScope = this.featureSearchScope;
         this.lastSearchQuery = session.definition.query;
         this.featureSearchScope = session.definition.scope;
+        this.syncSelectedMapLayersFromSession(session);
         this.refreshStyleAttributeOptionsIfNeeded(session, false);
         this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
         if ((session.definition.searchStyleRules?.length ?? 0) > 0 && this.applyDefaultStyleFieldIfMissing()) {
@@ -1166,6 +1379,10 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     protected isDocked(): boolean {
         return !!this.session && this.searchService.isSessionDocked(this.session.id);
+    }
+
+    protected searchEnabled(): boolean {
+        return this.session?.definition.enabled ?? true;
     }
 
     /**
@@ -1400,7 +1617,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     protected rerunSearch() {
         const query = this.searchQueryForRerun();
-        if (!query || !this.session) {
+        if (!query || !this.session || !this.searchEnabled()) {
             return;
         }
         this.featureSearchQuery = query;
@@ -1413,7 +1630,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     protected onFeatureSearchScopeChange(scope: FeatureSearchScope): void {
         this.featureSearchScope = scope;
-        if (this.session && this.session.definition.scope !== scope) {
+        if (this.session && this.searchEnabled() && this.session.definition.scope !== scope) {
             this.styleAttributeOptionsSessionSignature = "";
             this.stateService.patchFeatureSearch(this.session.id, {scope});
         }
@@ -1428,45 +1645,137 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     }
 
     protected onFeatureSearchAutoUpdateChange(autoUpdate: boolean): void {
-        if (this.session) {
+        if (this.session && this.searchEnabled()) {
             this.searchService.setSearchAutoUpdate(this.session.id, autoUpdate);
         }
     }
 
     protected updateSearchInArea(): void {
-        if (this.session) {
+        if (this.session && this.searchEnabled()) {
             this.searchService.updateSearchInArea(this.session.id);
         }
     }
 
     protected featureSearchHeaderActions(): AppSurfaceHeaderAction[] {
+        const bookmarked = !!this.session?.definition.bookmarked;
+        const enabled = this.searchEnabled();
         return [
+            {
+                label: bookmarked ? 'Remove bookmark' : 'Bookmark search',
+                tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark search',
+                icon: bookmarked ? 'pi pi-bookmark-fill' : 'pi pi-bookmark',
+                command: () => this.toggleSearchBookmarked()
+            },
+            {
+                label: enabled ? 'Disable search' : 'Enable search',
+                tooltip: enabled ? 'Disable search' : 'Enable search',
+                icon: enabled ? 'pi pi-toggle-on' : 'pi pi-toggle-off',
+                command: () => this.toggleSearchEnabled()
+            },
+            {
+                label: 'Export as JSON',
+                tooltip: 'Export as JSON',
+                icon: 'pi pi-download',
+                disabled: !this.session,
+                command: () => this.exportSearchAsJson()
+            },
             {
                 label: 'Rerun search',
                 tooltip: 'Rerun search',
                 icon: 'pi pi-refresh',
-                disabled: !this.searchQueryForRerun(),
+                disabled: !enabled || !this.searchQueryForRerun(),
                 command: () => this.rerunSearch()
             },
             {
                 label: this.isSearchPaused ? 'Resume search' : 'Pause search',
                 tooltip: this.isSearchPaused ? 'Resume search' : 'Pause search',
                 icon: this.isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle',
-                disabled: !this.canPauseStopSearch,
+                disabled: !enabled || !this.canPauseStopSearch,
                 command: () => this.toggleSearchPaused()
             },
             {
                 label: 'Stop search',
                 tooltip: 'Stop search',
                 icon: 'pi pi-stop-circle',
-                disabled: !this.canPauseStopSearch,
+                disabled: !enabled || !this.canPauseStopSearch,
                 command: () => this.stopSearch()
             }
         ];
     }
 
-    protected closeSearch() {
+    protected toggleSearchBookmarked(): void {
         if (this.session) {
+            this.searchService.setSearchBookmarked(this.session.id, !this.session.definition.bookmarked);
+        }
+    }
+
+    protected toggleSearchEnabled(): void {
+        if (this.session) {
+            this.searchService.setSearchEnabled(this.session.id, !this.searchEnabled());
+        }
+    }
+
+    protected exportSearchAsJson(): void {
+        const session = this.session;
+        if (!session) {
+            return;
+        }
+        const safeId = safeFeatureSearchExportId(session.id);
+        this.downloadJsonFile(
+            `feature-search-${safeId}-definition.json`,
+            featureSearchDefinitionExport(session.definition)
+        );
+        this.downloadJsonFile(
+            `feature-search-${safeId}-results.json`,
+            featureSearchResultsExport(session.searchResults, this.currentExportGrouping(), this.resultTreeFilterValue)
+        );
+        this.infoMessageService.showSuccess('Feature search JSON export started');
+    }
+
+    private currentExportGrouping(): FeatureSearchGroupingExportOption[] {
+        return this.groupingValuesFromOptions(this.selectedGroupingOptions).map(id => ({
+            id,
+            name: this.grouping.find(option => option.value === id)?.name ?? String(id)
+        }));
+    }
+
+    private downloadJsonFile(filename: string, payload: unknown): void {
+        const source = JSON.stringify(payload, featureSearchJsonReplacer, 2) ?? "null";
+        const blob = new Blob(
+            [source],
+            {type: 'application/json;charset=utf-8'}
+        );
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    protected async closeSearch() {
+        if (this.session) {
+            const sessionId = this.session.id;
+            if (this.session.definition.bookmarked && !this.confirmedCloseSessionIds.has(sessionId)) {
+                if (this.confirmingClose) {
+                    return;
+                }
+                this.confirmingClose = true;
+                const confirmed = await this.infoMessageService.showConfirmDialog(
+                    this.alertContainer,
+                    'Close Bookmarked Search',
+                    'This search is bookmarked. Close it anyway?'
+                );
+                this.confirmingClose = false;
+                if (!confirmed) {
+                    this.featureSearchDialogVisible = true;
+                    return;
+                }
+                this.confirmedCloseSessionIds.add(sessionId);
+            }
+            this.confirmedCloseSessionIds.add(sessionId);
             this.searchService.closeSearch(this.session.id);
         }
     }
@@ -1548,6 +1857,10 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.inspectionSelection.setHoveredFeatures([]);
     }
 
+    protected onResultTreeFilter(event: {filter?: string | null | undefined}): void {
+        this.resultTreeFilterValue = String(event?.filter ?? "");
+    }
+
     /**
      * Pauses or resumes server-side search while keeping already collected results visible.
      */
@@ -1590,13 +1903,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /**
      * Resets dialog-local state after the dialog closes.
      */
-    onHide(_: any) {
+    async onHide(_: any) {
         const sessionId = this.session?.id;
         if (sessionId) {
-            this.searchService.closeSearch(sessionId);
+            await this.closeSearch();
         }
-        this.resetLocalState();
-        this.featureSearchDialogVisible = false;
+        if (!this.session || this.confirmedCloseSessionIds.has(sessionId ?? "")) {
+            this.resetLocalState();
+            this.featureSearchDialogVisible = false;
+        }
     }
 
     /** Clears local rendering state after the owning session disappears. */
@@ -1628,10 +1943,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.resultTreeInputLength = 0;
         this.resultTreeGroupingSignature = "";
         this.resultTreeRunId = "";
+        this.resultTreeFilterValue = "";
         this.resultTreeGroupNodesByKey.clear();
         this.cancelResultTreeAppend();
         this.lastErrorAlertSignature = "";
         this.surfacedDockedSearchId = "";
+        this.selectedMapLayerOptions = [];
+        this.selectedMapLayersSignature = "";
+        this.confirmingClose = false;
+        this.confirmedCloseSessionIds.clear();
     }
 
     /**
@@ -1646,21 +1966,32 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /** Applies user changes to feature search grouping options. */
     onGroupingOptionsChange(options: FeatureSearchGroupingOption[]) {
         const groupingValues = this.groupingValuesFromOptions(options);
-        this.selectedGroupingOptions = this.groupingOptionsFromValues(groupingValues);
+        this.selectedGroupingOptions = groupingValues
+            .map(value => this.grouping.find(option => option.value === value))
+            .filter((option): option is FeatureSearchGroupingOption => !!option);
         this.stateService.featureSearchGrouping = groupingValues;
         this.rebuildResultsTreeIncrementally();
     }
 
     /** Converts persisted grouping values into dropdown options. */
     private groupingOptionsFromValues(values: number[]): FeatureSearchGroupingOption[] {
-        const selected = new Set(values);
-        return this.grouping.filter(option => selected.has(option.value));
+        return values
+            .map(value => this.grouping.find(option => option.value === value))
+            .filter((option): option is FeatureSearchGroupingOption => !!option);
     }
 
     /** Converts dropdown options into persisted grouping values. */
     private groupingValuesFromOptions(options: FeatureSearchGroupingOption[] | null | undefined): number[] {
-        const selected = new Set((options ?? []).map(option => option.value));
-        return this.grouping.filter(option => selected.has(option.value)).map(option => option.value);
+        const seen = new Set<number>();
+        const result: number[] = [];
+        for (const option of options ?? []) {
+            if (!this.grouping.some(candidate => candidate.value === option.value) || seen.has(option.value)) {
+                continue;
+            }
+            seen.add(option.value);
+            result.push(option.value);
+        }
+        return result;
     }
 
     /** Checks whether two grouping option lists are equivalent. */
@@ -1795,12 +2126,17 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     /** Clears tree state so the next append pass can rebuild from the current session in chunks. */
     private resetStreamingResultTree(runId: string, groupingSignature: string): void {
+        const runChanged = this.resultTreeRunId !== runId;
         this.cancelResultTreeAppend();
         this.resultsTree = [];
         this.resultTreeGroupNodesByKey.clear();
         this.resultTreeInputLength = 0;
         this.resultTreeRunId = runId;
         this.resultTreeGroupingSignature = groupingSignature;
+        if (runChanged) {
+            this.resultTreeFilterValue = "";
+            this.tree?.resetFilter();
+        }
         this.showFilter = false;
         this.resultsStatus = "Loading...";
     }

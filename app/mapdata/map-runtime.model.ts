@@ -158,6 +158,16 @@ export interface FeatureSearchAttributeScopeCandidate {
     layerId: string;
 }
 
+export type FeatureSearchStyleValueKind =
+    | "number"
+    | "integer"
+    | "string"
+    | "boolean"
+    | "enum"
+    | "object"
+    | "array"
+    | "unknown";
+
 /** Schema-backed result-value field candidate for search-result style rules. */
 export interface FeatureSearchStyleFieldCandidate {
     path: string;
@@ -165,6 +175,8 @@ export interface FeatureSearchStyleFieldCandidate {
     layerId: string;
     attrName?: string;
     featureType?: string;
+    valueKind: FeatureSearchStyleValueKind;
+    enumValues: string[];
 }
 
 /** Re-export of the native search status payload type used by feature-search UI state. */

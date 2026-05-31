@@ -13,6 +13,7 @@ import {
     gradientPreviewCss,
     gradientStopsNeedSorting,
     gradientValueTags,
+    isNumericStyleValueKind,
     isSerializableColorDraft,
     normalizeHexColor,
     SearchStyleCategoryStopDraft,
@@ -31,7 +32,7 @@ import {
                 <label [for]="modeInputId">Mode</label>
                 <p-select [inputId]="modeInputId"
                           class="search-style-color-mode"
-                          [options]="modeOptions"
+                          [options]="availableModeOptions"
                           [ngModel]="viewDraft.mode"
                           (ngModelChange)="setMode($event)"
                           optionLabel="label"
@@ -135,12 +136,25 @@ import {
                                            [attr.aria-label]="'Category color ' + (stopIndex + 1)"
                                            (ngModelChange)="setCategoryStopColor(stop, $event)">
                             </p-colorpicker>
-                            <input class="search-style-color-value-input"
-                                   type="text"
-                                   [ngModel]="stop.valueText"
-                                   (ngModelChange)="setCategoryStopValue(stop, $event)"
-                                   placeholder="Value"
-                                   [attr.aria-label]="'Category value ' + (stopIndex + 1)">
+                            @if (categoryValueOptions.length > 0) {
+                                <p-select class="search-style-color-value-select"
+                                          [options]="categoryValueOptions"
+                                          [editable]="true"
+                                          [ngModel]="stop.valueText"
+                                          (ngModelChange)="setCategoryStopValue(stop, $event)"
+                                          optionLabel="label"
+                                          optionValue="value"
+                                          appendTo="body"
+                                          [attr.aria-label]="'Category value ' + (stopIndex + 1)">
+                                </p-select>
+                            } @else {
+                                <input class="search-style-color-value-input"
+                                       [type]="categoryValueInputType"
+                                       [ngModel]="stop.valueText"
+                                       (ngModelChange)="setCategoryStopValue(stop, $event)"
+                                       placeholder="Value"
+                                       [attr.aria-label]="'Category value ' + (stopIndex + 1)">
+                            }
                             <p-button class="search-style-color-delete"
                                       icon="pi pi-times"
                                       severity="danger"
@@ -166,7 +180,7 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected readonly modeInputId: string;
     protected readonly fieldInputId: string;
-    protected readonly modeOptions: Array<{label: string; value: SearchStyleColorMode}> = [
+    private readonly modeOptions: Array<{label: string; value: SearchStyleColorMode}> = [
         {label: "Gradient", value: "gradient"},
         {label: "Solid", value: "solid"},
         {label: "Categories", value: "categories"}
@@ -187,7 +201,24 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
         this.viewDraft = cloneSearchStyleColorDraft(this.draft);
+        if (this.viewDraft.mode === "gradient" && this.fieldOptions.length > 0 && !this.selectedFieldSupportsGradient()) {
+            this.viewDraft = {...this.viewDraft, mode: "categories"};
+        }
         this.nextStopId = this.maxStopId(this.viewDraft) + 1;
+    }
+
+    protected get availableModeOptions(): Array<{label: string; value: SearchStyleColorMode}> {
+        return this.modeOptions.filter(option =>
+            option.value !== "gradient" || this.hasGradientField()
+        );
+    }
+
+    protected get categoryValueOptions(): Array<{label: string; value: string}> {
+        return (this.selectedFieldOption()?.enumValues ?? []).map(value => ({label: value, value}));
+    }
+
+    protected get categoryValueInputType(): string {
+        return this.selectedFieldIsNumeric() ? "number" : "text";
     }
 
     protected get gradientPreview(): string {
@@ -203,12 +234,24 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     protected setMode(mode: SearchStyleColorMode): void {
-        this.viewDraft = {...this.viewDraft, mode};
+        let nextField = this.viewDraft.field;
+        if (mode === "gradient") {
+            nextField = this.selectedFieldSupportsGradient()
+                ? nextField
+                : this.firstGradientField();
+            if (!nextField) {
+                return;
+            }
+        }
+        this.viewDraft = {...this.viewDraft, mode, field: nextField};
         this.emitChange();
     }
 
     protected setField(field: string): void {
-        this.viewDraft = {...this.viewDraft, field};
+        const nextMode = this.viewDraft.mode === "gradient" && !this.fieldSupportsGradient(field)
+            ? "categories"
+            : this.viewDraft.mode;
+        this.viewDraft = {...this.viewDraft, field, mode: nextMode};
         this.emitChange();
     }
 
@@ -335,5 +378,30 @@ export class SearchStyleColorComponent implements OnChanges {
             ...draft.gradientStops.map(stop => stop.id),
             ...draft.categoryStops.map(stop => stop.id)
         );
+    }
+
+    private selectedFieldOption(): SearchStyleFieldOption | undefined {
+        return this.fieldOptions.find(option => option.value === this.viewDraft.field);
+    }
+
+    private selectedFieldIsNumeric(): boolean {
+        return isNumericStyleValueKind(this.selectedFieldOption()?.valueKind);
+    }
+
+    private selectedFieldSupportsGradient(): boolean {
+        return this.fieldSupportsGradient(this.viewDraft.field);
+    }
+
+    private hasGradientField(): boolean {
+        return this.fieldOptions.some(option => isNumericStyleValueKind(option.valueKind));
+    }
+
+    private firstGradientField(): string {
+        return this.fieldOptions.find(option => isNumericStyleValueKind(option.valueKind))?.value ?? "";
+    }
+
+    private fieldSupportsGradient(field: string): boolean {
+        const option = this.fieldOptions.find(candidate => candidate.value === field);
+        return isNumericStyleValueKind(option?.valueKind);
     }
 }

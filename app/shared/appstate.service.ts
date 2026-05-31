@@ -859,19 +859,7 @@ export class AppStateService implements OnDestroy {
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
-            this.setupStateSubscriptions();
-            this.hydrateFromStorage();
-            this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
-            this.migrateLegacyOsmState(this.router.routerState.snapshot.root?.queryParams ?? {});
-            this.isHydrating = false;
-            // Keep inbound links stable during passive startup hydration.
-            this.skipNextUrlSync = true;
-
-            // Ensure that the merged app state after hydration is reflected in local storage and URL.
-            this.syncAllStates();
-
-            this.isReady = true;
-            this.ready.next(true);
+            this.initializePersistence();
         });
 
         // Subsequently, Navigation events may come from usage of the browser back/forward-buttons.
@@ -901,6 +889,27 @@ export class AppStateService implements OnDestroy {
             this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
             this.sanitizeFocusedInspectionPanel(panels);
         });
+    }
+
+    /** Hydrates persisted state once config defaults are known and marks the service ready. */
+    initializePersistence(): void {
+        if (this.isReady) {
+            return;
+        }
+        this.setupStateSubscriptions();
+        const queryParams = this.router.routerState.snapshot.root?.queryParams ?? {};
+        this.hydrateFromStorage();
+        this.hydrateFromUrl(queryParams);
+        this.migrateLegacyOsmState(queryParams);
+        this.isHydrating = false;
+        // Keep inbound links stable during passive startup hydration.
+        this.skipNextUrlSync = true;
+
+        // Ensure that the merged app state after hydration is reflected in local storage and URL.
+        this.syncAllStates();
+
+        this.isReady = true;
+        this.ready.next(true);
     }
 
     /** Flushes all state slots to storage and URL after a batch update. */
@@ -1062,6 +1071,9 @@ export class AppStateService implements OnDestroy {
                     this.clearStyleOptionStorageEntries();
                 }
                 for (const [k, v] of Object.entries(serialized)) {
+                    if (v === null) {
+                        continue;
+                    }
                     localStorage.setItem(k, v);
                 }
 
@@ -1156,7 +1168,7 @@ export class AppStateService implements OnDestroy {
     /** Serializes URL-backed state and updates router query params accordingly. */
     private syncUrl(): 'replace' | 'merge' {
         // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
-        const params: Record<string, string> = {};
+        const params: Record<string, string | null> = {};
         for (const state of this.pendingUrlSyncStates) {
             const serialized = state.serialize(true);
             if (serialized === undefined) {
