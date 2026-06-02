@@ -24,6 +24,7 @@ function searchDefinition(patch: Partial<FeatureSearchStateEntry> = {}): Feature
         showResultsOnMap: true,
         pinColor: "#ea4336",
         selectedMapLayers: [],
+        selectedViewIndices: [0, 1],
         searchStyleRules: [],
         renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
         ...patch

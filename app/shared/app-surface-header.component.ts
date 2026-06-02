@@ -1,12 +1,11 @@
 import {Component, EventEmitter, Input, Output, ViewChild} from '@angular/core';
 import {NgClass} from '@angular/common';
-import {FormsModule} from '@angular/forms';
 import {ButtonModule} from 'primeng/button';
-import {ColorPickerModule} from 'primeng/colorpicker';
 import {TooltipModule} from 'primeng/tooltip';
 import {Menu} from 'primeng/menu';
 import {MenuModule} from 'primeng/menu';
-import type {MenuItem, MenuItemCommandEvent, OverlayOptions} from 'primeng/api';
+import type {MenuItem, MenuItemCommandEvent} from 'primeng/api';
+import type {ButtonSeverity} from 'primeng/types/button';
 
 export type AppSurfaceHeaderDockMode = 'none' | 'dock' | 'undock';
 
@@ -22,6 +21,9 @@ export interface AppSurfaceHeaderAction {
     icon?: string;
     menuIcon?: string;
     materialIcon?: string;
+    severity?: ButtonSeverity;
+    outlined?: boolean;
+    styleClass?: string;
     disabled?: boolean;
     command: (event: AppSurfaceHeaderActionCommandEvent) => void;
 }
@@ -35,17 +37,11 @@ export interface AppSurfaceHeaderAction {
              (focusin)="focusRequest.emit($event)">
             <span class="app-surface-header-title-group title-container"
                   [class.feature]="featureTitle">
-                @if (hasColorPicker || focusable) {
+                @if (hasSmartControl || focusable) {
                     <span class="inspection-focus-indicator"
                           [class.inspection-focus-indicator-active]="focusable && focused">
-                        @if (hasColorPicker) {
-                            <p-colorpicker [ngModel]="color"
-                                           [appendTo]="colorPickerAppendTo"
-                                           [overlayOptions]="colorPickerOverlayOptions"
-                                           (click)="$event.stopPropagation()"
-                                           (mousedown)="$event.stopPropagation()"
-                                           (ngModelChange)="updateColor($event)">
-                            </p-colorpicker>
+                        @if (hasSmartControl) {
+                            <ng-content select="[surfaceHeaderSmartControl]"></ng-content>
                         } @else {
                             <ng-content select="[surfaceHeaderIndicator]"></ng-content>
                         }
@@ -88,6 +84,9 @@ export interface AppSurfaceHeaderAction {
                         @for (action of extraActions; track action.label) {
                             <p-button [icon]="action.materialIcon ? '' : (action.icon ?? '')"
                                       [disabled]="action.disabled"
+                                      [severity]="action.severity"
+                                      [outlined]="action.outlined"
+                                      [styleClass]="action.styleClass"
                                       [pTooltip]="action.tooltip || action.label"
                                       tooltipPosition="bottom"
                                       (click)="emitExtraAction(action, $event, 'inline')"
@@ -160,7 +159,7 @@ export interface AppSurfaceHeaderAction {
         </div>
     `,
     standalone: true,
-    imports: [ButtonModule, ColorPickerModule, FormsModule, MenuModule, NgClass, TooltipModule]
+    imports: [ButtonModule, MenuModule, NgClass, TooltipModule]
 })
 /** Generic header used by docked panels and floating dialogs. */
 export class AppSurfaceHeaderComponent {
@@ -170,10 +169,7 @@ export class AppSurfaceHeaderComponent {
     @Input() lockable = false;
     @Input() locked = false;
     @Input() featureTitle = false;
-    @Input() hasColorPicker = false;
-    @Input() color = '';
-    @Input() colorPickerAppendTo: 'body' | HTMLElement | undefined = 'body';
-    @Input() colorPickerOverlayOptions: OverlayOptions = {autoZIndex: true, baseZIndex: 9500};
+    @Input() hasSmartControl = false;
     @Input() focusable = false;
     @Input() focused = false;
     @Input() dragEnabled = false;
@@ -188,7 +184,6 @@ export class AppSurfaceHeaderComponent {
     @Input() closeTooltip = 'Close';
     @Input() extraActions: AppSurfaceHeaderAction[] = [];
 
-    @Output() colorChange = new EventEmitter<string>();
     @Output() focusRequest = new EventEmitter<Event>();
     @Output() dragPointerDown = new EventEmitter<PointerEvent>();
     @Output() titleClick = new EventEmitter<MouseEvent>();
@@ -218,11 +213,6 @@ export class AppSurfaceHeaderComponent {
             return;
         }
         this.dragPointerDown.emit(event);
-    }
-
-    protected updateColor(color: string): void {
-        this.color = color;
-        this.colorChange.emit(color);
     }
 
     protected openExtraActionsMenu(event: MouseEvent): void {
@@ -286,7 +276,7 @@ export class AppSurfaceHeaderComponent {
             return false;
         }
         return !!target.closest(
-            'button, .p-button, .p-colorpicker, .p-select, .p-dropdown, .p-multiselect, input, textarea, select, option, a'
+            'button, .p-button, .p-colorpicker, .p-select, p-select, .p-dropdown, .p-multiselect, p-multiselect, .p-treeselect, p-treeselect, .p-toggleswitch, p-toggleswitch, p-iftalabel, input, textarea, select, option, a'
         );
     }
 }

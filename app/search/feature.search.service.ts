@@ -12,8 +12,14 @@ import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.servi
 import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
 import {GeoMath} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService, FEATURE_SEARCH_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
 import {
+    AppStateService,
+    FEATURE_SEARCH_DIALOG_LAYOUT_ID,
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
+    SEARCH_DOCK_TAB_ID
+} from "../shared/appstate.service";
+import {
+    DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
     FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
     FeatureSearchStateEntry
@@ -100,6 +106,7 @@ export interface FeatureSearchResultLayer {
     pointsVersion: number;
     pointColor: string;
     pointColorRgba: [number, number, number, number];
+    selectedViewIndices: number[];
     renderStrategy: FeatureSearchRenderStrategy;
     points: SearchResultPoint[];
     pointBuckets: SearchResultPointBucket[];
@@ -109,6 +116,28 @@ export interface FeatureSearchResultLayer {
 export interface CompletionOwnerState {
     candidates: BehaviorSubject<CompletionCandidate[]>;
     candidateList: CompletionCandidate[];
+}
+
+export interface FeatureSearchExportGroupingOption {
+    id: number;
+    name: string;
+}
+
+export interface FeatureSearchExportDialogRequest {
+    searchId: string;
+    includeConfiguration: boolean;
+    includeResults: boolean;
+    closeAfterExport: boolean;
+    grouping: FeatureSearchExportGroupingOption[];
+    filterValue: string;
+}
+
+export interface FeatureSearchExportDialogOptions {
+    includeConfiguration?: boolean;
+    includeResults?: boolean;
+    closeAfterExport?: boolean;
+    grouping?: FeatureSearchExportGroupingOption[];
+    filterValue?: string;
 }
 
 @Injectable({providedIn: 'root'})
@@ -142,6 +171,7 @@ export class FeatureSearchService {
 
     readonly sessionsChanged = new BehaviorSubject<FeatureSearchSession[]>([]);
     readonly progress: BehaviorSubject<FeatureSearchSession|null> = new BehaviorSubject<FeatureSearchSession|null>(null);
+    readonly exportDialogRequest = new BehaviorSubject<FeatureSearchExportDialogRequest | null>(null);
     diagnosticsMessageLimit: number = 25;
 
     private readonly completionStates = new Map<string, CompletionOwnerState>();
@@ -261,6 +291,7 @@ export class FeatureSearchService {
                 pointsVersion: session.searchResultPointsVersion,
                 pointColor: session.pointColor,
                 pointColorRgba: this.parseSearchResultColor(session.pointColor),
+                selectedViewIndices: [...session.definition.selectedViewIndices],
                 renderStrategy: session.definition.renderStrategy,
                 points: this.getSessionSearchResultPoints(session),
                 pointBuckets: this.getSessionSearchResultPointBuckets(session),
@@ -311,6 +342,8 @@ export class FeatureSearchService {
         const nextFields = featureSearchResultFields(definition, entry => this.searchSchema.resolveSearchScope(entry));
         const selectedLayersChanged = JSON.stringify(previous.selectedMapLayers)
             !== JSON.stringify(definition.selectedMapLayers);
+        const selectedViewsChanged = JSON.stringify(previous.selectedViewIndices)
+            !== JSON.stringify(definition.selectedViewIndices);
 
         if (previous.enabled !== definition.enabled) {
             if (!definition.enabled) {
@@ -354,7 +387,7 @@ export class FeatureSearchService {
                 this.applySearchResume(session);
             }
         }
-        if (previous.showResultsOnMap !== definition.showResultsOnMap) {
+        if (previous.showResultsOnMap !== definition.showResultsOnMap || selectedViewsChanged) {
             this.bumpSearchResultLayersVersion();
             this.progress.next(session);
         }
@@ -365,7 +398,8 @@ export class FeatureSearchService {
         if (previous.autoUpdate !== definition.autoUpdate
             || previous.bookmarked !== definition.bookmarked
             || previous.enabled !== definition.enabled
-            || selectedLayersChanged) {
+            || selectedLayersChanged
+            || selectedViewsChanged) {
             this.progress.next(session);
         }
         if (JSON.stringify(previous.searchStyleRules ?? []) !== JSON.stringify(definition.searchStyleRules ?? [])) {
@@ -402,12 +436,18 @@ export class FeatureSearchService {
             .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
     }
 
+    /** Returns the view indices that should receive visualizations for a newly created search. */
+    private activeFeatureSearchViewIndices(): number[] {
+        return [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES];
+    }
+
     /** Starts a new feature search over the currently prioritized tiles. */
     run(query: string): FeatureSearchSession {
         const entry = this.stateService.addFeatureSearch({
             query,
             pinColor: this.nextDefaultSearchColor(),
-            selectedMapLayers: this.activeFeatureSearchLayers()
+            selectedMapLayers: this.activeFeatureSearchLayers(),
+            selectedViewIndices: this.activeFeatureSearchViewIndices()
         });
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
         if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
@@ -580,6 +620,28 @@ export class FeatureSearchService {
         }
     }
 
+    /** Opens the feature-search export dialog for one runtime session. */
+    openExportDialog(sessionId: string, options: FeatureSearchExportDialogOptions = {}): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        this.exportDialogRequest.next({
+            searchId: session.id,
+            includeConfiguration: options.includeConfiguration ?? true,
+            includeResults: options.includeResults ?? true,
+            closeAfterExport: options.closeAfterExport ?? false,
+            grouping: options.grouping ?? [],
+            filterValue: options.filterValue ?? ""
+        });
+        this.stateService.openDialog(FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID);
+    }
+
+    /** Clears the current feature-search export request after the dialog closes. */
+    clearExportDialogRequest(): void {
+        this.exportDialogRequest.next(null);
+    }
+
     /** Enables or disables one persisted search without removing the panel. */
     setSearchEnabled(sessionId: string, enabled: boolean): void {
         const session = this.getInternalSession(sessionId);
@@ -606,6 +668,20 @@ export class FeatureSearchService {
         if (!this.stateService.patchFeatureSearch(sessionId, {selectedMapLayers})) {
             session.definition = {...session.definition, selectedMapLayers};
             this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+            this.progress.next(session);
+        }
+    }
+
+    /** Replaces the map views that render one search's visualizations. */
+    setSearchViewIndices(sessionId: string, selectedViewIndices: number[]): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {selectedViewIndices})) {
+            session.definition = {...session.definition, selectedViewIndices};
+            this.bumpSearchResultLayersVersion();
+            this.syncSearchRequestsToMapService();
             this.progress.next(session);
         }
     }

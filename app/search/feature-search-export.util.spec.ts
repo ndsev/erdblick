@@ -3,6 +3,8 @@ import type {FeatureSearchStateEntry} from "../shared/feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 import {
     featureSearchDefinitionExport,
+    featureSearchExportFilename,
+    featureSearchExportPayload,
     featureSearchJsonReplacer,
     featureSearchResultsExport,
     safeFeatureSearchExportId
@@ -21,6 +23,7 @@ describe("feature search JSON export helpers", () => {
             showResultsOnMap: true,
             pinColor: "#ea4336",
             selectedMapLayers: [{mapId: "MapA", layerId: "LayerA"}],
+            selectedViewIndices: [0, 1],
             searchStyleRules: [],
             renderStrategy: {
                 showLowFiDots: true,
@@ -44,10 +47,12 @@ describe("feature search JSON export helpers", () => {
             "showResultsOnMap",
             "pinColor",
             "selectedMapLayers",
+            "selectedViewIndices",
             "searchStyleRules",
             "renderStrategy"
         ]);
         expect(exported.selectedMapLayers).toEqual([{mapId: "MapA", layerId: "LayerA"}]);
+        expect(exported.selectedViewIndices).toEqual([0, 1]);
     });
 
     it("exports ungrouped result leaves with JSON-safe tile ids", () => {
@@ -62,6 +67,60 @@ describe("feature search JSON export helpers", () => {
                 result: expect.objectContaining({sourceTileId: "120"})
             })
         ]);
+    });
+
+    it("builds a combined export payload only when both categories are selected", () => {
+        const definition = searchDefinition();
+        const exported = featureSearchExportPayload(
+            definition,
+            [result("Road.1", "MapA", "LayerA", 120n)],
+            [{id: 1, name: "Maps"}],
+            "",
+            {includeConfiguration: true, includeResults: true},
+            "2026-06-01T00:00:00.000Z"
+        );
+
+        expect(exported).toMatchObject({
+            exportedAt: "2026-06-01T00:00:00.000Z",
+            searchId: "feature/search:1",
+            configuration: expect.objectContaining({id: "feature/search:1"}),
+            results: expect.objectContaining({grouping: [{id: 1, name: "Maps"}]})
+        });
+        expect(featureSearchExportFilename(definition.id, {includeConfiguration: true, includeResults: true}))
+            .toBe("feature-search-feature_search_1.json");
+    });
+
+    it("builds single-category export payloads and filenames", () => {
+        const definition = searchDefinition();
+        const results = [result("Road.1", "MapA", "LayerA", 120n)];
+
+        expect(featureSearchExportPayload(
+            definition,
+            results,
+            [],
+            "",
+            {includeConfiguration: true, includeResults: false}
+        )).toEqual(featureSearchDefinitionExport(definition));
+        expect(featureSearchExportFilename(definition.id, {includeConfiguration: true, includeResults: false}))
+            .toBe("feature-search-feature_search_1-configuration.json");
+
+        expect(featureSearchExportPayload(
+            definition,
+            results,
+            [],
+            "",
+            {includeConfiguration: false, includeResults: true}
+        )).toEqual(featureSearchResultsExport(results, [], ""));
+        expect(featureSearchExportFilename(definition.id, {includeConfiguration: false, includeResults: true}))
+            .toBe("feature-search-feature_search_1-results.json");
+
+        expect(featureSearchExportPayload(
+            definition,
+            results,
+            [],
+            "",
+            {includeConfiguration: false, includeResults: false}
+        )).toBeNull();
     });
 
     it("preserves grouping order and filtered group counts", () => {
@@ -115,6 +174,30 @@ describe("feature search JSON export helpers", () => {
         expect(safeFeatureSearchExportId("feature/search:1")).toBe("feature_search_1");
     });
 });
+
+function searchDefinition(): FeatureSearchStateEntry {
+    return {
+        id: "feature/search:1",
+        query: "**.speed > 80",
+        scope: "auto",
+        autoUpdate: false,
+        bookmarked: true,
+        enabled: false,
+        paused: true,
+        showResultsOnMap: true,
+        pinColor: "#ea4336",
+        selectedMapLayers: [{mapId: "MapA", layerId: "LayerA"}],
+        selectedViewIndices: [0, 1],
+        searchStyleRules: [],
+        renderStrategy: {
+            showLowFiDots: true,
+            showBucketLabels: true,
+            showHighFiGeometry: true,
+            showHighFiResultDots: false,
+            highFidelityMaxVisibleTiles: 512
+        }
+    };
+}
 
 function result(
     featureId: string,

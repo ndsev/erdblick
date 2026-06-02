@@ -665,6 +665,10 @@ app-surface-header {
   width: 1.5em !important;
 }
 
+.app-surface-header .p-toggleswitch {
+  flex: 0 0 auto;
+}
+
 .app-surface-header .inspection-focus-indicator-active .p-colorpicker input,
 .app-surface-header .inspection-focus-indicator-active .p-colorpicker-preview {
   border-radius: 50%;
@@ -1047,7 +1051,19 @@ diagnostics-indicator {
   gap: 1em;
 }
 
+.feature-search-export-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
 .diagnostics-export-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.feature-search-export-section {
   display: flex;
   flex-direction: column;
   gap: 0.5em;
@@ -1058,6 +1074,22 @@ diagnostics-indicator {
   flex-wrap: wrap;
   gap: 0.75em;
   align-items: center;
+}
+
+.feature-search-export-options {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75em 0.5em;
+  align-items: center;
+}
+
+.feature-search-export-label {
+  font-weight: 600;
+}
+
+.feature-search-export-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .hidden {
@@ -1389,7 +1421,8 @@ map-view {
 .diagnostics-progress-dialog,
 .diagnostics-performance-dialog,
 .diagnostics-log-dialog,
-.diagnostics-export-dialog {
+.diagnostics-export-dialog,
+.feature-search-export-dialog {
   .p-dialog {
     .p-dialog-header {
       padding: 0.75em !important;
@@ -1512,6 +1545,31 @@ map-view {
     min-width: 26em;
     width: 30em;
   }
+}
+
+.feature-search-export-dialog {
+  .p-dialog {
+    min-width: 24em;
+    width: 28em;
+  }
+}
+
+.feature-search-close-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  padding: 0.75em;
+  max-width: 24em;
+}
+
+.feature-search-close-confirm-message {
+  line-height: 1.35;
+}
+
+.feature-search-close-confirm-actions {
+  display: flex;
+  gap: 0.5em;
+  justify-content: flex-end;
 }
 
 .datasource-dialog {
@@ -4240,6 +4298,14 @@ inspection-tree {
   }
 }
 
+.feature-search-content-disabled {
+  opacity: 0.52;
+}
+
+.feature-search-content-disabled .feature-search-tabs {
+  pointer-events: none;
+}
+
 .feature-search-scope-control {
   align-items: center;
   display: flex;
@@ -4250,17 +4316,14 @@ inspection-tree {
   color: var(--p-text-muted-color);
   font-size: 0.9em;
 
-  > span {
-    flex: 0 0 auto;
-    font-weight: 600;
+  p-iftalabel,
+  .feature-search-scope-select {
+    flex: 0 1 12em;
+    min-width: 10em;
   }
 
-  .p-selectbutton {
-    flex: 0 1 auto;
-  }
-
-  .p-togglebutton-content {
-    padding: 0.25em 0.65em;
+  .p-select {
+    width: 100%;
   }
 }
 
@@ -4268,6 +4331,35 @@ inspection-tree {
   color: var(--p-text-color);
   flex: 1 1 12em;
   min-width: 10em;
+}
+
+.feature-search-layer-control {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0 0 0.35em 0;
+  font-size: 0.9em;
+
+  p-iftalabel,
+  .feature-search-layer-select,
+  .feature-search-view-select {
+    min-width: 12em;
+  }
+
+  .feature-search-layer-select {
+    flex: 1 1 20em;
+  }
+
+  .feature-search-view-select {
+    flex: 0 1 12em;
+  }
+
+  .p-treeselect,
+  .p-multiselect {
+    width: 100%;
+  }
 }
 
 .feature-search-awaiting {
@@ -4339,24 +4431,6 @@ inspection-tree {
     flex-wrap: wrap;
     gap: 0.5em;
     font-size: 0.9em;
-  }
-
-  .feature-search-content-disabled {
-    opacity: 0.52;
-    pointer-events: none;
-  }
-
-  .feature-search-layer-control {
-    align-items: center;
-    display: flex;
-    flex: 0 0 auto;
-    gap: 0.5em;
-    font-size: 0.9em;
-
-    p-multiselect {
-      flex: 1 1 18em;
-      min-width: 12em;
-    }
   }
 
   .feature-search-style-rules {

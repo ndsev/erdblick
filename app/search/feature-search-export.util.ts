@@ -64,7 +64,7 @@ export interface FeatureSearchResultsExport {
     tree: FeatureSearchExportNode[];
 }
 
-type FeatureSearchDefinitionExport = Pick<FeatureSearchStateEntry,
+export type FeatureSearchDefinitionExport = Pick<FeatureSearchStateEntry,
     "id"
     | "query"
     | "scope"
@@ -75,8 +75,21 @@ type FeatureSearchDefinitionExport = Pick<FeatureSearchStateEntry,
     | "showResultsOnMap"
     | "pinColor"
     | "selectedMapLayers"
+    | "selectedViewIndices"
     | "searchStyleRules"
     | "renderStrategy">;
+
+export interface FeatureSearchExportSelection {
+    includeConfiguration: boolean;
+    includeResults: boolean;
+}
+
+export interface FeatureSearchCombinedExport {
+    exportedAt: string;
+    searchId: string;
+    configuration: FeatureSearchDefinitionExport;
+    results: FeatureSearchResultsExport;
+}
 
 const GROUPING_ACCESSORS: Record<number, FeatureSearchGroupingAccessor> = {
     1: {name: "Maps", label: "Map", get: result => result.mapId},
@@ -97,6 +110,7 @@ export function featureSearchDefinitionExport(definition: FeatureSearchStateEntr
         showResultsOnMap: definition.showResultsOnMap,
         pinColor: definition.pinColor,
         selectedMapLayers: definition.selectedMapLayers.map(ref => ({mapId: ref.mapId, layerId: ref.layerId})),
+        selectedViewIndices: [...definition.selectedViewIndices],
         searchStyleRules: definition.searchStyleRules,
         renderStrategy: {...definition.renderStrategy}
     };
@@ -129,6 +143,42 @@ export function featureSearchResultsExport(
 
 export function featureSearchJsonReplacer(_: string, value: unknown): unknown {
     return typeof value === "bigint" ? value.toString() : value;
+}
+
+export function featureSearchExportPayload(
+    definition: FeatureSearchStateEntry,
+    results: FeatureSearchResultEntry[],
+    grouping: FeatureSearchGroupingExportOption[],
+    filterValue: string,
+    selection: FeatureSearchExportSelection,
+    exportedAt = new Date().toISOString()
+): FeatureSearchDefinitionExport | FeatureSearchResultsExport | FeatureSearchCombinedExport | null {
+    if (selection.includeConfiguration && selection.includeResults) {
+        return {
+            exportedAt,
+            searchId: definition.id,
+            configuration: featureSearchDefinitionExport(definition),
+            results: featureSearchResultsExport(results, grouping, filterValue)
+        };
+    }
+    if (selection.includeConfiguration) {
+        return featureSearchDefinitionExport(definition);
+    }
+    if (selection.includeResults) {
+        return featureSearchResultsExport(results, grouping, filterValue);
+    }
+    return null;
+}
+
+export function featureSearchExportFilename(searchId: string, selection: FeatureSearchExportSelection): string {
+    const safeId = safeFeatureSearchExportId(searchId);
+    if (selection.includeConfiguration && selection.includeResults) {
+        return `feature-search-${safeId}.json`;
+    }
+    if (selection.includeConfiguration) {
+        return `feature-search-${safeId}-configuration.json`;
+    }
+    return `feature-search-${safeId}-results.json`;
 }
 
 export function safeFeatureSearchExportId(id: string): string {

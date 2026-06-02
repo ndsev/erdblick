@@ -17,7 +17,7 @@ import {DividerModule} from "primeng/divider";
 import {PanelMenuModule} from "primeng/panelmenu";
 import {TreeTableModule} from "primeng/treetable";
 import {ToastModule} from "primeng/toast";
-import {MessageService} from "primeng/api";
+import {ConfirmationService, MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {InfoMessageService} from "./shared/info.service";
@@ -32,6 +32,7 @@ import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
 import {SearchStyleColorComponent} from "./search/search-style-color.component";
 import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
+import {FeatureSearchExportDialogComponent} from "./search/feature-search-export.dialog.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
@@ -52,6 +53,7 @@ import {ListboxModule} from "primeng/listbox";
 import {FeatureSearchService} from "./search/feature.search.service";
 import {ClipboardService} from "./shared/clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
+import {TreeSelectModule} from "primeng/treeselect";
 import {ButtonGroupModule} from "primeng/buttongroup";
 import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
@@ -60,6 +62,7 @@ import {HighlightRegion} from "./inspection/highlight.region.pipe";
 import {TreeTableFilterPatchDirective} from "./inspection/treetablefilter-patch.directive";
 import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
+import {IftaLabelModule} from "primeng/iftalabel";
 import {TabsModule} from "primeng/tabs";
 import {OnEnterClickDirective} from "./shared/keyboard.service";
 import {SelectModule} from 'primeng/select';
@@ -73,6 +76,7 @@ import {ButtonModule} from "primeng/button";
 import {TooltipModule} from "primeng/tooltip";
 import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
+import {ConfirmPopupModule} from "primeng/confirmpopup";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
 import {AboutComponent} from "./auxiliaries/about.component";
@@ -199,6 +203,7 @@ export const initializeServices = () => {
         FeatureSearchComponent,
         SearchStyleColorComponent,
         FeatureSearchDialogsComponent,
+        FeatureSearchExportDialogComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
         HighlightSearch,
@@ -263,7 +268,9 @@ export const initializeServices = () => {
         ColorPickerModule,
         ListboxModule,
         MultiSelectModule,
+        TreeSelectModule,
         FloatLabelModule,
+        IftaLabelModule,
         MessageModule,
         Textarea,
         ButtonGroupModule,
@@ -277,6 +284,7 @@ export const initializeServices = () => {
         TooltipModule,
         ProgressSpinnerModule,
         ContextMenuModule,
+        ConfirmPopupModule,
         IconFieldModule,
         InputIconModule,
         PopoverModule,
@@ -297,6 +305,7 @@ export const initializeServices = () => {
         InspectionSelectionService,
         MapRenderService,
         MessageService,
+        ConfirmationService,
         InfoMessageService,
         JumpTargetService,
         AppStateService,

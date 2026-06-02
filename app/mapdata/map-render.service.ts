@@ -26,7 +26,7 @@ import {
     type RenderableTileLayer
 } from "../mapview/render-view.model";
 import type {FeatureLayerStyle, HighlightMode} from "../../build/libs/core/erdblick-core";
-import type {FeatureSearchStateEntry} from "../shared/feature-search-state";
+import {featureSearchVisibleInView, type FeatureSearchStateEntry} from "../shared/feature-search-state";
 
 export interface TileVisualizationRenderTask {
     visualization: ITileVisualization;
@@ -307,7 +307,8 @@ export class MapRenderService {
 
             for (const styleId of state.getVisualizedStyleIds()) {
                 const searchRequest = this.searchRequestForVisualizationStyle(styleId);
-                let styleEnabled = !!searchRequest?.showResultsOnMap;
+                let styleEnabled = !!searchRequest?.showResultsOnMap
+                    && featureSearchVisibleInView(searchRequest, viewIndex);
                 if (!searchRequest && this.styleService.styles.has(styleId)) {
                     styleEnabled = this.styleService.styles.get(styleId)!.visible;
                 }
@@ -626,7 +627,10 @@ export class MapRenderService {
     private updateSearchResultVisualizationsForView(state: ViewVisualizationState, viewIndex: number): void {
         for (const tile of this.tileStream.searchResultTiles()) {
             const request = this.tileStream.activeFeatureSearchRequest(tile.searchId);
-            if (!request?.showResultsOnMap || !tile.hasResultLayer() || !this.viewShowsSearchResultTile(viewIndex, tile)) {
+            if (!request?.showResultsOnMap
+                || !featureSearchVisibleInView(request, viewIndex)
+                || !tile.hasResultLayer()
+                || !this.viewShowsSearchResultTile(viewIndex, tile)) {
                 continue;
             }
 
@@ -644,7 +648,7 @@ export class MapRenderService {
         }
         for (let viewIndex = 0; viewIndex < this.viewStates().length; viewIndex++) {
             const state = this.viewStates()[viewIndex];
-            if (!this.viewShowsSearchResultTile(viewIndex, tile)) {
+            if (!featureSearchVisibleInView(request, viewIndex) || !this.viewShowsSearchResultTile(viewIndex, tile)) {
                 this.removeSearchResultVisualizations(tile.searchId, tile.sourceTileKey, state);
                 continue;
             }
@@ -960,7 +964,9 @@ export class MapRenderService {
     /** Returns whether high-fidelity search-result geometry should currently be rendered for one tile. */
     prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: bigint): boolean {
         const request = this.tileStream.activeFeatureSearchRequest(searchId);
-        if (!request?.showResultsOnMap || !request.renderStrategy.showHighFiGeometry) {
+        if (!request?.showResultsOnMap
+            || !featureSearchVisibleInView(request, viewIndex)
+            || !request.renderStrategy.showHighFiGeometry) {
             return false;
         }
         return this.viewState.prefersHighFidelityForSearchResultTile(
@@ -1067,7 +1073,10 @@ export class MapRenderService {
                 searchRequest.id,
                 visualization.tile.sourceTileKey
             );
-            if (!hasRenderTile || !searchRequest.showResultsOnMap || !this.viewShowsSearchResultTile(viewIndex, visualization.tile)) {
+            if (!hasRenderTile
+                || !searchRequest.showResultsOnMap
+                || !featureSearchVisibleInView(searchRequest, viewIndex)
+                || !this.viewShowsSearchResultTile(viewIndex, visualization.tile)) {
                 return false;
             }
             visualization.prefersHighFidelity = this.prefersHighFidelityForSearchResultTile(

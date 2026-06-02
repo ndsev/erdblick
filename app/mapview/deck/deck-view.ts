@@ -21,6 +21,7 @@ import {
     FeatureSearchService,
     type FeatureSearchResultLayer
 } from "../../search/feature.search.service";
+import {featureSearchVisibleInView} from "../../shared/feature-search-state";
 import type {SearchResultDensityMarker, SearchResultPoint} from "../../search/search-result-density.model";
 import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
@@ -1531,7 +1532,8 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        const searchLayers = this.featureSearchService.getSearchResultLayers();
+        const searchLayers = this.featureSearchService.getSearchResultLayers()
+            .filter(searchLayer => featureSearchVisibleInView(searchLayer, this._viewIndex));
         const overlayInputs: SearchResultOverlayInput[] = searchLayers.map(searchLayer => {
             const lowFiSourceTileKeys = new Set<string>();
             const highFiPointMarkers: SearchResultDensityMarker[] = [];

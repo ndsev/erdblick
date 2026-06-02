@@ -10,16 +10,22 @@ import {
     ViewChild,
     ViewContainerRef
 } from "@angular/core";
-import {FeatureSearchResultEntry, FeatureSearchService, FeatureSearchSession} from "./feature.search.service";
+import {
+    FeatureSearchExportGroupingOption,
+    FeatureSearchResultEntry,
+    FeatureSearchService,
+    FeatureSearchSession
+} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
+import {GroupTreeNode, LayerTreeNode, MapTreeNode, removeGroupPrefix} from "../mapdata/map.tree.model";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import type {
     FeatureSearchAttributeScopeCandidate,
     FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
-import {TreeNode} from "primeng/api";
+import {ConfirmationService, TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
 import {coreLib} from "../integrations/wasm";
@@ -54,13 +60,6 @@ import {
     serializableCategoryStops,
     serializableGradientStops
 } from "./search-style-color.util";
-import {
-    featureSearchDefinitionExport,
-    featureSearchJsonReplacer,
-    featureSearchResultsExport,
-    safeFeatureSearchExportId,
-    type FeatureSearchGroupingExportOption
-} from "./feature-search-export.util";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -78,14 +77,20 @@ interface FeatureSearchStyleOption {
     enumValues?: string[];
 }
 
-interface FeatureSearchLayerOption extends FeatureSearchMapLayerRef {
-    key: string;
-    label: string;
-}
-
 interface FeatureSearchScopeOption {
     label: string;
     value: FeatureSearchScope;
+}
+
+interface FeatureSearchLayerTreeNodeData {
+    kind: "group" | "map" | "layer";
+    mapId?: string;
+    layerId?: string;
+}
+
+interface FeatureSearchViewOption {
+    label: string;
+    value: number;
 }
 
 interface FeatureSearchResultTreeItem {
@@ -157,7 +162,7 @@ interface FeatureSearchStyleRuleDraft {
             <app-surface-header class="feature-search-surface-header"
                                 title="Search Loaded Features"
                                 titleIcon="search"
-                                [hasColorPicker]="false"
+                                [hasSmartControl]="true"
                                 [dockMode]="isDocked() ? 'undock' : 'dock'"
                                 [sizeToggleVisible]="isDocked()"
                                 [sizeToggleDisabled]="dockedPanelCount <= 1"
@@ -167,8 +172,17 @@ interface FeatureSearchStyleRuleDraft {
                                 (focusRequest)="bringSurfaceToFront()"
                                 (dockRequest)="toggleDocked()"
                                 (sizeToggleRequest)="toggleExpanded()"
-                                (closeRequest)="closeSearch()"
+                                (closeRequest)="closeSearch($event)"
                                 (dragPointerDown)="onHeaderPointerDown($event)">
+                <p-toggleswitch surfaceHeaderSmartControl
+                                [ngModel]="searchEnabled()"
+                                [disabled]="!session"
+                                inputId="feature-search-enabled-toggle"
+                                data-testid="feature-search-enabled-toggle"
+                                (click)="$event.stopPropagation()"
+                                (mousedown)="$event.stopPropagation()"
+                                (ngModelChange)="onSearchEnabledChange($event)">
+                </p-toggleswitch>
             </app-surface-header>
         </ng-template>
 
@@ -203,15 +217,18 @@ interface FeatureSearchStyleRuleDraft {
                 </search-completion-popup>
             </div>
             <div class="feature-search-scope-control">
-                <span>Search scope</span>
-                <p-selectbutton [options]="featureSearchScopeOptions"
-                                [(ngModel)]="featureSearchScope"
-                                optionLabel="label"
-                                optionValue="value"
-                                [allowEmpty]="false"
-                                [disabled]="!searchEnabled()"
-                                (ngModelChange)="onFeatureSearchScopeChange($event)">
-                </p-selectbutton>
+                <p-iftalabel class="feature-search-scope-select">
+                    <p-select inputId="feature-search-scope"
+                              [options]="featureSearchScopeOptions"
+                              [(ngModel)]="featureSearchScope"
+                              optionLabel="label"
+                              optionValue="value"
+                              [disabled]="!searchEnabled()"
+                              appendTo="body"
+                              (ngModelChange)="onFeatureSearchScopeChange($event)">
+                    </p-select>
+                    <label for="feature-search-scope">Scope</label>
+                </p-iftalabel>
                 @if (featureSearchScopeSummary) {
                     <span class="feature-search-scope-summary"
                           [title]="featureSearchScopeSummaryTitle">
@@ -220,37 +237,35 @@ interface FeatureSearchStyleRuleDraft {
                 }
             </div>
             <div class="feature-search-layer-control">
-                <span>Map layers</span>
-                <p-multiSelect [options]="mapLayerOptions"
-                               [(ngModel)]="selectedMapLayerOptions"
-                               (ngModelChange)="onSearchMapLayersChange($event)"
-                               optionLabel="label"
-                               placeholder="Select Map Layers"
-                               [filter]="true"
-                               [showToggleAll]="true"
-                               [maxSelectedLabels]="3"
-                               [disabled]="!searchEnabled()"
-                               display="chip"
-                               appendTo="body">
-                </p-multiSelect>
-            </div>
-            <div class="feature-search-area-control">
-                <label for="feature-search-auto-update-toggle">Auto-update area</label>
-                <p-toggleswitch [ngModel]="session?.definition?.autoUpdate"
-                                [disabled]="!searchEnabled()"
-                                (ngModelChange)="onFeatureSearchAutoUpdateChange($event)"
-                                inputId="feature-search-auto-update-toggle"
-                                data-testid="feature-search-auto-update-toggle">
-                </p-toggleswitch>
-                @if (!session?.definition?.autoUpdate) {
-                    <p-button icon="pi pi-refresh"
-                              label="Update Area"
-                              severity="secondary"
-                              [outlined]="true"
-                              [disabled]="!searchEnabled()"
-                              data-testid="feature-search-update-area-button"
-                              (click)="updateSearchInArea()">
-                    </p-button>
+                <p-iftalabel class="feature-search-layer-select">
+                    <p-treeselect inputId="feature-search-map-layers"
+                                  [options]="mapLayerTreeOptions"
+                                  [(ngModel)]="selectedMapLayerTreeNodes"
+                                  selectionMode="checkbox"
+                                  [filter]="true"
+                                  [showClear]="false"
+                                  [disabled]="!searchEnabled()"
+                                  scrollHeight="24em"
+                                  appendTo="body"
+                                  (ngModelChange)="onSearchMapLayerTreeSelectionChange($event)">
+                    </p-treeselect>
+                    <label for="feature-search-map-layers">Map Layers</label>
+                </p-iftalabel>
+                @if (showSearchViewControl()) {
+                    <p-iftalabel class="feature-search-view-select">
+                        <p-multiSelect inputId="feature-search-views"
+                                       [options]="featureSearchViewOptions"
+                                       [(ngModel)]="selectedViewIndices"
+                                       optionLabel="label"
+                                       optionValue="value"
+                                       [maxSelectedLabels]="1"
+                                       selectedItemsLabel="All"
+                                       [disabled]="!searchEnabled()"
+                                       appendTo="body"
+                                       (ngModelChange)="onSearchViewIndicesChange($event)">
+                        </p-multiSelect>
+                        <label for="feature-search-views">View</label>
+                    </p-iftalabel>
                 }
             </div>
             <div class="feature-search-controls">
@@ -603,6 +618,35 @@ interface FeatureSearchStyleRuleDraft {
             </p-tabs>
             </div>
         </ng-template>
+        <p-confirmpopup [key]="bookmarkedCloseConfirmKey"
+                        appendTo="body"
+                        [baseZIndex]="30000"
+                        styleClass="feature-search-close-confirm-popup">
+            <ng-template pTemplate="headless" let-confirmation>
+                <div class="feature-search-close-confirm">
+                    <div class="feature-search-close-confirm-message">{{ confirmation?.message }}</div>
+                    <div class="feature-search-close-confirm-actions">
+                        <p-button label="Export"
+                                  size="small"
+                                  severity="secondary"
+                                  [outlined]="true"
+                                  (click)="exportBookmarkedCloseSearch()">
+                        </p-button>
+                        <p-button label="Cancel"
+                                  size="small"
+                                  severity="secondary"
+                                  [text]="true"
+                                  (click)="cancelBookmarkedCloseSearch()">
+                        </p-button>
+                        <p-button label="Yes"
+                                  size="small"
+                                  severity="danger"
+                                  (click)="confirmBookmarkedCloseSearch()">
+                        </p-button>
+                    </div>
+                </div>
+            </ng-template>
+        </p-confirmpopup>
         <div #alert></div>
     `,
     styles: [``],
@@ -639,8 +683,10 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     ];
     selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
     styleAttributeOptions: FeatureSearchStyleOption[] = [];
-    mapLayerOptions: FeatureSearchLayerOption[] = [];
-    selectedMapLayerOptions: FeatureSearchLayerOption[] = [];
+    mapLayerTreeOptions: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+    selectedMapLayerTreeNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+    featureSearchViewOptions: FeatureSearchViewOption[] = [];
+    selectedViewIndices: number[] = [];
     styleOperatorOptions: FeatureSearchStyleOption[] = [
         {label: '>', value: '>'},
         {label: '>=', value: '>='},
@@ -677,9 +723,9 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     featureSearchScopeSummary = "";
     featureSearchScopeSummaryTitle = "";
     featureSearchScopeOptions: FeatureSearchScopeOption[] = [
-        {label: 'Feature', value: 'feature'},
+        {label: 'Auto', value: 'auto'},
         {label: 'Attribute', value: 'attribute'},
-        {label: 'Auto', value: 'auto'}
+        {label: 'Feature', value: 'feature'}
     ];
     completionItems: CompletionCandidate[] = [];
     completion = {
@@ -705,10 +751,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private readonly resultTreeAppendBatchSize = 1000;
     private readonly resultTreeAppendFrameBudgetMs = 8;
     private styleAttributeOptionsSessionSignature = "";
-    private mapLayerOptionsSignature = "";
+    private mapLayerTreeOptionsSignature = "";
     private selectedMapLayersSignature = "";
-    private confirmingClose = false;
-    private confirmedCloseSessionIds = new Set<string>();
+    private initializedMapLayerSelectionSessionId = "";
+    private searchViewOptionsSignature = "";
+    private selectedViewIndicesSignature = "";
+    private pendingBookmarkedCloseSessionId: string | null = null;
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
@@ -726,7 +774,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 private readonly inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
-                private dialogStack: DialogStackService) {
+                private dialogStack: DialogStackService,
+                private confirmationService: ConfirmationService) {
         this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
         this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
@@ -752,11 +801,17 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }));
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
-            this.refreshMapLayerOptions();
+            this.refreshMapLayerTreeOptions();
             if (this.session) {
                 this.refreshFeatureSearchScopeSummary(this.session);
                 this.refreshStyleAttributeOptionsIfNeeded(this.session);
-                this.syncSelectedMapLayersFromSession(this.session);
+                this.syncMapLayerTreeSelection(this.session);
+            }
+        }));
+        this.subscriptions.add(this.stateService.numViewsState.subscribe(() => {
+            this.refreshSearchViewOptions();
+            if (this.session) {
+                this.syncSelectedViewIndicesFromSession(this.session);
             }
         }));
         this.subscriptions.add(this.featureSearchQueryChanged
@@ -1284,55 +1339,233 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return JSON.stringify([mapId, layerId]);
     }
 
-    private refreshMapLayerOptions(): void {
-        const options: FeatureSearchLayerOption[] = [];
-        for (const [mapId, map] of this.mapService.maps.maps) {
-            for (const layer of map.allFeatureLayers()) {
-                options.push({
-                    mapId,
-                    layerId: layer.id,
-                    key: this.searchLayerKey(mapId, layer.id),
-                    label: `${mapId} - ${layer.id}`
+    private searchLayerTreeKey(mapId: string, layerId: string): string {
+        return `layer:${this.searchLayerKey(mapId, layerId)}`;
+    }
+
+    private refreshMapLayerTreeOptions(): void {
+        const options = this.mapService.maps.nodes
+            .map(node => this.mapTreeNodeToSearchTreeNode(node))
+            .filter((node): node is TreeNode<FeatureSearchLayerTreeNodeData> => !!node);
+        const signature = JSON.stringify(this.mapLayerLeafKeys(options));
+        if (signature === this.mapLayerTreeOptionsSignature) {
+            return;
+        }
+        this.mapLayerTreeOptionsSignature = signature;
+        this.mapLayerTreeOptions = options;
+        const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
+        this.selectedMapLayerTreeNodes = this.mapLayerTreeNodesForKeys(selectedKeys);
+    }
+
+    private mapTreeNodeToSearchTreeNode(
+        node: GroupTreeNode | MapTreeNode
+    ): TreeNode<FeatureSearchLayerTreeNodeData> | null {
+        if (node instanceof GroupTreeNode) {
+            const children = node.children
+                .map(child => this.mapTreeNodeToSearchTreeNode(child))
+                .filter((child): child is TreeNode<FeatureSearchLayerTreeNodeData> => !!child);
+            if (!children.length) {
+                return null;
+            }
+            return {
+                key: `group:${node.key}`,
+                label: removeGroupPrefix(node.id),
+                data: {kind: "group"},
+                expanded: node.expanded,
+                children
+            };
+        }
+        const children = node.children.map(layer => this.layerTreeNodeToSearchTreeNode(layer));
+        if (!children.length) {
+            return null;
+        }
+        return {
+            key: `map:${node.key}`,
+            label: removeGroupPrefix(node.id),
+            data: {kind: "map", mapId: node.id},
+            expanded: node.expanded,
+            children
+        };
+    }
+
+    private layerTreeNodeToSearchTreeNode(layer: LayerTreeNode): TreeNode<FeatureSearchLayerTreeNodeData> {
+        return {
+            key: this.searchLayerTreeKey(layer.mapId, layer.id),
+            label: layer.id,
+            data: {
+                kind: "layer",
+                mapId: layer.mapId,
+                layerId: layer.id
+            },
+            leaf: true
+        };
+    }
+
+    private mapLayerLeafKeys(nodes: TreeNode<FeatureSearchLayerTreeNodeData>[]): string[] {
+        const keys: string[] = [];
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            if (node.data?.kind === "layer" && node.data.mapId && node.data.layerId) {
+                keys.push(this.searchLayerKey(node.data.mapId, node.data.layerId));
+            }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of nodes) {
+            visit(node);
+        }
+        return keys;
+    }
+
+    private selectedMapLayerKeysFromTreeNodes(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    ): Set<string> {
+        const selectedKeys = new Set<string>();
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            if (node.data?.kind === "layer" && node.data.mapId && node.data.layerId) {
+                selectedKeys.add(this.searchLayerKey(node.data.mapId, node.data.layerId));
+            }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of nodes ?? []) {
+            visit(node);
+        }
+        return selectedKeys;
+    }
+
+    private selectedMapLayerRefsFromTreeNodes(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    ): FeatureSearchMapLayerRef[] {
+        const refsByKey = new Map<string, FeatureSearchMapLayerRef>();
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            if (node.data?.kind === "layer" && node.data.mapId && node.data.layerId) {
+                refsByKey.set(this.searchLayerKey(node.data.mapId, node.data.layerId), {
+                    mapId: node.data.mapId,
+                    layerId: node.data.layerId
                 });
             }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of nodes ?? []) {
+            visit(node);
         }
-        options.sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
-        const signature = JSON.stringify(options.map(option => option.key));
-        if (signature === this.mapLayerOptionsSignature) {
+        return Array.from(refsByKey.values())
+            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
+    }
+
+    private mapLayerTreeNodesForKeys(selectedKeys: Set<string>): TreeNode<FeatureSearchLayerTreeNodeData>[] {
+        const selectedNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            if (node.data?.kind === "layer"
+                && node.data.mapId
+                && node.data.layerId
+                && selectedKeys.has(this.searchLayerKey(node.data.mapId, node.data.layerId))) {
+                selectedNodes.push(node);
+                return;
+            }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of this.mapLayerTreeOptions) {
+            visit(node);
+        }
+        return selectedNodes;
+    }
+
+    private mapLayerKeySignature(selectedKeys: Set<string>): string {
+        return JSON.stringify(Array.from(selectedKeys).sort());
+    }
+
+    private syncMapLayerTreeSelection(session: FeatureSearchSession): void {
+        this.refreshMapLayerTreeOptions();
+        if (this.initializedMapLayerSelectionSessionId !== session.id) {
+            this.initializedMapLayerSelectionSessionId = session.id;
+            const selectedKeys = new Set(session.definition.selectedMapLayers
+                .map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
+            this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
+            this.selectedMapLayerTreeNodes = this.mapLayerTreeNodesForKeys(selectedKeys);
             return;
         }
-        this.mapLayerOptionsSignature = signature;
-        this.mapLayerOptions = options;
+        const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
+        this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
+        this.selectedMapLayerTreeNodes = this.mapLayerTreeNodesForKeys(selectedKeys);
     }
 
-    private activeMapLayerOptions(): FeatureSearchLayerOption[] {
-        return this.mapLayerOptions.filter(option => this.isStyleFieldCandidateActive(option.mapId, option.layerId));
-    }
-
-    private syncSelectedMapLayersFromSession(session: FeatureSearchSession): void {
-        this.refreshMapLayerOptions();
-        const selectedRefs = session.definition.selectedMapLayers;
-        const selectedKeys = new Set(selectedRefs.map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
-        const nextOptions = this.mapLayerOptions.filter(option => selectedKeys.has(option.key));
-        const signature = JSON.stringify(nextOptions.map(option => option.key));
-        if (signature === this.selectedMapLayersSignature) {
-            return;
-        }
-        this.selectedMapLayersSignature = signature;
-        this.selectedMapLayerOptions = nextOptions;
-    }
-
-    protected onSearchMapLayersChange(options: FeatureSearchLayerOption[]): void {
+    protected onSearchMapLayerTreeSelectionChange(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    ): void {
         const session = this.session;
         if (!session || !this.searchEnabled()) {
             return;
         }
-        this.selectedMapLayerOptions = options ?? [];
-        this.selectedMapLayersSignature = JSON.stringify(this.selectedMapLayerOptions.map(option => option.key));
+        this.selectedMapLayerTreeNodes = nodes ?? [];
+        this.selectedMapLayersSignature = this.mapLayerKeySignature(
+            this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes)
+        );
         this.searchService.setSearchMapLayers(
             session.id,
-            this.selectedMapLayerOptions.map(option => ({mapId: option.mapId, layerId: option.layerId}))
+            this.selectedMapLayerRefsFromTreeNodes(this.selectedMapLayerTreeNodes)
         );
+    }
+
+    protected showSearchViewControl(): boolean {
+        return this.stateService.numViews === 2 && this.featureSearchViewOptions.length === 2;
+    }
+
+    private refreshSearchViewOptions(): void {
+        const viewLabels = ["Left", "Right"];
+        const options = Array.from(
+            {length: Math.min(this.stateService.numViews, viewLabels.length)},
+            (_, index) => ({label: viewLabels[index], value: index})
+        );
+        const signature = JSON.stringify(options);
+        if (signature === this.searchViewOptionsSignature) {
+            return;
+        }
+        this.searchViewOptionsSignature = signature;
+        this.featureSearchViewOptions = options;
+        this.selectedViewIndices = this.normalizedSearchViewIndices(this.selectedViewIndices);
+    }
+
+    private normalizedSearchViewIndices(indices: number[] | null | undefined): number[] {
+        const allowed = new Set(this.featureSearchViewOptions.map(option => option.value));
+        const selected = new Set<number>();
+        for (const value of indices ?? []) {
+            const index = Number(value);
+            if (Number.isInteger(index) && allowed.has(index)) {
+                selected.add(index);
+            }
+        }
+        return Array.from(selected).sort((lhs, rhs) => lhs - rhs);
+    }
+
+    private syncSelectedViewIndicesFromSession(session: FeatureSearchSession): void {
+        this.refreshSearchViewOptions();
+        const nextIndices = this.normalizedSearchViewIndices(
+            this.stateService.numViews === 1 ? [0] : session.definition.selectedViewIndices
+        );
+        const signature = JSON.stringify(nextIndices);
+        if (signature === this.selectedViewIndicesSignature) {
+            return;
+        }
+        this.selectedViewIndicesSignature = signature;
+        this.selectedViewIndices = nextIndices;
+    }
+
+    protected onSearchViewIndicesChange(indices: number[] | null | undefined): void {
+        const session = this.session;
+        if (!session || !this.searchEnabled()) {
+            return;
+        }
+        const nextIndices = this.normalizedSearchViewIndices(indices ?? []);
+        this.selectedViewIndices = nextIndices;
+        this.selectedViewIndicesSignature = JSON.stringify(nextIndices);
+        this.searchService.setSearchViewIndices(session.id, nextIndices);
     }
 
     /** Returns whether an editor field should be replaced by a schema-backed default. */
@@ -1444,7 +1677,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const previousScope = this.featureSearchScope;
         this.lastSearchQuery = session.definition.query;
         this.featureSearchScope = session.definition.scope;
-        this.syncSelectedMapLayersFromSession(session);
+        this.syncMapLayerTreeSelection(session);
+        this.syncSelectedViewIndicesFromSession(session);
         this.refreshFeatureSearchScopeSummary(session);
         this.refreshStyleAttributeOptionsIfNeeded(session, false);
         this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
@@ -1751,6 +1985,20 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return this.featureSearchQuery.trim() || this.session?.definition.query || this.lastSearchQuery;
     }
 
+    protected searchQueryEdited(): boolean {
+        const query = this.featureSearchQuery.trim();
+        const sessionQuery = this.session?.definition.query.trim() ?? "";
+        return query.length > 0 && query !== sessionQuery;
+    }
+
+    protected refreshSearchAreaOrQuery(): void {
+        if (this.searchQueryEdited()) {
+            this.rerunSearch();
+            return;
+        }
+        this.updateSearchInArea();
+    }
+
     protected onFeatureSearchScopeChange(scope: FeatureSearchScope): void {
         this.featureSearchScope = scope;
         if (this.session) {
@@ -1776,6 +2024,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }
     }
 
+    protected onSearchEnabledChange(enabled: boolean): void {
+        if (this.session) {
+            this.searchService.setSearchEnabled(this.session.id, enabled);
+        }
+    }
+
     protected updateSearchInArea(): void {
         if (this.session && this.searchEnabled()) {
             this.searchService.updateSearchInArea(this.session.id);
@@ -1785,6 +2039,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     protected featureSearchHeaderActions(): AppSurfaceHeaderAction[] {
         const bookmarked = !!this.session?.definition.bookmarked;
         const enabled = this.searchEnabled();
+        const autoUpdate = !!this.session?.definition.autoUpdate;
+        const refreshLabel = this.searchQueryEdited() ? 'Rerun search' : 'Update area';
         return [
             {
                 label: bookmarked ? 'Remove bookmark' : 'Bookmark search',
@@ -1793,10 +2049,13 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 command: () => this.toggleSearchBookmarked()
             },
             {
-                label: enabled ? 'Disable search' : 'Enable search',
-                tooltip: enabled ? 'Disable search' : 'Enable search',
-                icon: enabled ? 'pi pi-toggle-on' : 'pi pi-toggle-off',
-                command: () => this.toggleSearchEnabled()
+                label: 'Auto update area',
+                tooltip: autoUpdate ? 'Disable automatic area updates' : 'Enable automatic area updates',
+                materialIcon: 'autorenew',
+                menuIcon: 'pi pi-refresh',
+                severity: autoUpdate ? 'success' : 'primary',
+                disabled: !enabled || !this.session,
+                command: () => this.onFeatureSearchAutoUpdateChange(!autoUpdate)
             },
             {
                 label: 'Export as JSON',
@@ -1806,11 +2065,11 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 command: () => this.exportSearchAsJson()
             },
             {
-                label: 'Rerun search',
-                tooltip: 'Rerun search',
+                label: refreshLabel,
+                tooltip: refreshLabel,
                 icon: 'pi pi-refresh',
                 disabled: !enabled || !this.searchQueryForRerun(),
-                command: () => this.rerunSearch()
+                command: () => this.refreshSearchAreaOrQuery()
             },
             {
                 label: this.isSearchPaused ? 'Resume search' : 'Pause search',
@@ -1835,74 +2094,84 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }
     }
 
-    protected toggleSearchEnabled(): void {
-        if (this.session) {
-            this.searchService.setSearchEnabled(this.session.id, !this.searchEnabled());
-        }
-    }
-
     protected exportSearchAsJson(): void {
         const session = this.session;
         if (!session) {
             return;
         }
-        const safeId = safeFeatureSearchExportId(session.id);
-        this.downloadJsonFile(
-            `feature-search-${safeId}-definition.json`,
-            featureSearchDefinitionExport(session.definition)
-        );
-        this.downloadJsonFile(
-            `feature-search-${safeId}-results.json`,
-            featureSearchResultsExport(session.searchResults, this.currentExportGrouping(), this.resultTreeFilterValue)
-        );
-        this.infoMessageService.showSuccess('Feature search JSON export started');
+        this.openSearchExportDialog(session.id);
     }
 
-    private currentExportGrouping(): FeatureSearchGroupingExportOption[] {
+    private openSearchExportDialog(sessionId: string, closeAfterExport = false): void {
+        this.searchService.openExportDialog(sessionId, {
+            closeAfterExport,
+            grouping: this.currentExportGrouping(),
+            filterValue: this.resultTreeFilterValue
+        });
+    }
+
+    private currentExportGrouping(): FeatureSearchExportGroupingOption[] {
         return this.groupingValuesFromOptions(this.selectedGroupingOptions).map(id => ({
             id,
             name: this.grouping.find(option => option.value === id)?.name ?? String(id)
         }));
     }
 
-    private downloadJsonFile(filename: string, payload: unknown): void {
-        const source = JSON.stringify(payload, featureSearchJsonReplacer, 2) ?? "null";
-        const blob = new Blob(
-            [source],
-            {type: 'application/json;charset=utf-8'}
-        );
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+    protected get bookmarkedCloseConfirmKey(): string {
+        return `feature-search-bookmarked-close:${this.searchId}`;
     }
 
-    protected async closeSearch() {
-        if (this.session) {
-            const sessionId = this.session.id;
-            if (this.session.definition.bookmarked && !this.confirmedCloseSessionIds.has(sessionId)) {
-                if (this.confirmingClose) {
-                    return;
-                }
-                this.confirmingClose = true;
-                const confirmed = await this.infoMessageService.showConfirmDialog(
-                    this.alertContainer,
-                    'Close Bookmarked Search',
-                    'This search is bookmarked. Close it anyway?'
-                );
-                this.confirmingClose = false;
-                if (!confirmed) {
-                    this.featureSearchDialogVisible = true;
-                    return;
-                }
-                this.confirmedCloseSessionIds.add(sessionId);
-            }
-            this.confirmedCloseSessionIds.add(sessionId);
-            this.searchService.closeSearch(this.session.id);
+    protected closeSearch(event?: MouseEvent): void {
+        const session = this.session;
+        if (!session) {
+            return;
+        }
+        if (session.definition.bookmarked) {
+            this.showBookmarkedClosePopup(session.id, event);
+            return;
+        }
+        this.searchService.closeSearch(session.id);
+    }
+
+    private showBookmarkedClosePopup(sessionId: string, event?: MouseEvent): void {
+        const target = this.bookmarkedClosePopupTarget(event);
+        this.featureSearchDialogVisible = true;
+        this.pendingBookmarkedCloseSessionId = sessionId;
+        this.confirmationService.confirm({
+            key: this.bookmarkedCloseConfirmKey,
+            target,
+            message: "Close bookmarked search? It will be permanently deleted. You can export the search before deleting."
+        });
+    }
+
+    private bookmarkedClosePopupTarget(event?: MouseEvent): EventTarget {
+        return (event?.currentTarget ?? event?.target)
+            || this.featureSearchDialog?.container()
+            || this.featureSearchPanel?.container()
+            || document.body;
+    }
+
+    protected confirmBookmarkedCloseSearch(): void {
+        const sessionId = this.pendingBookmarkedCloseSessionId;
+        this.pendingBookmarkedCloseSessionId = null;
+        this.confirmationService.close();
+        if (sessionId) {
+            this.searchService.closeSearch(sessionId);
+        }
+    }
+
+    protected cancelBookmarkedCloseSearch(): void {
+        this.pendingBookmarkedCloseSessionId = null;
+        this.featureSearchDialogVisible = true;
+        this.confirmationService.close();
+    }
+
+    protected exportBookmarkedCloseSearch(): void {
+        const sessionId = this.pendingBookmarkedCloseSessionId;
+        this.pendingBookmarkedCloseSessionId = null;
+        this.confirmationService.close();
+        if (sessionId) {
+            this.openSearchExportDialog(sessionId, true);
         }
     }
 
@@ -2029,15 +2298,17 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /**
      * Resets dialog-local state after the dialog closes.
      */
-    async onHide(_: any) {
-        const sessionId = this.session?.id;
-        if (sessionId) {
-            await this.closeSearch();
+    onHide(_: any) {
+        const session = this.session;
+        if (session?.definition.bookmarked) {
+            this.featureSearchDialogVisible = true;
+            return;
         }
-        if (!this.session || this.confirmedCloseSessionIds.has(sessionId ?? "")) {
-            this.resetLocalState();
-            this.featureSearchDialogVisible = false;
+        if (session) {
+            this.searchService.closeSearch(session.id);
         }
+        this.resetLocalState();
+        this.featureSearchDialogVisible = false;
     }
 
     /** Clears local rendering state after the owning session disappears. */
@@ -2074,10 +2345,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.cancelResultTreeAppend();
         this.lastErrorAlertSignature = "";
         this.surfacedDockedSearchId = "";
-        this.selectedMapLayerOptions = [];
+        this.mapLayerTreeOptions = [];
+        this.selectedMapLayerTreeNodes = [];
+        this.featureSearchViewOptions = [];
+        this.selectedViewIndices = [];
+        this.mapLayerTreeOptionsSignature = "";
         this.selectedMapLayersSignature = "";
-        this.confirmingClose = false;
-        this.confirmedCloseSessionIds.clear();
+        this.initializedMapLayerSelectionSessionId = "";
+        this.searchViewOptionsSignature = "";
+        this.selectedViewIndicesSignature = "";
+        this.pendingBookmarkedCloseSessionId = null;
     }
 
     /**

@@ -69,6 +69,7 @@ export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
 export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
 export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
 export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
+export const FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID = 'feature-search-export';
 export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
 export const INSPECTION_DOCK_TAB_ID = 'inspection';
 export const SEARCH_DOCK_TAB_ID = 'search';

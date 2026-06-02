@@ -45,15 +45,13 @@ interface InspectionPanelContentAdapter {
                                         [featureTitle]="panel().sourceData === undefined"
                                         [focusable]="true"
                                         [focused]="panel().focused === true"
-                                        [hasColorPicker]="panel().sourceData === undefined && panel().features.length > 0"
-                                        [color]="panel().color"
+                                        [hasSmartControl]="panel().sourceData === undefined && panel().features.length > 0"
                                         dockMode="undock"
                                         [expanded]="isExpanded"
                                         [sizeToggleVisible]="true"
                                         [sizeToggleDisabled]="!showDockAutoSizeToggle()"
                                         [dragEnabled]="true"
                                         [extraActions]="featureHeaderActions()"
-                                        (colorChange)="onPanelColorChange($event)"
                                         (titleClick)="toggleLockedState($event)"
                                         (dockRequest)="undock($event)"
                                         (sizeToggleRequest)="toggleDockAutoSize($event)"
@@ -72,6 +70,15 @@ interface InspectionPanelContentAdapter {
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
                                       optionLabel="label"
                                       optionDisabled="disabled"/>
+                        } @else if (panel().features.length > 0) {
+                            <p-colorpicker surfaceHeaderSmartControl
+                                           [ngModel]="panel().color"
+                                           appendTo="body"
+                                           [overlayOptions]="{autoZIndex: true, baseZIndex: 9500}"
+                                           (click)="$event.stopPropagation()"
+                                           (mousedown)="$event.stopPropagation()"
+                                           (ngModelChange)="onPanelColorChange($event)">
+                            </p-colorpicker>
                         }
                     </app-surface-header>
             </ng-template>

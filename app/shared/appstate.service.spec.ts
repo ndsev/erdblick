@@ -220,6 +220,7 @@ describe('AppStateService', () => {
 
         const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
         expect(stored[0].selectedMapLayers).toEqual([]);
+        expect(stored[0].selectedViewIndices).toEqual([0, 1]);
 
         service.ngOnDestroy();
         routerStub.events.complete();

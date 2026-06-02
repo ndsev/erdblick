@@ -54,6 +54,7 @@ export interface FeatureSearchStateEntry {
     showResultsOnMap: boolean;
     pinColor: string;
     selectedMapLayers: FeatureSearchMapLayerRef[];
+    selectedViewIndices: number[];
     searchStyleRules: FeatureSearchStyleRule[];
     renderStrategy: FeatureSearchRenderStrategy;
 }
@@ -69,10 +70,15 @@ const MAX_STYLE_RULES_PER_SEARCH = 50;
 const MAX_FILTERS_PER_RULE = 25;
 const MAX_COLOR_STOPS_PER_RULE = 25;
 const MAX_SELECTED_SEARCH_LAYERS = 500;
+const MAX_SUPPORTED_FEATURE_SEARCH_VIEWS = 2;
 const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "polygon", "mesh"]);
 const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
 const MIN_HIGH_FIDELITY_VISIBLE_TILES = 1;
 const MAX_HIGH_FIDELITY_VISIBLE_TILES = 64 * 1024;
+export const DEFAULT_FEATURE_SEARCH_VIEW_INDICES: number[] = Array.from(
+    {length: MAX_SUPPORTED_FEATURE_SEARCH_VIEWS},
+    (_, index) => index
+);
 
 export const DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY: FeatureSearchRenderStrategy = {
     showLowFiDots: true,
@@ -217,6 +223,23 @@ function normalizeSearchMapLayerRefs(value: unknown): FeatureSearchMapLayerRef[]
     return refs;
 }
 
+function normalizeSearchViewIndices(value: unknown): number[] {
+    if (!Array.isArray(value)) {
+        return [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES];
+    }
+    const seen = new Set<number>();
+    const indices: number[] = [];
+    for (const item of value) {
+        const index = Number(item);
+        if (!Number.isInteger(index) || index < 0 || index >= MAX_SUPPORTED_FEATURE_SEARCH_VIEWS || seen.has(index)) {
+            continue;
+        }
+        seen.add(index);
+        indices.push(index);
+    }
+    return indices.sort((lhs, rhs) => lhs - rhs);
+}
+
 function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchColorMode {
     const nested = raw["color"];
     if (nested && typeof nested === "object" && !Array.isArray(nested)) {
@@ -348,6 +371,7 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         showResultsOnMap: normalizeBoolean(raw["showResultsOnMap"], true),
         pinColor: normalizeHexColor(raw["pinColor"]),
         selectedMapLayers,
+        selectedViewIndices: normalizeSearchViewIndices(raw["selectedViewIndices"]),
         searchStyleRules: styleRules,
         renderStrategy: normalizeFeatureSearchRenderStrategy(raw["renderStrategy"])
     };
@@ -373,6 +397,16 @@ export function normalizeFeatureSearchState(value: unknown): FeatureSearchStateE
     return result;
 }
 
+export function featureSearchVisibleInView(
+    definition: Pick<FeatureSearchStateEntry, "selectedViewIndices">,
+    viewIndex: number
+): boolean {
+    const selectedViewIndices = Array.isArray(definition.selectedViewIndices)
+        ? definition.selectedViewIndices
+        : DEFAULT_FEATURE_SEARCH_VIEW_INDICES;
+    return selectedViewIndices.includes(viewIndex);
+}
+
 export function createFeatureSearchStateEntry(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
     return normalizeFeatureSearchStateEntry({
         id: createFeatureSearchId(),
@@ -384,6 +418,7 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
         showResultsOnMap: true,
         pinColor: DEFAULT_PIN_COLOR,
         selectedMapLayers: [],
+        selectedViewIndices: [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES],
         searchStyleRules: [],
         renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
         ...value

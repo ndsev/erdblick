@@ -7,6 +7,7 @@ import {
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
     Versions
 } from "./shared/appstate.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
@@ -41,6 +42,9 @@ declare let window: DebugWindow;
             <style-panel></style-panel>
             <inspection-dialogs></inspection-dialogs>
             <feature-search-dialogs></feature-search-dialogs>
+            @if (stateService.isDialogOpen(featureSearchExportDialogLayoutId)) {
+                <feature-search-export-dialog></feature-search-export-dialog>
+            }
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
             <survey></survey>
@@ -75,6 +79,7 @@ export class AppComponent implements OnDestroy {
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
+    protected readonly featureSearchExportDialogLayoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
 
     title: string = "erdblick";
     private detachDialogFocusListener?: () => void;
