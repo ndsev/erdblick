@@ -4361,7 +4361,7 @@ inspection-tree {
 }
 
 .feature-search-layer-control {
-  align-items: center;
+  align-items: stretch;
   display: grid;
   flex: 0 0 auto;
   gap: 0.5em;
@@ -4380,6 +4380,8 @@ inspection-tree {
   .feature-search-layer-select,
   .feature-search-scope-select,
   .feature-search-view-select {
+    align-self: stretch;
+    display: block;
     max-width: 100%;
     min-width: 0;
   }
@@ -4401,12 +4403,16 @@ inspection-tree {
   .p-treeselect,
   .p-select,
   .p-multiselect {
+    height: 100%;
     max-width: 100%;
     min-width: 0;
     width: 100%;
   }
 
-  .p-treeselect-label-container {
+  .p-treeselect-label-container,
+  .p-multiselect-label-container {
+    align-items: center;
+    display: flex;
     min-width: 0;
     overflow: hidden;
   }
@@ -4414,6 +4420,8 @@ inspection-tree {
   .p-treeselect-label,
   .p-select-label,
   .p-multiselect-label {
+    align-items: center;
+    display: flex;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
