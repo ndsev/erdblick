@@ -65,6 +65,8 @@ public:
     struct SurfaceBuffers {
         std::vector<float> surfacePositions;
         std::vector<uint32_t> surfaceStartIndices;
+        std::vector<uint32_t> surfaceHoleIndices;
+        std::vector<uint32_t> surfaceHoleIndexStarts;
         std::vector<uint8_t> surfaceColors;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> surfaceFeatureAddresses;
@@ -139,6 +141,7 @@ private:
     /** Append one polygon primitive to the surface buffers. */
     void emitPolygon(
         std::vector<mapget::Point> const& vertsCartesian,
+        std::vector<uint32_t> const& ringStarts,
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun) override;
@@ -197,6 +200,7 @@ private:
     /** Append one polygon or mesh primitive after choosing the correct aggregate buffers. */
     void appendSurfaceGeometry(
         std::vector<mapget::Point> const& vertsCartesian,
+        std::vector<uint32_t> const& ringStarts,
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun);
@@ -379,7 +383,11 @@ private:
         uint32_t resultIndex);
     void appendPoint(mapget::Point const& pointWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
     void appendPath(std::vector<mapget::Point> const& pointsWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
-    void appendSurface(std::vector<mapget::Point> const& pointsWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
+    void appendSurface(
+        std::vector<mapget::Point> const& pointsWgs,
+        std::vector<uint32_t> const& ringStarts,
+        uint32_t resultIndex,
+        SearchResolvedStyle const& style);
     void appendAabbFootprint(
         mapget::Point const& originWgs,
         mapget::Point const& sizeWgs,

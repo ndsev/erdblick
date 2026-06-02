@@ -87,6 +87,8 @@ export interface DeckPointBucketBuffers {
 export interface DeckSurfaceBucketBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
+    holeIndices: Uint32Array;
+    holeIndexStarts: Uint32Array;
     colors: Uint8Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;

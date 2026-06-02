@@ -155,6 +155,7 @@ protected:
     /** Emit one polygon in renderer-specific form. */
     virtual void emitPolygon(
         std::vector<mapget::Point> const& vertsCartesian,
+        std::vector<uint32_t> const& ringStarts,
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun);

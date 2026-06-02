@@ -11,6 +11,7 @@ import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
 import {IconLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
+import earcut from "earcut";
 import type {Device} from "@luma.gl/core";
 import {Matrix4} from "@math.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
@@ -133,6 +134,7 @@ interface DeckSurfaceLayerData {
     featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
         getPolygon: DeckBinaryAttribute<Float32Array>;
+        indices: DeckBinaryAttribute<Uint32Array>;
         fillColors: DeckBinaryAttribute<Uint8Array>;
     };
 }
@@ -213,6 +215,8 @@ interface DeckSurfaceRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
     startIndices: Uint32Array;
+    holeIndices: Uint32Array;
+    holeIndexStarts: Uint32Array;
     colors: Uint8Array;
     depthTests?: Uint8Array;
     featureAddresses: Uint32Array;
@@ -2167,7 +2171,13 @@ export class DeckTileVisualization implements ITileVisualization {
         if (raw.depthTests && raw.depthTests.length < surfaceCount) {
             return [];
         }
+        if (raw.holeIndexStarts.length && raw.holeIndexStarts.length !== surfaceCount + 1) {
+            return [];
+        }
         if (raw.startIndices[0] !== 0) {
+            return [];
+        }
+        if (raw.holeIndexStarts.length && raw.holeIndexStarts[0] !== 0) {
             return [];
         }
 
@@ -2177,11 +2187,25 @@ export class DeckTileVisualization implements ITileVisualization {
             if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 3 || end > vertexCount) {
                 return [];
             }
+            if (raw.holeIndexStarts.length) {
+                const holeStart = raw.holeIndexStarts[surfaceIndex];
+                const holeEnd = raw.holeIndexStarts[surfaceIndex + 1];
+                if (holeStart > holeEnd || holeEnd > raw.holeIndices.length) {
+                    return [];
+                }
+                for (let holeIndex = holeStart; holeIndex < holeEnd; holeIndex++) {
+                    const holeVertex = raw.holeIndices[holeIndex];
+                    if (holeVertex <= start || holeVertex >= end) {
+                        return [];
+                    }
+                }
+            }
         }
 
         const groups = new Map<boolean, {
             positions: number[];
             startIndices: number[];
+            holeIndices: number[];
             colors: number[];
             depthTests: number[];
             featureAddresses: number[];
@@ -2194,6 +2218,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 group = {
                     positions: [],
                     startIndices: [0],
+                    holeIndices: [],
                     colors: [],
                     depthTests: [],
                     featureAddresses: []
@@ -2203,6 +2228,7 @@ export class DeckTileVisualization implements ITileVisualization {
 
             const startVertex = raw.startIndices[surfaceIndex];
             const endVertex = raw.startIndices[surfaceIndex + 1];
+            const groupStartVertex = group.positions.length / 3;
             for (let vertexIndex = startVertex; vertexIndex < endVertex; vertexIndex++) {
                 const positionOffset = vertexIndex * 3;
                 group.positions.push(
@@ -2218,10 +2244,33 @@ export class DeckTileVisualization implements ITileVisualization {
                     raw.colors[colorOffset + 3]
                 );
             }
+            if (raw.holeIndexStarts.length) {
+                const holeStart = raw.holeIndexStarts[surfaceIndex];
+                const holeEnd = raw.holeIndexStarts[surfaceIndex + 1];
+                for (let holeIndex = holeStart; holeIndex < holeEnd; holeIndex++) {
+                    group.holeIndices.push(groupStartVertex + raw.holeIndices[holeIndex] - startVertex);
+                }
+            }
             group.depthTests.push(depthTest ? 1 : 0);
             group.featureAddresses.push(raw.featureAddresses[surfaceIndex]);
             group.startIndices.push(group.positions.length / 3);
         }
+
+        const triangulateGroup = (group: {positions: number[]; startIndices: number[]; holeIndices: number[]}): Uint32Array => {
+            const indices: number[] = [];
+            for (let surfaceIndex = 0; surfaceIndex + 1 < group.startIndices.length; surfaceIndex++) {
+                const start = group.startIndices[surfaceIndex];
+                const end = group.startIndices[surfaceIndex + 1];
+                const holes = group.holeIndices
+                    .filter(holeStart => holeStart > start && holeStart < end)
+                    .map(holeStart => holeStart - start);
+                const localPositions = group.positions.slice(start * 3, end * 3);
+                for (const index of earcut(localPositions, holes, 3)) {
+                    indices.push(start + index);
+                }
+            }
+            return new Uint32Array(indices);
+        };
 
         return [true, false].flatMap((depthTest) => {
             const group = groups.get(depthTest);
@@ -2236,6 +2285,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 featureAddresses: new Uint32Array(group.featureAddresses),
                 attributes: {
                     getPolygon: {value: new Float32Array(group.positions), size: 3},
+                    indices: {value: triangulateGroup(group), size: 1},
                     fillColors: {value: new Uint8Array(group.colors), size: 4}
                 }
             }];

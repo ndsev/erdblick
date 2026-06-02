@@ -183,7 +183,14 @@ function transferPointBucket(bucket: DeckGeometryBucketBuffers["pointWorld"]): A
 
 /** Collects transferable buffers for one packed surface bucket. */
 function transferSurfaceBucket(bucket: DeckGeometryBucketBuffers["surface"]): ArrayBuffer[] {
-    return [bucket.positions.buffer, bucket.startIndices.buffer, bucket.colors.buffer, bucket.featureAddresses.buffer];
+    return [
+        bucket.positions.buffer,
+        bucket.startIndices.buffer,
+        bucket.holeIndices.buffer,
+        bucket.holeIndexStarts.buffer,
+        bucket.colors.buffer,
+        bucket.featureAddresses.buffer
+    ];
 }
 
 /** Collects transferable buffers for one packed path or arrow bucket. */
@@ -413,7 +420,14 @@ function emptyGeometryBuffers(): DeckGeometryBucketBuffers {
     return {
         pointWorld: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureAddresses: new Uint32Array()},
         pointBillboard: {positions: new Float32Array(), colors: new Uint8Array(), radii: new Float32Array(), featureAddresses: new Uint32Array()},
-        surface: {positions: new Float32Array(), startIndices: new Uint32Array(), colors: new Uint8Array(), featureAddresses: new Uint32Array()},
+        surface: {
+            positions: new Float32Array(),
+            startIndices: new Uint32Array(),
+            holeIndices: new Uint32Array(),
+            holeIndexStarts: new Uint32Array(),
+            colors: new Uint8Array(),
+            featureAddresses: new Uint32Array()
+        },
         pathWorld: {
             positions: new Float32Array(),
             startIndices: new Uint32Array(),

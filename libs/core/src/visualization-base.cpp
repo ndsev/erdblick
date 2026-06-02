@@ -35,7 +35,7 @@ mapget::Point offsetAabbOriginLocally(
     glm::dvec3 const& localOffsetMeters)
 {
     auto const shiftedOrigin = offsetGeometryLocally(
-        SelfContainedGeometry{{originWgs}, GeomType::Points},
+        SelfContainedGeometry{{originWgs}, {}, GeomType::Points},
         localOffsetMeters);
     if (shiftedOrigin.points_.empty()) {
         return originWgs;
@@ -666,11 +666,13 @@ bool FeatureLayerVisualizationBase::bypassLowFiMaxLodFilter() const
 
 void FeatureLayerVisualizationBase::emitPolygon(
     std::vector<mapget::Point> const& vertsCartesian,
+    std::vector<uint32_t> const& ringStarts,
     FeatureStyleRule const& rule,
     uint32_t tileFeatureId,
     BoundEvalFun& evalFun)
 {
     (void) vertsCartesian;
+    (void) ringStarts;
     (void) rule;
     (void) tileFeatureId;
     (void) evalFun;
@@ -1232,7 +1234,7 @@ bool FeatureLayerVisualizationBase::addGeometry(
     switch (geometryForRendering.geomType_) {
     case GeomType::Polygon:
         if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
-            emitPolygon(vertsProjected, rule, renderFeatureId, evalFun);
+            emitPolygon(vertsProjected, geometryForRendering.polygonRingStarts_, rule, renderFeatureId, evalFun);
             emittedAnyGeometry = true;
         }
         break;
@@ -1430,7 +1432,7 @@ void FeatureLayerVisualizationBase::addLine(
     if (!includesNonPointGeometry()) {
         return;
     }
-    auto lineGeometry = SelfContainedGeometry{{wgsA, wgsB}, GeomType::Line};
+    auto lineGeometry = SelfContainedGeometry{{wgsA, wgsB}, {}, GeomType::Line};
     if (hasLocalOffset(offset)) {
         lineGeometry = offsetGeometryLocally(lineGeometry, offset);
     }

@@ -532,6 +532,21 @@ std::vector<mapget::Point> geometryPoints(mapget::model_ptr<mapget::Geometry> co
     return points;
 }
 
+/** Return polygon ring starts in point-buffer order for hole-aware surface rendering. */
+std::vector<uint32_t> geometryPolygonRingStarts(mapget::model_ptr<mapget::Geometry> const& geometry)
+{
+    std::vector<uint32_t> ringStarts;
+    if (!geometry || geometry->geomType() != mapget::GeomType::Polygon) {
+        return ringStarts;
+    }
+    auto const ringCount = geometry->numPolygonRings();
+    ringStarts.reserve(ringCount);
+    for (uint32_t ringIndex = 0; ringIndex < ringCount; ++ringIndex) {
+        ringStarts.push_back(geometry->polygonRingStart(ringIndex));
+    }
+    return ringStarts;
+}
+
 }
 
 DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
@@ -564,6 +579,7 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
           rawFeatureMergeService)
 {
     aggregateBuffers_.surfaces.surfaceStartIndices.push_back(0);
+    aggregateBuffers_.surfaces.surfaceHoleIndexStarts.push_back(0);
     aggregateBuffers_.pathWorld.startIndices.push_back(0);
     aggregateBuffers_.pathBillboard.startIndices.push_back(0);
     aggregateBuffers_.arrowWorld.startIndices.push_back(0);
@@ -571,6 +587,7 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
     aggregateBuffers_.gltfPickProxies.startIndices.push_back(0);
     for (auto& lowFiLodBuffer : lowFiLodBuffers_) {
         lowFiLodBuffer.surfaces.surfaceStartIndices.push_back(0);
+        lowFiLodBuffer.surfaces.surfaceHoleIndexStarts.push_back(0);
         lowFiLodBuffer.pathWorld.startIndices.push_back(0);
         lowFiLodBuffer.pathBillboard.startIndices.push_back(0);
         lowFiLodBuffer.arrowWorld.startIndices.push_back(0);
@@ -623,6 +640,8 @@ JsValue DeckFeatureLayerVisualization::surfaceBuffersToJs(SurfaceBuffers const& 
     return JsValue::Dict({
         {"positions", JsValue::Float32Array(buffers.surfacePositions)},
         {"startIndices", JsValue::Uint32Array(buffers.surfaceStartIndices)},
+        {"holeIndices", JsValue::Uint32Array(buffers.surfaceHoleIndices)},
+        {"holeIndexStarts", JsValue::Uint32Array(buffers.surfaceHoleIndexStarts)},
         {"colors", JsValue::Uint8Array(buffers.surfaceColors)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.surfaceFeatureAddresses)},
@@ -937,11 +956,12 @@ void DeckFeatureLayerVisualization::emitPoint(
 
 void DeckFeatureLayerVisualization::emitPolygon(
     std::vector<mapget::Point> const& vertsCartesian,
+    std::vector<uint32_t> const& ringStarts,
     FeatureStyleRule const& rule,
     uint32_t tileFeatureId,
     BoundEvalFun& evalFun)
 {
-    appendSurfaceGeometry(vertsCartesian, rule, tileFeatureId, evalFun);
+    appendSurfaceGeometry(vertsCartesian, ringStarts, rule, tileFeatureId, evalFun);
 }
 
 void DeckFeatureLayerVisualization::emitMesh(
@@ -956,6 +976,7 @@ void DeckFeatureLayerVisualization::emitMesh(
     for (size_t i = 0; i + 2 < vertsCartesian.size(); i += 3) {
         appendSurfaceGeometry(
             {vertsCartesian[i], vertsCartesian[i + 1], vertsCartesian[i + 2]},
+            {},
             rule,
             tileFeatureId,
             evalFun);
@@ -1208,6 +1229,7 @@ void DeckFeatureLayerVisualization::appendPointGeometry(
 
 void DeckFeatureLayerVisualization::appendSurfaceGeometry(
     std::vector<mapget::Point> const& vertsCartesian,
+    std::vector<uint32_t> const& ringStarts,
     FeatureStyleRule const& rule,
     uint32_t tileFeatureId,
     BoundEvalFun& evalFun)
@@ -1220,6 +1242,7 @@ void DeckFeatureLayerVisualization::appendSurfaceGeometry(
     auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
     auto appendToBuffers = [&](SurfaceBuffers& buffers)
     {
+        auto const startVertex = static_cast<uint32_t>(buffers.surfacePositions.size() / 3);
         for (auto const& point : vertsCartesian) {
             buffers.surfacePositions.push_back(static_cast<float>(point.x));
             buffers.surfacePositions.push_back(static_cast<float>(point.y));
@@ -1229,6 +1252,12 @@ void DeckFeatureLayerVisualization::appendSurfaceGeometry(
             buffers.surfaceColors.push_back(toColorByte(color.b));
             buffers.surfaceColors.push_back(toColorByte(color.a));
         }
+        for (size_t ringIndex = 1; ringIndex < ringStarts.size(); ++ringIndex) {
+            if (ringStarts[ringIndex] < vertsCartesian.size()) {
+                buffers.surfaceHoleIndices.push_back(startVertex + ringStarts[ringIndex]);
+            }
+        }
+        buffers.surfaceHoleIndexStarts.push_back(static_cast<uint32_t>(buffers.surfaceHoleIndices.size()));
         buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
         buffers.surfaceStartIndices.push_back(static_cast<uint32_t>(buffers.surfacePositions.size() / 3));
         buffers.surfaceFeatureAddresses.push_back(selectableFeatureId);
@@ -1481,6 +1510,7 @@ DeckTileSearchResultLayerVisualization::DeckTileSearchResultLayerVisualization(
     fallbackStyle_ = parsedStyle.first;
     styleRules_ = std::move(parsedStyle.second);
     buffers_.surfaces.surfaceStartIndices.push_back(0);
+    buffers_.surfaces.surfaceHoleIndexStarts.push_back(0);
     buffers_.pathWorld.startIndices.push_back(0);
     buffers_.pathBillboard.startIndices.push_back(0);
     buffers_.arrowWorld.startIndices.push_back(0);
@@ -1577,8 +1607,10 @@ void DeckTileSearchResultLayerVisualization::appendResultGeometry(
         appendPath(geometryPoints(geometry), resultIndex, style);
         break;
     case mapget::GeomType::Polygon:
+        appendSurface(geometryPoints(geometry), geometryPolygonRingStarts(geometry), resultIndex, style);
+        break;
     case mapget::GeomType::Mesh:
-        appendSurface(geometryPoints(geometry), resultIndex, style);
+        appendSurface(geometryPoints(geometry), {}, resultIndex, style);
         break;
     case mapget::GeomType::AABB:
         appendAabbFootprint(geometry->aabbOrigin(), geometry->aabbSize(), resultIndex, style);
@@ -1639,6 +1671,7 @@ void DeckTileSearchResultLayerVisualization::appendPath(
 
 void DeckTileSearchResultLayerVisualization::appendSurface(
     std::vector<mapget::Point> const& pointsWgs,
+    std::vector<uint32_t> const& ringStarts,
     uint32_t resultIndex,
     SearchResolvedStyle const& style)
 {
@@ -1646,6 +1679,7 @@ void DeckTileSearchResultLayerVisualization::appendSurface(
         return;
     }
     auto& buffers = buffers_.surfaces;
+    auto const startVertex = static_cast<uint32_t>(buffers.surfacePositions.size() / 3);
     for (auto const& pointWgs : pointsWgs) {
         auto const point = projectWgsPoint(pointWgs);
         buffers.surfacePositions.push_back(static_cast<float>(point.x));
@@ -1653,6 +1687,12 @@ void DeckTileSearchResultLayerVisualization::appendSurface(
         buffers.surfacePositions.push_back(static_cast<float>(point.z));
         buffers.surfaceColors.insert(buffers.surfaceColors.end(), style.surfaceColor.begin(), style.surfaceColor.end());
     }
+    for (size_t ringIndex = 1; ringIndex < ringStarts.size(); ++ringIndex) {
+        if (ringStarts[ringIndex] < pointsWgs.size()) {
+            buffers.surfaceHoleIndices.push_back(startVertex + ringStarts[ringIndex]);
+        }
+    }
+    buffers.surfaceHoleIndexStarts.push_back(static_cast<uint32_t>(buffers.surfaceHoleIndices.size()));
     buffers.depthTests.push_back(0U);
     buffers.surfaceFeatureAddresses.push_back(resultIndex);
     buffers.surfaceStartIndices.push_back(static_cast<uint32_t>(buffers.surfacePositions.size() / 3));
@@ -1670,7 +1710,7 @@ void DeckTileSearchResultLayerVisualization::appendAabbFootprint(
         {originWgs.x + sizeWgs.x, originWgs.y, originWgs.z},
         {originWgs.x + sizeWgs.x, originWgs.y + sizeWgs.y, originWgs.z},
         {originWgs.x, originWgs.y + sizeWgs.y, originWgs.z},
-    }, resultIndex, style);
+    }, {}, resultIndex, style);
 }
 
 DeckTileSearchResultLayerVisualization::SearchResolvedStyle
