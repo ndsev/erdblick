@@ -2,7 +2,6 @@ import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {PathLayer, ScatterplotLayer, SolidPolygonLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {Matrix4} from "@math.gl/core";
-import earcut from "earcut";
 import {SearchResultTile} from "../../mapdata/search-result-tile.model";
 import {SceneMode} from "../../integrations/geo";
 import {coreLib, uint8ArrayToWasm} from "../../integrations/wasm";
@@ -21,6 +20,7 @@ import {
     DeckVisualizationBufferResult,
     DeckWorkerTimings
 } from "./deck-render.worker.protocol";
+import {isValidSurfaceRingTopology, triangulateSurfaceIndices} from "./surface-triangulation";
 import {
     DeckTileSearchResultLayerVisualization as WasmDeckTileSearchResultLayerVisualization,
     TileLayerParser,
@@ -519,24 +519,15 @@ export class DeckTileSearchVisualization implements ITileVisualization {
             || raw.startIndices[0] !== 0) {
             return [];
         }
-        if (raw.holeIndexStarts.length && raw.holeIndexStarts.length !== surfaceCount + 1) {
+        if (!isValidSurfaceRingTopology(raw, vertexCount)) {
             return [];
         }
 
-        const indices: number[] = [];
         for (let surfaceIndex = 0; surfaceIndex < surfaceCount; surfaceIndex++) {
             const start = raw.startIndices[surfaceIndex];
             const end = raw.startIndices[surfaceIndex + 1];
             if (end - start < 3 || end > vertexCount) {
                 return [];
-            }
-            const holes = raw.holeIndexStarts.length
-                ? Array.from(raw.holeIndices.slice(raw.holeIndexStarts[surfaceIndex], raw.holeIndexStarts[surfaceIndex + 1]))
-                    .map(holeStart => holeStart - start)
-                : [];
-            const localPositions = Array.from(raw.positions.slice(start * 3, end * 3));
-            for (const index of earcut(localPositions, holes, 3)) {
-                indices.push(start + index);
             }
         }
 
@@ -548,7 +539,7 @@ export class DeckTileSearchVisualization implements ITileVisualization {
             featureAddresses: raw.featureAddresses,
             attributes: {
                 getPolygon: {value: raw.positions, size: 3},
-                indices: {value: new Uint32Array(indices), size: 1},
+                indices: {value: triangulateSurfaceIndices(raw), size: 1},
                 fillColors: {value: raw.colors, size: 4}
             }
         }];

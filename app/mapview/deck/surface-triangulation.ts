@@ -103,15 +103,12 @@ export function triangulateSurfaceIndices(input: SurfaceTriangulationInput): Uin
         if (!localPositions.length) {
             continue;
         }
-        const holes = holeIndexStarts.length
-            ? Array.from(
-                holeIndices,
-                (holeStart, holeIndex) => holeIndex >= holeIndexStarts[surfaceIndex]
-                    && holeIndex < holeIndexStarts[surfaceIndex + 1]
-                    ? holeStart - start
-                    : -1
-            ).filter(holeStart => holeStart >= 0)
-            : [];
+        const holes: number[] = [];
+        if (holeIndexStarts.length) {
+            for (let holeIndex = holeIndexStarts[surfaceIndex]; holeIndex < holeIndexStarts[surfaceIndex + 1]; holeIndex++) {
+                holes.push(holeIndices[holeIndex] - start);
+            }
+        }
         for (const index of earcut(localPositions, holes, 2)) {
             indices.push(start + index);
         }
