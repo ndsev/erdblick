@@ -25,8 +25,9 @@ import type {
     FeatureSearchAttributeScopeCandidate,
     FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
-import {ConfirmationService, TreeNode} from "primeng/api";
+import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
+import {AppConfirmPopupService} from "../shared/app-confirm-popup.service";
 import {CompletionCandidate, DiagnosticsMessage, TraceResult} from "./search.model";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
@@ -216,27 +217,8 @@ interface FeatureSearchStyleRuleDraft {
                     (candidateSelected)="applyFeatureSearchCompletion($event)">
                 </search-completion-popup>
             </div>
-            <div class="feature-search-scope-control">
-                <p-iftalabel class="feature-search-scope-select">
-                    <p-select inputId="feature-search-scope"
-                              [options]="featureSearchScopeOptions"
-                              [(ngModel)]="featureSearchScope"
-                              optionLabel="label"
-                              optionValue="value"
-                              [disabled]="!searchEnabled()"
-                              appendTo="body"
-                              (ngModelChange)="onFeatureSearchScopeChange($event)">
-                    </p-select>
-                    <label for="feature-search-scope">Scope</label>
-                </p-iftalabel>
-                @if (featureSearchScopeSummary) {
-                    <span class="feature-search-scope-summary"
-                          [title]="featureSearchScopeSummaryTitle">
-                        {{ featureSearchScopeSummary }}
-                    </span>
-                }
-            </div>
-            <div class="feature-search-layer-control">
+            <div class="feature-search-layer-control"
+                 [class.feature-search-layer-control-with-view]="showSearchViewControl()">
                 <p-iftalabel class="feature-search-layer-select">
                     <p-treeselect inputId="feature-search-map-layers"
                                   [options]="mapLayerTreeOptions"
@@ -250,6 +232,18 @@ interface FeatureSearchStyleRuleDraft {
                                   (ngModelChange)="onSearchMapLayerTreeSelectionChange($event)">
                     </p-treeselect>
                     <label for="feature-search-map-layers">Map Layers</label>
+                </p-iftalabel>
+                <p-iftalabel class="feature-search-scope-select">
+                    <p-select inputId="feature-search-scope"
+                              [options]="featureSearchScopeOptions"
+                              [(ngModel)]="featureSearchScope"
+                              optionLabel="label"
+                              optionValue="value"
+                              [disabled]="!searchEnabled()"
+                              appendTo="body"
+                              (ngModelChange)="onFeatureSearchScopeChange($event)">
+                    </p-select>
+                    <label for="feature-search-scope">Scope</label>
                 </p-iftalabel>
                 @if (showSearchViewControl()) {
                     <p-iftalabel class="feature-search-view-select">
@@ -266,6 +260,12 @@ interface FeatureSearchStyleRuleDraft {
                         </p-multiSelect>
                         <label for="feature-search-views">View</label>
                     </p-iftalabel>
+                }
+                @if (featureSearchScopeSummary) {
+                    <span class="feature-search-scope-summary"
+                          [title]="featureSearchScopeSummaryTitle">
+                        {{ featureSearchScopeSummary }}
+                    </span>
                 }
             </div>
             <div class="feature-search-controls">
@@ -618,35 +618,17 @@ interface FeatureSearchStyleRuleDraft {
             </p-tabs>
             </div>
         </ng-template>
-        <p-confirmpopup [key]="bookmarkedCloseConfirmKey"
-                        appendTo="body"
-                        [baseZIndex]="30000"
-                        styleClass="feature-search-close-confirm-popup">
-            <ng-template pTemplate="headless" let-confirmation>
-                <div class="feature-search-close-confirm">
-                    <div class="feature-search-close-confirm-message">{{ confirmation?.message }}</div>
-                    <div class="feature-search-close-confirm-actions">
-                        <p-button label="Export"
-                                  size="small"
-                                  severity="secondary"
-                                  [outlined]="true"
-                                  (click)="exportBookmarkedCloseSearch()">
-                        </p-button>
-                        <p-button label="Cancel"
-                                  size="small"
-                                  severity="secondary"
-                                  [text]="true"
-                                  (click)="cancelBookmarkedCloseSearch()">
-                        </p-button>
-                        <p-button label="Yes"
-                                  size="small"
-                                  severity="danger"
-                                  (click)="confirmBookmarkedCloseSearch()">
-                        </p-button>
-                    </div>
-                </div>
+        <app-confirm-popup [key]="bookmarkedCloseConfirmKey"
+                           styleClass="feature-search-close-confirm-popup">
+            <ng-template #extraActions>
+                <p-button label="Export"
+                          size="small"
+                          severity="secondary"
+                          [outlined]="true"
+                          (click)="exportBookmarkedCloseSearch()">
+                </p-button>
             </ng-template>
-        </p-confirmpopup>
+        </app-confirm-popup>
         <div #alert></div>
     `,
     styles: [``],
@@ -775,7 +757,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
-                private confirmationService: ConfirmationService) {
+                private confirmPopupService: AppConfirmPopupService) {
         this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
         this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
@@ -1375,23 +1357,27 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 children
             };
         }
-        const children = node.children.map(layer => this.layerTreeNodeToSearchTreeNode(layer));
+        const mapLabel = removeGroupPrefix(node.id);
+        const children = node.children.map(layer => this.layerTreeNodeToSearchTreeNode(layer, mapLabel));
         if (!children.length) {
             return null;
         }
         return {
             key: `map:${node.key}`,
-            label: removeGroupPrefix(node.id),
+            label: mapLabel,
             data: {kind: "map", mapId: node.id},
             expanded: node.expanded,
             children
         };
     }
 
-    private layerTreeNodeToSearchTreeNode(layer: LayerTreeNode): TreeNode<FeatureSearchLayerTreeNodeData> {
+    private layerTreeNodeToSearchTreeNode(
+        layer: LayerTreeNode,
+        parentLabel: string
+    ): TreeNode<FeatureSearchLayerTreeNodeData> {
         return {
             key: this.searchLayerTreeKey(layer.mapId, layer.id),
-            label: layer.id,
+            label: `${parentLabel}/${layer.id}`,
             data: {
                 kind: "layer",
                 mapId: layer.mapId,
@@ -2137,10 +2123,14 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         const target = this.bookmarkedClosePopupTarget(event);
         this.featureSearchDialogVisible = true;
         this.pendingBookmarkedCloseSessionId = sessionId;
-        this.confirmationService.confirm({
+        this.confirmPopupService.confirm({
             key: this.bookmarkedCloseConfirmKey,
             target,
-            message: "Close bookmarked search? It will be permanently deleted. You can export the search before deleting."
+            header: "Close bookmarked search?",
+            message: "It will be permanently deleted. You can export the search before deleting.",
+            severity: "error",
+            accept: () => this.confirmBookmarkedCloseSearch(),
+            reject: () => this.cancelBookmarkedCloseSearch()
         });
     }
 
@@ -2154,7 +2144,6 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     protected confirmBookmarkedCloseSearch(): void {
         const sessionId = this.pendingBookmarkedCloseSessionId;
         this.pendingBookmarkedCloseSessionId = null;
-        this.confirmationService.close();
         if (sessionId) {
             this.searchService.closeSearch(sessionId);
         }
@@ -2163,13 +2152,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     protected cancelBookmarkedCloseSearch(): void {
         this.pendingBookmarkedCloseSessionId = null;
         this.featureSearchDialogVisible = true;
-        this.confirmationService.close();
     }
 
     protected exportBookmarkedCloseSearch(): void {
         const sessionId = this.pendingBookmarkedCloseSessionId;
         this.pendingBookmarkedCloseSessionId = null;
-        this.confirmationService.close();
+        this.confirmPopupService.close();
         if (sessionId) {
             this.openSearchExportDialog(sessionId, true);
         }

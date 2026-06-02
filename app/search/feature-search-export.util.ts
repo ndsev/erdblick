@@ -1,4 +1,4 @@
-import type {FeatureSearchStateEntry} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 
 export interface FeatureSearchGroupingExportOption {
@@ -52,7 +52,15 @@ export interface FeatureSearchGroupExportNode {
 
 export type FeatureSearchExportNode = FeatureSearchGroupExportNode | FeatureSearchResultExportNode;
 
+export interface FeatureSearchResultMapLayerExport extends FeatureSearchMapLayerRef {
+    label: string;
+}
+
 export interface FeatureSearchResultsExport {
+    mapLayers: {
+        activated: FeatureSearchResultMapLayerExport[];
+        exported: FeatureSearchResultMapLayerExport[];
+    };
     grouping: FeatureSearchGroupingExportOption[];
     filters: {
         tree: {
@@ -119,16 +127,27 @@ export function featureSearchDefinitionExport(definition: FeatureSearchStateEntr
 export function featureSearchResultsExport(
     results: FeatureSearchResultEntry[],
     grouping: FeatureSearchGroupingExportOption[],
-    filterValue = ""
+    filterValue = "",
+    activatedMapLayers: FeatureSearchMapLayerRef[] = inferMapLayersFromResults(results),
+    exportedMapLayers: FeatureSearchMapLayerRef[] = activatedMapLayers
 ): FeatureSearchResultsExport {
     const normalizedGrouping = normalizeGrouping(grouping);
+    const normalizedActivatedMapLayers = normalizeMapLayerRefs(activatedMapLayers);
+    const normalizedExportedMapLayers = normalizeMapLayerRefs(exportedMapLayers);
+    const exportedMapLayerKeys = new Set(normalizedExportedMapLayers.map(ref => featureSearchMapLayerKey(ref)));
     const tree = buildResultTree(
-        results.map((result, index) => ({result, index})),
+        results
+            .map((result, index) => ({result, index}))
+            .filter(item => resultMatchesExportedMapLayer(item.result, exportedMapLayerKeys)),
         normalizedGrouping,
         0,
         "root"
     );
     return {
+        mapLayers: {
+            activated: normalizedActivatedMapLayers.map(ref => featureSearchMapLayerExport(ref)),
+            exported: normalizedExportedMapLayers.map(ref => featureSearchMapLayerExport(ref))
+        },
         grouping: normalizedGrouping,
         filters: {
             tree: {
@@ -151,6 +170,8 @@ export function featureSearchExportPayload(
     grouping: FeatureSearchGroupingExportOption[],
     filterValue: string,
     selection: FeatureSearchExportSelection,
+    activatedMapLayers: FeatureSearchMapLayerRef[] = definition.selectedMapLayers,
+    exportedMapLayers: FeatureSearchMapLayerRef[] = activatedMapLayers,
     exportedAt = new Date().toISOString()
 ): FeatureSearchDefinitionExport | FeatureSearchResultsExport | FeatureSearchCombinedExport | null {
     if (selection.includeConfiguration && selection.includeResults) {
@@ -158,14 +179,26 @@ export function featureSearchExportPayload(
             exportedAt,
             searchId: definition.id,
             configuration: featureSearchDefinitionExport(definition),
-            results: featureSearchResultsExport(results, grouping, filterValue)
+            results: featureSearchResultsExport(
+                results,
+                grouping,
+                filterValue,
+                activatedMapLayers,
+                exportedMapLayers
+            )
         };
     }
     if (selection.includeConfiguration) {
         return featureSearchDefinitionExport(definition);
     }
     if (selection.includeResults) {
-        return featureSearchResultsExport(results, grouping, filterValue);
+        return featureSearchResultsExport(
+            results,
+            grouping,
+            filterValue,
+            activatedMapLayers,
+            exportedMapLayers
+        );
     }
     return null;
 }
@@ -185,6 +218,14 @@ export function safeFeatureSearchExportId(id: string): string {
     return (id || "search").replace(/[^A-Za-z0-9._-]+/g, "_") || "search";
 }
 
+export function featureSearchMapLayerKey(ref: FeatureSearchMapLayerRef): string {
+    return JSON.stringify([ref.mapId, ref.layerId]);
+}
+
+export function featureSearchMapLayerLabel(ref: FeatureSearchMapLayerRef): string {
+    return `${ref.mapId}/${ref.layerId}`;
+}
+
 function normalizeGrouping(grouping: FeatureSearchGroupingExportOption[]): FeatureSearchGroupingExportOption[] {
     const seen = new Set<number>();
     const result: FeatureSearchGroupingExportOption[] = [];
@@ -197,6 +238,45 @@ function normalizeGrouping(grouping: FeatureSearchGroupingExportOption[]): Featu
         result.push({id: option.id, name: option.name || accessor.name});
     }
     return result;
+}
+
+function normalizeMapLayerRefs(refs: FeatureSearchMapLayerRef[]): FeatureSearchMapLayerRef[] {
+    const result: FeatureSearchMapLayerRef[] = [];
+    const seen = new Set<string>();
+    for (const ref of refs) {
+        const key = featureSearchMapLayerKey(ref);
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        result.push({mapId: ref.mapId, layerId: ref.layerId});
+    }
+    return result;
+}
+
+function inferMapLayersFromResults(results: FeatureSearchResultEntry[]): FeatureSearchMapLayerRef[] {
+    return normalizeMapLayerRefs(results.map(result => ({
+        mapId: result.sourceMapId,
+        layerId: result.sourceLayerId
+    })));
+}
+
+function featureSearchMapLayerExport(ref: FeatureSearchMapLayerRef): FeatureSearchResultMapLayerExport {
+    return {
+        mapId: ref.mapId,
+        layerId: ref.layerId,
+        label: featureSearchMapLayerLabel(ref)
+    };
+}
+
+function resultMatchesExportedMapLayer(result: FeatureSearchResultEntry, exportedKeys: Set<string>): boolean {
+    if (exportedKeys.size === 0) {
+        return false;
+    }
+    return exportedKeys.has(featureSearchMapLayerKey({
+        mapId: result.sourceMapId,
+        layerId: result.sourceLayerId
+    }));
 }
 
 function buildResultTree(

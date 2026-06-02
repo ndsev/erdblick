@@ -10,7 +10,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
     selector: 'diagnostics-export-dialog',
     template: `
         <app-dialog #dialog header="Export Diagnostics Data" class="diagnostics-export-dialog" [(visible)]="dialogVisible"
-                  [modal]="false" [persistLayout]="true" [layoutId]="layoutId" (onShow)="onDialogShow()">
+                  [modal]="false" [layoutId]="layoutId" (onShow)="onDialogShow()">
             <div class="diagnostics-export-content">
                 <div class="diagnostics-export-section">
                     <div class="diagnostics-label">Include</div>

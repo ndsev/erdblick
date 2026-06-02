@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {FeatureSearchStateEntry} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 import {
     featureSearchDefinitionExport,
@@ -58,6 +58,10 @@ describe("feature search JSON export helpers", () => {
     it("exports ungrouped result leaves with JSON-safe tile ids", () => {
         const exported = featureSearchResultsExport([result("Road.1", "MapA", "LayerA", 120n)], [], "");
 
+        expect(exported.mapLayers).toEqual({
+            activated: [{mapId: "MapA", layerId: "LayerA", label: "MapA/LayerA"}],
+            exported: [{mapId: "MapA", layerId: "LayerA", label: "MapA/LayerA"}]
+        });
         expect(exported.grouping).toEqual([]);
         expect(exported.filters.tree).toEqual({value: "", filterBy: "label", filterMode: "lenient"});
         expect(exported.tree).toEqual([
@@ -69,6 +73,33 @@ describe("feature search JSON export helpers", () => {
         ]);
     });
 
+    it("filters exported results by the selected active map layers", () => {
+        const exported = featureSearchResultsExport([
+            result("Road.1", "MapA", "LayerA", 120n),
+            result("Lane.1", "MapA", "LayerB", 121n)
+        ], [], "", [
+            mapLayer("MapA", "LayerA"),
+            mapLayer("MapA", "LayerB")
+        ], [
+            mapLayer("MapA", "LayerA")
+        ]);
+
+        expect(exported.mapLayers).toEqual({
+            activated: [
+                {mapId: "MapA", layerId: "LayerA", label: "MapA/LayerA"},
+                {mapId: "MapA", layerId: "LayerB", label: "MapA/LayerB"}
+            ],
+            exported: [
+                {mapId: "MapA", layerId: "LayerA", label: "MapA/LayerA"}
+            ]
+        });
+        expect(exported.tree).toHaveLength(1);
+        expect(exported.tree[0]).toMatchObject({
+            type: "result",
+            label: "Road.1"
+        });
+    });
+
     it("builds a combined export payload only when both categories are selected", () => {
         const definition = searchDefinition();
         const exported = featureSearchExportPayload(
@@ -77,6 +108,8 @@ describe("feature search JSON export helpers", () => {
             [{id: 1, name: "Maps"}],
             "",
             {includeConfiguration: true, includeResults: true},
+            definition.selectedMapLayers,
+            definition.selectedMapLayers,
             "2026-06-01T00:00:00.000Z"
         );
 
@@ -197,6 +230,10 @@ function searchDefinition(): FeatureSearchStateEntry {
             highFidelityMaxVisibleTiles: 512
         }
     };
+}
+
+function mapLayer(mapId: string, layerId: string): FeatureSearchMapLayerRef {
+    return {mapId, layerId};
 }
 
 function result(

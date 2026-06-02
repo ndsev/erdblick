@@ -119,6 +119,7 @@ import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
 import {AppPanelComponent} from "./shared/app-panel.component";
 import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
+import {AppConfirmPopupComponent} from "./shared/app-confirm-popup.component";
 import {SearchCompletionPopupComponent} from "./search/search-completion-popup.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
@@ -243,6 +244,7 @@ export const initializeServices = () => {
         AppDialogComponent,
         AppPanelComponent,
         AppSurfaceHeaderComponent,
+        AppConfirmPopupComponent,
         SearchCompletionPopupComponent,
         SpeedDialModule,
         DialogModule,
