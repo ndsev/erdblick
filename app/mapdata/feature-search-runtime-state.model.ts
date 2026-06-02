@@ -102,19 +102,6 @@ export class FeatureSearchRuntimeState {
         return selectedRefs.some(ref => selectedLayerKey(ref) === key);
     }
 
-    /** Filters global visible source-tile coverage down to this search's selected layers. */
-    filterVisibleLayerTiles(visibleLayerTiles: Map<string, SearchLayerTileSet>): Map<string, SearchLayerTileSet> {
-        const selectedRefs = normalizedSelectedLayerRefs(this.definition);
-        const selectedKeys = new Set(selectedRefs.map(selectedLayerKey));
-        const filtered = new Map<string, SearchLayerTileSet>();
-        for (const [key, entry] of visibleLayerTiles) {
-            if (selectedKeys.has(key)) {
-                filtered.set(key, entry);
-            }
-        }
-        return filtered;
-    }
-
     /** Returns whether the current visible tile set should replace this search's desired coverage. */
     shouldAdoptVisibleTiles(): boolean {
         return this.definition.autoUpdate

@@ -980,7 +980,7 @@ export class MapRenderService {
     /** Returns whether a search-result source tile is visible in one view and layer context. */
     private viewShowsSearchResultTile(viewIndex: number, tile: SearchResultTile): boolean {
         return !tile.disposed
-            && this.viewState.showsFeatureTileInView(
+            && this.viewState.showsFeatureSearchTileInView(
                 viewIndex,
                 tile.sourceMapId,
                 tile.sourceLayerId,

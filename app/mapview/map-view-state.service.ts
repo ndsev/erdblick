@@ -112,6 +112,21 @@ export class MapViewStateService {
         return tileGridVisibleCellCount(level, viewState.viewport, this.mapInfo.maps.getViewTileGridMode(viewIndex));
     }
 
+    /** Returns viewport tile ids for one level, even when no currently visible map layer uses that level. */
+    visibleTileIdsForLevel(viewIndex: number, level: number): bigint[] {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState || !Number.isFinite(level)) {
+            return [];
+        }
+        const normalizedLevel = Math.max(0, Math.floor(level));
+        const cached = viewState.visibleTileIdsPerLevel.get(normalizedLevel);
+        if (cached) {
+            return cached;
+        }
+        const tileLimit = this.stateService.tilesLoadLimit / Math.max(1, this.stateService.numViews);
+        return coreLib.getTileIds(viewState.viewport, normalizedLevel, tileLimit) as bigint[];
+    }
+
     /** Returns whether a feature tile id is currently inside one view's visible tile set and layer state. */
     showsFeatureTileInView(viewIndex: number, mapId: string, layerId: string, tileId: bigint): boolean {
         const viewState = this.viewVisualizationState[viewIndex];
@@ -120,6 +135,15 @@ export class MapViewStateService {
         }
         return this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layerId)
             && coreLib.getTileLevel(tileId) === this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+    }
+
+    /** Returns whether a search-result source tile is in view, without consulting Map Panel visibility. */
+    showsFeatureSearchTileInView(viewIndex: number, mapId: string, layerId: string, tileId: bigint): boolean {
+        const level = this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+        if (coreLib.getTileLevel(tileId) !== level) {
+            return false;
+        }
+        return this.visibleTileIdsForLevel(viewIndex, level).some(visibleTileId => visibleTileId === tileId);
     }
 
     /** Returns the set of feature levels that are currently visible in one view across all layers. */

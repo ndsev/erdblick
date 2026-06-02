@@ -30,7 +30,7 @@ import {SearchResultTile} from "./search-result-tile.model";
 import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, TileFeatureId} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
-import {FeatureSearchStateEntry, normalizeFeatureSearchState} from "../shared/feature-search-state";
+import {FeatureSearchMapLayerRef, FeatureSearchStateEntry, normalizeFeatureSearchState} from "../shared/feature-search-state";
 
 interface LayerRequestEntry {
     mapId: string;
@@ -808,8 +808,6 @@ export class MapTileStreamService {
 
         const requestByLayer = new Map<string, LayerRequestEntry>();
         const expectedByLayer = new Map<string, ExpectedLayerEntry>();
-        const visibleSearchLayerTiles = new Map<string, SearchLayerTileSet>();
-        let searchTileRequestOrder = 0;
         const queueTile = (
             mapId: string,
             layerId: string,
@@ -900,13 +898,6 @@ export class MapTileStreamService {
                     for (const tileId of tileIds) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
                         const isSelectedTile = this.selectedTileKeys.has(tileMapLayerKey);
-                        this.trackVisibleSearchLayerTile(
-                            visibleSearchLayerTiles,
-                            mapName,
-                            layer.id,
-                            tileId,
-                            searchTileRequestOrder++,
-                            isSelectedTile);
                         const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
                         if (!existingTile) {
                             this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
@@ -951,7 +942,7 @@ export class MapTileStreamService {
             }
             return request;
         });
-        requests.push(...this.buildFeatureSearchTileRequests(visibleSearchLayerTiles));
+        requests.push(...this.buildFeatureSearchTileRequests());
 
         this.resetRequestedStageProgressFromExpected(expectedByLayer);
 
@@ -1385,7 +1376,7 @@ export class MapTileStreamService {
     }
 
     /** Builds all active server-side search-as-map requests for the next `/tiles` update. */
-    private buildFeatureSearchTileRequests(visibleLayerTiles: Map<string, SearchLayerTileSet>): FeatureSearchTileRequest[] {
+    private buildFeatureSearchTileRequests(): FeatureSearchTileRequest[] {
         const requests: FeatureSearchTileRequest[] = [];
 
         for (const runtime of this.activeFeatureSearches.values()) {
@@ -1400,7 +1391,7 @@ export class MapTileStreamService {
                 continue;
             }
 
-            const runtimeVisibleLayerTiles = runtime.filterVisibleLayerTiles(visibleLayerTiles);
+            const runtimeVisibleLayerTiles = this.featureSearchCoverageTiles(runtime.definition);
             if (runtime.shouldAdoptVisibleTiles()) {
                 this.disposeSearchResultTiles(runtime.adoptVisibleTiles(runtimeVisibleLayerTiles), true);
             }
@@ -1424,6 +1415,51 @@ export class MapTileStreamService {
         }
 
         return requests;
+    }
+
+    /** Builds search-local source-tile coverage from selected layers and current viewports, ignoring Map Panel visibility. */
+    private featureSearchCoverageTiles(definition: FeatureSearchStateEntry): Map<string, SearchLayerTileSet> {
+        const coverage = new Map<string, SearchLayerTileSet>();
+        let requestOrder = 0;
+        for (const ref of this.availableFeatureSearchLayerRefs(definition.selectedMapLayers)) {
+            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                const level = this.viewState.getEffectiveMapLayerLevel(viewIndex, ref.mapId, ref.layerId);
+                const tileIds = this.viewState.visibleTileIdsForLevel(viewIndex, level);
+                for (const tileId of tileIds) {
+                    const tileMapLayerKey = coreLib.getTileFeatureLayerKey(ref.mapId, ref.layerId, tileId);
+                    this.trackVisibleSearchLayerTile(
+                        coverage,
+                        ref.mapId,
+                        ref.layerId,
+                        tileId,
+                        requestOrder++,
+                        this.selectedTileKeys.has(tileMapLayerKey)
+                    );
+                }
+            }
+        }
+        return coverage;
+    }
+
+    /** Returns selected feature-search layers that still exist in datasource metadata, de-duplicated in state order. */
+    private availableFeatureSearchLayerRefs(refs: FeatureSearchMapLayerRef[]): FeatureSearchMapLayerRef[] {
+        const result: FeatureSearchMapLayerRef[] = [];
+        const seen = new Set<string>();
+        for (const ref of refs) {
+            const key = FeatureSearchRuntimeState.layerKey(ref.mapId, ref.layerId);
+            if (seen.has(key) || !this.hasFeatureLayer(ref.mapId, ref.layerId)) {
+                continue;
+            }
+            seen.add(key);
+            result.push({mapId: ref.mapId, layerId: ref.layerId});
+        }
+        return result;
+    }
+
+    /** Returns whether map metadata still contains this feature layer. */
+    private hasFeatureLayer(mapId: string, layerId: string): boolean {
+        const map = this.mapInfo.maps.maps.get(mapId);
+        return !!map?.allFeatureLayers().some(layer => layer.id === layerId);
     }
 
     /** Closes the viewport render timer once backend requests finished. */

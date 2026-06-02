@@ -1540,7 +1540,7 @@ export abstract class DeckMapView implements IRenderView {
             const sourceTileKeyParts: string[] = [];
             let maxVisibleLevel = 0;
             for (const bucket of searchLayer.pointBuckets) {
-                if (!this.mapViewState.showsFeatureTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
+                if (!this.mapViewState.showsFeatureSearchTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
                     continue;
                 }
                 if (this.mapRender.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
