@@ -252,6 +252,8 @@ interface FeatureSearchStyleRuleDraft {
                                        [(ngModel)]="selectedViewIndices"
                                        optionLabel="label"
                                        optionValue="value"
+                                       [filter]="false"
+                                       [showToggleAll]="false"
                                        [maxSelectedLabels]="1"
                                        selectedItemsLabel="All"
                                        [disabled]="!searchEnabled()"
