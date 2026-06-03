@@ -1892,6 +1892,16 @@ inspection-tree {
     }
 
     tr {
+      &.inspection-selection-soft > td {
+        background: color-mix(in srgb, var(--p-primary-color) 18%, var(--p-content-background));
+        box-shadow: inset 3px 0 0 var(--p-primary-color);
+      }
+
+      &.inspection-selection-strong > td {
+        background: color-mix(in srgb, var(--p-primary-color) 30%, var(--p-content-background));
+        box-shadow: inset 4px 0 0 var(--p-primary-color);
+      }
+
       &.inspection-hover-soft > td {
         background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
       }
@@ -4311,22 +4321,53 @@ inspection-tree {
 }
 
 .feature-search-controls {
-  padding: 0 0 0.25em 0;
+  padding: 0 0 0.35em 0;
   display: flex;
   gap: 0.25em;
   align-items: center;
+  min-width: 0;
+  overflow: hidden;
 
-  .progress-bar-container {
+  .feature-search-progress-meter {
+    flex: 1 1 auto;
+    min-width: 0;
+    position: relative;
     width: 100%;
 
-    .p-progressbar {
-      height: 2em;
+    p-metergroup,
+    .p-metergroup {
+      display: block;
+      min-width: 0;
       width: 100%;
-      font-size: 0.9em;
+    }
 
-      .p-progressbar-value-animate {
-        transition: none !important;
-      }
+    .p-metergroup-meters {
+      border-radius: 4px;
+      height: 1.35em;
+      overflow: hidden;
+    }
+
+    .p-metergroup-meter {
+      transition: width 80ms linear;
+    }
+
+    .p-metergroup-label-list {
+      display: none;
+    }
+
+    & > span {
+      align-items: center;
+      color: var(--p-primary-contrast-color);
+      display: flex;
+      font-size: 0.78em;
+      font-weight: 600;
+      inset: 0;
+      justify-content: center;
+      pointer-events: none;
+      position: absolute;
+      text-align: center;
+      text-shadow: 0 1px 1px rgb(0 0 0 / 25%);
+      z-index: 1;
     }
   }
 }
@@ -4334,6 +4375,13 @@ inspection-tree {
 .feature-search-query {
   flex: 0 0 auto;
   margin-bottom: 0.25em;
+
+  simfil-expression-input,
+  .simfil-expression-input,
+  .simfil-expression-editor-host,
+  .cm-editor {
+    width: 100%;
+  }
 
   textarea {
     overflow-y: scroll;
@@ -4350,14 +4398,45 @@ inspection-tree {
   opacity: 0.52;
 }
 
-.feature-search-content-disabled .feature-search-tabs {
-  pointer-events: none;
+simfil-expression-input,
+search-style-color {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
 }
 
-.feature-search-scope-summary {
-  color: var(--p-text-color);
-  flex: 1 1 100%;
-  min-width: 10em;
+simfil-expression-input {
+
+  .simfil-expression-input {
+    max-width: 100%;
+    min-width: 0;
+    position: relative;
+    width: 100%;
+  }
+
+  .simfil-expression-editor-host {
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .cm-editor {
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .cm-scroller {
+    min-width: 0;
+  }
+
+  .cm-content {
+    font-size: inherit;
+  }
+}
+
+.feature-search-content-disabled .feature-search-tabs {
+  pointer-events: none;
 }
 
 .feature-search-layer-control {
@@ -4394,10 +4473,6 @@ inspection-tree {
   .feature-search-scope-select,
   .feature-search-view-select {
     width: 8.5em;
-  }
-
-  .feature-search-scope-summary {
-    grid-column: 1 / -1;
   }
 
   .p-treeselect,
@@ -4674,7 +4749,18 @@ inspection-tree {
 
   .feature-search-style-opacity-slider {
     flex: 1 1 auto;
+    // PrimeNG positions the slider handle half outside the track at 0/100%.
+    // Reserve that overhang inside the flex row so the Styles panel does not grow horizontally.
+    margin-inline: calc(var(--p-slider-handle-width, 1.25rem) / 2);
     min-width: 7em;
+  }
+
+  .feature-search-style-loading,
+  .feature-search-query-dirty,
+  .feature-search-values-waiting,
+  .search-style-color-warning {
+    color: var(--p-text-muted-color);
+    font-size: 0.85em;
   }
 
   .search-style-color {
@@ -4704,6 +4790,20 @@ inspection-tree {
       flex: 0 1 10em;
       min-width: 8em;
     }
+
+    .search-style-color-field-input {
+      flex: 1 1 22em;
+      min-width: 14em;
+    }
+
+    .search-style-color-field-mode {
+      flex: 0 0 auto;
+    }
+  }
+
+  .search-style-color-field-input {
+    display: block;
+    width: 100%;
   }
 
   .search-style-color-preview {
@@ -4800,14 +4900,23 @@ inspection-tree {
     padding: 0 0 0.25em 0;
   }
 
-  .feature-search-render-strategy {
+  .feature-search-visualization-controls {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 0.65em;
+  }
+
+  .feature-search-density-map,
+  .feature-search-highfi-controls {
     border: 1px solid var(--p-content-border-color);
     border-radius: 6px;
     display: flex;
     flex: 0 0 auto;
     flex-direction: column;
-    gap: 0.75em;
-    padding: 0.85em;
+    gap: 0.65em;
+    min-width: 0;
+    padding: 0.7em 0.85em;
 
     h3 {
       margin: 0;
@@ -4817,18 +4926,52 @@ inspection-tree {
     }
   }
 
-  .feature-search-render-strategy-grid {
+  .feature-search-density-map-primary,
+  .feature-search-highfi-pin-controls {
+    align-items: center;
+    display: flex;
+    gap: 0.55em;
+    min-width: 0;
+  }
+
+  .feature-search-density-map {
+    margin-top: 0.25em;
+  }
+
+  .feature-search-density-map-primary,
+  .feature-search-highfi-pin-controls {
+    flex: 0 0 auto;
+  }
+
+  .feature-search-density-map-grid,
+  .feature-search-highfi-grid,
+  .feature-search-density-size-row {
     align-items: center;
     display: grid;
     gap: 0.6em 1em;
-    grid-template-columns: minmax(9em, 1fr) auto;
+    grid-template-columns: minmax(9em, 1fr) minmax(0, auto);
   }
 
-  .feature-search-lowfi-controls {
+  .feature-search-density-size-control {
     align-items: center;
-    display: inline-flex;
+    display: flex;
+    flex: 1 1 auto;
     gap: 0.55em;
-    justify-content: flex-end;
+    justify-self: end;
+    margin-right: 0.55em;
+    min-width: 9em;
+
+    p-slider {
+      flex: 1 1 auto;
+      min-width: 7em;
+    }
+
+    span {
+      color: var(--p-text-muted-color);
+      flex: 0 0 3em;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
   }
 
   .feature-search-tree-node-label {
@@ -4851,8 +4994,7 @@ inspection-tree {
     }
   }
 
-  #searchDiagnosticsPanel,
-  #searchTracesPanel {
+  #searchDiagnosticsPanel {
     & > * {
       padding-top: 0.5em;
     }
@@ -4896,6 +5038,141 @@ inspection-tree {
         flex: 1;
       }
     }
+
+    .feature-search-diagnostics-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65em;
+
+      h3 {
+        margin: 0;
+        font-size: 0.95em;
+        font-weight: 700;
+      }
+    }
+
+    .feature-search-diagnostics-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35em;
+    }
+
+    .feature-search-query-diagnostics-grid {
+      display: grid;
+      grid-template-columns: max-content minmax(0, 1fr);
+      gap: 0.35em 0.8em;
+      align-items: baseline;
+
+      & > span:nth-child(odd) {
+        color: var(--p-text-muted-color);
+      }
+
+      code {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+    }
+
+    .feature-search-query-diagnostics {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45em;
+    }
+
+    .feature-search-query-diagnostic,
+    .feature-search-value-card {
+      border: 1px solid var(--p-content-border-color);
+      border-radius: 0.65em;
+      padding: 0.7em;
+      background: color-mix(in srgb, var(--p-content-background) 92%, var(--p-primary-color) 8%);
+    }
+
+    .feature-search-values-heading,
+    .feature-search-values-loading,
+    .feature-search-value-card header,
+    .feature-search-value-card-meta,
+    .feature-search-value-summary-row,
+    .feature-search-value-histogram div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75em;
+    }
+
+    .feature-search-values-loading {
+      justify-content: flex-start;
+      color: var(--p-text-muted-color);
+    }
+
+    .feature-search-values-empty {
+      color: var(--p-text-muted-color);
+
+      pre {
+        white-space: pre-wrap;
+      }
+    }
+
+    .feature-search-value-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(16em, 1fr));
+      gap: 0.65em;
+    }
+
+    .feature-search-value-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55em;
+
+      header span,
+      .feature-search-value-card-meta,
+      .feature-search-value-summary-row span {
+        color: var(--p-text-muted-color);
+      }
+
+      code {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        text-align: right;
+      }
+    }
+
+    .feature-search-value-card-meta {
+      justify-content: flex-start;
+      font-size: 0.85em;
+    }
+
+    .feature-search-value-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45em;
+    }
+
+    .feature-search-value-kind-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35em;
+
+      span {
+        border-radius: 999px;
+        padding: 0.1em 0.55em;
+        background: var(--p-highlight-background);
+      }
+    }
+
+    .feature-search-value-histogram {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25em;
+      font-size: 0.9em;
+    }
+  }
+}
+
+.feature-search-colorpicker-overlay {
+  // PrimeNG writes an inline transform on the body-appended overlay root, so shift the panel itself.
+  // The search visualization color pickers sit near the right dock edge and need the panel to open leftward.
+  .p-colorpicker-panel {
+    transform: translateX(calc(-100% + 1.75rem));
   }
 }
 

@@ -72,6 +72,7 @@ import {EditorService} from "./shared/editor.service";
 import {ReactiveFormsModule} from '@angular/forms';
 import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {ProgressBarModule} from "primeng/progressbar";
+import {MeterGroupModule} from "primeng/metergroup";
 import {ButtonModule} from "primeng/button";
 import {TooltipModule} from "primeng/tooltip";
 import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
@@ -121,6 +122,7 @@ import {AppPanelComponent} from "./shared/app-panel.component";
 import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
 import {AppConfirmPopupComponent} from "./shared/app-confirm-popup.component";
 import {SearchCompletionPopupComponent} from "./search/search-completion-popup.component";
+import {SimfilExpressionInputComponent} from "./search/simfil-expression-input.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
 
@@ -246,6 +248,7 @@ export const initializeServices = () => {
         AppSurfaceHeaderComponent,
         AppConfirmPopupComponent,
         SearchCompletionPopupComponent,
+        SimfilExpressionInputComponent,
         SpeedDialModule,
         DialogModule,
         DynamicDialogModule,
@@ -282,6 +285,7 @@ export const initializeServices = () => {
         AutoCompleteModule,
         ReactiveFormsModule,
         ProgressBarModule,
+        MeterGroupModule,
         ButtonModule,
         TooltipModule,
         ProgressSpinnerModule,

@@ -1,10 +1,13 @@
 import {describe, expect, it} from "vitest";
 import {
+    autoInitializeSearchStyleColorDraft,
+    categoryStopsForEnumValues,
     defaultSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,
     EMPTY_GRADIENT_PREVIEW_COLOR,
     gradientCss,
     gradientPreviewCss,
+    gradientStopsForNumericRange,
     gradientStopsNeedSorting,
     gradientStopsToDraft,
     gradientValueTags,
@@ -114,5 +117,54 @@ describe("search style color helpers", () => {
             {id: 2, value: null, color: "#ff1726"}
         ];
         expect(serializableGradientStops(draft)).toBeNull();
+    });
+
+    it("auto-generates decade-stepped numeric gradients from schema ranges", () => {
+        let nextId = 1;
+        const stops = gradientStopsForNumericRange({min: 0, max: 255}, () => nextId++);
+
+        expect(stops.map(stop => stop.value).slice(0, 4)).toEqual([0, 10, 20, 30]);
+        expect(stops.at(-2)?.value).toBe(250);
+        expect(stops.at(-1)?.value).toBe(255);
+        expect(stops.every(stop => /^#[0-9a-f]{6}$/.test(stop.color))).toBe(true);
+    });
+
+    it("auto-generates deterministic unique category colors for enum values", () => {
+        let nextId = 1;
+        const stops = categoryStopsForEnumValues(["A", "B", "C"], () => nextId++);
+        let secondNextId = 1;
+        const repeatedStops = categoryStopsForEnumValues(["A", "B", "C"], () => secondNextId++);
+
+        expect(stops.map(stop => stop.valueText)).toEqual(["A", "B", "C"]);
+        expect(new Set(stops.map(stop => stop.color)).size).toBe(3);
+        expect(stops.map(stop => stop.color)).toEqual(repeatedStops.map(stop => stop.color));
+    });
+
+    it("auto-initializes categories and reports incompatible gradient fields", () => {
+        let nextId = 1;
+        const categoryDraft = defaultSearchStyleColorDraft("warningSign");
+        categoryDraft.mode = "categories";
+        const categories = autoInitializeSearchStyleColorDraft(categoryDraft, {
+            label: "warningSign",
+            value: "warningSign",
+            valueKind: "enum",
+            enumValues: ["SPEED_LIMIT", "SPEED_LIMIT_END"]
+        }, () => nextId++);
+
+        expect(categories.success).toBe(true);
+        expect(categories.draft.categoryStops.map(stop => stop.valueText))
+            .toEqual(["SPEED_LIMIT", "SPEED_LIMIT_END"]);
+
+        const gradientDraft = defaultSearchStyleColorDraft("warningSign");
+        const gradient = autoInitializeSearchStyleColorDraft(gradientDraft, {
+            label: "warningSign",
+            value: "warningSign",
+            valueKind: "enum",
+            enumValues: ["SPEED_LIMIT"]
+        }, () => nextId++);
+
+        expect(gradient.success).toBe(false);
+        expect(gradient.message).toContain("Enum fields");
+        expect(gradient.draft.gradientStops).toEqual([]);
     });
 });

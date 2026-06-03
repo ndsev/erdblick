@@ -30,7 +30,9 @@ describe("feature search JSON export helpers", () => {
                 showBucketLabels: true,
                 showHighFiGeometry: true,
                 showHighFiResultDots: false,
-                highFidelityMaxVisibleTiles: 512
+                highFidelityMaxVisibleTiles: 512,
+                densityHeatGradient: false,
+                densitySizeMultiplier: 1
             }
         };
 
@@ -227,7 +229,9 @@ function searchDefinition(): FeatureSearchStateEntry {
             showBucketLabels: true,
             showHighFiGeometry: true,
             showHighFiResultDots: false,
-            highFidelityMaxVisibleTiles: 512
+            highFidelityMaxVisibleTiles: 512,
+            densityHeatGradient: false,
+            densitySizeMultiplier: 1
         }
     };
 }

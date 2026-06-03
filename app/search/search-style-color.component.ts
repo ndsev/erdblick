@@ -6,7 +6,9 @@ import {
     Output,
     SimpleChanges
 } from "@angular/core";
+import {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
 import {
+    autoInitializeSearchStyleColorDraft,
     cloneSearchStyleColorDraft,
     defaultSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,
@@ -41,19 +43,44 @@ import {
                 </p-select>
 
                 @if (viewDraft.mode !== 'solid') {
-                    <label [for]="fieldInputId">Field</label>
-                    <p-select [inputId]="fieldInputId"
-                              class="search-style-color-field"
-                              [options]="fieldOptions"
-                              [ngModel]="viewDraft.field"
-                              (ngModelChange)="setField($event)"
-                              optionLabel="label"
-                              optionValue="value"
-                              [filter]="true"
-                              appendTo="body">
-                    </p-select>
+                    <p-selectbutton class="search-style-color-field-mode"
+                                    [options]="fieldModeOptions"
+                                    [ngModel]="viewDraft.customField ? 'custom' : 'field'"
+                                    (ngModelChange)="setFieldMode($event)"
+                                    optionLabel="label"
+                                    optionValue="value"
+                                    [allowEmpty]="false">
+                    </p-selectbutton>
+
+                    @if (viewDraft.customField) {
+                        <simfil-expression-input class="search-style-color-field-input"
+                                                 [value]="viewDraft.field"
+                                                 (valueChange)="setCustomField($event)"
+                                                 [singleLine]="true"
+                                                 [completionOwnerId]="customFieldCompletionOwnerId"
+                                                 [completionScope]="completionScope"
+                                                 [completionMapLayers]="completionMapLayers"
+                                                 placeholder="Custom expression">
+                        </simfil-expression-input>
+                    } @else {
+                        <label [for]="fieldInputId">Field</label>
+                        <p-select [inputId]="fieldInputId"
+                                  class="search-style-color-field"
+                                  [options]="fieldOptionsForCurrentMode"
+                                  [ngModel]="viewDraft.field"
+                                  (ngModelChange)="setField($event)"
+                                  optionLabel="label"
+                                  optionValue="value"
+                                  [filter]="true"
+                                  appendTo="body">
+                        </p-select>
+                    }
                 }
             </div>
+
+            @if (colorWarning) {
+                <div class="search-style-color-warning">{{ colorWarning }}</div>
+            }
 
             @if (viewDraft.mode === 'solid') {
                 <div class="search-style-color-solid-row">
@@ -174,43 +201,57 @@ import {
 export class SearchStyleColorComponent implements OnChanges {
     @Input({required: true}) draft!: SearchStyleColorDraft;
     @Input() fieldOptions: SearchStyleFieldOption[] = [];
+    @Input() completionScope?: FeatureSearchScope;
+    @Input() completionMapLayers: FeatureSearchMapLayerRef[] = [];
     @Output() draftChange = new EventEmitter<SearchStyleColorDraft>();
 
     private static nextComponentId = 1;
 
     protected readonly modeInputId: string;
     protected readonly fieldInputId: string;
+    protected readonly customFieldCompletionOwnerId: string;
     private readonly modeOptions: Array<{label: string; value: SearchStyleColorMode}> = [
         {label: "Gradient", value: "gradient"},
         {label: "Solid", value: "solid"},
         {label: "Categories", value: "categories"}
     ];
+    protected readonly fieldModeOptions = [
+        {label: "Field", value: "field"},
+        {label: "Custom", value: "custom"}
+    ];
 
     private nextStopId = 1;
 
     protected viewDraft = defaultSearchStyleColorDraft("");
+    protected colorWarning = "";
 
     constructor() {
         const componentId = SearchStyleColorComponent.nextComponentId++;
         this.modeInputId = `search-style-color-mode-${componentId}`;
         this.fieldInputId = `search-style-color-field-${componentId}`;
+        this.customFieldCompletionOwnerId = `search-style-color-field-${componentId}`;
     }
 
     ngOnChanges(changes: SimpleChanges): void {
-        if (!changes["draft"] || !this.draft) {
+        if (!this.draft) {
             return;
         }
-        this.viewDraft = cloneSearchStyleColorDraft(this.draft);
-        if (this.viewDraft.mode === "gradient" && this.fieldOptions.length > 0 && !this.selectedFieldSupportsGradient()) {
-            this.viewDraft = {...this.viewDraft, mode: "categories"};
+        if (changes["draft"]) {
+            this.viewDraft = cloneSearchStyleColorDraft(this.draft);
+            this.nextStopId = this.maxStopId(this.viewDraft) + 1;
         }
-        this.nextStopId = this.maxStopId(this.viewDraft) + 1;
+        this.updateColorWarning();
     }
 
     protected get availableModeOptions(): Array<{label: string; value: SearchStyleColorMode}> {
-        return this.modeOptions.filter(option =>
-            option.value !== "gradient" || this.hasGradientField()
-        );
+        return this.modeOptions;
+    }
+
+    protected get fieldOptionsForCurrentMode(): SearchStyleFieldOption[] {
+        if (this.viewDraft.mode !== "gradient") {
+            return this.fieldOptions;
+        }
+        return this.fieldOptions.filter(option => isNumericStyleValueKind(option.valueKind));
     }
 
     protected get categoryValueOptions(): Array<{label: string; value: string}> {
@@ -235,23 +276,56 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected setMode(mode: SearchStyleColorMode): void {
         let nextField = this.viewDraft.field;
-        if (mode === "gradient") {
+        if (mode === "gradient" && !this.viewDraft.customField) {
             nextField = this.selectedFieldSupportsGradient()
                 ? nextField
                 : this.firstGradientField();
             if (!nextField) {
+                this.colorWarning = "Gradient color requires a numeric field.";
                 return;
             }
         }
-        this.viewDraft = {...this.viewDraft, mode, field: nextField};
+        this.viewDraft = this.autoInitializedDraft({...this.viewDraft, mode, field: nextField});
+        this.updateColorWarning();
         this.emitChange();
     }
 
     protected setField(field: string): void {
-        const nextMode = this.viewDraft.mode === "gradient" && !this.fieldSupportsGradient(field)
-            ? "categories"
-            : this.viewDraft.mode;
-        this.viewDraft = {...this.viewDraft, field, mode: nextMode};
+        if (this.viewDraft.mode === "gradient" && !this.fieldSupportsGradient(field)) {
+            this.colorWarning = "Gradient color requires a numeric field.";
+            return;
+        }
+        this.viewDraft = this.autoInitializedDraft({...this.viewDraft, field, customField: false});
+        this.updateColorWarning();
+        this.emitChange();
+    }
+
+    protected setFieldMode(mode: "field" | "custom"): void {
+        if (mode === "custom") {
+            this.viewDraft = {...this.viewDraft, customField: true};
+            this.updateColorWarning();
+            this.emitChange();
+            return;
+        }
+        let nextField = this.viewDraft.field;
+        if (!this.fieldExists(nextField)) {
+            nextField = this.firstFieldForCurrentMode();
+        }
+        if (this.viewDraft.mode === "gradient" && !this.fieldSupportsGradient(nextField)) {
+            nextField = this.firstGradientField();
+            if (!nextField) {
+                this.colorWarning = "Gradient color requires a numeric field.";
+                return;
+            }
+        }
+        this.viewDraft = this.autoInitializedDraft({...this.viewDraft, customField: false, field: nextField});
+        this.updateColorWarning();
+        this.emitChange();
+    }
+
+    protected setCustomField(field: string): void {
+        this.viewDraft = {...this.viewDraft, field: field ?? "", customField: true};
+        this.updateColorWarning();
         this.emitChange();
     }
 
@@ -389,19 +463,54 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     private selectedFieldSupportsGradient(): boolean {
+        if (this.viewDraft.customField) {
+            return true;
+        }
         return this.fieldSupportsGradient(this.viewDraft.field);
-    }
-
-    private hasGradientField(): boolean {
-        return this.fieldOptions.some(option => isNumericStyleValueKind(option.valueKind));
     }
 
     private firstGradientField(): string {
         return this.fieldOptions.find(option => isNumericStyleValueKind(option.valueKind))?.value ?? "";
     }
 
+    private firstFieldForCurrentMode(): string {
+        return this.fieldOptionsForCurrentMode[0]?.value ?? "";
+    }
+
+    private fieldExists(field: string): boolean {
+        return this.fieldOptions.some(candidate => candidate.value === field);
+    }
+
     private fieldSupportsGradient(field: string): boolean {
         const option = this.fieldOptions.find(candidate => candidate.value === field);
         return isNumericStyleValueKind(option?.valueKind);
+    }
+
+    private autoInitializedDraft(draft: SearchStyleColorDraft): SearchStyleColorDraft {
+        const result = autoInitializeSearchStyleColorDraft(
+            draft,
+            this.fieldOptions.find(candidate => candidate.value === draft.field),
+            () => this.nextStopId++
+        );
+        this.colorWarning = result.message;
+        return result.draft;
+    }
+
+    private updateColorWarning(): void {
+        const gradientWarning = this.viewDraft.mode === "gradient"
+            && !this.viewDraft.customField
+            && !this.selectedFieldSupportsGradient()
+            ? "Gradient color requires a numeric field."
+            : "";
+        if (gradientWarning) {
+            this.colorWarning = gradientWarning;
+            return;
+        }
+        const result = autoInitializeSearchStyleColorDraft(
+            this.viewDraft,
+            this.selectedFieldOption(),
+            () => this.nextStopId
+        );
+        this.colorWarning = result.success ? "" : result.message;
     }
 }

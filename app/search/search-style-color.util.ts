@@ -1,11 +1,17 @@
 export type SearchStyleColorMode = "solid" | "gradient" | "categories";
 export type SearchStyleFieldValueKind = "number" | "integer" | "string" | "boolean" | "enum" | "object" | "array" | "unknown";
 
+export interface SearchStyleNumericRange {
+    min: number;
+    max: number;
+}
+
 export interface SearchStyleFieldOption {
     label: string;
     value: string;
     valueKind?: SearchStyleFieldValueKind;
     enumValues?: string[];
+    numericRange?: SearchStyleNumericRange;
 }
 
 export interface SearchStyleGradientStopDraft {
@@ -24,6 +30,7 @@ export interface SearchStyleCategoryStopDraft {
 export interface SearchStyleColorDraft {
     mode: SearchStyleColorMode;
     field: string;
+    customField?: boolean;
     solidColor: string;
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
@@ -35,6 +42,12 @@ export interface SearchStyleGradientValueTag {
     label: string;
     offsetPercent: number;
     edge: "start" | "middle" | "end";
+}
+
+export interface SearchStyleAutoInitializationResult {
+    draft: SearchStyleColorDraft;
+    message: string;
+    success: boolean;
 }
 
 export const DEFAULT_SEARCH_STYLE_SOLID_COLOR = "#ff1726";
@@ -67,6 +80,7 @@ export function defaultSearchStyleColorDraft(field: string): SearchStyleColorDra
     return {
         mode: "gradient",
         field,
+        customField: false,
         solidColor: DEFAULT_SEARCH_STYLE_SOLID_COLOR,
         gradientStops: [],
         categoryStops: [],
@@ -78,6 +92,7 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
     return {
         mode: draft.mode,
         field: draft.field,
+        customField: !!draft.customField,
         solidColor: normalizeHexColor(draft.solidColor),
         gradientStops: draft.gradientStops.map(stop => ({
             id: stop.id,
@@ -240,6 +255,207 @@ export function gradientValueTags(draft: SearchStyleColorDraft): SearchStyleGrad
 
 export function isNumericStyleValueKind(kind: SearchStyleFieldValueKind | undefined): boolean {
     return kind === "number" || kind === "integer";
+}
+
+/** Returns a deterministic color for one enum value while avoiding collisions within the enum set. */
+export function categoryColorForEnumValue(value: string, usedColors = new Set<string>()): string {
+    const hash = stableStringHash(value);
+    let hue = hash % 360;
+    let saturation = 58 + ((hash >>> 8) % 18);
+    let lightness = 44 + ((hash >>> 16) % 14);
+    let color = hslToHex(hue, saturation, lightness);
+    for (let attempt = 0; usedColors.has(color) && attempt < 360; ++attempt) {
+        hue = (hue + 37) % 360;
+        saturation = 58 + ((saturation + 7) % 18);
+        lightness = 44 + ((lightness + 5) % 14);
+        color = hslToHex(hue, saturation, lightness);
+    }
+    usedColors.add(color);
+    return color;
+}
+
+/** Creates one category stop for each schema enum value. */
+export function categoryStopsForEnumValues(
+    enumValues: string[],
+    nextId: () => number
+): SearchStyleCategoryStopDraft[] {
+    const usedColors = new Set<string>();
+    return enumValues.map(value => ({
+        id: nextId(),
+        valueText: value,
+        color: categoryColorForEnumValue(value, usedColors),
+        pending: false
+    }));
+}
+
+/** Creates numeric gradient stops from schema min/max bounds using the requested decade-based step. */
+export function gradientStopsForNumericRange(
+    range: SearchStyleNumericRange | undefined,
+    nextId: () => number
+): SearchStyleGradientStopDraft[] {
+    if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) {
+        return [];
+    }
+    if (range.min === range.max) {
+        return [{id: nextId(), value: range.min, color: gradientColorAt(0.5)}];
+    }
+
+    const span = range.max - range.min;
+    const step = Math.pow(10, Math.floor(Math.log10(span))) / 10;
+    const values: number[] = [];
+    for (let index = 0; index <= Math.ceil(span / step); ++index) {
+        const value = roundGradientValue(range.min + index * step, step);
+        if (value >= range.max) {
+            break;
+        }
+        values.push(value);
+    }
+    if (values.length === 0 || values[0] !== range.min) {
+        values.unshift(range.min);
+    }
+    if (values[values.length - 1] !== range.max) {
+        values.push(range.max);
+    }
+
+    return values.map((value, index) => ({
+        id: nextId(),
+        value,
+        color: gradientColorAt(index / Math.max(values.length - 1, 1))
+    }));
+}
+
+/** Auto-populates gradient/category stops for one selected schema field. */
+export function autoInitializeSearchStyleColorDraft(
+    draft: SearchStyleColorDraft,
+    fieldOption: SearchStyleFieldOption | undefined,
+    nextId: () => number
+): SearchStyleAutoInitializationResult {
+    if (draft.mode === "solid") {
+        return {draft: cloneSearchStyleColorDraft(draft), message: "", success: true};
+    }
+
+    if (!fieldOption || draft.customField) {
+        return {
+            draft: cloneSearchStyleColorDraft({
+                ...draft,
+                gradientStops: draft.mode === "gradient" ? [] : draft.gradientStops,
+                categoryStops: draft.mode === "categories" ? [] : draft.categoryStops
+            }),
+            message: "No schema metadata is available for automatic color initialization.",
+            success: false
+        };
+    }
+
+    if (draft.mode === "categories") {
+        const enumValues = fieldOption.enumValues ?? [];
+        if (fieldOption.valueKind === "enum" && enumValues.length > 0) {
+            return {
+                draft: cloneSearchStyleColorDraft({
+                    ...draft,
+                    categoryStops: categoryStopsForEnumValues(enumValues, nextId),
+                    gradientStops: []
+                }),
+                message: "",
+                success: true
+            };
+        }
+        return {
+            draft: cloneSearchStyleColorDraft({...draft, categoryStops: []}),
+            message: "Automatic categories require a schema enum field.",
+            success: false
+        };
+    }
+
+    if (fieldOption.valueKind === "enum") {
+        return {
+            draft: cloneSearchStyleColorDraft({...draft, gradientStops: []}),
+            message: "Enum fields can only be auto-initialized in Categories mode.",
+            success: false
+        };
+    }
+    if (!isNumericStyleValueKind(fieldOption.valueKind)) {
+        return {
+            draft: cloneSearchStyleColorDraft({...draft, gradientStops: []}),
+            message: "Automatic gradients require a numeric schema field.",
+            success: false
+        };
+    }
+
+    const gradientStops = gradientStopsForNumericRange(fieldOption.numericRange, nextId);
+    if (gradientStops.length === 0) {
+        return {
+            draft: cloneSearchStyleColorDraft({...draft, gradientStops: []}),
+            message: "Automatic gradients require numeric min/max bounds in the schema.",
+            success: false
+        };
+    }
+    return {
+        draft: cloneSearchStyleColorDraft({...draft, gradientStops, categoryStops: []}),
+        message: "",
+        success: true
+    };
+}
+
+function stableStringHash(value: string): number {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; ++index) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function hslToHex(hue: number, saturationPercent: number, lightnessPercent: number): string {
+    const saturation = saturationPercent / 100;
+    const lightness = lightnessPercent / 100;
+    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const segment = hue / 60;
+    const x = chroma * (1 - Math.abs(segment % 2 - 1));
+    const match = lightness - chroma / 2;
+    const [red, green, blue] = segment < 1
+        ? [chroma, x, 0]
+        : segment < 2
+            ? [x, chroma, 0]
+            : segment < 3
+                ? [0, chroma, x]
+                : segment < 4
+                    ? [0, x, chroma]
+                    : segment < 5
+                        ? [x, 0, chroma]
+                        : [chroma, 0, x];
+    return `#${[red, green, blue]
+        .map(channel => Math.round((channel + match) * 255).toString(16).padStart(2, "0"))
+        .join("")}`;
+}
+
+function gradientColorAt(offset: number): string {
+    const clamped = Math.max(0, Math.min(1, offset));
+    if (clamped <= 0.5) {
+        return interpolateHexColor("#2149ff", "#d9ff32", clamped / 0.5);
+    }
+    return interpolateHexColor("#d9ff32", "#ff1726", (clamped - 0.5) / 0.5);
+}
+
+function interpolateHexColor(startColor: string, endColor: string, offset: number): string {
+    const start = hexToRgb(startColor);
+    const end = hexToRgb(endColor);
+    return `#${start.map((channel, index) =>
+        Math.round(channel + (end[index] - channel) * offset).toString(16).padStart(2, "0")
+    ).join("")}`;
+}
+
+function hexToRgb(color: string): [number, number, number] {
+    const normalized = normalizeHexColor(color);
+    return [
+        Number.parseInt(normalized.slice(1, 3), 16),
+        Number.parseInt(normalized.slice(3, 5), 16),
+        Number.parseInt(normalized.slice(5, 7), 16)
+    ];
+}
+
+function roundGradientValue(value: number, step: number): number {
+    const decimals = step >= 1 ? 0 : Math.ceil(Math.abs(Math.log10(step))) + 2;
+    return Number(value.toFixed(Math.min(12, decimals)));
 }
 
 function serializableValue(valueText: string, valueKind: SearchStyleFieldValueKind | undefined): unknown {

@@ -41,6 +41,8 @@ export interface FeatureSearchRenderStrategy {
     showHighFiGeometry: boolean;
     showHighFiResultDots: boolean;
     highFidelityMaxVisibleTiles: number;
+    densityHeatGradient: boolean;
+    densitySizeMultiplier: number;
 }
 
 export interface FeatureSearchStateEntry {
@@ -68,13 +70,15 @@ const VALID_SCOPES = new Set<FeatureSearchScope>(["attribute", "feature", "auto"
 const MAX_FEATURE_SEARCHES = 50;
 const MAX_STYLE_RULES_PER_SEARCH = 50;
 const MAX_FILTERS_PER_RULE = 25;
-const MAX_COLOR_STOPS_PER_RULE = 25;
+const MAX_COLOR_STOPS_PER_RULE = 512;
 const MAX_SELECTED_SEARCH_LAYERS = 500;
 const MAX_SUPPORTED_FEATURE_SEARCH_VIEWS = 2;
 const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "polygon", "mesh"]);
 const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
 const MIN_HIGH_FIDELITY_VISIBLE_TILES = 1;
 const MAX_HIGH_FIDELITY_VISIBLE_TILES = 64 * 1024;
+const MIN_DENSITY_SIZE_MULTIPLIER = 0.5;
+const MAX_DENSITY_SIZE_MULTIPLIER = 10;
 export const DEFAULT_FEATURE_SEARCH_VIEW_INDICES: number[] = Array.from(
     {length: MAX_SUPPORTED_FEATURE_SEARCH_VIEWS},
     (_, index) => index
@@ -85,7 +89,9 @@ export const DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY: FeatureSearchRenderStrategy
     showBucketLabels: true,
     showHighFiGeometry: true,
     showHighFiResultDots: false,
-    highFidelityMaxVisibleTiles: 512
+    highFidelityMaxVisibleTiles: 512,
+    densityHeatGradient: false,
+    densitySizeMultiplier: 1
 };
 
 function createFeatureSearchId(): string {
@@ -296,6 +302,10 @@ export function normalizeFeatureSearchRenderStrategy(value: unknown): FeatureSea
         raw["highFidelityMaxVisibleTiles"],
         MIN_HIGH_FIDELITY_VISIBLE_TILES
     );
+    const densitySizeMultiplier = normalizePositiveNumber(
+        raw["densitySizeMultiplier"],
+        MIN_DENSITY_SIZE_MULTIPLIER
+    );
     return {
         showLowFiDots: normalizeBoolean(
             raw["showLowFiDots"],
@@ -319,6 +329,17 @@ export function normalizeFeatureSearchRenderStrategy(value: unknown): FeatureSea
                 MIN_HIGH_FIDELITY_VISIBLE_TILES,
                 Math.floor(highFidelityMaxVisibleTiles
                     ?? DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.highFidelityMaxVisibleTiles)
+            )
+        ),
+        densityHeatGradient: normalizeBoolean(
+            raw["densityHeatGradient"],
+            DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.densityHeatGradient
+        ),
+        densitySizeMultiplier: Math.min(
+            MAX_DENSITY_SIZE_MULTIPLIER,
+            Math.max(
+                MIN_DENSITY_SIZE_MULTIPLIER,
+                densitySizeMultiplier ?? DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY.densitySizeMultiplier
             )
         )
     };
