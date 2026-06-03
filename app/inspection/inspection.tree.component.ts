@@ -21,6 +21,7 @@ import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
+import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -271,6 +272,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             }
 
             this.refreshLayout();
+            this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
             this.cdr.markForCheck();
         });
         effect(() => {
@@ -286,7 +288,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.cdr.markForCheck();
         });
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
-            setTimeout(() => this.table?.scrollToVirtualIndex(index ?? 0), 5);
+            this.scrollToHighlightedIndex(index);
         }));
     }
 
@@ -519,6 +521,41 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 }
             });
         }
+        const inspectionTarget = this.inspectionTargetForRow(rowData);
+        const mapTileKey = typeof rowData?.["mapTileKey"] === "string" ? rowData["mapTileKey"] : "";
+        if (inspectionTarget && mapTileKey) {
+            this.inspectionMenuItems.push({
+                label: this.isInspectionTargetFocused(mapTileKey, inspectionTarget)
+                    ? 'Unfocus Attr/Validity'
+                    : 'Focus Attr/Validity',
+                icon: 'pi pi-bullseye',
+                command: () => {
+                    this.stateService.toggleInspectionFeatureTarget(this.panelId(), mapTileKey, inspectionTarget);
+                }
+            });
+        }
+    }
+
+    /** Returns the attribute or validity pseudo-feature id represented by a row, preferring exact validities. */
+    private inspectionTargetForRow(rowData: any): string | undefined {
+        const candidates = [
+            rowData?.["strongHoverGroupId"],
+            rowData?.["hoverId"],
+            rowData?.["softHoverGroupId"]
+        ];
+        return candidates.find((value): value is string =>
+            typeof value === "string" && value.includes(":attribute#"));
+    }
+
+    /** Checks whether this panel already focuses the requested attribute/validity target. */
+    private isInspectionTargetFocused(mapTileKey: string, targetFeatureId: string): boolean {
+        const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
+        const panel = this.stateService.selection.find(item => item.id === this.panelId());
+        return panel?.features.some(feature =>
+            feature.mapTileKey === mapTileKey &&
+            stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
+            feature.featureId === targetFeatureId
+        ) ?? false;
     }
 
     /** Jumps or highlights the feature referenced by a FeatureId cell. */
@@ -648,6 +685,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             : undefined;
         return {
             [rowData?.styleClass ?? ""]: !!rowData?.styleClass,
+            "inspection-selection-soft": rowData?.["selectionHighlight"] === "soft",
+            "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
             "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
                 softHoverGroupId === this.activeSoftHoverGroupId,
             "inspection-hover-strong": !!this.activeStrongHoverGroupId &&
@@ -780,18 +819,33 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.emitFilterChange(nextValue);
     }
 
-    /** Expands the inspection branches that are usually most useful on first render. */
+    /** Expands the inspection branches that are usually most useful on first render, preserving explicit row state. */
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
             const isRelationTypeNode = parent && parent.data["key"] === "Relations";
             const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || isRelationTypeNode || isSection || hasSingleChild;
+            if (node.expanded === undefined) {
+                node.expanded = isTopLevelNode || isRelationTypeNode || isSection || hasSingleChild;
+            }
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
             }
+        });
+    }
+
+    /** Scrolls virtual inspection trees to selected attr/validity rows after PrimeNG has applied data changes. */
+    private scrollToHighlightedIndex(index: number | undefined): void {
+        if (index === undefined) {
+            return;
+        }
+        const scroll = () => this.table?.scrollToVirtualIndex(index);
+        setTimeout(scroll, 5);
+        window.requestAnimationFrame(() => {
+            scroll();
+            window.requestAnimationFrame(scroll);
         });
     }
 

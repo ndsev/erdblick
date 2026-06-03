@@ -127,10 +127,10 @@ protected:
         RelationStyleState::RelationToVisualize* relationToRender = nullptr;
     };
 
-    /** Hover filter restricting attribute rendering to the subset currently under the cursor. */
-    struct HoveredAttributeSubset {
-        std::unordered_set<uint32_t> hoveredAttributeIndices_;
-        std::unordered_map<uint32_t, std::unordered_set<uint32_t>> hoveredValidityIndicesByAttribute_;
+    /** Highlight filter restricting attribute rendering to a selected or hovered sub-target. */
+    struct HighlightedAttributeSubset {
+        std::unordered_set<uint32_t> attributeIndices_;
+        std::unordered_map<uint32_t, std::unordered_set<uint32_t>> validityIndicesByAttribute_;
     };
 
     static constexpr uint32_t kUnselectableFeatureId = std::numeric_limits<uint32_t>::max();
@@ -252,7 +252,7 @@ protected:
         const FeatureStyleRule& rule,
         std::string const& mapLayerStyleRuleId,
         uint32_t& offsetSlot,
-        std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr);
+        std::unordered_set<uint32_t> const* highlightedValidityIndices = nullptr);
     /** Emit an already materialized geometry if it passes all render filters. */
     bool addGeometry(
         mapget::SelfContainedGeometry const& geom,
@@ -386,7 +386,7 @@ protected:
     FeatureLayerStyle const& style_;
     std::set<std::string> featureIdSubset_;
     std::set<std::string> featureIdBaseSubset_;
-    std::unordered_map<std::string, HoveredAttributeSubset> hoveredAttributeSubsetsByFeatureId_;
+    std::unordered_map<std::string, HighlightedAttributeSubset> highlightedAttributeSubsetsByFeatureId_;
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;
     FeatureStyleRule::Fidelity fidelity_;

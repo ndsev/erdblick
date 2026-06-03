@@ -36,6 +36,7 @@ import {
     normalizeFeatureSearchState,
     serializeFeatureSearchState
 } from "./feature-search-state";
+import {stripFeatureInspectionTarget} from "./tile-feature-id";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -881,7 +882,7 @@ export class AppStateService implements OnDestroy {
                 }
                 this.cancelPendingStateSync();
                 this.withHydration(() => {
-                    this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+                    this.hydrateFromUrl(this.currentBrowserQueryParams());
                 });
             }
         });
@@ -898,7 +899,7 @@ export class AppStateService implements OnDestroy {
             return;
         }
         this.setupStateSubscriptions();
-        const queryParams = this.router.routerState.snapshot.root?.queryParams ?? {};
+        const queryParams = this.currentBrowserQueryParams();
         this.hydrateFromStorage();
         this.hydrateFromUrl(queryParams);
         this.migrateLegacyOsmState(queryParams);
@@ -1169,7 +1170,7 @@ export class AppStateService implements OnDestroy {
     /** Serializes URL-backed state and updates router query params accordingly. */
     private syncUrl(): 'replace' | 'merge' {
         // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
-        const params: Record<string, string | null> = {};
+        const params: Record<string, string | string[] | null> = {};
         for (const state of this.pendingUrlSyncStates) {
             const serialized = state.serialize(true);
             if (serialized === undefined) {
@@ -1186,6 +1187,13 @@ export class AppStateService implements OnDestroy {
         const queryParamsHandling = this.pendingUrlSyncStates.size === [...this.statePool.values().filter(
             state => state.isUrlState())].length ? "replace" : "merge";
         this.pendingUrlSyncStates.clear();
+        if (queryParamsHandling === "merge") {
+            for (const [key, value] of Object.entries(this.currentBrowserQueryParams())) {
+                if (params[key] === undefined) {
+                    params[key] = value as string | string[];
+                }
+            }
+        }
         this.router.navigate([], {
             queryParams: params,
             queryParamsHandling: queryParamsHandling,
@@ -1259,6 +1267,28 @@ export class AppStateService implements OnDestroy {
                 state.deserialize(params);
             }
         });
+    }
+
+    /**
+     * Reads query parameters from the browser URL before Angular Router can normalize unknown app-state keys away.
+     */
+    private currentBrowserQueryParams(): Params {
+        const params: Params = {};
+        const search = typeof window !== "undefined" ? window.location.search : "";
+        if (!search) {
+            return this.router.routerState.snapshot.root?.queryParams ?? {};
+        }
+        const urlParams = new URLSearchParams(search);
+        for (const [key, value] of urlParams.entries()) {
+            if (params[key] === undefined) {
+                params[key] = value;
+            } else if (Array.isArray(params[key])) {
+                params[key].push(value);
+            } else {
+                params[key] = [params[key], value];
+            }
+        }
+        return params;
     }
 
     /** Runs a callback while suppressing persistence side effects during hydration. */
@@ -1949,7 +1979,12 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Updates the current selection, reusing or creating inspection panels as needed. */
-    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
+    setSelection(
+        newSelection: TileFeatureId[] | SelectedSourceData,
+        id?: number,
+        forceNewPanel: boolean = false,
+        createUndockedFeaturePanel: boolean = false
+    ) {
         this._replaceUrl = false;
         let allPanels = this.selectionState.getValue();
         const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
@@ -1959,7 +1994,7 @@ export class AppStateService implements OnDestroy {
         const duplicateFeaturePanelId = !isSourceDataSelection && featureSelection.length
             ? this.findPanelIdContainingFeatureSelection(allPanels, featureSelection)
             : undefined;
-        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0) {
+        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0 && !createUndockedFeaturePanel) {
             this.isDockOpen = true;
         }
         const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
@@ -1978,6 +2013,11 @@ export class AppStateService implements OnDestroy {
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
             if (!featureSelection.length && !isClearSourceDataRequest) {
+                const duplicatePanel = allPanels.find(panel => panel.id === duplicateFeaturePanelId);
+                if (duplicatePanel && !duplicatePanel.undocked && !createUndockedFeaturePanel) {
+                    this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                    this.isDockOpen = true;
+                }
                 this.setFocusedInspectionPanel(duplicateFeaturePanelId);
                 this._replaceUrl = true;
                 return;
@@ -2005,24 +2045,29 @@ export class AppStateService implements OnDestroy {
 
         // Inspection strategy:
         // Feature selection (default path): reuse the last unlocked feature panel and close all other unlocked feature panels.
+        // Docked search result clicks prefer an unlocked floating feature panel, keeping the Search dock tab visible.
         // Otherwise: reuse unlocked docked panel of the same inspection type, then unlocked undocked dialog, else create new.
         if (!mustCreateNewPanel && targetPanelId === undefined) {
             const isDefaultFeatureSelectionRequest = !isSourceDataSelection && id === undefined;
             if (isDefaultFeatureSelectionRequest) {
+                const requiresUndockedFeaturePanel = createUndockedFeaturePanel;
                 let lastUnlockedFeaturePanelId: number | undefined;
                 for (let index = allPanels.length - 1; index >= 0; index--) {
                     const panel = allPanels[index];
-                    if (isFeaturePanel(panel) && !panel.locked) {
+                    if (isFeaturePanel(panel) && !panel.locked &&
+                        (!requiresUndockedFeaturePanel || panel.undocked)) {
                         lastUnlockedFeaturePanelId = panel.id;
                         break;
                     }
                 }
                 if (lastUnlockedFeaturePanelId !== undefined) {
-                    allPanels = allPanels.filter(panel =>
-                        !isFeaturePanel(panel) ||
-                        panel.locked ||
-                        panel.id === lastUnlockedFeaturePanelId
-                    );
+                    if (!requiresUndockedFeaturePanel) {
+                        allPanels = allPanels.filter(panel =>
+                            !isFeaturePanel(panel) ||
+                            panel.locked ||
+                            panel.id === lastUnlockedFeaturePanelId
+                        );
+                    }
                     targetPanelId = lastUnlockedFeaturePanelId;
                 } else {
                     mustCreateNewPanel = true;
@@ -2058,16 +2103,21 @@ export class AppStateService implements OnDestroy {
                 return;
             }
             const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
+            const newPanelUndocked = isSourceDataSelection || createUndockedFeaturePanel;
             allPanels.push({
                 id: newId,
                 features: isSourceDataSelection ? [] : featureSelection,
                 sourceData: sourceDataSelection,
                 locked: false,
-                size: [DEFAULT_EM_WIDTH, isSourceDataSelection ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
+                size: [DEFAULT_EM_WIDTH, newPanelUndocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
-                undocked: isSourceDataSelection
+                undocked: newPanelUndocked
             });
             this.selectionState.next(allPanels);
+            if (!newPanelUndocked) {
+                this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                this.isDockOpen = true;
+            }
             this.setFocusedInspectionPanel(newId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return newId;
@@ -2089,12 +2139,56 @@ export class AppStateService implements OnDestroy {
                 allPanels[panelIndex].sourceData = undefined;
             }
             this.selectionState.next(allPanels);
+            if (!allPanels[panelIndex].undocked && !isSourceDataSelection) {
+                this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                this.isDockOpen = true;
+            }
             this.setFocusedInspectionPanel(targetPanelId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return targetPanelId;
         }
 
         return;
+    }
+
+    /** Toggles one inspection panel between its base feature and a selected attribute/validity pseudo-feature id. */
+    toggleInspectionFeatureTarget(panelId: number, mapTileKey: string, targetFeatureId: string): void {
+        const allPanels = this.selectionState.getValue();
+        const panelIndex = allPanels.findIndex(panel => panel.id === panelId && panel.sourceData === undefined);
+        if (panelIndex === -1) {
+            return;
+        }
+
+        const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
+        const panel = allPanels[panelIndex];
+        let changed = false;
+        const nextFeatures = panel.features.map(feature => {
+            if (feature.mapTileKey !== mapTileKey ||
+                stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId) {
+                return feature;
+            }
+            changed = true;
+            return {
+                ...feature,
+                featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
+            };
+        });
+        if (!changed) {
+            return;
+        }
+
+        const nextPanels = allPanels.slice();
+        nextPanels[panelIndex] = {
+            ...panel,
+            features: nextFeatures
+        };
+        this.selectionState.next(nextPanels);
+        if (!panel.undocked) {
+            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+            this.isDockOpen = true;
+        }
+        this.setFocusedInspectionPanel(panelId);
+        this.sanitizeInspectionComparisonForSelection(nextPanels);
     }
 
     /** Persists the size of one inspection panel. */

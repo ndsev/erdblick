@@ -181,8 +181,9 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto layers = featurePtr->attributeLayersOrNull())
     {
         auto scope = push(convertString("Attribute Layers"), RawPath{"properties.layer"}, ValueType::Section);
-        layers->forEachLayer([this](auto&& layerName, auto&& layer) -> bool {
-            convertAttributeLayer(layerName, layer);
+        size_t attributeIndex = 0;
+        layers->forEachLayer([this, &attributeIndex](auto&& layerName, auto&& layer) -> bool {
+            convertAttributeLayer(layerName, layer, attributeIndex);
             return true;
         });
     }
@@ -277,7 +278,8 @@ void InspectionConverter::pop()
 
 void InspectionConverter::convertAttributeLayer(
     const std::string_view& name,
-    const model_ptr<AttributeLayer>& l)
+    const model_ptr<AttributeLayer>& l,
+    size_t& attributeIndex)
 {
     auto layerScope = push(convertString(name), name);
     std::vector<simfil::StringId> attributeFieldIds;
@@ -289,13 +291,14 @@ void InspectionConverter::convertAttributeLayer(
         attributeFieldIds.push_back(fieldId);
     }
 
-    size_t attributeIndex = 0;
-    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex](model_ptr<Attribute> const& attr)
+    size_t layerAttributeIndex = 0;
+    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex, &layerAttributeIndex](model_ptr<Attribute> const& attr)
     {
-        auto fieldId = attributeIndex < attributeFieldIds.size()
-            ? attributeFieldIds[attributeIndex]
+        auto const thisAttributeIndex = attributeIndex++;
+        auto const thisLayerAttributeIndex = layerAttributeIndex++;
+        auto fieldId = thisLayerAttributeIndex < attributeFieldIds.size()
+            ? attributeFieldIds[thisLayerAttributeIndex]
             : simfil::StringId{};
-        ++attributeIndex;
 
         auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
         auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
@@ -322,7 +325,7 @@ void InspectionConverter::convertAttributeLayer(
 
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
-                              std::to_string(static_cast<uint32_t>(attr->addr().index()));
+                              std::to_string(static_cast<uint32_t>(thisAttributeIndex));
         if (auto validity = attr->validityOrNull()) {
             convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
         }

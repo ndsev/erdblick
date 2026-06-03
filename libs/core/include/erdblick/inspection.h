@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <unordered_map>
@@ -112,8 +113,11 @@ public:
     /** Pop the current node from the conversion stack. */
     void pop();
 
-    /** Convert one attribute layer into child inspection nodes. */
-    void convertAttributeLayer(std::string_view const& name, mapget::model_ptr<mapget::AttributeLayer> const& l);
+    /** Convert one attribute layer while sharing the feature-wide attribute index used in hover ids. */
+    void convertAttributeLayer(
+        std::string_view const& name,
+        mapget::model_ptr<mapget::AttributeLayer> const& l,
+        size_t& attributeIndex);
     /** Convert one relation and attach hover metadata if applicable. */
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     /** Convert one geometry node, including stage/name metadata and points. */
