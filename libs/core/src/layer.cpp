@@ -4,8 +4,15 @@
 #include "geometry.h"
 #include "mapget/log.h"
 #include "mapget/model/feature.h"
+#include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <sstream>
+#include <string_view>
+#include <unordered_map>
+#include <variant>
+#include <vector>
 
 namespace
 {
@@ -116,6 +123,217 @@ auto searchResultGeometryCenter(mapget::model_ptr<mapget::SearchResult> const& r
     default:
         return erdblick::geometryCenter(geometry->toSelfContained());
     }
+}
+
+/** Accumulate compact diagnostics for one value stream. */
+struct ValueSummary
+{
+    uint64_t count = 0;
+    uint64_t missing = 0;
+    uint64_t nulls = 0;
+    uint64_t booleans = 0;
+    uint64_t integers = 0;
+    uint64_t numbers = 0;
+    uint64_t strings = 0;
+    uint64_t objects = 0;
+    uint64_t lists = 0;
+    uint64_t blobs = 0;
+    uint64_t unknown = 0;
+    uint64_t numericCount = 0;
+    uint64_t histogramDropped = 0;
+    bool distinctLimitReached = false;
+    double numericMin = std::numeric_limits<double>::infinity();
+    double numericMax = -std::numeric_limits<double>::infinity();
+    double numericSum = 0.0;
+    std::unordered_map<std::string, uint64_t> histogram;
+};
+
+/** Extract string-like SIMFIL scalar values without forcing JSON conversion. */
+auto nodeStringValue(simfil::ModelNode const& node) -> std::string
+{
+    auto const value = node.value();
+    if (auto const* str = std::get_if<std::string>(&value)) {
+        return *str;
+    }
+    if (auto const* strView = std::get_if<std::string_view>(&value)) {
+        return std::string(*strView);
+    }
+    return {};
+}
+
+/** Add one finite numeric scalar to the min/max/average accumulator. */
+void addNumeric(ValueSummary& summary, double value)
+{
+    if (!std::isfinite(value)) {
+        return;
+    }
+    summary.numericCount++;
+    summary.numericSum += value;
+    summary.numericMin = std::min(summary.numericMin, value);
+    summary.numericMax = std::max(summary.numericMax, value);
+}
+
+/** Track string histograms with a hard distinct-value cap. */
+void addHistogram(ValueSummary& summary, std::string value, uint32_t distinctLimit)
+{
+    if (distinctLimit == 0) {
+        summary.histogramDropped++;
+        summary.distinctLimitReached = true;
+        return;
+    }
+
+    if (auto existing = summary.histogram.find(value); existing != summary.histogram.end()) {
+        existing->second++;
+        return;
+    }
+
+    if (summary.histogram.size() >= distinctLimit) {
+        summary.histogramDropped++;
+        summary.distinctLimitReached = true;
+        return;
+    }
+    summary.histogram.emplace(std::move(value), 1);
+}
+
+/** Accumulate one model node sample into a value summary. */
+void summarizeNode(ValueSummary& summary, simfil::ModelNode::Ptr const& node, uint32_t distinctLimit)
+{
+    summary.count++;
+    if (!node) {
+        summary.missing++;
+        return;
+    }
+
+    switch (node->type()) {
+    case simfil::ValueType::Undef:
+        summary.missing++;
+        break;
+    case simfil::ValueType::Null:
+        summary.nulls++;
+        break;
+    case simfil::ValueType::Bool:
+        summary.booleans++;
+        break;
+    case simfil::ValueType::Int:
+        summary.integers++;
+        addNumeric(summary, static_cast<double>(std::get<int64_t>(node->value())));
+        break;
+    case simfil::ValueType::Float:
+        summary.numbers++;
+        addNumeric(summary, std::get<double>(node->value()));
+        break;
+    case simfil::ValueType::String: {
+        auto value = nodeStringValue(*node);
+        if (value == "object") {
+            summary.objects++;
+        }
+        else if (value == "list") {
+            summary.lists++;
+        }
+        else if (value == "blob") {
+            summary.blobs++;
+        }
+        else {
+            summary.strings++;
+            addHistogram(summary, std::move(value), distinctLimit);
+        }
+        break;
+    }
+    case simfil::ValueType::Bytes:
+        summary.blobs++;
+        break;
+    case simfil::ValueType::TransientObject:
+    case simfil::ValueType::Object:
+        summary.objects++;
+        break;
+    case simfil::ValueType::Array:
+        summary.lists++;
+        break;
+    default:
+        summary.unknown++;
+        break;
+    }
+}
+
+/** Convert one summary to the JS diagnostics object used by the search panel. */
+auto summaryToJsValue(ValueSummary const& summary, uint32_t histogramLimit) -> erdblick::JsValue
+{
+    using erdblick::JsValue;
+
+    auto result = JsValue::Dict({
+        {"count", JsValue(static_cast<double>(summary.count))},
+        {"missing", JsValue(static_cast<double>(summary.missing))},
+        {"nulls", JsValue(static_cast<double>(summary.nulls))},
+        {"kinds", JsValue::Dict({
+            {"integer", JsValue(static_cast<double>(summary.integers))},
+            {"number", JsValue(static_cast<double>(summary.numbers))},
+            {"boolean", JsValue(static_cast<double>(summary.booleans))},
+            {"string", JsValue(static_cast<double>(summary.strings))},
+            {"object", JsValue(static_cast<double>(summary.objects))},
+            {"list", JsValue(static_cast<double>(summary.lists))},
+            {"blob", JsValue(static_cast<double>(summary.blobs))},
+            {"unknown", JsValue(static_cast<double>(summary.unknown))},
+        })},
+        {"otherCount", JsValue(static_cast<double>(summary.histogramDropped))},
+        {"distinctLimitReached", JsValue(summary.distinctLimitReached)},
+    });
+
+    if (summary.numericCount > 0) {
+        result.set("numeric", JsValue::Dict({
+            {"count", JsValue(static_cast<double>(summary.numericCount))},
+            {"min", JsValue(summary.numericMin)},
+            {"max", JsValue(summary.numericMax)},
+            {"sum", JsValue(summary.numericSum)},
+            {"average", JsValue(summary.numericSum / static_cast<double>(summary.numericCount))},
+        }));
+    }
+
+    std::vector<std::pair<std::string, uint64_t>> histogramEntries;
+    histogramEntries.reserve(summary.histogram.size());
+    for (auto const& entry : summary.histogram) {
+        histogramEntries.emplace_back(entry);
+    }
+    std::sort(
+        histogramEntries.begin(),
+        histogramEntries.end(),
+        [](auto const& left, auto const& right)
+        {
+            if (left.second != right.second) {
+                return left.second > right.second;
+            }
+            return left.first < right.first;
+        });
+
+    auto histogram = JsValue::List();
+    uint64_t otherCount = summary.histogramDropped;
+    for (size_t index = 0; index < histogramEntries.size(); ++index) {
+        auto const& [value, count] = histogramEntries[index];
+        if (index >= histogramLimit) {
+            otherCount += count;
+            continue;
+        }
+        histogram.push(JsValue::Dict({
+            {"value", JsValue(value)},
+            {"count", JsValue(static_cast<double>(count))},
+        }));
+    }
+    result.set("histogram", histogram);
+    result.set("otherCount", JsValue(static_cast<double>(otherCount)));
+    return result;
+}
+
+/** Keep histogram parameters bounded before native summary work starts. */
+auto normalizedSummaryLimits(uint32_t histogramLimit, uint32_t distinctLimit) -> std::pair<uint32_t, uint32_t>
+{
+    auto const normalizedHistogramLimit = std::clamp<uint32_t>(
+        histogramLimit == 0 ? 16U : histogramLimit,
+        1U,
+        256U);
+    auto const normalizedDistinctLimit = std::clamp<uint32_t>(
+        distinctLimit == 0 ? 512U : distinctLimit,
+        1U,
+        8192U);
+    return {normalizedHistogramLimit, normalizedDistinctLimit};
 }
 
 }
@@ -553,6 +771,68 @@ NativeJsValue TileSearchResultLayer::resultEntries() const
     }
 
     return *entries;
+}
+
+NativeJsValue TileSearchResultLayer::valueSummaries(uint32_t histogramLimit, uint32_t distinctLimit) const
+{
+    auto const [normalizedHistogramLimit, normalizedDistinctLimit] = normalizedSummaryLimits(
+        histogramLimit,
+        distinctLimit);
+
+    auto resultFields = JsValue::List();
+    auto const& fields = model_->resultFields();
+    auto fieldSummaries = std::vector<ValueSummary>(fields.size());
+    for (size_t resultIndex = 0; resultIndex < model_->size(); ++resultIndex) {
+        auto searchResult = model_->at(resultIndex);
+        auto values = searchResult ? searchResult->values() : mapget::model_ptr<simfil::Array>{};
+        for (size_t fieldIndex = 0; fieldIndex < fields.size(); ++fieldIndex) {
+            if (!values || fieldIndex >= values->size()) {
+                summarizeNode(fieldSummaries[fieldIndex], {}, normalizedDistinctLimit);
+                continue;
+            }
+            summarizeNode(
+                fieldSummaries[fieldIndex],
+                values->at(static_cast<int64_t>(fieldIndex)),
+                normalizedDistinctLimit);
+        }
+    }
+
+    for (size_t fieldIndex = 0; fieldIndex < fields.size(); ++fieldIndex) {
+        resultFields.push(JsValue::Dict({
+            {"source", JsValue("resultField")},
+            {"index", JsValue(static_cast<double>(fieldIndex))},
+            {"expression", JsValue(fields[fieldIndex])},
+            {"summary", summaryToJsValue(fieldSummaries[fieldIndex], normalizedHistogramLimit)},
+        }));
+    }
+
+    auto traces = JsValue::List();
+    for (size_t traceIndex = 0; traceIndex < model_->traceCount(); ++traceIndex) {
+        auto trace = model_->traceAt(traceIndex);
+        if (!trace) {
+            continue;
+        }
+
+        auto summary = ValueSummary{};
+        if (auto values = trace->values()) {
+            for (uint32_t valueIndex = 0; valueIndex < values->size(); ++valueIndex) {
+                summarizeNode(summary, values->at(valueIndex), normalizedDistinctLimit);
+            }
+        }
+
+        traces.push(JsValue::Dict({
+            {"source", JsValue("trace")},
+            {"name", JsValue(trace->name())},
+            {"calls", JsValue(static_cast<double>(trace->calls()))},
+            {"totalus", JsValue(static_cast<double>(trace->totalUs().count()))},
+            {"summary", summaryToJsValue(summary, normalizedHistogramLimit)},
+        }));
+    }
+
+    return *JsValue::Dict({
+        {"resultFields", resultFields},
+        {"traces", traces},
+    });
 }
 
 std::string TileSearchResultLayer::toJson() const

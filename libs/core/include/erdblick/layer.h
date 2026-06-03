@@ -186,11 +186,18 @@ struct TileSearchResultLayer
     /** Result field expressions aligned with every result values array. */
     NativeJsValue resultFields() const;
 
-    /** Layer metadata such as search id, refresh, traces, and result count. */
+    /** Layer metadata such as search id, refresh, and result count. */
     NativeJsValue info() const;
 
     /** Compact entries consumed by the TypeScript search UI and low-fi marker path. */
     NativeJsValue resultEntries() const;
+
+    /**
+     * Summarize withFields and trace values without materializing all samples in TypeScript.
+     * @param histogramLimit Maximum number of histogram buckets returned per value stream.
+     * @param distinctLimit Maximum number of distinct strings tracked per value stream.
+     */
+    NativeJsValue valueSummaries(uint32_t histogramLimit, uint32_t distinctLimit) const;
 
     /** JSON representation for diagnostics and tests. */
     std::string toJson() const;

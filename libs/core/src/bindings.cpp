@@ -722,6 +722,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("resultFields", &TileSearchResultLayer::resultFields)
         .function("info", &TileSearchResultLayer::info)
         .function("resultEntries", &TileSearchResultLayer::resultEntries)
+        .function("valueSummaries", &TileSearchResultLayer::valueSummaries)
         .function("toJson", &TileSearchResultLayer::toJson)
         .function("copyDiagnostics", &TileSearchResultLayer::copyDiagnostics);
 

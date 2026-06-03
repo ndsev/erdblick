@@ -1,11 +1,68 @@
-/**
- * Timing information emitted by the core search engine for one traced function.
- */
-export interface TraceResult {
+/** Counts of scalar and placeholder value kinds observed in a search value stream. */
+export interface SearchValueKindCounts {
+    integer: number;
+    number: number;
+    boolean: number;
+    string: number;
+    object: number;
+    list: number;
+    blob: number;
+    unknown: number;
+}
+
+/** Numeric aggregate for one search value stream. */
+export interface SearchValueNumericSummary {
+    count: number;
+    min: number;
+    max: number;
+    sum: number;
+    average: number;
+}
+
+/** One string histogram bucket for a search value stream. */
+export interface SearchValueHistogramBucket {
+    value: string;
+    count: number;
+}
+
+/** Aggregated value summary for one withFields expression or one trace expression. */
+export interface SearchValueSummary {
+    count: number;
+    missing: number;
+    nulls: number;
+    kinds: SearchValueKindCounts;
+    numeric?: SearchValueNumericSummary;
+    histogram: SearchValueHistogramBucket[];
+    otherCount: number;
+    distinctLimitReached: boolean;
+}
+
+/** Value summary for one withFields expression. */
+export interface SearchResultFieldValueSummary {
+    source: "resultField";
+    index: number;
+    expression: string;
+    summary: SearchValueSummary;
+}
+
+/** Value summary for one SIMFIL trace expression. */
+export interface SearchTraceValueSummary {
+    source: "trace";
     name: string;
-    calls: bigint;
-    totalus: bigint;
-    values: Array<string>;
+    calls: number;
+    totalus: number;
+    summary: SearchValueSummary;
+}
+
+/** Lazy diagnostics state for value summaries computed from streamed search-result tiles. */
+export interface SearchValueSummariesState {
+    status: "idle" | "loading" | "ready" | "empty" | "error";
+    revision: number;
+    processedTiles: number;
+    totalTiles: number;
+    resultFields: SearchResultFieldValueSummary[];
+    traces: SearchTraceValueSummary[];
+    error?: string;
 }
 
 /**

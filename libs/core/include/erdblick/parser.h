@@ -109,19 +109,19 @@ public:
      * Returns true when the query references one or more concrete attribute
      * contexts without requiring feature-owned or broad dynamic fields.
      */
-    bool isAttributeScopeSearchQuery(std::string const& query) const;
+    bool isAttributeScopeSearchQuery(std::string const& query, NativeJsValue const& options) const;
 
     /**
      * Return attribute contexts whose schema can evaluate the supplied query.
      *
      * The result is a list of `{attrName, featureType, attrLayerName, mapId, layerId}` dictionaries.
      */
-    NativeJsValue getAttributeScopeForQuery(std::string const& query) const;
+    NativeJsValue getAttributeScopeForQuery(std::string const& query, NativeJsValue const& options) const;
 
     /**
      * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
      */
-    NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope) const;
+    NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
      * Enumerate schema-backed result fields usable by search-result style rules.
@@ -129,7 +129,7 @@ public:
      * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
      * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was inferred.
      */
-    NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope) const;
+    NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
      * Set layer info which will be used if the external doesn't fit.

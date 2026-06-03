@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <span>
@@ -250,6 +252,51 @@ bool hasFeatureModelSchema(mapget::LayerInfo const& layerInfo)
     return !layerInfo.featureModelSchema_.is_null();
 }
 
+struct SelectedLayerFilter
+{
+    bool active = false;
+    std::set<std::pair<std::string, std::string>> layers;
+
+    /** Returns whether a map/layer pair should participate in schema processing. */
+    bool contains(std::string const& mapId, std::string const& layerId) const
+    {
+        return !active || layers.contains({mapId, layerId});
+    }
+};
+
+/** Parses the optional schema-processing map/layer filter from JS parser options. */
+SelectedLayerFilter selectedLayerFilterFromOptions(JsValue const& options)
+{
+    SelectedLayerFilter filter;
+    if (!options.has("selectedMapLayers")) {
+        return filter;
+    }
+
+    auto const selectedLayers = options["selectedMapLayers"];
+    if (selectedLayers.type() != JsValue::Type::ObjectOrList) {
+        return filter;
+    }
+
+    filter.active = true;
+    for (uint32_t i = 0; i < selectedLayers.size(); ++i) {
+        auto const entry = selectedLayers.at(i);
+        if (!entry.has("mapId") || !entry.has("layerId")) {
+            continue;
+        }
+        auto const mapId = entry["mapId"].as<std::string>();
+        auto const layerId = entry["layerId"].as<std::string>();
+        if (!mapId.empty() && !layerId.empty()) {
+            filter.layers.insert({mapId, layerId});
+        }
+    }
+    // Treat an empty selected-layer list as "not hydrated yet" for schema helpers.
+    // Search execution itself still receives the concrete selected layer set elsewhere.
+    if (filter.layers.empty()) {
+        filter.active = false;
+    }
+    return filter;
+}
+
 struct AttributeScopeInfo
 {
     std::string attrName;
@@ -282,6 +329,8 @@ struct SearchStyleFieldInfo
     std::string featureType;
     std::string valueKind = "unknown";
     std::vector<std::string> enumValues;
+    std::optional<double> numericMinimum;
+    std::optional<double> numericMaximum;
 };
 
 struct SearchStyleFieldPath
@@ -290,6 +339,8 @@ struct SearchStyleFieldPath
     simfil::SchemaId schemaId = simfil::NoSchemaId;
     std::string valueKind = "unknown";
     std::vector<std::string> enumValues;
+    std::optional<double> numericMinimum;
+    std::optional<double> numericMaximum;
 };
 
 /** Returns string literals from direct positive comparisons such as `$name == "SpeedLimit"`. */
@@ -384,11 +435,16 @@ std::set<std::string> positiveStringLiteralsForIdentifier(
 }
 
 /** Collects every attribute context that can be styled or searched through schema metadata. */
-std::vector<AttributeScopeInfo> collectAttributeScopes(std::map<std::string, mapget::DataSourceInfo> const& infos)
+std::vector<AttributeScopeInfo> collectAttributeScopes(
+    std::map<std::string, mapget::DataSourceInfo> const& infos,
+    SelectedLayerFilter const& selectedLayers = {})
 {
     std::vector<AttributeScopeInfo> scopes;
     for (auto const& [_, dataSource] : infos) {
         for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
+                continue;
+            }
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
@@ -438,11 +494,16 @@ std::vector<AttributeScopeInfo> collectAttributeScopes(std::map<std::string, map
 }
 
 /** Collects the feature root schemas that can be queried by feature-scope search. */
-std::vector<FeatureSchemaInfo> collectFeatureSchemaScopes(std::map<std::string, mapget::DataSourceInfo> const& infos)
+std::vector<FeatureSchemaInfo> collectFeatureSchemaScopes(
+    std::map<std::string, mapget::DataSourceInfo> const& infos,
+    SelectedLayerFilter const& selectedLayers = {})
 {
     std::vector<FeatureSchemaInfo> scopes;
     for (auto const& [_, dataSource] : infos) {
         for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
+                continue;
+            }
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
@@ -676,29 +737,66 @@ std::string schemaAstContext(FeatureSchemaInfo const& scope)
     return scope.mapId + "/" + scope.layerId + "/" + scope.featureType;
 }
 
-/** Append one deduplicated AST diagnostics message in the same shape as simfil diagnostics. */
-void addSchemaAstDiagnostic(
-    JsValue& result,
-    std::set<std::string>& seenMessages,
-    std::string const& query,
-    std::string const& label,
+/** Record one compiled AST together with every schema context that produced it. */
+void recordSchemaAstDiagnostic(
+    std::map<std::string, std::set<std::string>>& astContexts,
+    std::string const& context,
     std::string const& ast)
 {
-    constexpr uint32_t kMaxSchemaAstMessages = 8;
-    auto message = label + ": " + ast;
-    if (result.size() >= kMaxSchemaAstMessages || !seenMessages.insert(message).second) {
+    if (ast.empty()) {
         return;
     }
+    astContexts[ast].insert(context);
+}
 
-    result.push(JsValue::Dict({
-        {"query", JsValue(query)},
-        {"message", JsValue(std::move(message))},
-        {"location", JsValue::Dict({
-            {"offset", JsValue(0)},
-            {"size", JsValue(static_cast<int>(query.size()))},
-        })},
-        {"fix", JsValue()},
-    }));
+/** Append unique compiled-query diagnostics in the same shape as simfil diagnostics. */
+void appendSchemaAstDiagnostics(
+    JsValue& result,
+    std::string const& query,
+    std::map<std::string, std::set<std::string>> const& astContexts)
+{
+    constexpr uint32_t kMaxSchemaAstMessages = 8;
+    constexpr size_t kMaxContextLabels = 3;
+    for (auto const& [ast, contexts] : astContexts) {
+        if (result.size() >= kMaxSchemaAstMessages) {
+            return;
+        }
+
+        std::vector<std::string> contextLabels;
+        contextLabels.reserve(std::min(contexts.size(), kMaxContextLabels));
+        for (auto const& context : contexts) {
+            if (contextLabels.size() >= kMaxContextLabels) {
+                break;
+            }
+            contextLabels.push_back(context);
+        }
+
+        std::ostringstream message;
+        message << "Compiled query";
+        if (!contextLabels.empty()) {
+            message << " for ";
+            for (size_t i = 0; i < contextLabels.size(); ++i) {
+                if (i > 0) {
+                    message << ", ";
+                }
+                message << contextLabels[i];
+            }
+            if (contexts.size() > contextLabels.size()) {
+                message << ", +" << (contexts.size() - contextLabels.size()) << " more";
+            }
+        }
+        message << ": " << ast;
+
+        result.push(JsValue::Dict({
+            {"query", JsValue(query)},
+            {"message", JsValue(message.str())},
+            {"location", JsValue::Dict({
+                {"offset", JsValue(0)},
+                {"size", JsValue(static_cast<int>(query.size()))},
+            })},
+            {"fix", JsValue()},
+        }));
+    }
 }
 
 void analyzeFeatureRootQuery(
@@ -723,9 +821,7 @@ void analyzeFeatureRootQuery(
     if (!references) {
         return;
     }
-    analysis.hasDynamicOrBroadAccess = analysis.hasDynamicOrBroadAccess
-        || references->hasDynamicAccess
-        || references->hasBroadWildcardAccess;
+    analysis.hasDynamicOrBroadAccess = analysis.hasDynamicOrBroadAccess || references->hasDynamicAccess;
 
     for (auto const& reference : references->paths) {
         auto fieldNames = schemaPathFieldNames(*env, reference.path);
@@ -779,7 +875,7 @@ void analyzeAttributeRootQuery(
     if (!references) {
         return;
     }
-    if (references->hasDynamicAccess || references->hasBroadWildcardAccess) {
+    if (references->hasDynamicAccess) {
         analysis.hasDynamicOrBroadAccess = true;
         return;
     }
@@ -795,6 +891,12 @@ void analyzeAttributeRootQuery(
             continue;
         }
         if (fieldNames->front() == "$feature") {
+            if (reference.viaWildcard) {
+                // Recursive attribute-root queries like `**.speedLimit` also find the same field
+                // through the synthetic `$feature` mirror. That mirror must not veto attribute
+                // scope when the query also matches a direct attribute field.
+                continue;
+            }
             analysis.hasFeatureOwnedPath = true;
             continue;
         }
@@ -841,15 +943,16 @@ std::vector<AttributeScopeInfo> filterScopesByAttributeLiterals(
 /** Resolves the exact attribute contexts implied by schema-referenced query paths. */
 std::vector<AttributeScopeInfo> resolveAttributeScopesForQuery(
     std::map<std::string, mapget::DataSourceInfo> const& infos,
-    std::string const& query)
+    std::string const& query,
+    SelectedLayerFilter const& selectedLayers = {})
 {
-    auto const allAttributeScopes = collectAttributeScopes(infos);
+    auto const allAttributeScopes = collectAttributeScopes(infos, selectedLayers);
     if (allAttributeScopes.empty() || query.empty()) {
         return {};
     }
 
     QueryScopeAnalysis analysis;
-    for (auto const& featureScope : collectFeatureSchemaScopes(infos)) {
+    for (auto const& featureScope : collectFeatureSchemaScopes(infos, selectedLayers)) {
         analyzeFeatureRootQuery(analysis, allAttributeScopes, featureScope, query);
     }
     for (auto const& attributeScope : allAttributeScopes) {
@@ -897,6 +1000,8 @@ struct SearchStyleSchemaMetadata
 {
     std::string valueKind = "unknown";
     std::vector<std::string> enumValues;
+    std::optional<double> numericMinimum;
+    std::optional<double> numericMaximum;
 };
 
 bool jsonSchemaHasType(nlohmann::json const& schema, std::string_view type)
@@ -991,6 +1096,30 @@ void appendUniqueEnumValues(std::vector<std::string>& target, std::vector<std::s
     }
 }
 
+std::optional<double> finiteSchemaNumber(nlohmann::json const& schema, std::string_view key)
+{
+    auto const it = schema.find(std::string(key));
+    if (it == schema.end() || !it->is_number()) {
+        return std::nullopt;
+    }
+    auto const value = it->get<double>();
+    return std::isfinite(value) ? std::optional<double>{value} : std::nullopt;
+}
+
+void mergeNumericRange(SearchStyleSchemaMetadata& target, SearchStyleSchemaMetadata const& source)
+{
+    if (source.numericMinimum) {
+        target.numericMinimum = target.numericMinimum
+            ? std::min(*target.numericMinimum, *source.numericMinimum)
+            : source.numericMinimum;
+    }
+    if (source.numericMaximum) {
+        target.numericMaximum = target.numericMaximum
+            ? std::max(*target.numericMaximum, *source.numericMaximum)
+            : source.numericMaximum;
+    }
+}
+
 SearchStyleSchemaMetadata schemaMetadata(
     nlohmann::json const& root,
     nlohmann::json const* schema,
@@ -1022,6 +1151,7 @@ SearchStyleSchemaMetadata schemaMetadata(
         for (auto const& branch : resolved->at(std::string(combiner))) {
             auto branchMetadata = schemaMetadata(root, &branch, registry, simfil::NoSchemaId, depth - 1);
             appendUniqueEnumValues(metadata.enumValues, branchMetadata.enumValues);
+            mergeNumericRange(metadata, branchMetadata);
             if (branchMetadata.valueKind == "unknown") {
                 continue;
             }
@@ -1049,10 +1179,14 @@ SearchStyleSchemaMetadata schemaMetadata(
         }
         if (constIt->is_number_integer()) {
             metadata.valueKind = "integer";
+            metadata.numericMinimum = constIt->get<double>();
+            metadata.numericMaximum = constIt->get<double>();
             return metadata;
         }
         if (constIt->is_number()) {
             metadata.valueKind = "number";
+            metadata.numericMinimum = constIt->get<double>();
+            metadata.numericMaximum = constIt->get<double>();
             return metadata;
         }
     }
@@ -1094,6 +1228,10 @@ SearchStyleSchemaMetadata schemaMetadata(
         else if (registry->kind(schemaId) == simfil::Schema::Kind::Array) {
             metadata.valueKind = "array";
         }
+    }
+    if (metadata.valueKind == "integer" || metadata.valueKind == "number") {
+        metadata.numericMinimum = finiteSchemaNumber(*resolved, "minimum");
+        metadata.numericMaximum = finiteSchemaNumber(*resolved, "maximum");
     }
     return metadata;
 }
@@ -1146,9 +1284,12 @@ void collectSchemaFieldPaths(
     nlohmann::json const* schemaJson,
     nlohmann::json const& rootSchema,
     std::string const& basePath,
-    int depth)
+    std::set<simfil::SchemaId>& activeSchemas)
 {
-    if (!registry || schemaId == simfil::NoSchemaId || depth <= 0) {
+    if (!registry || schemaId == simfil::NoSchemaId) {
+        return;
+    }
+    if (!activeSchemas.insert(schemaId).second) {
         return;
     }
 
@@ -1157,11 +1298,19 @@ void collectSchemaFieldPaths(
         auto const childSchema = registry->childSchema(schemaId, field);
         auto const* childJson = schemaChildForField(rootSchema, schemaJson, field);
         auto metadata = schemaMetadata(rootSchema, childJson, registry, childSchema);
-        paths.push_back({path, childSchema, metadata.valueKind, metadata.enumValues});
+        paths.push_back({
+            path,
+            childSchema,
+            metadata.valueKind,
+            metadata.enumValues,
+            metadata.numericMinimum,
+            metadata.numericMaximum
+        });
         if (childSchema != simfil::NoSchemaId && registry->kind(childSchema) == simfil::Schema::Kind::Object) {
-            collectSchemaFieldPaths(paths, registry, childSchema, childJson, rootSchema, path, depth - 1);
+            collectSchemaFieldPaths(paths, registry, childSchema, childJson, rootSchema, path, activeSchemas);
         }
     }
+    activeSchemas.erase(schemaId);
 }
 
 /** Adds one search-style field candidate while preserving map/layer/attribute context. */
@@ -1182,7 +1331,17 @@ void addSearchStyleField(
     if (!seen.insert(key).second) {
         return;
     }
-    fields.push_back({path, mapId, layerId, attrName, featureType, metadata.valueKind, metadata.enumValues});
+    fields.push_back({
+        path,
+        mapId,
+        layerId,
+        attrName,
+        featureType,
+        metadata.valueKind,
+        metadata.enumValues,
+        metadata.numericMinimum,
+        metadata.numericMaximum
+    });
 }
 
 /** Converts native attribute-scope candidates into the embind JS value shape. */
@@ -1219,6 +1378,12 @@ NativeJsValue searchStyleFieldsToJs(std::vector<SearchStyleFieldInfo> const& fie
             enumValues.push(JsValue(value));
         }
         item.set("enumValues", enumValues);
+        if (field.numericMinimum && field.numericMaximum) {
+            item.set("numericRange", JsValue::Dict({
+                {"min", JsValue(*field.numericMinimum)},
+                {"max", JsValue(*field.numericMaximum)}
+            }));
+        }
         result.push(item);
     }
     return *result;
@@ -1531,10 +1696,14 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     }
     auto const includeFeatureScope = scope != "attribute";
     auto const includeAttributeScope = scope != "feature";
+    auto const selectedLayers = selectedLayerFilterFromOptions(options);
 
     std::set<simfil::CompletionCandidate> mergedCandidates;
     for (auto const& [_, dataSource] : info_) {
         for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
+                continue;
+            }
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
@@ -1597,48 +1766,50 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     return completionCandidatesToJs(query, mergedCandidates, opts.limit);
 }
 
-bool TileLayerParser::isAttributeScopeSearchQuery(std::string const& query) const
+bool TileLayerParser::isAttributeScopeSearchQuery(std::string const& query, NativeJsValue const& options_) const
 {
-    return !resolveAttributeScopesForQuery(info_, query).empty();
+    return !resolveAttributeScopesForQuery(info_, query, selectedLayerFilterFromOptions(JsValue(options_))).empty();
 }
 
 /** Returns schema contexts that can evaluate an attribute-scope search query. */
-NativeJsValue TileLayerParser::getAttributeScopeForQuery(std::string const& query) const
+NativeJsValue TileLayerParser::getAttributeScopeForQuery(std::string const& query, NativeJsValue const& options_) const
 {
-    return attributeScopesToJs(resolveAttributeScopesForQuery(info_, query));
+    return attributeScopesToJs(resolveAttributeScopesForQuery(info_, query, selectedLayerFilterFromOptions(JsValue(options_))));
 }
 
 /** Returns schema-AST diagnostics generated by the same parser passes that infer search scope. */
-NativeJsValue TileLayerParser::searchQueryAstDiagnostics(std::string const& query, std::string const& scope) const
+NativeJsValue TileLayerParser::searchQueryAstDiagnostics(
+    std::string const& query,
+    std::string const& scope,
+    NativeJsValue const& options_) const
 {
     auto result = JsValue::List();
     if (query.empty()) {
         return *result;
     }
+    auto const selectedLayers = selectedLayerFilterFromOptions(JsValue(options_));
 
-    auto const discoveredAttributeScopes = resolveAttributeScopesForQuery(info_, query);
+    auto const discoveredAttributeScopes = resolveAttributeScopesForQuery(info_, query, selectedLayers);
     std::set<std::string> discoveredAttributeScopeKeys;
     for (auto const& attrScope : discoveredAttributeScopes) {
         discoveredAttributeScopeKeys.insert(attributeScopeKey(attrScope));
     }
 
-    std::set<std::string> seenMessages;
+    std::map<std::string, std::set<std::string>> astContexts;
     auto const concreteScope = scope == "auto"
         ? (!discoveredAttributeScopes.empty() ? "attribute" : "feature")
         : scope;
 
-    for (auto const& featureScope : collectFeatureSchemaScopes(info_)) {
+    for (auto const& featureScope : collectFeatureSchemaScopes(info_, selectedLayers)) {
         auto astDebug = compileFeatureScopeQueryAstDebug(featureScope, query);
         if (!astDebug) {
             continue;
         }
 
         if (concreteScope == "feature" || discoveredAttributeScopes.empty()) {
-            addSchemaAstDiagnostic(
-                result,
-                seenMessages,
-                query,
-                "Schema AST for feature scope " + schemaAstContext(featureScope),
+            recordSchemaAstDiagnostic(
+                astContexts,
+                schemaAstContext(featureScope),
                 astDebug->ast);
             continue;
         }
@@ -1647,51 +1818,51 @@ NativeJsValue TileLayerParser::searchQueryAstDiagnostics(std::string const& quer
             if (!discoveredAttributeScopeKeys.contains(attributeScopeKey(attrScope))) {
                 continue;
             }
-            addSchemaAstDiagnostic(
-                result,
-                seenMessages,
-                query,
-                "Auto-scope schema AST via " + schemaAstContext(attrScope),
+            recordSchemaAstDiagnostic(
+                astContexts,
+                schemaAstContext(attrScope),
                 astDebug->ast);
         }
     }
 
     if (concreteScope == "attribute") {
-        auto const allScopes = collectAttributeScopes(info_);
+        auto const allScopes = collectAttributeScopes(info_, selectedLayers);
         auto const& scopes = discoveredAttributeScopes.empty() ? allScopes : discoveredAttributeScopes;
         for (auto const& attrScope : scopes) {
             auto ast = compileAttributeScopeQueryAst(attrScope, query);
             if (!ast) {
                 continue;
             }
-            addSchemaAstDiagnostic(
-                result,
-                seenMessages,
-                query,
-                "Schema AST for attribute scope " + schemaAstContext(attrScope),
+            recordSchemaAstDiagnostic(
+                astContexts,
+                schemaAstContext(attrScope),
                 (*ast)->expr().toString());
         }
     }
 
+    appendSchemaAstDiagnostics(result, query, astContexts);
     return *result;
 }
 
 /** Enumerates result fields available to search-result style rules for the requested scope. */
-NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& query, std::string const& scope) const
+NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
+    std::string const& query,
+    std::string const& scope,
+    NativeJsValue const& options_) const
 {
-    auto const discoveredAttributeScopes = resolveAttributeScopesForQuery(info_, query);
+    auto const selectedLayers = selectedLayerFilterFromOptions(JsValue(options_));
+    auto const discoveredAttributeScopes = resolveAttributeScopesForQuery(info_, query, selectedLayers);
     auto const concreteScope = scope == "auto"
         ? (!discoveredAttributeScopes.empty() ? "attribute" : "feature")
         : scope;
 
     std::vector<SearchStyleFieldInfo> fields;
     std::set<std::string> seen;
-    constexpr int kSearchStyleFieldDepth = 5;
 
     if (concreteScope == "attribute") {
         // Attribute-scope rules can style both the matched attribute value and
         // selected feature-level fields through the `$feature` overlay.
-        auto const allScopes = collectAttributeScopes(info_);
+        auto const allScopes = collectAttributeScopes(info_, selectedLayers);
         auto const& scopes = discoveredAttributeScopes.empty() ? allScopes : discoveredAttributeScopes;
         for (auto const& attrScope : scopes) {
             auto const* attributeSchemaJson = attrScope.layerInfo
@@ -1715,6 +1886,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                     attrScope.attrName);
             }
             std::vector<SearchStyleFieldPath> paths;
+            std::set<simfil::SchemaId> activeSchemas;
             collectSchemaFieldPaths(
                 paths,
                 attrScope.registry,
@@ -1722,7 +1894,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                 attributeSchemaJson,
                 attrScope.layerInfo ? attrScope.layerInfo->featureModelSchema_ : nlohmann::json::object(),
                 "",
-                kSearchStyleFieldDepth);
+                activeSchemas);
             for (auto const& path : paths) {
                 addSearchStyleField(
                     fields,
@@ -1732,7 +1904,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                     attrScope.layerId,
                     attrScope.attrName,
                     attrScope.featureType,
-                    {path.valueKind, path.enumValues});
+                    {path.valueKind, path.enumValues, path.numericMinimum, path.numericMaximum});
             }
 
             for (auto const& overlayField : {"$name", "$layer", "$validityIndex", "$validityCount"}) {
@@ -1760,6 +1932,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                 ? schemaForRegistryKey(*attrScope.layerInfo, attrScope.registry, "Feature:" + attrScope.featureType)
                 : nullptr;
             std::vector<SearchStyleFieldPath> featurePaths;
+            std::set<simfil::SchemaId> activeFeatureSchemas;
             collectSchemaFieldPaths(
                 featurePaths,
                 attrScope.registry,
@@ -1767,7 +1940,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                 featureSchemaJson,
                 attrScope.layerInfo ? attrScope.layerInfo->featureModelSchema_ : nlohmann::json::object(),
                 "$feature",
-                kSearchStyleFieldDepth);
+                activeFeatureSchemas);
             for (auto const& path : featurePaths) {
                 addSearchStyleField(
                     fields,
@@ -1777,7 +1950,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                     attrScope.layerId,
                     attrScope.attrName,
                     attrScope.featureType,
-                    {path.valueKind, path.enumValues});
+                    {path.valueKind, path.enumValues, path.numericMinimum, path.numericMaximum});
             }
         }
     }
@@ -1785,6 +1958,9 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
         // Feature-scope style fields come directly from each advertised feature schema.
         for (auto const& [_, dataSource] : info_) {
             for (auto const& [__, layerInfo] : dataSource.layers_) {
+                if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
+                    continue;
+                }
                 if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                     continue;
                 }
@@ -1795,6 +1971,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                 for (auto const& featureType : layerInfo->featureTypes_) {
                     auto const* featureSchemaJson = schemaForRegistryKey(*layerInfo, registry, "Feature:" + featureType.name_);
                     std::vector<SearchStyleFieldPath> paths;
+                    std::set<simfil::SchemaId> activeSchemas;
                     collectSchemaFieldPaths(
                         paths,
                         registry,
@@ -1802,7 +1979,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                         featureSchemaJson,
                         layerInfo->featureModelSchema_,
                         "",
-                        kSearchStyleFieldDepth);
+                        activeSchemas);
                     for (auto const& path : paths) {
                         addSearchStyleField(
                             fields,
@@ -1812,7 +1989,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(std::string const& quer
                             layerInfo->layerId_,
                             "",
                             featureType.name_,
-                            {path.valueKind, path.enumValues});
+                            {path.valueKind, path.enumValues, path.numericMinimum, path.numericMaximum});
                     }
                 }
             }

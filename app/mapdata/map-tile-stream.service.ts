@@ -707,10 +707,6 @@ export class MapTileStreamService {
                     ? this.canonicalizeMapTileKey(entry.mapTileKey)
                     : sourceTileKey
             }));
-            const tracesValue = rawInfo["traces"];
-            const traces = tracesValue && typeof tracesValue === "object" && !Array.isArray(tracesValue)
-                ? tracesValue as Record<string, unknown>
-                : null;
             const diagnostics = searchResultLayer.copyDiagnostics
                 ? uint8ArrayFromWasm(buffer => {
                     searchResultLayer.copyDiagnostics?.(buffer);
@@ -749,7 +745,7 @@ export class MapTileStreamService {
                 resultCount,
                 resultFields,
                 ...progress,
-                traces,
+                layerBlob: searchResultLayerBlob,
                 diagnostics,
                 entries
             });
@@ -1424,7 +1420,7 @@ export class MapTileStreamService {
         for (const ref of this.availableFeatureSearchLayerRefs(definition.selectedMapLayers)) {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                 const level = this.viewState.getEffectiveMapLayerLevel(viewIndex, ref.mapId, ref.layerId);
-                const tileIds = this.viewState.visibleTileIdsForLevel(viewIndex, level);
+                const tileIds = this.viewState.visibleSearchTileIdsForLevel(viewIndex, level);
                 for (const tileId of tileIds) {
                     const tileMapLayerKey = coreLib.getTileFeatureLayerKey(ref.mapId, ref.layerId, tileId);
                     this.trackVisibleSearchLayerTile(

@@ -5,13 +5,17 @@ import {
     FeatureSearchStyleValueKind
 } from "./map-runtime.model";
 import {MapInfoService} from "./map-info.service";
-import type {FeatureSearchScope, FeatureSearchStateEntry} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef, FeatureSearchScope, FeatureSearchStateEntry} from "../shared/feature-search-state";
 
 export interface FeatureSearchDiagnosticMessage {
     query: string;
     message: string;
     location?: {offset: number, size: number};
     fix: null | string;
+}
+
+interface FeatureSearchSchemaOptions {
+    selectedMapLayers?: FeatureSearchMapLayerRef[];
 }
 
 /**
@@ -35,14 +39,20 @@ export class FeatureSearchSchemaService {
     }
 
     /** Returns schema-backed attribute contexts matching a search query. */
-    getAttributeScopeForQuery(query: string): FeatureSearchAttributeScopeCandidate[] {
-        const cacheKey = query.trim();
+    getAttributeScopeForQuery(
+        query: string,
+        selectedMapLayers?: FeatureSearchMapLayerRef[]
+    ): FeatureSearchAttributeScopeCandidate[] {
+        const cacheKey = `${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
         const cached = this.attributeScopesByQueryCache.get(cacheKey);
         if (cached) {
             return cached;
         }
         try {
-            const candidates = this.mapInfo.tileLayerParser.getAttributeScopeForQuery(query);
+            const candidates = this.mapInfo.tileLayerParser.getAttributeScopeForQuery(
+                query,
+                this.schemaOptions(selectedMapLayers)
+            );
             const normalized = this.normalizeAttributeScopeCandidates(candidates);
             this.attributeScopesByQueryCache.set(cacheKey, normalized);
             return normalized;
@@ -53,14 +63,22 @@ export class FeatureSearchSchemaService {
     }
 
     /** Returns schema-backed field expressions available to search-result style rules. */
-    searchStyleFieldsForQuery(query: string, scope: FeatureSearchScope): FeatureSearchStyleFieldCandidate[] {
-        const cacheKey = `${scope}\n${query.trim()}`;
+    searchStyleFieldsForQuery(
+        query: string,
+        scope: FeatureSearchScope,
+        selectedMapLayers?: FeatureSearchMapLayerRef[]
+    ): FeatureSearchStyleFieldCandidate[] {
+        const cacheKey = `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
         const cached = this.searchStyleFieldsByQueryCache.get(cacheKey);
         if (cached) {
             return cached;
         }
         try {
-            const candidates = this.mapInfo.tileLayerParser.searchStyleFieldsForQuery(query, scope);
+            const candidates = this.mapInfo.tileLayerParser.searchStyleFieldsForQuery(
+                query,
+                scope,
+                this.schemaOptions(selectedMapLayers)
+            );
             const normalized = this.normalizeSearchStyleFieldCandidates(candidates);
             this.searchStyleFieldsByQueryCache.set(cacheKey, normalized);
             return normalized;
@@ -71,9 +89,12 @@ export class FeatureSearchSchemaService {
     }
 
     /** Uses the schema-aware native parser to keep auto scope aligned with completion. */
-    isAttributeScopeSearchQuery(query: string): boolean {
+    isAttributeScopeSearchQuery(query: string, selectedMapLayers?: FeatureSearchMapLayerRef[]): boolean {
         try {
-            return this.mapInfo.tileLayerParser.isAttributeScopeSearchQuery(query);
+            return this.mapInfo.tileLayerParser.isAttributeScopeSearchQuery(
+                query,
+                this.schemaOptions(selectedMapLayers)
+            );
         } catch (error) {
             console.warn("Failed to infer feature-search scope from schema metadata.", error);
             return false;
@@ -81,11 +102,18 @@ export class FeatureSearchSchemaService {
     }
 
     /** Resolves persisted search scope state to the concrete token expected by mapget. */
-    resolveSearchScope(definition: Pick<FeatureSearchStateEntry, "query" | "scope">): "feature" | "attribute" {
+    resolveSearchScope(
+        definition: Pick<FeatureSearchStateEntry, "query" | "scope"> & Partial<Pick<FeatureSearchStateEntry, "selectedMapLayers">>
+    ): "feature" | "attribute" {
         if (definition.scope === "feature" || definition.scope === "attribute") {
             return definition.scope;
         }
-        return this.isAttributeScopeSearchQuery(definition.query) ? "attribute" : "feature";
+        const selectedMapLayers = "selectedMapLayers" in definition
+            ? definition.selectedMapLayers ?? []
+            : undefined;
+        return this.isAttributeScopeSearchQuery(definition.query, selectedMapLayers)
+            ? "attribute"
+            : "feature";
     }
 
     /**
@@ -95,14 +123,19 @@ export class FeatureSearchSchemaService {
      * search, mapget evaluates each attribute object as the root, where the equivalent
      * backend filter is the attribute name predicate.
      */
-    resolveBackendQuery(definition: Pick<FeatureSearchStateEntry, "query" | "scope">): string {
+    resolveBackendQuery(
+        definition: Pick<FeatureSearchStateEntry, "query" | "scope"> & Partial<Pick<FeatureSearchStateEntry, "selectedMapLayers">>
+    ): string {
         if (this.resolveSearchScope(definition) !== "attribute" || !this.isBareSearchIdentifier(definition.query)) {
             return definition.query;
         }
 
         const queryIdentifier = definition.query.trim();
+        const selectedMapLayers = "selectedMapLayers" in definition
+            ? definition.selectedMapLayers
+            : undefined;
         const attributeNames = Array.from(new Set(
-            this.getAttributeScopeForQuery(definition.query)
+            this.getAttributeScopeForQuery(definition.query, selectedMapLayers)
                 .map(scope => scope.attrName)
                 .filter(attrName => attrName === queryIdentifier)
         )).sort();
@@ -116,14 +149,22 @@ export class FeatureSearchSchemaService {
     }
 
     /** Builds debug diagnostics for the schema-aware ASTs used by auto-scope and style-field inference. */
-    searchQueryAstDiagnostics(query: string, scope: FeatureSearchScope): FeatureSearchDiagnosticMessage[] {
-        const cacheKey = `${scope}\n${query.trim()}`;
+    searchQueryAstDiagnostics(
+        query: string,
+        scope: FeatureSearchScope,
+        selectedMapLayers?: FeatureSearchMapLayerRef[]
+    ): FeatureSearchDiagnosticMessage[] {
+        const cacheKey = `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
         const cached = this.searchAstDiagnosticsByQueryCache.get(cacheKey);
         if (cached) {
             return cached;
         }
         try {
-            const rawMessages = this.mapInfo.tileLayerParser.searchQueryAstDiagnostics(query, scope);
+            const rawMessages = this.mapInfo.tileLayerParser.searchQueryAstDiagnostics(
+                query,
+                scope,
+                this.schemaOptions(selectedMapLayers)
+            );
             if (!Array.isArray(rawMessages)) {
                 return [];
             }
@@ -134,6 +175,22 @@ export class FeatureSearchSchemaService {
             console.warn("Failed to build schema AST diagnostics for feature search.", error);
             return [];
         }
+    }
+
+    /** Builds parser options from the currently selected search map/layer scope. */
+    private schemaOptions(selectedMapLayers?: FeatureSearchMapLayerRef[]): FeatureSearchSchemaOptions {
+        return selectedMapLayers === undefined ? {} : {selectedMapLayers};
+    }
+
+    /** Returns a stable cache key fragment for selected map/layer refs. */
+    private selectedMapLayerSignature(selectedMapLayers?: FeatureSearchMapLayerRef[]): string {
+        if (selectedMapLayers === undefined) {
+            return "*";
+        }
+        return selectedMapLayers
+            .map(ref => JSON.stringify([ref.mapId, ref.layerId]))
+            .sort()
+            .join("|");
     }
 
     /** Clears cached schema query results after datasource metadata changes. */
@@ -191,8 +248,31 @@ export class FeatureSearchSchemaService {
             const enumValues = Array.isArray(raw["enumValues"])
                 ? raw["enumValues"].filter((item): item is string => typeof item === "string")
                 : [];
-            return [{path, mapId, layerId, attrName, featureType, valueKind, enumValues}];
+            const numericRange = this.normalizeStyleFieldNumericRange(raw["numericRange"]);
+            return [{
+                path,
+                mapId,
+                layerId,
+                attrName,
+                featureType,
+                valueKind,
+                enumValues,
+                ...(numericRange ? {numericRange} : {})
+            }];
         });
+    }
+
+    /** Normalizes optional native numeric range metadata for schema-backed style fields. */
+    private normalizeStyleFieldNumericRange(value: unknown): {min: number; max: number} | undefined {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return undefined;
+        }
+        const raw = value as Record<string, unknown>;
+        const min = typeof raw["min"] === "number" ? raw["min"] : Number.NaN;
+        const max = typeof raw["max"] === "number" ? raw["max"] : Number.NaN;
+        return Number.isFinite(min) && Number.isFinite(max) && min <= max
+            ? {min, max}
+            : undefined;
     }
 
     /** Normalizes native value-kind strings while keeping old WASM builds usable. */

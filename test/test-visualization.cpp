@@ -10,6 +10,7 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <map>
 #include <set>
@@ -145,6 +146,115 @@ nlohmann::json speedLimitLayerInfoJson(std::string const& layerId, std::string c
                 {"name", featureType},
                 {"uniqueIdCompositions", nlohmann::json::array({
                     nlohmann::json::array({{{"partId", "id"}, {"datatype", "U32"}}})
+                })}
+            }
+        })},
+        {"featureModelSchema", std::move(schema)}
+    };
+}
+
+/** Build a Classic-style schema where SPEED_LIMIT exposes speedLimit directly on the attribute object. */
+nlohmann::json classicSpeedLimitLayerInfoJson()
+{
+    auto schema = nlohmann::json{
+        {"$schema", "http://json-schema.org/draft-07/schema#"},
+        {"oneOf", nlohmann::json::array({{{"$ref", "#/$defs/Feature"}}})},
+        {"$defs", {
+            {"Feature", {
+                {"type", "object"},
+                {"x-mapget", {
+                    {"metaType", "Feature"},
+                    {"featureType", "Link"}
+                }},
+                {"properties", {
+                    {"typeId", {{"const", "Link"}}},
+                    {"properties", {{"$ref", "#/$defs/FeatureProperties"}}}
+                }}
+            }},
+            {"FeatureProperties", {
+                {"type", "object"},
+                {"properties", {
+                    {"layer", {{"$ref", "#/$defs/AttributeLayerMap"}}}
+                }}
+            }},
+            {"AttributeLayerMap", {
+                {"type", "object"},
+                {"x-mapget", {
+                    {"metaType", "AttributeLayerMap"}
+                }},
+                {"properties", {
+                    {"Guidance", {{"$ref", "#/$defs/GuidanceLayer"}}}
+                }}
+            }},
+            {"GuidanceLayer", {
+                {"type", "object"},
+                {"x-mapget", {
+                    {"metaType", "AttributeContainer"}
+                }},
+                {"properties", {
+                    {"SPEED_LIMIT", {
+                        {"anyOf", nlohmann::json::array({
+                            {
+                                {"type", "object"},
+                                {"x-mapget", {
+                                    {"metaType", "Attribute"},
+                                    {"attributeTypeCode", "SPEED_LIMIT"},
+                                    {"rdsValueField", "speedLimit"}
+                                }},
+                                {"properties", {
+                                    {"speedLimit", {
+                                        {"type", "integer"},
+                                        {"minimum", 0},
+                                        {"maximum", 255}
+                                    }},
+                                    {"value", {
+                                        {"anyOf", nlohmann::json::array({
+                                            {{"type", "null"}},
+                                            {{"type", "integer"}},
+                                            {{"type", "string"}}
+                                        })}
+                                    }}
+                                }}
+                            },
+                            {
+                                {"type", "array"},
+                                {"items", {
+                                    {"type", "object"},
+                                    {"x-mapget", {
+                                        {"metaType", "Attribute"},
+                                        {"attributeTypeCode", "SPEED_LIMIT"},
+                                        {"rdsValueField", "speedLimit"}
+                                    }},
+                                    {"properties", {
+                                        {"speedLimit", {
+                                            {"type", "integer"},
+                                            {"minimum", 0},
+                                            {"maximum", 255}
+                                        }}
+                                    }}
+                                }}
+                            }
+                        })},
+                        {"x-mapget", {
+                            {"metaType", "Attribute"},
+                            {"attributeTypeCode", "SPEED_LIMIT"},
+                            {"rdsValueField", "speedLimit"}
+                        }},
+                        {"x-mapget-multimap", true}
+                    }}
+                }}
+            }}
+        }}
+    };
+
+    return {
+        {"layerId", "NDS.Classic-Routing"},
+        {"type", "Features"},
+        {"featureTypes", nlohmann::json::array({
+            {
+                {"name", "Link"},
+                {"uniqueIdCompositions", nlohmann::json::array({
+                    nlohmann::json::array({{{"partId", "linkId"}, {"datatype", "U32"}}})
                 })}
             }
         })},
@@ -413,6 +523,31 @@ void collectFeatureReferenceRows(
     }
 }
 
+/** Recursively collect inspection hover ids so URL-facing row identities can be asserted. */
+void collectInspectionHoverIds(
+    nlohmann::json const& node,
+    std::vector<std::string>& hoverIds)
+{
+    if (node.is_array()) {
+        for (auto const& child : node) {
+            collectInspectionHoverIds(child, hoverIds);
+        }
+        return;
+    }
+
+    if (!node.is_object()) {
+        return;
+    }
+
+    if (node.contains("hoverId")) {
+        hoverIds.push_back(node.value("hoverId", std::string{}));
+    }
+
+    if (node.contains("children")) {
+        collectInspectionHoverIds(node.at("children"), hoverIds);
+    }
+}
+
 bool hasRenderedPathGeometry(nlohmann::json const& renderResult)
 {
     auto const& pathWorld = renderResult["pathWorld"]["positions"];
@@ -504,6 +639,43 @@ TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[er
             std::pair<std::string, std::string>{"Way.3", "ValidationMap"}) != featureRefs.end());
 }
 
+TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto firstLayer = feature->attributeLayers()->newLayer("first-layer");
+    auto first = firstLayer->newAttribute("first");
+    first->addField("value", tile->newValue(int64_t(1)));
+    auto secondLayer = feature->attributeLayers()->newLayer("second-layer");
+    auto second = secondLayer->newAttribute("second");
+    second->addField("value", tile->newValue(int64_t(2)));
+    second->validity()->newFeatureId(
+        tile->newFeatureId("Way", {{"wayId", 1}}),
+        mapget::Validity::Positive);
+
+    auto inspection = InspectionConverter().convert(feature);
+    std::vector<std::string> hoverIds;
+    collectInspectionHoverIds(*inspection, hoverIds);
+
+    REQUIRE(
+        std::find(
+            hoverIds.begin(),
+            hoverIds.end(),
+            "Way.1:attribute#0") != hoverIds.end());
+    REQUIRE(
+        std::find(
+            hoverIds.begin(),
+            hoverIds.end(),
+            "Way.1:attribute#1") != hoverIds.end());
+    REQUIRE(
+        std::find(
+            hoverIds.begin(),
+            hoverIds.end(),
+            "Way.1:attribute#1:validity#0") != hoverIds.end());
+}
+
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
@@ -517,12 +689,18 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
 
     TileLayerParser parser;
     parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
+    auto const options = nlohmann::json::object();
 
-    REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimitKmh"));
+    REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimitKmh", options));
+    REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimitKmh > 80", options));
 
-    auto scopes = parser.getAttributeScopeForQuery("**.speedLimitKmh");
+    auto scopes = parser.getAttributeScopeForQuery("**.speedLimitKmh", options);
     REQUIRE(scopes.is_array());
     REQUIRE(scopes.size() == 2);
+
+    auto comparisonScopes = parser.getAttributeScopeForQuery("**.speedLimitKmh > 80", options);
+    REQUIRE(comparisonScopes.is_array());
+    REQUIRE(comparisonScopes.size() == 2);
 
     std::set<std::tuple<std::string, std::string, std::string>> scopeKeys;
     for (auto const& scope : scopes) {
@@ -537,6 +715,52 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
     REQUIRE(scopeKeys.contains({"Road", "Road", "RoadRulesLayer"}));
 }
 
+TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields", "[erdblick.search]")
+{
+    auto datasource = nlohmann::json{
+        {"nodeId", "ClassicScopeNode"},
+        {"mapId", "ClassicScopeMap"},
+        {"layers", {
+            {"NDS.Classic-Routing", classicSpeedLimitLayerInfoJson()}
+        }}
+    };
+
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
+    auto const options = nlohmann::json{
+        {"selectedMapLayers", nlohmann::json::array({
+            {
+                {"mapId", "ClassicScopeMap"},
+                {"layerId", "NDS.Classic-Routing"}
+            }
+        })}
+    };
+
+    REQUIRE(parser.isAttributeScopeSearchQuery("speedLimit < 80", options));
+    REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimit", options));
+    REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimit < 80", options));
+
+    auto scopes = parser.getAttributeScopeForQuery("**.speedLimit < 80", options);
+    REQUIRE(scopes.is_array());
+    REQUIRE(scopes.size() == 1);
+    REQUIRE(scopes.front().at("attrName") == "SPEED_LIMIT");
+    REQUIRE(scopes.front().at("attrLayerName") == "Guidance");
+    REQUIRE(scopes.front().at("featureType") == "Link");
+    REQUIRE(scopes.front().at("mapId") == "ClassicScopeMap");
+    REQUIRE(scopes.front().at("layerId") == "NDS.Classic-Routing");
+
+    auto styleFields = parser.searchStyleFieldsForQuery("**.speedLimit < 80", "auto", options);
+    REQUIRE(styleFields.is_array());
+    auto speedLimitField = std::ranges::find_if(styleFields, [](auto const& field) {
+        return field.at("path") == "speedLimit" && field.at("attrName") == "SPEED_LIMIT";
+    });
+    REQUIRE(speedLimitField != styleFields.end());
+    REQUIRE(speedLimitField->at("valueKind") == "integer");
+    REQUIRE(speedLimitField->contains("numericRange"));
+    REQUIRE(speedLimitField->at("numericRange").at("min").get<double>() == 0.0);
+    REQUIRE(speedLimitField->at("numericRange").at("max").get<double>() == 255.0);
+}
+
 TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
@@ -549,10 +773,11 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
 
     TileLayerParser parser;
     parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
+    auto const options = nlohmann::json::object();
 
-    REQUIRE(parser.isAttributeScopeSearchQuery("SPEED_LIMIT_END"));
+    REQUIRE(parser.isAttributeScopeSearchQuery("SPEED_LIMIT_END", options));
 
-    auto scopes = parser.getAttributeScopeForQuery("SPEED_LIMIT_END");
+    auto scopes = parser.getAttributeScopeForQuery("SPEED_LIMIT_END", options);
     REQUIRE(scopes.is_array());
     REQUIRE(scopes.size() == 2);
 
@@ -564,7 +789,7 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
     REQUIRE(attrNames.contains("WARNING_SIGN"));
     REQUIRE(attrNames.contains("MOVABLE_WARNING_SIGN"));
 
-    auto styleFields = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto");
+    auto styleFields = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
     REQUIRE(styleFields.is_array());
 
     std::set<std::pair<std::string, std::string>> fieldOwners;
@@ -632,22 +857,21 @@ TEST_CASE("Feature search diagnostics expose schema ASTs used by scope inference
     TileLayerParser parser;
     parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
 
-    auto diagnostics = parser.searchQueryAstDiagnostics("WARNING_SIGN", "auto");
+    auto diagnostics = parser.searchQueryAstDiagnostics("WARNING_SIGN", "auto", nlohmann::json::object());
     REQUIRE(diagnostics.is_array());
 
-    bool hasAutoScopeAst = false;
-    bool hasAttributeScopeAst = false;
+    bool hasCompiledAst = false;
+    bool hasLegacyAttributeScopeLabel = false;
     for (auto const& diagnostic : diagnostics) {
         auto const message = diagnostic.value("message", std::string{});
-        hasAutoScopeAst = hasAutoScopeAst
-            || (message.find("Auto-scope schema AST via WarningSignAstMap/Road/Road.RoadRulesLayer.WARNING_SIGN") != std::string::npos
+        hasCompiledAst = hasCompiledAst
+            || (message.find("Compiled query for WarningSignAstMap/Road/Road.RoadRulesLayer.WARNING_SIGN") != std::string::npos
                 && message.find("WARNING_SIGN") != std::string::npos);
-        hasAttributeScopeAst = hasAttributeScopeAst
-            || (message.find("Schema AST for attribute scope WarningSignAstMap/Road/Road.RoadRulesLayer.WARNING_SIGN") != std::string::npos
-                && message.find("WARNING_SIGN") != std::string::npos);
+        hasLegacyAttributeScopeLabel = hasLegacyAttributeScopeLabel
+            || message.find("Schema AST for attribute scope") != std::string::npos;
     }
-    REQUIRE(hasAutoScopeAst);
-    REQUIRE(hasAttributeScopeAst);
+    REQUIRE(hasCompiledAst);
+    REQUIRE_FALSE(hasLegacyAttributeScopeLabel);
 }
 
 TEST_CASE("FeatureStyleRuleLodFilterParsing", "[erdblick.style]")
@@ -906,13 +1130,77 @@ TEST_CASE("DeckTileSearchResultLayerVisualization does not connect point-cloud v
     std::vector<simfil::ModelNode::Ptr> values;
     layer->newSearchResult(featureId, geometry, values, 0U, 0U, 10U);
 
-    DeckTileSearchResultLayerVisualization visualization(0, "LineTestMap/LineLayer/0", R"json({})json");
+    DeckTileSearchResultLayerVisualization visualization(0, "LineTestMap/LineLayer/0", R"json({
+        "rules": [{
+            "geometry": "any",
+            "color": {"mode": "solid", "color": "#ea4336"}
+        }]
+    })json");
     visualization.addTileSearchResultLayer(TileSearchResultLayer(layer));
     visualization.run();
 
     auto result = nlohmann::json(visualization.renderResult());
     REQUIRE(result["pathWorld"]["positions"].empty());
     REQUIRE(result["pointWorld"]["positions"].size() == 30);
+}
+
+TEST_CASE("TileSearchResultLayer value summaries aggregate fields and typed traces", "[erdblick.search]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("SearchSummaryNode");
+    auto layer = std::make_shared<mapget::TileSearchResultLayer>(
+        mapget::TileId::fromWgs84(42.0, 11.0, 13),
+        strings->nodeId_,
+        "LineTestMap",
+        lineTestLayerInfo(),
+        strings);
+    layer->setResultFields({"speed", "category", "shape"});
+
+    auto geometry = layer->newGeometryCollection();
+    geometry->newGeometry(mapget::GeomType::Points)->append(layer->tileId().center());
+    auto firstFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
+    auto secondFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(2)}});
+    auto listValue = layer->newArray(1, true);
+    listValue->append(layer->newValue(int64_t(1)));
+    layer->newSearchResult(
+        firstFeatureId,
+        geometry,
+        std::vector<simfil::ModelNode::Ptr>{
+            layer->newValue(int64_t(50)),
+            layer->newValue("primary"),
+            layer->materializeValue(simfil::Value{
+                simfil::ValueType::Object,
+                simfil::model_ptr<simfil::ModelNode>(firstFeatureId)}),
+        });
+    layer->newSearchResult(
+        secondFeatureId,
+        geometry,
+        std::vector<simfil::ModelNode::Ptr>{
+            layer->newValue(int64_t(80)),
+            layer->newValue("secondary"),
+            layer->materializeValue(simfil::Value{
+                simfil::ValueType::Array,
+                simfil::model_ptr<simfil::ModelNode>(listValue)}),
+        });
+
+    simfil::Trace trace;
+    trace.calls = 3;
+    trace.totalus = std::chrono::microseconds{12};
+    trace.values.push_back(simfil::Value::make(int64_t(80)));
+    trace.values.push_back(simfil::Value::make(std::string("secondary")));
+    trace.values.push_back(simfil::Value::make(simfil::ByteArray{"AB"}));
+    layer->setTraces({{"debug", std::move(trace)}});
+
+    auto summary = nlohmann::json(TileSearchResultLayer(layer).valueSummaries(4, 16));
+    REQUIRE(summary["resultFields"].size() == 3);
+    REQUIRE(summary["resultFields"][0]["summary"]["numeric"]["min"].get<double>() == 50.0);
+    REQUIRE(summary["resultFields"][0]["summary"]["numeric"]["max"].get<double>() == 80.0);
+    REQUIRE(summary["resultFields"][0]["summary"]["numeric"]["average"].get<double>() == 65.0);
+    REQUIRE(summary["resultFields"][1]["summary"]["histogram"].size() == 2);
+    REQUIRE(summary["resultFields"][2]["summary"]["kinds"]["object"].get<double>() == 1.0);
+    REQUIRE(summary["resultFields"][2]["summary"]["kinds"]["list"].get<double>() == 1.0);
+    REQUIRE(summary["traces"][0]["name"] == "debug");
+    REQUIRE(summary["traces"][0]["calls"].get<double>() == 3.0);
+    REQUIRE(summary["traces"][0]["summary"]["kinds"]["blob"].get<double>() == 1.0);
 }
 
 TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdblick.renderer]")

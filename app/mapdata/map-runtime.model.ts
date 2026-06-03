@@ -88,6 +88,7 @@ export interface TileSearchResultLayerLike {
     nodeId(): string;
     resultFields?(): unknown;
     resultEntries?(): unknown;
+    valueSummaries?(histogramLimit: number, distinctLimit: number): unknown;
     numResults?(): unknown;
     tileId(): unknown;
     mapId(): string;
@@ -112,7 +113,7 @@ export interface SearchResultTilePayload {
     resultFields: string[];
     tilesConsidered?: number;
     tilesCompleted?: number;
-    traces: Record<string, unknown> | null;
+    layerBlob: Uint8Array;
     diagnostics: Uint8Array | null;
     entries: SearchResultTileEntry[];
 }
@@ -184,6 +185,7 @@ export interface FeatureSearchStyleFieldCandidate {
     featureType?: string;
     valueKind: FeatureSearchStyleValueKind;
     enumValues: string[];
+    numericRange?: {min: number; max: number};
 }
 
 /** Re-export of the native search status payload type used by feature-search UI state. */
