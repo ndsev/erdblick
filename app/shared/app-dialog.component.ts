@@ -127,6 +127,11 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.dialog?.close(event ?? new Event('close'));
     }
 
+    /** Starts PrimeNG's built-in dialog dragging from a projected header drag handle. */
+    startDrag(event: MouseEvent | PointerEvent): void {
+        this.dialog?.initDrag(event);
+    }
+
     /** Returns the underlying PrimeNG dialog wrapper element. */
     get wrapper() {
         return this.dialog?.wrapper;

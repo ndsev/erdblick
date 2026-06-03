@@ -10,6 +10,7 @@ import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
+import {displayFeatureId} from "../shared/tile-feature-id";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -35,7 +36,7 @@ import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from ".
                                         (dockRequest)="dock($event)"
                                         (closeRequest)="unsetPanel()"
                                         (focusRequest)="focusPanel()"
-                                        (dragPointerDown)="beginDrag()">
+                                        (dragPointerDown)="beginDrag($event)">
                         @if (isMetadata) {
                             <p-tag surfaceHeaderIndicator severity="info" value="META" [rounded]="true" />
                         } @else if (panel().sourceData !== undefined) {
@@ -193,7 +194,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 this.selectedLayerItem = undefined;
             }
         } else {
-            this.title = panel.features.length > 1 ? `Selected ${panel.features.length} features` : panel.features[0].featureId;
+            this.title = panel.features.length > 1 ? `Selected ${panel.features.length} features` : displayFeatureId(panel.features[0].featureId);
             this.layerMenuItems = [];
             this.selectedLayerItem = undefined;
         }
@@ -204,7 +205,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         event.stopPropagation();
         const p = this.panel();
         if (p.features.length) {
-            this.title = p.features.length > 1 ? `Selected ${p.features.length} features` : p.features[0].featureId;
+            this.title = p.features.length > 1 ? `Selected ${p.features.length} features` : displayFeatureId(p.features[0].featureId);
         }
         this.errorMessage = "";
         this.stateService.setSelection(p.features, p.id);
@@ -461,8 +462,11 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     }
 
     /** Freezes expensive inspection trees while the floating dialog is being dragged. */
-    protected beginDrag(): void {
+    protected beginDrag(event?: PointerEvent): void {
         this.focusPanel();
+        if (event) {
+            this.dialog?.startDrag(event);
+        }
         this.featurePanel?.freezeTree();
         this.sourceDataPanel?.freezeTree();
         this.detachPointerUpListener?.();

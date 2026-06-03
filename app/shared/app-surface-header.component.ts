@@ -1,4 +1,4 @@
-import {Component, EventEmitter, Input, Output, ViewChild} from '@angular/core';
+import {Component, EventEmitter, Input, OnDestroy, Output, ViewChild} from '@angular/core';
 import {NgClass} from '@angular/common';
 import {ButtonModule} from 'primeng/button';
 import {TooltipModule} from 'primeng/tooltip';
@@ -55,7 +55,7 @@ export interface AppSurfaceHeaderAction {
                             [pTooltip]="titleTooltip || (locked ? 'Unlock ' + title : 'Lock ' + title)"
                             tooltipPosition="bottom"
                             (click)="handleTitleClick($event)"
-                            (mousedown)="$event.stopPropagation()">
+                            (mousedown)="handleTitleMouseDown($event)">
                         <span class="material-symbols-outlined">
                             @if (locked) {
                                 lock
@@ -162,7 +162,9 @@ export interface AppSurfaceHeaderAction {
     imports: [ButtonModule, MenuModule, NgClass, TooltipModule]
 })
 /** Generic header used by docked panels and floating dialogs. */
-export class AppSurfaceHeaderComponent {
+export class AppSurfaceHeaderComponent implements OnDestroy {
+    private static readonly titleDragClickThresholdPx = 4;
+
     @Input() title = '';
     @Input() titleTooltip = '';
     @Input() titleIcon = '';
@@ -193,6 +195,9 @@ export class AppSurfaceHeaderComponent {
 
     @ViewChild('extraActionsMenu') private extraActionsMenu?: Menu;
     private extraActionsMenuAnchor?: HTMLElement;
+    private titleDragMoveListener?: (event: PointerEvent) => void;
+    private titleDragEndListener?: (event: PointerEvent) => void;
+    private suppressNextTitleClick = false;
 
     protected get dockTooltip(): string {
         return this.dockMode === 'dock' ? 'Dock' : 'Undock';
@@ -209,7 +214,11 @@ export class AppSurfaceHeaderComponent {
 
     protected onPointerDown(event: PointerEvent): void {
         this.focusRequest.emit(event);
-        if (!this.dragEnabled || event.button !== 0 || this.isInteractiveTarget(event.target as HTMLElement | null)) {
+        const target = event.target as HTMLElement | null;
+        if (this.dragEnabled && event.button === 0 && target?.closest('.app-surface-header-title')) {
+            this.trackTitleDragClickSuppression(event);
+        }
+        if (!this.dragEnabled || event.button !== 0 || this.isInteractiveTarget(target)) {
             return;
         }
         this.dragPointerDown.emit(event);
@@ -267,16 +276,80 @@ export class AppSurfaceHeaderComponent {
     }
 
     protected handleTitleClick(event: MouseEvent): void {
+        if (this.suppressNextTitleClick) {
+            this.suppressNextTitleClick = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
         event.stopPropagation();
         this.titleClick.emit(event);
+    }
+
+    protected handleTitleMouseDown(event: MouseEvent): void {
+        if (!this.dragEnabled) {
+            event.stopPropagation();
+        }
     }
 
     private isInteractiveTarget(target: HTMLElement | null): boolean {
         if (!target) {
             return false;
         }
+        if (target.closest('.app-surface-header-title')) {
+            return false;
+        }
         return !!target.closest(
             'button, .p-button, .p-colorpicker, .p-select, p-select, .p-dropdown, .p-multiselect, p-multiselect, .p-treeselect, p-treeselect, .p-toggleswitch, p-toggleswitch, p-iftalabel, input, textarea, select, option, a'
         );
+    }
+
+    /** Removes global drag tracking listeners if the header is destroyed mid-drag. */
+    ngOnDestroy(): void {
+        this.clearTitleDragTracking();
+    }
+
+    /** Detects title-bar drags so the click generated after mouseup does not toggle the lock state. */
+    private trackTitleDragClickSuppression(event: PointerEvent): void {
+        this.clearTitleDragTracking();
+        this.suppressNextTitleClick = false;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const pointerId = event.pointerId;
+        const thresholdSquared =
+            AppSurfaceHeaderComponent.titleDragClickThresholdPx *
+            AppSurfaceHeaderComponent.titleDragClickThresholdPx;
+
+        this.titleDragMoveListener = moveEvent => {
+            if (moveEvent.pointerId !== pointerId) {
+                return;
+            }
+            const dx = moveEvent.clientX - startX;
+            const dy = moveEvent.clientY - startY;
+            if (dx * dx + dy * dy >= thresholdSquared) {
+                this.suppressNextTitleClick = true;
+            }
+        };
+        this.titleDragEndListener = endEvent => {
+            if (endEvent.pointerId === pointerId) {
+                this.clearTitleDragTracking();
+            }
+        };
+        window.addEventListener('pointermove', this.titleDragMoveListener, true);
+        window.addEventListener('pointerup', this.titleDragEndListener, true);
+        window.addEventListener('pointercancel', this.titleDragEndListener, true);
+    }
+
+    /** Stops observing pointer movement while preserving the pending click-suppression flag. */
+    private clearTitleDragTracking(): void {
+        if (this.titleDragMoveListener) {
+            window.removeEventListener('pointermove', this.titleDragMoveListener, true);
+            this.titleDragMoveListener = undefined;
+        }
+        if (this.titleDragEndListener) {
+            window.removeEventListener('pointerup', this.titleDragEndListener, true);
+            window.removeEventListener('pointercancel', this.titleDragEndListener, true);
+            this.titleDragEndListener = undefined;
+        }
     }
 }

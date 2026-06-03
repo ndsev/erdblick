@@ -14,6 +14,7 @@ import {coreLib} from "../integrations/wasm";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
+import {displayFeatureId} from "../shared/tile-feature-id";
 
 /** Select option for switching between source-data layers within one inspected tile. */
 interface SourceLayerMenuItem {
@@ -230,7 +231,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
             } else {
                 this.title = panel.features.length > 1 ?
                     `Selected ${panel.features.length} features` :
-                    panel.features[0].featureId;
+                    displayFeatureId(panel.features[0].featureId);
                 this.layerMenuItems = [];
                 this.selectedLayerItem = undefined;
             }
@@ -430,6 +431,9 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     /** Checks whether an event target should keep its own pointer behavior. */
     private isInteractiveTarget(target: HTMLElement | null): boolean {
         if (!target) {
+            return false;
+        }
+        if (target.closest('.app-surface-header-title')) {
             return false;
         }
         return !!target.closest(
