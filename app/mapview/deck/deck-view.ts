@@ -19,7 +19,7 @@ import {MapRenderService, TileVisualizationRenderTask} from "../../mapdata/map-r
 import {InspectionSelectionService} from "../../inspection/inspection-selection.service";
 import {
     FeatureSearchService,
-    type FeatureSearchResultLayer
+    type FeatureSearchOverlayLayer
 } from "../../search/feature.search.service";
 import {featureSearchVisibleInView} from "../../shared/feature-search-state";
 import type {SearchResultDensityMarker, SearchResultPoint} from "../../search/search-result-density.model";
@@ -58,12 +58,12 @@ import {
     layoutSearchResultDensityMarkers,
     SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
     searchResultDensityCountDomain,
+    type SearchResultDensityCountDomain,
     type SearchResultDensityLayoutEntry
 } from "./deck-search-result-density.layer";
 import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 import {
     coarsenedTileGridLevels,
-    coarsenedTileLevel,
     tileGridExtentForLevel,
     tileGridLatToNormY,
     tileGridLonToNormX,
@@ -100,13 +100,21 @@ interface VisibleLayerRef {
 
 /** One active search layer together with the visible source tiles it contributes to this view. */
 interface SearchResultOverlayInput {
-    searchLayer: FeatureSearchResultLayer;
+    searchLayer: FeatureSearchOverlayLayer;
     dotLayerKey: string;
     labelLayerKey: string;
+    pinLayerKey: string;
     lowFiSourceTileKeys: Set<string>;
-    highFiPointMarkers: SearchResultDensityMarker[];
+    highFiPinMarkers: SearchResultDensityMarker[];
     targetLevel: number;
+    densitySizeScale: number;
     sourceTileKeySignature: string;
+}
+
+/** Search-result marker data plus its observed count range for one deck dot layer. */
+interface SearchResultOverlayLayerData {
+    markers: SearchResultDensityMarker[];
+    countDomain: SearchResultDensityCountDomain;
 }
 
 /** Shared rectangle overlay datum for tile outlines and jump-area highlights. */
@@ -162,6 +170,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly LOCATION_MARKER_ICON_NAME = "marker";
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
+    private static readonly SEARCH_RESULT_PIN_RENDER_SIZE_PX = 24;
     private static readonly VIEWPORT_BOUNDARY_SAMPLE_STEPS = 16;
     private static readonly UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
@@ -169,6 +178,8 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
     private static readonly SEARCH_RESULT_DENSITY_SIZE_SCALE = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE;
+    private static readonly SEARCH_RESULT_SOURCE_TILE_HASH_OFFSET = 0x811c9dc5;
+    private static readonly SEARCH_RESULT_SOURCE_TILE_HASH_PRIME = 0x01000193;
     private static readonly HOVER_PICK_THROTTLE_MS = 75;
     private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
@@ -554,7 +565,10 @@ export abstract class DeckMapView implements IRenderView {
             ? pickedObject.featureTileKeys as unknown[]
             : undefined;
         const objectFeatureAddresses = pickedObject?.featureAddresses ?? pickedObject?.featureAddress;
-        if (objectFeatureAddresses !== undefined && objectFeatureAddresses !== null) {
+        const objectFeatureAddressesAreBinaryBuffer = typeof objectFeatureAddresses === "object"
+            && objectFeatureAddresses !== null
+            && ArrayBuffer.isView(objectFeatureAddresses as ArrayBufferView);
+        if (objectFeatureAddresses !== undefined && objectFeatureAddresses !== null && !objectFeatureAddressesAreBinaryBuffer) {
             if (Array.isArray(objectFeatureAddresses)) {
                 return objectFeatureAddresses
                     .map((value, index) => {
@@ -1365,8 +1379,10 @@ export abstract class DeckMapView implements IRenderView {
      * sources forces a fresh TileLayer instance and tile selection pass.
      * The layer also prefers deck's `best-available` refinement so panning
      * keeps already loaded detailed tiles visible instead of collapsing to a
-     * coarse parent tile while sibling requests are still in flight. When
-     * `headers` are configured, tile requests use them for authenticated
+     * coarse parent tile while sibling requests are still in flight. Bitmap
+     * opacity is blended against the map's black background inside the shader
+     * so overlapping parent/child placeholders do not briefly compound alpha.
+     * When `headers` are configured, tile requests use them for authenticated
      * HTTP endpoints without changing local bundled backgrounds.
      */
     private createXyzBackgroundLayer(layerConfig: XyzBackgroundLayerConfig, opacity: number): TileLayer<string> {
@@ -1401,6 +1417,7 @@ export abstract class DeckMapView implements IRenderView {
                         boundingBox[1][1]
                     ],
                     opacity,
+                    transparentColor: [0, 0, 0, 255],
                     pickable: false,
                     parameters: {depthTest: false}
                 });
@@ -1525,27 +1542,30 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        const viewport = this.computeViewport();
-        if (!viewport) {
-            this.removeSearchResultLayers();
-            this.lastSearchResultsSignature = "";
-            return;
-        }
-
-        const searchLayers = this.featureSearchService.getSearchResultLayers()
+        const searchLayers = this.featureSearchService.getSearchResultOverlayLayers()
             .filter(searchLayer => featureSearchVisibleInView(searchLayer, this._viewIndex));
         const overlayInputs: SearchResultOverlayInput[] = searchLayers.map(searchLayer => {
             const lowFiSourceTileKeys = new Set<string>();
-            const highFiPointMarkers: SearchResultDensityMarker[] = [];
-            const sourceTileKeyParts: string[] = [];
+            const highFiPinMarkers: SearchResultDensityMarker[] = [];
+            const highFidelityByLevel = new Map<number, boolean>();
+            let sourceTileKeyHash = DeckMapView.SEARCH_RESULT_SOURCE_TILE_HASH_OFFSET;
+            let sourceTileKeyCount = 0;
             let maxVisibleLevel = 0;
             for (const bucket of searchLayer.pointBuckets) {
                 if (!this.mapViewState.showsFeatureSearchTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
                     continue;
                 }
-                if (this.mapRender.prefersHighFidelityForSearchResultTile(this._viewIndex, searchLayer.id, bucket.tileId)) {
+                const bucketLevel = Number(coreLib.getTileLevel(bucket.tileId));
+                sourceTileKeyHash = this.hashSearchResultSourceTileKey(sourceTileKeyHash, bucket.sourceTileKey);
+                sourceTileKeyCount += 1;
+                let highFidelityActive = highFidelityByLevel.get(bucketLevel);
+                if (highFidelityActive === undefined) {
+                    highFidelityActive = this.prefersHighFidelityForSearchResultOverlay(searchLayer, bucket.tileId);
+                    highFidelityByLevel.set(bucketLevel, highFidelityActive);
+                }
+                if (highFidelityActive) {
                     if (searchLayer.renderStrategy.showHighFiResultDots) {
-                        highFiPointMarkers.push(...bucket.points.map(point => this.searchResultPointMarker(point)));
+                        highFiPinMarkers.push(...bucket.points.map(point => this.searchResultPointMarker(point)));
                     }
                     continue;
                 }
@@ -1553,18 +1573,22 @@ export abstract class DeckMapView implements IRenderView {
                     continue;
                 }
                 lowFiSourceTileKeys.add(bucket.sourceTileKey);
-                sourceTileKeyParts.push(bucket.sourceTileKey);
-                maxVisibleLevel = Math.max(maxVisibleLevel, Number(coreLib.getTileLevel(bucket.tileId)));
+                maxVisibleLevel = Math.max(maxVisibleLevel, bucketLevel);
             }
-            const targetLevel = this.searchResultDensityTargetLevel(searchLayer, maxVisibleLevel, viewport);
+            const targetLevel = this.mapViewState.searchResultDensityTargetLevel(
+                this._viewIndex,
+                maxVisibleLevel,
+                searchLayer.renderStrategy.highFidelityMaxVisibleTiles);
             return {
                 searchLayer,
                 dotLayerKey: this.searchResultLayerKey(searchLayer.id, "dot"),
                 labelLayerKey: this.searchResultLayerKey(searchLayer.id, "label"),
+                pinLayerKey: this.searchResultLayerKey(searchLayer.id, "pin"),
                 lowFiSourceTileKeys,
-                highFiPointMarkers,
+                highFiPinMarkers,
                 targetLevel,
-                sourceTileKeySignature: sourceTileKeyParts.sort().join(",")
+                densitySizeScale: this.searchResultDensitySizeScale(searchLayer.renderStrategy.densitySizeMultiplier),
+                sourceTileKeySignature: `${sourceTileKeyCount}:${sourceTileKeyHash.toString(16)}`
             };
         });
 
@@ -1573,6 +1597,7 @@ export abstract class DeckMapView implements IRenderView {
                 input.searchLayer.id,
                 input.searchLayer.pointsVersion,
                 input.searchLayer.pointColor,
+                input.searchLayer.styleRuleCount,
                 JSON.stringify(input.searchLayer.renderStrategy),
                 input.targetLevel,
                 input.sourceTileKeySignature
@@ -1583,7 +1608,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.lastSearchResultsSignature = signature;
 
-        const densityMarkersByLayerKey = new Map<string, SearchResultDensityMarker[]>();
+        const densityMarkersByLayerKey = new Map<string, SearchResultOverlayLayerData>();
         const layoutEntries: SearchResultDensityLayoutEntry[] = [];
         for (const input of overlayInputs) {
             const lowFiDensityMarkers = input.lowFiSourceTileKeys.size > 0 && !input.searchLayer.densityIndex.isEmpty
@@ -1592,26 +1617,30 @@ export abstract class DeckMapView implements IRenderView {
                     targetLevel: input.targetLevel
                 })
                 : [];
-            const layerMarkers = [...lowFiDensityMarkers, ...input.highFiPointMarkers];
+            const layerMarkers = lowFiDensityMarkers;
             const countDomain = searchResultDensityCountDomain(layerMarkers);
             for (const marker of lowFiDensityMarkers) {
                 layoutEntries.push({
                     marker,
                     sortKey: `${input.searchLayer.id}\n${marker.resultKey}`,
-                    countDomain
+                    countDomain,
+                    sizeScale: input.densitySizeScale
                 });
             }
-            densityMarkersByLayerKey.set(input.dotLayerKey, layerMarkers);
+            densityMarkersByLayerKey.set(input.dotLayerKey, {markers: layerMarkers, countDomain});
         }
         layoutSearchResultDensityMarkers(layoutEntries, DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE);
 
         const nextKeys = new Set<string>();
         for (const input of overlayInputs) {
-            if ((densityMarkersByLayerKey.get(input.dotLayerKey)?.length ?? 0) > 0) {
+            if ((densityMarkersByLayerKey.get(input.dotLayerKey)?.markers.length ?? 0) > 0) {
                 nextKeys.add(input.dotLayerKey);
                 if (input.searchLayer.renderStrategy.showBucketLabels) {
                     nextKeys.add(input.labelLayerKey);
                 }
+            }
+            if (input.highFiPinMarkers.length > 0) {
+                nextKeys.add(input.pinLayerKey);
             }
         }
         for (const layerKey of this.searchResultLayerKeys) {
@@ -1622,18 +1651,18 @@ export abstract class DeckMapView implements IRenderView {
         this.searchResultLayerKeys = nextKeys;
 
         for (const input of overlayInputs) {
-            const layerMarkers = densityMarkersByLayerKey.get(input.dotLayerKey) ?? [];
-            if (layerMarkers.length) {
-                const countDomain = searchResultDensityCountDomain(layerMarkers);
+            const layerData = densityMarkersByLayerKey.get(input.dotLayerKey);
+            if (layerData?.markers.length) {
                 this.layerRegistry.upsert(
                     input.dotLayerKey,
                     createSearchResultDensityLayer({
                         id: input.dotLayerKey,
-                        data: layerMarkers,
+                        data: layerData.markers,
                         pickable: false,
-                        sizeScale: DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE,
+                        sizeScale: input.densitySizeScale,
                         dotColor: input.searchLayer.pointColorRgba,
-                        countDomain
+                        countDomain: layerData.countDomain,
+                        heatGradient: input.searchLayer.renderStrategy.densityHeatGradient
                     }),
                     650);
                 if (input.searchLayer.renderStrategy.showBucketLabels) {
@@ -1641,7 +1670,7 @@ export abstract class DeckMapView implements IRenderView {
                         input.labelLayerKey,
                         createSearchResultDensityLabelLayer({
                             id: input.labelLayerKey,
-                            data: layerMarkers,
+                            data: layerData.markers,
                             pickable: false
                         }),
                         651);
@@ -1650,33 +1679,94 @@ export abstract class DeckMapView implements IRenderView {
                 this.layerRegistry.remove(input.dotLayerKey);
                 this.layerRegistry.remove(input.labelLayerKey);
             }
+            if (input.highFiPinMarkers.length) {
+                this.layerRegistry.upsert(
+                    input.pinLayerKey,
+                    this.createSearchResultPinLayer(input.pinLayerKey, input.highFiPinMarkers, input.searchLayer.pointColorRgba),
+                    652);
+            } else {
+                this.layerRegistry.remove(input.pinLayerKey);
+            }
         }
     }
 
-    /**
-     * Selects a mapget tile level for low-fidelity density using the same visible-grid-cell basis as the fidelity switch.
-     * The search's high/low threshold is used as the aggregation budget, then relaxed by one level because dots are
-     * cheaper than high-fidelity geometry and benefit from a denser spatial distribution.
-     */
-    private searchResultDensityTargetLevel(
-        searchLayer: FeatureSearchResultLayer,
-        maxVisibleLevel: number,
-        viewport: Viewport
-    ): number {
-        if (!Number.isFinite(maxVisibleLevel) || maxVisibleLevel <= 0) {
-            return 0;
+    /** Returns whether this search wants high-fidelity overlay state for the supplied source tile. */
+    private prefersHighFidelityForSearchResultOverlay(
+        searchLayer: FeatureSearchOverlayLayer,
+        tileId: bigint
+    ): boolean {
+        const strategy = searchLayer.renderStrategy;
+        const hasHighFidelityVisualization = strategy.showHighFiResultDots
+            || (strategy.showHighFiGeometry && searchLayer.styleRuleCount > 0);
+        if (!hasHighFidelityVisualization) {
+            return false;
         }
-        const coarsenedLevel = coarsenedTileLevel(
-            maxVisibleLevel,
-            viewport,
-            searchLayer.renderStrategy.highFidelityMaxVisibleTiles,
-            this.tileGridMode
+        if (!strategy.showLowFiDots) {
+            return true;
+        }
+        return this.mapViewState.prefersHighFidelityForSearchResultTile(
+            this._viewIndex,
+            searchLayer.id,
+            tileId,
+            strategy.highFidelityMaxVisibleTiles
         );
-        return Math.min(maxVisibleLevel, coarsenedLevel + 1);
+    }
+
+    /** Applies the user-visible density marker size multiplier to the default deck icon scale. */
+    private searchResultDensitySizeScale(multiplier: number): number {
+        const normalizedMultiplier = Number.isFinite(multiplier)
+            ? Math.max(0.5, Math.min(10, multiplier))
+            : 1;
+        return DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE * normalizedMultiplier;
+    }
+
+    /** Creates the explicit per-feature high-fidelity result-pin layer. */
+    private createSearchResultPinLayer(
+        layerKey: string,
+        markers: SearchResultDensityMarker[],
+        color: [number, number, number, number]
+    ): IconLayer<SearchResultDensityMarker> {
+        const iconSize = DeckMapView.LOCATION_MARKER_ICON_SIZE_PX;
+        return new IconLayer<SearchResultDensityMarker>({
+            id: layerKey,
+            data: markers,
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            iconAtlas: this.featureSearchService.markerGraphics(),
+            iconMapping: {
+                [DeckMapView.LOCATION_MARKER_ICON_NAME]: {
+                    x: 0,
+                    y: 0,
+                    width: iconSize,
+                    height: iconSize,
+                    anchorX: iconSize / 2,
+                    anchorY: iconSize,
+                    mask: true
+                }
+            },
+            getIcon: () => DeckMapView.LOCATION_MARKER_ICON_NAME,
+            getPosition: marker => marker.coordinates,
+            getColor: () => color,
+            getSize: () => DeckMapView.SEARCH_RESULT_PIN_RENDER_SIZE_PX,
+            sizeUnits: "pixels",
+            billboard: true,
+            pickable: false,
+            alphaCutoff: 0.05,
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS
+        });
+    }
+
+    /** Updates the FNV-1a source-key hash used to avoid sorting visible search tiles per overlay refresh. */
+    private hashSearchResultSourceTileKey(hash: number, sourceTileKey: string): number {
+        let nextHash = hash;
+        for (let index = 0; index < sourceTileKey.length; index++) {
+            nextHash ^= sourceTileKey.charCodeAt(index);
+            nextHash = Math.imul(nextHash, DeckMapView.SEARCH_RESULT_SOURCE_TILE_HASH_PRIME);
+        }
+        return nextHash >>> 0;
     }
 
     /** Returns a stable deck-layer key for one feature-search session. */
-    private searchResultLayerKey(searchId: string, kind: "dot" | "label"): string {
+    private searchResultLayerKey(searchId: string, kind: "dot" | "label" | "pin"): string {
         return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}/${kind}`;
     }
 

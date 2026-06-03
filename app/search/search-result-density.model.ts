@@ -26,6 +26,7 @@ export interface SearchResultPointBucket {
     mapId: string;
     layerId: string;
     tileId: bigint;
+    requestOrder: number;
     points: SearchResultPoint[];
 }
 

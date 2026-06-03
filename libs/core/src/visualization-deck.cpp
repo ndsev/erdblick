@@ -1556,9 +1556,18 @@ void DeckTileSearchResultLayerVisualization::run()
         if (!result) {
             continue;
         }
-        resultFeatureIds_[resultIndex] = result->featureId()
+        auto resultFeatureId = result->featureId()
             ? result->featureId()->toString()
             : std::string{};
+        if (!resultFeatureId.empty()) {
+            if (auto attributeIndex = result->attributeIndex()) {
+                resultFeatureId += ":attribute#" + std::to_string(*attributeIndex);
+                if (auto validityIndex = result->validityIndex()) {
+                    resultFeatureId += ":validity#" + std::to_string(*validityIndex);
+                }
+            }
+        }
+        resultFeatureIds_[resultIndex] = std::move(resultFeatureId);
         auto geometryCollection = result->geometry();
         if (!geometryCollection) {
             continue;
@@ -1595,31 +1604,34 @@ void DeckTileSearchResultLayerVisualization::appendResultGeometry(
     }
 
     auto const style = styleForResultGeometry(result, geometry->geomType());
+    if (!style) {
+        return;
+    }
     switch (geometry->geomType()) {
     case mapget::GeomType::Points: {
         geometry->forEachPoint([&](auto const& point) {
-            appendPoint(point, resultIndex, style);
+            appendPoint(point, resultIndex, *style);
             return true;
         });
         break;
     }
     case mapget::GeomType::Line:
-        appendPath(geometryPoints(geometry), resultIndex, style);
+        appendPath(geometryPoints(geometry), resultIndex, *style);
         break;
     case mapget::GeomType::Polygon:
-        appendSurface(geometryPoints(geometry), geometryPolygonRingStarts(geometry), resultIndex, style);
+        appendSurface(geometryPoints(geometry), geometryPolygonRingStarts(geometry), resultIndex, *style);
         break;
     case mapget::GeomType::Mesh:
-        appendSurface(geometryPoints(geometry), {}, resultIndex, style);
+        appendSurface(geometryPoints(geometry), {}, resultIndex, *style);
         break;
     case mapget::GeomType::AABB:
-        appendAabbFootprint(geometry->aabbOrigin(), geometry->aabbSize(), resultIndex, style);
+        appendAabbFootprint(geometry->aabbOrigin(), geometry->aabbSize(), resultIndex, *style);
         break;
     case mapget::GeomType::GltfNodeIndex:
         // Search-result rendering intentionally stays self-contained. GLTF hits
         // therefore render as their copied bounds instead of depending on a
         // source tile GLB asset being resident in the client.
-        appendAabbFootprint(geometry->gltfNodeAabbOrigin(), geometry->gltfNodeAabbSize(), resultIndex, style);
+        appendAabbFootprint(geometry->gltfNodeAabbOrigin(), geometry->gltfNodeAabbSize(), resultIndex, *style);
         break;
     }
 }
@@ -1713,7 +1725,7 @@ void DeckTileSearchResultLayerVisualization::appendAabbFootprint(
     }, {}, resultIndex, style);
 }
 
-DeckTileSearchResultLayerVisualization::SearchResolvedStyle
+std::optional<DeckTileSearchResultLayerVisualization::SearchResolvedStyle>
 DeckTileSearchResultLayerVisualization::styleForResultGeometry(
     mapget::model_ptr<mapget::SearchResult> const& result,
     mapget::GeomType geomType) const
@@ -1731,7 +1743,7 @@ DeckTileSearchResultLayerVisualization::styleForResultGeometry(
             rule.opacity ? opacityByte(*rule.opacity, rule.fallbackSurfaceColor[3]) : rule.fallbackSurfaceColor[3]);
         return resolved;
     }
-    return fallbackStyle_;
+    return std::nullopt;
 }
 
 bool DeckTileSearchResultLayerVisualization::ruleMatches(

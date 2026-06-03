@@ -7,6 +7,7 @@ export interface SearchResultDensityLayerProps extends IconLayerProps<SearchResu
     data: SearchResultDensityMarker[];
     dotColor: [number, number, number, number];
     countDomain?: SearchResultDensityCountDomain;
+    heatGradient?: boolean;
 }
 
 /** Public props for low-fidelity search-result bucket labels. */
@@ -18,6 +19,7 @@ export interface SearchResultDensityLayoutEntry {
     marker: SearchResultDensityMarker;
     sortKey: string;
     countDomain?: SearchResultDensityCountDomain;
+    sizeScale?: number;
 }
 
 export interface SearchResultDensityCountDomain {
@@ -77,6 +79,30 @@ function searchResultDensitySizeScale(
         + clamped * (SEARCH_RESULT_DENSITY_MAX_SIZE_FACTOR - SEARCH_RESULT_DENSITY_MIN_SIZE_FACTOR);
 }
 
+/** Maps an aggregate count into a blue-yellow-red heat color for density mode. */
+function searchResultDensityHeatColor(
+    count: number,
+    countDomain: SearchResultDensityCountDomain,
+    alpha: number
+): [number, number, number, number] {
+    const minCount = Math.max(1, Math.floor(countDomain.min));
+    const maxCount = Math.max(minCount, Math.floor(countDomain.max));
+    const normalized = maxCount > minCount
+        ? (Math.log10(Math.max(1, count)) - Math.log10(minCount))
+            / Math.max(1e-6, Math.log10(maxCount) - Math.log10(minCount))
+        : 1;
+    const t = Math.max(0, Math.min(1, normalized));
+    const lower: [number, number, number] = t < 0.5 ? [40, 112, 255] : [255, 214, 64];
+    const upper: [number, number, number] = t < 0.5 ? [255, 214, 64] : [238, 66, 45];
+    const localT = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+    return [
+        Math.round(lower[0] + (upper[0] - lower[0]) * localT),
+        Math.round(lower[1] + (upper[1] - lower[1]) * localT),
+        Math.round(lower[2] + (upper[2] - lower[2]) * localT),
+        alpha
+    ];
+}
+
 /** Returns the compact bucket label shown inside a low-fidelity search-result dot. */
 export function searchResultDensityBucketLabel(size: number): string {
     const count = Number.isFinite(size) ? Math.floor(size) : 0;
@@ -126,7 +152,7 @@ export function layoutSearchResultDensityMarkers(
         const maxIconSize = Math.max(
             ...tileEntries.map(entry => searchResultDensityRenderSizePixels(
                 entry.marker.count,
-                sizeScale,
+                entry.sizeScale ?? sizeScale,
                 entry.countDomain
             ))
         );
@@ -160,7 +186,9 @@ export function createSearchResultDensityLayer(props: SearchResultDensityLayerPr
         getPixelOffset: marker => marker.pixelOffset ?? [0, 0],
         getIcon: () => "dot",
         getSize: marker => searchResultDensitySizeScale(marker.count, countDomain),
-        getColor: () => props.dotColor,
+        getColor: marker => props.heatGradient
+            ? searchResultDensityHeatColor(marker.count, countDomain, props.dotColor[3])
+            : props.dotColor,
         sizeScale: props.sizeScale ?? SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
         sizeUnits: "pixels",
         alphaCutoff: 0.05

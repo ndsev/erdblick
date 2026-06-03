@@ -393,7 +393,7 @@ private:
         mapget::Point const& sizeWgs,
         uint32_t resultIndex,
         SearchResolvedStyle const& style);
-    [[nodiscard]] SearchResolvedStyle styleForResultGeometry(
+    [[nodiscard]] std::optional<SearchResolvedStyle> styleForResultGeometry(
         mapget::model_ptr<mapget::SearchResult> const& result,
         mapget::GeomType geomType) const;
     [[nodiscard]] bool ruleMatches(

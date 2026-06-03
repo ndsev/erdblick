@@ -6,7 +6,7 @@ import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstat
 import {RenderRectangle} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import {Viewport} from "../../build/libs/core/erdblick-core";
-import {tileGridVisibleCellCount} from "./tile-grid-visibility";
+import {coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibility";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
@@ -30,6 +30,7 @@ export enum ViewRecalculationReason {
 @Injectable({providedIn: "root"})
 export class MapViewStateService {
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
+    private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
 
     readonly viewStateChanged = new Subject<ViewRecalculationReason | string>();
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
@@ -114,17 +115,58 @@ export class MapViewStateService {
 
     /** Returns viewport tile ids for one level, even when no currently visible map layer uses that level. */
     visibleTileIdsForLevel(viewIndex: number, level: number): bigint[] {
+        return this.ensureVisibleTileIdsForLevel(viewIndex, level);
+    }
+
+    /** Returns full viewport tile ids for search coverage without applying the regular tile-load limit. */
+    visibleSearchTileIdsForLevel(viewIndex: number, level: number): bigint[] {
+        return this.ensureVisibleSearchTileIdsForLevel(viewIndex, level);
+    }
+
+    /** Returns viewport tile ids as a set for hot-path source-tile visibility checks. */
+    visibleTileIdSetForLevel(viewIndex: number, level: number): Set<bigint> {
         const viewState = this.viewVisualizationState[viewIndex];
         if (!viewState || !Number.isFinite(level)) {
-            return [];
+            return new Set<bigint>();
         }
         const normalizedLevel = Math.max(0, Math.floor(level));
-        const cached = viewState.visibleTileIdsPerLevel.get(normalizedLevel);
-        if (cached) {
-            return cached;
+        const cachedSet = viewState.visibleTileIdSetsPerLevel.get(normalizedLevel);
+        if (cachedSet) {
+            return cachedSet;
         }
-        const tileLimit = this.stateService.tilesLoadLimit / Math.max(1, this.stateService.numViews);
-        return coreLib.getTileIds(viewState.viewport, normalizedLevel, tileLimit) as bigint[];
+        const visibleTileIds = this.ensureVisibleTileIdsForLevel(viewIndex, normalizedLevel);
+        const visibleTileIdSet = new Set<bigint>(visibleTileIds);
+        viewState.visibleTileIdSetsPerLevel.set(normalizedLevel, visibleTileIdSet);
+        return visibleTileIdSet;
+    }
+
+    /**
+     * Selects a low-fidelity search density level from the same visible grid-cell budget used by tile-grid overlays.
+     *
+     * Search dots are cheaper than full result geometry, so the caller may request a one-level finer aggregate than
+     * the strict coarsened level while still capping the result at the source tile level.
+     */
+    searchResultDensityTargetLevel(
+        viewIndex: number,
+        sourceLevel: number,
+        maxVisibleCells: number,
+        preferOneLevelFiner = true
+    ): number {
+        if (!Number.isFinite(sourceLevel) || sourceLevel <= 0) {
+            return 0;
+        }
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState) {
+            return Math.max(0, Math.floor(sourceLevel));
+        }
+        const normalizedLevel = Math.max(0, Math.floor(sourceLevel));
+        const coarsenedLevel = coarsenedTileLevel(
+            normalizedLevel,
+            viewState.viewport,
+            maxVisibleCells,
+            this.mapInfo.maps.getViewTileGridMode(viewIndex)
+        );
+        return Math.min(normalizedLevel, coarsenedLevel + (preferOneLevelFiner ? 1 : 0));
     }
 
     /** Returns whether a feature tile id is currently inside one view's visible tile set and layer state. */
@@ -143,7 +185,63 @@ export class MapViewStateService {
         if (coreLib.getTileLevel(tileId) !== level) {
             return false;
         }
-        return this.visibleTileIdsForLevel(viewIndex, level).some(visibleTileId => visibleTileId === tileId);
+        return this.visibleSearchTileIdSetForLevel(viewIndex, level).has(tileId);
+    }
+
+    /** Materializes and caches viewport tile ids for one level when regular feature rendering did not need it yet. */
+    private ensureVisibleTileIdsForLevel(viewIndex: number, level: number): bigint[] {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState || !Number.isFinite(level)) {
+            return [];
+        }
+        const normalizedLevel = Math.max(0, Math.floor(level));
+        const cached = viewState.visibleTileIdsPerLevel.get(normalizedLevel);
+        if (cached) {
+            return cached;
+        }
+        const tileLimit = this.stateService.tilesLoadLimit / Math.max(1, this.stateService.numViews);
+        const visibleTileIds = coreLib.getTileIds(viewState.viewport, normalizedLevel, tileLimit) as bigint[];
+        viewState.visibleTileIdsPerLevel.set(normalizedLevel, visibleTileIds);
+        viewState.visibleTileIdSetsPerLevel.set(normalizedLevel, new Set<bigint>(visibleTileIds));
+        return visibleTileIds;
+    }
+
+    /** Returns full search coverage as a cached set for visibility checks on search-result tiles. */
+    private visibleSearchTileIdSetForLevel(viewIndex: number, level: number): Set<bigint> {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState || !Number.isFinite(level)) {
+            return new Set<bigint>();
+        }
+        const normalizedLevel = Math.max(0, Math.floor(level));
+        const cachedSet = viewState.searchVisibleTileIdSetsPerLevel.get(normalizedLevel);
+        if (cachedSet) {
+            return cachedSet;
+        }
+        const visibleTileIds = this.ensureVisibleSearchTileIdsForLevel(viewIndex, normalizedLevel);
+        const visibleTileIdSet = new Set<bigint>(visibleTileIds);
+        viewState.searchVisibleTileIdSetsPerLevel.set(normalizedLevel, visibleTileIdSet);
+        return visibleTileIdSet;
+    }
+
+    /** Materializes search coverage at the native ceiling instead of the user-facing tile-load limit. */
+    private ensureVisibleSearchTileIdsForLevel(viewIndex: number, level: number): bigint[] {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState || !Number.isFinite(level)) {
+            return [];
+        }
+        const normalizedLevel = Math.max(0, Math.floor(level));
+        const cached = viewState.searchVisibleTileIdsPerLevel.get(normalizedLevel);
+        if (cached) {
+            return cached;
+        }
+        const visibleTileIds = coreLib.getTileIds(
+            viewState.viewport,
+            normalizedLevel,
+            MapViewStateService.SEARCH_COVERAGE_TILE_LIMIT
+        ) as bigint[];
+        viewState.searchVisibleTileIdsPerLevel.set(normalizedLevel, visibleTileIds);
+        viewState.searchVisibleTileIdSetsPerLevel.set(normalizedLevel, new Set<bigint>(visibleTileIds));
+        return visibleTileIds;
     }
 
     /** Returns the set of feature levels that are currently visible in one view across all layers. */

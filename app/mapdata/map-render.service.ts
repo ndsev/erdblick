@@ -966,8 +966,12 @@ export class MapRenderService {
         const request = this.tileStream.activeFeatureSearchRequest(searchId);
         if (!request?.showResultsOnMap
             || !featureSearchVisibleInView(request, viewIndex)
-            || !request.renderStrategy.showHighFiGeometry) {
+            || !request.renderStrategy.showHighFiGeometry
+            || (request.searchStyleRules ?? []).length === 0) {
             return false;
+        }
+        if (!request.renderStrategy.showLowFiDots) {
+            return true;
         }
         return this.viewState.prefersHighFidelityForSearchResultTile(
             viewIndex,
