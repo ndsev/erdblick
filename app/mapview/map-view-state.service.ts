@@ -35,6 +35,7 @@ export class MapViewStateService {
     readonly viewStateChanged = new Subject<ViewRecalculationReason | string>();
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
+    readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
     readonly viewVisualizationState: ViewVisualizationState[] = [];
 
     constructor(

@@ -30,12 +30,14 @@ interface LocateResponse {
 export interface SearchTarget {
     id: string;
     icon: string;
+    iconType?: "prime" | "material";
     color: string;
     name: string;
     label: string;
     enabled: boolean;
-    jump?: (value: string) => number[] | Rectangle | undefined;
-    execute?: (value: string) => void;
+    payload?: unknown;
+    jump?: (value: string, payload?: unknown) => number[] | Rectangle | undefined;
+    execute?: (value: string, payload?: unknown) => void;
     validate: (value: string) => boolean;
 }
 

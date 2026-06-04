@@ -46,6 +46,8 @@ const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 512;
+export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
+export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 export const MIN_MAP_ZOOM_STEP = 0.001;
 export const MAX_MAP_ZOOM_STEP = 1.0;
@@ -102,6 +104,15 @@ function normalizeFeatureSearchGrouping(value: unknown): number[] {
         result.push(numeric);
     }
     return result;
+}
+
+/** Clamps location-search hit limits from persisted state and preferences UI. */
+function clampLocationSearchResultLimit(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
+    }
+    return Math.min(MAX_LOCATION_SEARCH_RESULT_LIMIT, Math.max(1, Math.trunc(numeric)));
 }
 
 /** Version information shown in diagnostics and about dialogs. */
@@ -384,6 +395,14 @@ export class AppStateService implements OnDestroy {
         fromStorage: (payload: any): SearchStateValue => normalizeSearchStateValue(payload),
         urlParamName: 's',
         urlIncludeInVisualizationOnly: false
+    });
+
+    readonly locationSearchResultLimitState = this.createState<number>({
+        name: 'locationSearchResultLimit',
+        defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
+        schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
+        toStorage: (value: number) => clampLocationSearchResultLimit(value),
+        fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
     });
 
     readonly markerState = this.createState<boolean>({
@@ -1745,6 +1764,8 @@ export class AppStateService implements OnDestroy {
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
+    get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
+    set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
     get search() {return this.searchState.getValue();}
     set search(val: SearchStateValue) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}

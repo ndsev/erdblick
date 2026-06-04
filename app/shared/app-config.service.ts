@@ -73,6 +73,57 @@ export interface WmsBackgroundLayerConfig extends BackgroundLayerBaseConfig {
 /** Discriminated union of every currently supported background-layer type. */
 export type BackgroundLayerConfig = XyzBackgroundLayerConfig | WmsBackgroundLayerConfig;
 
+export type LocationSearchFieldSelector = string | number | boolean | {
+    path?: string;
+    value?: string | number | boolean;
+    template?: string;
+};
+
+export interface LocationSearchAdapterFieldsConfig {
+    id?: LocationSearchFieldSelector;
+    name?: LocationSearchFieldSelector;
+    lonLat?: LocationSearchFieldSelector;
+    longitude?: LocationSearchFieldSelector;
+    latitude?: LocationSearchFieldSelector;
+    aabb?: LocationSearchFieldSelector;
+    source?: LocationSearchFieldSelector;
+    countryCode?: LocationSearchFieldSelector;
+    population?: LocationSearchFieldSelector;
+}
+
+export interface LocationSearchBBoxAdapterConfig {
+    path: string;
+    format: "aabb" | "westSouthEastNorth" | "southNorthWestEast";
+}
+
+export interface LocationSearchAdapterConfig {
+    itemsPath?: string;
+    fields?: LocationSearchAdapterFieldsConfig;
+    lonLatOrder?: "lonLat" | "latLon";
+    bbox?: LocationSearchBBoxAdapterConfig;
+}
+
+/** One normalized location-search provider. */
+export interface LocationSearchProviderConfig {
+    id: string;
+    name: string;
+    url: string;
+    headers: Record<string, string>;
+    params?: Record<string, string | number | boolean>;
+    queryParam?: string;
+    limitParam?: string;
+    attribution?: string;
+    adapter?: LocationSearchAdapterConfig;
+    enabled: boolean;
+}
+
+/** Location-search configuration consumed by the search palette. */
+export interface LocationSearchConfig {
+    providers: LocationSearchProviderConfig[];
+    minCharacters: number;
+    debounceMs: number;
+}
+
 /** Raw config shape before defaults are applied. */
 export interface RawAppConfig {
     extensionModules?: ExtensionModulesConfig;
@@ -82,6 +133,7 @@ export interface RawAppConfig {
     state?: Record<string, unknown> | null;
     backgroundLayers?: RawBackgroundLayerConfig[];
     defaultBackgroundLayerId?: string | null;
+    locationSearch?: RawLocationSearchConfig;
 }
 
 /** `/config` payload consumed from mapget/mapviewer. */
@@ -110,6 +162,7 @@ export interface AppConfig {
     configStateHash: string;
     backgroundLayers: BackgroundLayerConfig[];
     defaultBackgroundLayerId: string | null;
+    locationSearch: LocationSearchConfig;
     serverConfig: AppServerConfigStatus;
 }
 
@@ -172,6 +225,62 @@ const BACKGROUND_LAYER_SCHEMA = z.union([
 
 type RawBackgroundLayerConfig = z.infer<typeof BACKGROUND_LAYER_SCHEMA>;
 
+const LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA = z.union([
+    z.string().min(1),
+    z.number(),
+    z.boolean(),
+    z.object({
+        path: z.string().min(1).optional(),
+        value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+        template: z.string().min(1).optional()
+    }).refine(value => value.path !== undefined || value.value !== undefined || value.template !== undefined)
+]);
+
+const LOCATION_SEARCH_ADAPTER_FIELDS_SCHEMA = z.object({
+    id: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    name: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    lonLat: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    longitude: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    latitude: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    aabb: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    source: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    countryCode: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional(),
+    population: LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA.optional()
+});
+
+const LOCATION_SEARCH_ADAPTER_SCHEMA = z.object({
+    itemsPath: z.string().min(1).optional(),
+    fields: LOCATION_SEARCH_ADAPTER_FIELDS_SCHEMA.optional(),
+    lonLatOrder: z.enum(["lonLat", "latLon"]).optional(),
+    bbox: z.object({
+        path: z.string().min(1),
+        format: z.enum(["aabb", "westSouthEastNorth", "southNorthWestEast"])
+    }).optional()
+});
+
+const LOCATION_SEARCH_PROVIDER_SCHEMA = z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    url: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    queryParam: z.string().min(1).optional(),
+    limitParam: z.string().min(1).optional(),
+    attribution: z.string().optional(),
+    adapter: LOCATION_SEARCH_ADAPTER_SCHEMA.optional(),
+    enabled: z.boolean().optional()
+});
+
+const LOCATION_SEARCH_SCHEMA = z.object({
+    providers: z.array(LOCATION_SEARCH_PROVIDER_SCHEMA).optional(),
+    minCharacters: z.coerce.number().int().optional(),
+    debounceMs: z.coerce.number().int().optional()
+});
+
+type RawLocationSearchConfig = z.infer<typeof LOCATION_SEARCH_SCHEMA>;
+type RawLocationSearchAdapterConfig = z.infer<typeof LOCATION_SEARCH_ADAPTER_SCHEMA>;
+type RawLocationSearchFieldSelector = z.infer<typeof LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA>;
+
 const RAW_APP_CONFIG_SCHEMA = z.object({
     extensionModules: z.object({
         jumpTargets: z.string().optional(),
@@ -182,7 +291,8 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     additionalStyles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
     state: z.record(z.string(), z.unknown()).nullable().optional(),
     backgroundLayers: z.array(BACKGROUND_LAYER_SCHEMA).optional(),
-    defaultBackgroundLayerId: z.string().nullable().optional()
+    defaultBackgroundLayerId: z.string().nullable().optional(),
+    locationSearch: LOCATION_SEARCH_SCHEMA.optional()
 }).passthrough();
 
 const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
@@ -218,6 +328,20 @@ const DEFAULT_SERVER_CONFIG_STATUS: AppServerConfigStatus = {
     datasourceConfigUnavailableReason: null
 };
 
+const DEFAULT_LOCATION_SEARCH_CONFIG: LocationSearchConfig = {
+    providers: [
+        {
+            id: "mapget-offline",
+            name: "Offline locations",
+            url: "/location",
+            headers: {},
+            enabled: true
+        }
+    ],
+    minCharacters: 2,
+    debounceMs: 150
+};
+
 const DEFAULT_APP_CONFIG: AppConfig = {
     extensionModules: {},
     surveys: [],
@@ -226,6 +350,7 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     configStateHash: "00000000",
     backgroundLayers: DEFAULT_BACKGROUND_LAYERS,
     defaultBackgroundLayerId: DEFAULT_BACKGROUND_LAYER_ID,
+    locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
     serverConfig: DEFAULT_SERVER_CONFIG_STATUS
 };
 
@@ -462,7 +587,15 @@ export class AppConfigService {
             additionalStyles: staticConfig.additionalStyles ? [...staticConfig.additionalStyles] : undefined,
             surveys: staticConfig.surveys ? [...staticConfig.surveys] : undefined,
             state: staticConfig.state ? {...staticConfig.state} : staticConfig.state ?? null,
-            backgroundLayers: staticConfig.backgroundLayers ? [...staticConfig.backgroundLayers] : undefined
+            backgroundLayers: staticConfig.backgroundLayers ? [...staticConfig.backgroundLayers] : undefined,
+            locationSearch: staticConfig.locationSearch
+                ? {
+                    ...staticConfig.locationSearch,
+                    providers: staticConfig.locationSearch.providers
+                        ? [...staticConfig.locationSearch.providers]
+                        : undefined
+                }
+                : undefined
         };
 
         if (Array.isArray(serverErdblickConfig.styles) && serverErdblickConfig.styles.length > 0) {
@@ -479,6 +612,25 @@ export class AppConfigService {
         }
         if (Array.isArray(serverErdblickConfig.backgroundLayers) && serverErdblickConfig.backgroundLayers.length > 0) {
             merged.backgroundLayers = [...serverErdblickConfig.backgroundLayers];
+        }
+        if (serverErdblickConfig.locationSearch && isPlainObject(serverErdblickConfig.locationSearch)) {
+            const mergedLocationSearch: RawLocationSearchConfig = {
+                ...(merged.locationSearch ?? {}),
+                providers: merged.locationSearch?.providers
+                    ? [...merged.locationSearch.providers]
+                    : undefined
+            };
+            const serverLocationSearch = serverErdblickConfig.locationSearch;
+            if (Array.isArray(serverLocationSearch.providers) && serverLocationSearch.providers.length > 0) {
+                mergedLocationSearch.providers = [...serverLocationSearch.providers];
+            }
+            if (serverLocationSearch.minCharacters !== undefined && Number.isFinite(serverLocationSearch.minCharacters)) {
+                mergedLocationSearch.minCharacters = serverLocationSearch.minCharacters;
+            }
+            if (serverLocationSearch.debounceMs !== undefined && Number.isFinite(serverLocationSearch.debounceMs)) {
+                mergedLocationSearch.debounceMs = serverLocationSearch.debounceMs;
+            }
+            merged.locationSearch = mergedLocationSearch;
         }
         if (typeof serverErdblickConfig.defaultBackgroundLayerId === "string"
             && serverErdblickConfig.defaultBackgroundLayerId.trim().length > 0) {
@@ -523,6 +675,7 @@ export class AppConfigService {
             rawConfig.defaultBackgroundLayerId ?? null,
             backgroundLayers
         );
+        const locationSearch = this.normalizeLocationSearch(rawConfig.locationSearch);
 
         return {
             extensionModules,
@@ -532,6 +685,7 @@ export class AppConfigService {
             configStateHash: this.hashConfigState(state),
             backgroundLayers,
             defaultBackgroundLayerId,
+            locationSearch,
             serverConfig: {...serverConfig}
         };
     }
@@ -633,6 +787,154 @@ export class AppConfigService {
             transparent: layer.transparent ?? false,
             vendorParameters: layer.vendorParameters ?? {}
         };
+    }
+
+    /** Normalizes configured location-search providers and behavior knobs. */
+    private normalizeLocationSearch(locationSearch: RawLocationSearchConfig | undefined): LocationSearchConfig {
+        const rawProviders = Array.isArray(locationSearch?.providers) && locationSearch.providers.length > 0
+            ? locationSearch.providers
+            : DEFAULT_LOCATION_SEARCH_CONFIG.providers;
+        const providers: LocationSearchProviderConfig[] = [];
+        const seenProviderIds = new Set<string>();
+        for (const provider of rawProviders) {
+            const id = provider.id.trim();
+            if (!id || seenProviderIds.has(id)) {
+                continue;
+            }
+            const name = provider.name.trim();
+            const url = provider.url.trim();
+            if (!name || !url) {
+                continue;
+            }
+            seenProviderIds.add(id);
+            const adapter = this.normalizeLocationSearchAdapter(provider.adapter);
+            const queryParam = provider.queryParam?.trim();
+            const limitParam = provider.limitParam?.trim();
+            const params = provider.params ?? {};
+            providers.push({
+                id,
+                name,
+                url,
+                headers: provider.headers ?? {},
+                ...(Object.keys(params).length > 0 ? {params} : {}),
+                ...(queryParam ? {queryParam} : {}),
+                ...(limitParam ? {limitParam} : {}),
+                ...(provider.attribution?.trim() ? {attribution: provider.attribution.trim()} : {}),
+                ...(adapter ? {adapter} : {}),
+                enabled: provider.enabled ?? true
+            });
+        }
+
+        return {
+            providers: providers.length ? providers : [...DEFAULT_LOCATION_SEARCH_CONFIG.providers],
+            minCharacters: this.clampInteger(locationSearch?.minCharacters, 1, 64, DEFAULT_LOCATION_SEARCH_CONFIG.minCharacters),
+            debounceMs: this.clampInteger(locationSearch?.debounceMs, 0, 2000, DEFAULT_LOCATION_SEARCH_CONFIG.debounceMs)
+        };
+    }
+
+    /** Normalizes a declarative provider adapter without allowing arbitrary executable mapping logic. */
+    private normalizeLocationSearchAdapter(adapter: RawLocationSearchAdapterConfig | undefined): LocationSearchAdapterConfig | undefined {
+        if (!adapter) {
+            return undefined;
+        }
+
+        const result: LocationSearchAdapterConfig = {};
+        if (typeof adapter.itemsPath === "string" && adapter.itemsPath.trim()) {
+            result.itemsPath = adapter.itemsPath.trim();
+        }
+        if (adapter.lonLatOrder) {
+            result.lonLatOrder = adapter.lonLatOrder;
+        }
+        if (adapter.bbox?.path?.trim()) {
+            result.bbox = {
+                path: adapter.bbox.path.trim(),
+                format: adapter.bbox.format
+            };
+        }
+
+        const fields = this.normalizeLocationSearchAdapterFields(adapter.fields);
+        if (fields && Object.keys(fields).length > 0) {
+            result.fields = fields;
+        }
+
+        return Object.keys(result).length > 0 ? result : undefined;
+    }
+
+    /** Normalizes field selectors used by a location-search adapter. */
+    private normalizeLocationSearchAdapterFields(
+        fields: RawLocationSearchAdapterConfig["fields"] | undefined): LocationSearchAdapterFieldsConfig | undefined {
+        if (!fields) {
+            return undefined;
+        }
+
+        const result: LocationSearchAdapterFieldsConfig = {};
+        const fieldNames: Array<keyof LocationSearchAdapterFieldsConfig> = [
+            "id",
+            "name",
+            "lonLat",
+            "longitude",
+            "latitude",
+            "aabb",
+            "source",
+            "countryCode",
+            "population"
+        ];
+
+        for (const fieldName of fieldNames) {
+            const selector = this.normalizeLocationSearchFieldSelector(fields[fieldName]);
+            if (selector !== undefined) {
+                result[fieldName] = selector;
+            }
+        }
+
+        return result;
+    }
+
+    /** Normalizes one path, constant, or template selector from config. */
+    private normalizeLocationSearchFieldSelector(
+        selector: RawLocationSearchFieldSelector | undefined): LocationSearchFieldSelector | undefined {
+        if (typeof selector === "string") {
+            const trimmed = selector.trim();
+            return trimmed ? trimmed : undefined;
+        }
+        if (typeof selector === "number") {
+            return Number.isFinite(selector) ? selector : undefined;
+        }
+        if (typeof selector === "boolean") {
+            return selector;
+        }
+        if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
+            return undefined;
+        }
+
+        const result: Exclude<LocationSearchFieldSelector, string | number | boolean> = {};
+        if (typeof selector.path === "string" && selector.path.trim()) {
+            result.path = selector.path.trim();
+        }
+        if (typeof selector.template === "string" && selector.template.trim()) {
+            result.template = selector.template.trim();
+        }
+        if (selector.value !== undefined) {
+            if (typeof selector.value === "string") {
+                const trimmed = selector.value.trim();
+                if (trimmed) {
+                    result.value = trimmed;
+                }
+            } else if (typeof selector.value === "boolean" || (typeof selector.value === "number" && Number.isFinite(selector.value))) {
+                result.value = selector.value;
+            }
+        }
+
+        return Object.keys(result).length > 0 ? result : undefined;
+    }
+
+    /** Clamps numeric config values into a stable integer range. */
+    private clampInteger(value: number | undefined, min: number, max: number, fallback: number): number {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return fallback;
+        }
+        return Math.max(min, Math.min(max, Math.round(numeric)));
     }
 
     /** Chooses a valid default background id or falls back to the first available layer. */

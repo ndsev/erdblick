@@ -5,7 +5,7 @@ import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounceTime, distinctUntilChanged, filter, skip, Subject, take} from "rxjs";
+import {debounce, debounceTime, distinctUntilChanged, skip, Subject, switchMap, timer, filter, take} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
@@ -20,11 +20,13 @@ import {
     LegacySearchHistoryEntry,
     normalizeResolvedSearchHistoryEntry,
     normalizeSearchHistoryEntry,
+    normalizeSearchHistoryPayload,
     sameSearchHistoryEntry,
     SearchHistoryEntry,
     SearchHistoryStateEntry,
     withSearchHistoryActionName
 } from "../shared/search-history";
+import {LocationSearchService, normalizeLocationSearchPayload} from "./location.search.service";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
@@ -72,7 +74,11 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                             <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle {{ item.color }}">
-                                    <i class="pi {{ item.icon }}"></i>
+                                    @if (item.iconType === 'material') {
+                                        <span class="material-symbols-outlined">{{ item.icon }}</span>
+                                    } @else {
+                                        <i class="pi {{ item.icon }}"></i>
+                                    }
                                 </span>
                                 <div class="search-option">
                                     <span class="search-option-name">{{ item.name }}</span>
@@ -93,7 +99,7 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                                         <br>
                                         <span [innerHTML]="item.label"></span>
                                     </div>
-                                    <p-button (click)="removeSearchHistoryEntry(item)" icon="pi pi-times" tabindex="-1"></p-button>
+                                    <p-button (click)="removeSearchHistoryEntry(item, $event)" icon="pi pi-times" tabindex="-1"></p-button>
                                 </div>
                             </div>
                         </div>
@@ -101,7 +107,11 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                             <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
                                  [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle grey">
-                                    <i class="pi {{ item.icon }}"></i>
+                                    @if (item.iconType === 'material') {
+                                        <span class="material-symbols-outlined">{{ item.icon }}</span>
+                                    } @else {
+                                        <i class="pi {{ item.icon }}"></i>
+                                    }
                                 </span>
                                 <div class="search-option">
                                     <span class="search-option-name">{{ item.name }}</span>
@@ -138,6 +148,7 @@ export class SearchPanelComponent implements AfterViewInit {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
 
     searchItems: Array<SearchTarget> = [];
+    private locationSearchItems: Array<SearchTarget> = [];
     private targetById = new Map<string, SearchTarget>();
     private targetByIdInput = "";
     activeSearchItems: Array<SearchTarget> = [];
@@ -149,6 +160,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
     /* Autocompletion */
     private searchInputChanged: Subject<void> = new Subject<void>();
+    private locationSearchQueryChanged: Subject<string> = new Subject<string>();
     completionItems: Array<CompletionCandidate> = [];
     completion = {
         // Position of the popup
@@ -287,7 +299,8 @@ export class SearchPanelComponent implements AfterViewInit {
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
-                private dialogStack: DialogStackService) {
+                private dialogStack: DialogStackService,
+                private locationSearchService: LocationSearchService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
 
         this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -295,12 +308,23 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
-            this.setCurrentSearchItems([
-                ...jumpTargets,
-                ...this.staticTargets
-            ]);
+            this.setCurrentSearchItems(this.currentSearchItems(jumpTargets));
             this.reloadSearchHistory();
             this.refreshSearchMenu();
+        });
+
+        this.locationSearchQueryChanged.pipe(
+            debounce(() => timer(this.locationSearchService.debounceMs)),
+            switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
+        ).subscribe(matches => {
+            this.locationSearchItems = matches.map(match => this.locationSearchService.createSearchTarget(match));
+            this.setCurrentSearchItems(this.currentSearchItems());
+            this.reloadSearchHistory();
+            this.refreshSearchMenu();
+        });
+
+        this.stateService.locationSearchResultLimitState.subscribe(() => {
+            this.locationSearchQueryChanged.next(this.searchInputValue);
         });
 
         // TODO: Get rid of map selection, as soon as we support
@@ -486,9 +510,20 @@ export class SearchPanelComponent implements AfterViewInit {
 
     /** Returns search targets applicable to an input value. */
     private searchItemsForValue(value: string): Array<SearchTarget> {
+        const locationItems = value === this.searchInputValue ? this.locationSearchItems : [];
         return [
             ...this.jumpService.getJumpTargetsForValue(value),
+            ...locationItems,
             ...this.staticTargetsForValue(value)
+        ];
+    }
+
+    /** Builds the search menu from current jump targets, async location matches, and static local actions. */
+    private currentSearchItems(jumpTargets: Array<SearchTarget> = this.jumpService.jumpTargets.getValue()): Array<SearchTarget> {
+        return [
+            ...jumpTargets,
+            ...this.locationSearchItems,
+            ...this.staticTargets
         ];
     }
 
@@ -516,6 +551,13 @@ export class SearchPanelComponent implements AfterViewInit {
 
     /** Finds the current search target represented by a history entry. */
     private resolveTargetForEntry(entry: SearchHistoryEntry): SearchTarget | undefined {
+        const locationPayload = normalizeLocationSearchPayload(entry.payload);
+        if (locationPayload) {
+            const locationTarget = this.locationSearchService.createSearchTarget(locationPayload);
+            if (locationTarget.id === entry.actionId) {
+                return locationTarget;
+            }
+        }
         if (entry.input === this.targetByIdInput) {
             return this.targetById.get(entry.actionId);
         }
@@ -528,11 +570,13 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!trimmedInput) {
             return null;
         }
+        const payload = normalizeSearchHistoryPayload(target.payload);
         return {
             version: 2,
             actionId: target.id,
             input: trimmedInput,
             actionName: target.name,
+            ...(payload !== undefined ? {payload} : {}),
             savedAt: Date.now()
         };
     }
@@ -603,6 +647,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 actionId: viewEntry.actionId,
                 input: viewEntry.input,
                 ...(viewEntry.actionName ? {actionName: viewEntry.actionName} : {}),
+                ...(viewEntry.payload !== undefined ? {payload: viewEntry.payload} : {}),
                 ...(viewEntry.savedAt !== undefined ? {savedAt: viewEntry.savedAt} : {})
             };
             const dedupeKey = historyEntryDedupeKey(refreshedEntry);
@@ -631,7 +676,10 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Removes one persisted history entry and mirrors the change back to app state.
      */
-    removeSearchHistoryEntry(entry: SearchHistoryEntry) {
+    removeSearchHistoryEntry(entry: SearchHistoryEntry, event?: Event) {
+        event?.preventDefault();
+        event?.stopPropagation();
+
         const key = historyEntryKey(entry);
         this.searchHistory = this.searchHistory.filter(historyEntry => historyEntryKey(historyEntry) !== key);
         this.writeSearchHistory(this.searchHistory.map(historyEntry => ({
@@ -639,6 +687,7 @@ export class SearchPanelComponent implements AfterViewInit {
             actionId: historyEntry.actionId,
             input: historyEntry.input,
             ...(historyEntry.actionName ? {actionName: historyEntry.actionName} : {}),
+            ...(historyEntry.payload !== undefined ? {payload: historyEntry.payload} : {}),
             ...(historyEntry.savedAt !== undefined ? {savedAt: historyEntry.savedAt} : {})
         })));
         this.reloadSearchHistory();
@@ -756,7 +805,7 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
      */
-    jumpToLocation(coordinates: number[] | undefined | Rectangle) {
+    jumpToLocation(coordinates: number[] | undefined | Rectangle, label?: string | null) {
         if (coordinates === null) {
             return;
         }
@@ -777,6 +826,14 @@ export class SearchPanelComponent implements AfterViewInit {
                 z: alt,
                 targetView: targetViewIndex
             });
+            if (label) {
+                this.mapService.showLocationLabelTopic.next({
+                    targetView: targetViewIndex,
+                    x: lon,
+                    y: lat,
+                    label
+                });
+            }
             this.jumpService.markedPosition.next(coordinates);
         } else {
             this.mapService.moveToRectangleTopic.next({
@@ -885,11 +942,14 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!value) {
             this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
-            this.setCurrentSearchItems([...this.jumpService.jumpTargets.getValue(), ...this.staticTargets]);
+            this.locationSearchItems = [];
+            this.locationSearchQueryChanged.next(value);
+            this.setCurrentSearchItems(this.currentSearchItems());
             this.refreshSearchMenu();
             return;
         }
         this.jumpService.targetValueSubject.next(value);
+        this.locationSearchQueryChanged.next(value);
         this.refreshSearchMenu();
     }
 
@@ -964,12 +1024,13 @@ export class SearchPanelComponent implements AfterViewInit {
             return;
         }
         if (item.jump !== undefined) {
-            this.jumpToLocation(item.jump(entry.input));
+            const payload = entry.payload ?? item.payload;
+            this.jumpToLocation(item.jump(entry.input, payload), this.locationSearchService.labelFromPayload(payload));
             return;
         }
 
         if (item.execute !== undefined) {
-            item.execute(entry.input);
+            item.execute(entry.input, entry.payload ?? item.payload);
             return;
         }
     }
@@ -1181,6 +1242,7 @@ export class SearchPanelComponent implements AfterViewInit {
             actionId: entry.actionId,
             input: entry.input,
             ...(entry.actionName ? {actionName: entry.actionName} : {}),
+            ...(entry.payload !== undefined ? {payload: entry.payload} : {}),
             ...(entry.savedAt !== undefined ? {savedAt: entry.savedAt} : {})
         });
     }

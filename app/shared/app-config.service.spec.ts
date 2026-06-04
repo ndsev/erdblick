@@ -264,4 +264,178 @@ describe("AppConfigService", () => {
         expect(config.surveys.length).toBe(1);
         expect(config.surveys[0].id).toBe("tooling-days-2026");
     });
+
+    it("uses the built-in offline location provider by default", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({});
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.locationSearch.providers).toEqual([
+            {
+                id: "mapget-offline",
+                name: "Offline locations",
+                url: "/location",
+                headers: {},
+                enabled: true
+            }
+        ]);
+        expect(config.locationSearch.minCharacters).toBe(2);
+        expect(config.locationSearch.debounceMs).toBe(150);
+    });
+
+    it("accepts location provider adapters from static config.json", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    locationSearch: {
+                        providers: [
+                            {
+                                id: "static-external",
+                                name: "Static external",
+                                url: "https://geocoder.example/search",
+                                params: {
+                                    format: "jsonv2",
+                                    addressdetails: 1
+                                },
+                                queryParam: "q",
+                                limitParam: "limit",
+                                adapter: {
+                                    itemsPath: "features",
+                                    fields: {
+                                        id: "id",
+                                        name: {template: "{properties.name}, {properties.country}"},
+                                        lonLat: "geometry.coordinates",
+                                        population: "properties.population",
+                                        source: {value: "static-geocoder"}
+                                    },
+                                    bbox: {
+                                        path: "bbox",
+                                        format: "westSouthEastNorth"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.locationSearch.providers[0]).toEqual({
+            id: "static-external",
+            name: "Static external",
+            url: "https://geocoder.example/search",
+            headers: {},
+            params: {
+                format: "jsonv2",
+                addressdetails: 1
+            },
+            queryParam: "q",
+            limitParam: "limit",
+            adapter: {
+                itemsPath: "features",
+                fields: {
+                    id: "id",
+                    name: {template: "{properties.name}, {properties.country}"},
+                    lonLat: "geometry.coordinates",
+                    population: "properties.population",
+                    source: {value: "static-geocoder"}
+                },
+                bbox: {
+                    path: "bbox",
+                    format: "westSouthEastNorth"
+                }
+            },
+            enabled: true
+        });
+    });
+
+    it("replaces location providers from non-empty server config", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    locationSearch: {
+                        providers: [
+                            {id: "static", name: "Static", url: "/static-location"}
+                        ],
+                        minCharacters: 3,
+                        debounceMs: 400
+                    }
+                });
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    datasourceConfigUnavailable: false,
+                    erdblick: {
+                        locationSearch: {
+                            providers: [
+                                {
+                                    id: "customer",
+                                    name: "Customer",
+                                    url: "https://geocoder.example/location",
+                                    headers: {"X-Project": "mapviewer"},
+                                    params: {
+                                        format: "jsonv2"
+                                    },
+                                    queryParam: "q",
+                                    adapter: {
+                                        itemsPath: "results",
+                                        fields: {
+                                            id: "place.id",
+                                            name: "place.label",
+                                            longitude: "position.lon",
+                                            latitude: "position.lat"
+                                        },
+                                        lonLatOrder: "lonLat"
+                                    },
+                                    enabled: false
+                                }
+                            ],
+                            minCharacters: 2,
+                            debounceMs: 200
+                        }
+                    }
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.locationSearch.providers).toEqual([
+            {
+                id: "customer",
+                name: "Customer",
+                url: "https://geocoder.example/location",
+                headers: {"X-Project": "mapviewer"},
+                params: {
+                    format: "jsonv2"
+                },
+                queryParam: "q",
+                adapter: {
+                    itemsPath: "results",
+                    fields: {
+                        id: "place.id",
+                        name: "place.label",
+                        longitude: "position.lon",
+                        latitude: "position.lat"
+                    },
+                    lonLatOrder: "lonLat"
+                },
+                enabled: false
+            }
+        ]);
+        expect(config.locationSearch.minCharacters).toBe(2);
+        expect(config.locationSearch.debounceMs).toBe(200);
+    });
 });

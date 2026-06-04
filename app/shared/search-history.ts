@@ -5,6 +5,7 @@ export interface SearchHistoryEntry {
     actionId: string;
     input: string;
     actionName?: string;
+    payload?: unknown;
     savedAt?: number;
 }
 
@@ -18,6 +19,7 @@ export const VersionedSearchHistoryEntrySchema = z.object({
     actionId: z.string(),
     input: z.string(),
     actionName: z.string().optional(),
+    payload: z.unknown().optional(),
     savedAt: z.coerce.number().optional()
 });
 
@@ -78,14 +80,32 @@ export function normalizeSearchHistoryEntry(raw: unknown): SearchHistoryStateEnt
     const savedAt = typeof value.savedAt === "number" && Number.isFinite(value.savedAt)
         ? value.savedAt
         : undefined;
+    const payload = normalizeSearchHistoryPayload(value.payload);
 
     return {
         version: 2,
         actionId,
         input,
         ...(actionName ? {actionName} : {}),
+        ...(payload !== undefined ? {payload} : {}),
         ...(savedAt !== undefined ? {savedAt} : {})
     };
+}
+
+/** Returns a small JSON-serializable payload value, or undefined when it is unsafe to persist. */
+export function normalizeSearchHistoryPayload(payload: unknown): unknown {
+    if (payload === undefined) {
+        return undefined;
+    }
+    try {
+        const serialized = JSON.stringify(payload);
+        if (serialized === undefined || serialized.length > 8192) {
+            return undefined;
+        }
+        return JSON.parse(serialized);
+    } catch {
+        return undefined;
+    }
 }
 
 /** Normalizes a raw resolved search history entry. */

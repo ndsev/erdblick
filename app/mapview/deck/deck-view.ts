@@ -8,7 +8,7 @@ import {
     type PickingInfo,
     WebMercatorViewport
 } from "@deck.gl/core";
-import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
+import {BitmapLayer, IconLayer, PolygonLayer, TextLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
@@ -130,6 +130,14 @@ interface DeckLocationMarkerDatum {
     position: [number, number];
 }
 
+/** Single transient place-name label datum for location-search jumps. */
+interface DeckLocationLabelDatum {
+    position: [number, number];
+    label: string;
+    textColor: [number, number, number, number];
+    backgroundColor: [number, number, number, number];
+}
+
 /** Metadata deck pick layers expose so `pickFeature()` can resolve addresses back to feature ids. */
 interface DeckPickLayerProps {
     tileKey?: string;
@@ -165,12 +173,14 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
     private static readonly SEARCH_RESULTS_LAYER_PREFIX = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
+    private static readonly LOCATION_LABEL_LAYER_KEY = "builtin/location-label";
     private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
     private static readonly CANVAS_USE_DEVICE_PIXELS = 1;
     private static readonly LOCATION_MARKER_ICON_NAME = "marker";
     private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
     private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
     private static readonly SEARCH_RESULT_PIN_RENDER_SIZE_PX = 24;
+    private static readonly LOCATION_LABEL_FADE_DURATION_MS = 4200;
     private static readonly VIEWPORT_BOUNDARY_SAMPLE_STEPS = 16;
     private static readonly UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
@@ -234,6 +244,7 @@ export abstract class DeckMapView implements IRenderView {
     private searchResultLayerKeys = new Set<string>();
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
+    private locationLabelTick: (() => void) | null = null;
     private isHoveringFeature = false;
     private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
     private pendingHoverInfo: PickingInfo | null = null;
@@ -364,8 +375,10 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
         this.removeSearchResultLayers();
         this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
         this.removeTileStateLayers();
         this.stopJumpAreaHighlight();
+        this.stopLocationLabel();
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
@@ -914,6 +927,15 @@ export abstract class DeckMapView implements IRenderView {
                     Cartographic.fromDegrees(value.x, value.y, alt),
                     this.stateService.getCameraOrientation(this._viewIndex)
                 );
+            })
+        );
+
+        this.subscriptions.push(
+            this.mapViewState.showLocationLabelTopic.subscribe(value => {
+                if (value.targetView !== this._viewIndex) {
+                    return;
+                }
+                this.startLocationLabel(value);
             })
         );
 
@@ -2327,6 +2349,70 @@ export abstract class DeckMapView implements IRenderView {
             this.jumpAreaHighlightTick = null;
         }
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
+    }
+
+    /** Starts a short-lived place-name label after a location-search jump. */
+    private startLocationLabel(value: {x: number; y: number; label: string}): void {
+        this.stopLocationLabel();
+
+        const longitude = Number(value.x);
+        const latitude = Number(value.y);
+        const label = value.label.trim().slice(0, 120);
+        if (!this.deck || !Number.isFinite(longitude) || !Number.isFinite(latitude) || !label) {
+            return;
+        }
+
+        const startTime = performance.now();
+        const tick = () => {
+            const elapsedMs = performance.now() - startTime;
+            const progress = Math.min(1, elapsedMs / DeckMapView.LOCATION_LABEL_FADE_DURATION_MS);
+            const alpha = Math.max(0, 1 - progress);
+            const data: DeckLocationLabelDatum[] = [{
+                position: [longitude, latitude],
+                label,
+                textColor: [255, 255, 255, Math.round(alpha * 255)],
+                backgroundColor: [0, 0, 0, Math.round(alpha * 235)]
+            }];
+            this.layerRegistry.upsert(DeckMapView.LOCATION_LABEL_LAYER_KEY, new TextLayer<DeckLocationLabelDatum>({
+                id: DeckMapView.LOCATION_LABEL_LAYER_KEY,
+                data,
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                getPosition: (datum: DeckLocationLabelDatum) => datum.position,
+                getText: (datum: DeckLocationLabelDatum) => datum.label,
+                getColor: (datum: DeckLocationLabelDatum) => datum.textColor,
+                getBackgroundColor: (datum: DeckLocationLabelDatum) => datum.backgroundColor,
+                getOutlineColor: () => [0, 0, 0, Math.round(alpha * 255)],
+                getOutlineWidth: () => 3,
+                getSize: () => 30,
+                sizeUnits: "pixels",
+                getTextAnchor: () => "middle",
+                getAlignmentBaseline: () => "bottom",
+                getPixelOffset: () => [0, -44],
+                background: true,
+                backgroundPadding: [14, 8],
+                billboard: true,
+                pickable: false,
+                parameters: DeckMapView.NO_DEPTH_PARAMETERS
+            } as any) as any, 720);
+            this.requestRender();
+
+            if (progress >= 1) {
+                this.stopLocationLabel();
+            }
+        };
+
+        this.locationLabelTick = tick;
+        this.onTick(tick);
+        tick();
+    }
+
+    /** Stops and removes the temporary location-search label overlay. */
+    private stopLocationLabel(): void {
+        if (this.locationLabelTick) {
+            this.offTick(this.locationLabelTick);
+            this.locationLabelTick = null;
+        }
+        this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
     }
 
     /** Converts Cesium-style colors to deck RGBA tuples with a caller-supplied fallback. */

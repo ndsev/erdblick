@@ -11,6 +11,8 @@ import {
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
     MAX_DECK_STYLE_WORKERS,
+    DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
+    MAX_LOCATION_SEARCH_RESULT_LIMIT,
     PREFERENCES_DIALOG_LAYOUT_ID,
     MIN_MAP_ZOOM_STEP,
     AppStateService,
@@ -72,6 +74,29 @@ import {environment} from "../environments/environment";
                               label=""
                               icon="pi pi-check"
                               [disabled]="!inspectionsLimitChanged"></p-button>
+                </div>
+            </div>
+            <p-divider></p-divider>
+            <div class="slider-container">
+                <label [for]="locationSearchResultLimitInput">Location Matches</label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="locationSearchResultLimitInput"
+                               (ngModelChange)="onLocationSearchResultLimitInputChange($event)"
+                               (keydown.enter)="applyLocationSearchResultLimit()"/>
+                        <p-slider [(ngModel)]="locationSearchResultLimitInput"
+                                  (ngModelChange)="onLocationSearchResultLimitSliderChange($event)"
+                                  class="w-full"
+                                  [min]="1"
+                                  [max]="MAX_LOCATION_SEARCH_RESULT_LIMIT"></p-slider>
+                    </div>
+                    <p-button (click)="applyLocationSearchResultLimit()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!locationSearchResultLimitChanged"></p-button>
                 </div>
             </div>
             <p-divider></p-divider>
@@ -231,6 +256,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number | string = 0;
     limitSimultaneousInspectionsInput: number | string = 0;
+    locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
     pinLowFiToMaxLodSetting: boolean = false;
@@ -239,6 +265,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
+    locationSearchResultLimitChanged: boolean = false;
     deckStyleWorkersCountChanged: boolean = false;
     mapZoomStepChanged: boolean = false;
     toggleOptions = [
@@ -273,6 +300,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.locationSearchResultLimitState.subscribe(limit => {
+            this.locationSearchResultLimitInput = limit;
         }));
         this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
@@ -321,10 +351,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
         this.tilesToLoadInput = this.stateService.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
+        this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
         this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
         this.mapZoomStepInput = this.stateService.mapZoomStep;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
+        this.locationSearchResultLimitChanged = false;
         this.deckStyleWorkersCountChanged = false;
         this.mapZoomStepChanged = false;
         this.dialogStack.bringToFront(this.preferencesDialog);
@@ -498,6 +530,20 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.messageService.showSuccess("Successfully updated inspections limit!");
     }
 
+    /** Commits the location result limit after validating the pending input. */
+    protected applyLocationSearchResultLimit() {
+        if (!this.locationSearchResultLimitChanged) {
+            return;
+        }
+        const limit = Number(this.locationSearchResultLimitInput);
+        if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_LOCATION_SEARCH_RESULT_LIMIT) {
+            this.messageService.showError(`Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`);
+            return;
+        }
+        this.stateService.locationSearchResultLimit = limit;
+        this.locationSearchResultLimitChanged = false;
+    }
+
     /** Tracks slider edits for the tile-load limit without applying them immediately. */
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
@@ -508,6 +554,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onInspectionsLimitSliderChange(value: number) {
         this.limitSimultaneousInspectionsInput = value;
         this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    /** Tracks slider edits for the location-search result limit. */
+    protected onLocationSearchResultLimitSliderChange(value: number) {
+        this.locationSearchResultLimitInput = value;
+        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.stateService.locationSearchResultLimit);
     }
 
     /** Tracks slider edits for the Deck render-worker count override. */
@@ -532,6 +584,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onInspectionsLimitInputChange(value: number | string) {
         this.limitSimultaneousInspectionsInput = value;
         this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    /** Tracks free-form edits for the location-search result limit. */
+    protected onLocationSearchResultLimitInputChange(value: number | string) {
+        this.locationSearchResultLimitInput = value;
+        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.stateService.locationSearchResultLimit);
     }
 
     /** Tracks free-form edits for the Deck render-worker count input. */
@@ -570,6 +628,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
+    protected readonly MAX_LOCATION_SEARCH_RESULT_LIMIT = MAX_LOCATION_SEARCH_RESULT_LIMIT;
     protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
