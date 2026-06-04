@@ -1,6 +1,6 @@
 # UI Basics
 
-Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock that can host inspection or SourceData panels. This guide explains the controls most users touch first.
+Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock that can host Search, inspection, or SourceData panels. This guide explains the controls most users touch first.
 
 !!! note "Focus on the layout before advanced features"
     If you are new to the viewer, get comfortable with the shell, map navigation, and Maps & Layers first. Search, inspection, SourceData, and diagnostics all build on those basics.
@@ -13,7 +13,7 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 2. **Main bar** – the top menu bar contains the search panel plus the main entry points for editing, view management, tools, and help.
 3. **Map view** – one or two active views, depending on whether split view is enabled.
 4. **Maps & Layers panel** – shows maps, feature layers, metadata actions, per-layer style options, and per-view layer controls.
-5. **Inspection dock** – hosts feature panels and SourceData panels. Panels can stay docked or be undocked into separate dialogs.
+5. **Dock** – hosts Search panels, feature panels, and SourceData panels. Panels can stay docked or be undocked into separate dialogs.
 6. **Diagnostics indicator** – summarizes tile progress, backend connectivity, and error presence.
 7. **Coordinate readout** – shows cursor coordinates and tile IDs and lets you place a shared marker.
 
@@ -112,9 +112,10 @@ For the feature workflow, continue with the [Feature Inspection Guide](erdblick-
 
 - jump actions for coordinates, tiles, feature IDs, and SourceData
 - feature search using Simfil expressions
+- persistent Search panels for results, visualization, and diagnostics
 - search history and inline validation
 
-The dedicated [Search Guide](erdblick-search.md) covers the available targets and query language in detail.
+The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets, persistent feature-search panels, result visualization, diagnostics, and the query language.
 
 ## Preferences and Resets
 

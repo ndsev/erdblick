@@ -21,6 +21,14 @@ Built-in styles that were edited locally show a **Modified** tag. Click it to op
 In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options.
 That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
 
+## YAML Styles and Search Result Styles
+
+YAML style sheets are persistent project-wide styling rules. They are loaded from the erdblick bundle, deployment configuration, additional style locations, or browser-imported YAML.
+
+Search result styles are configured inside a feature-search panel. They apply only to that search session's result layer and are stored with the search state. Use them when you want to quickly color, label, or filter the current result set without changing the shared project style sheets. The MapViewer [Search and Jump](../../../docs/mv-search.md#visualization) guide describes the Search panel controls.
+
+Both systems use the same rendering primitives and Simfil expression model. Datasource schemas improve both workflows by providing field completion, enum values, numeric ranges, and better picker defaults, but styles must still tolerate layers that do not publish schema metadata.
+
 ## Style Sheet Anatomy
 
 At the top level, a style sheet is usually split into two sections: a list of rendering `rules` and an optional set of `options` that expose toggles in the UI for each layer the style sheet applies to:
@@ -121,6 +129,63 @@ rules:
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
 | `arrow` / `arrow-expression` | `none`, `forward`, `backward`, or `double` arrowheads. Expressions can switch per feature. |
 | `point-merge-grid-cell` | `[x, y, z]` cell size for merging coincident POIs. When set, `$mergeCount` appears in the expression context. |
+
+## Rule Composition Examples
+
+Use `all-of` when one matched feature should emit several visual leaves. This example draws a casing line and a narrower center line from the same rule:
+
+```yaml
+rules:
+  - type: Road
+    geometry: [line]
+    all-of:
+      - width: 10
+        color: "#202020"
+      - width: 6
+        color: "#f6c344"
+```
+
+Use lateral offsets to draw parallel lines for the same feature or attribute family:
+
+```yaml
+rules:
+  - type: Road
+    geometry: [line]
+    all-of:
+      - width: 3
+        color: "#2f80ed"
+        lateral-offset: -1.5
+        offset-type: miter
+      - width: 3
+        color: "#eb5757"
+        lateral-offset: 1.5
+        offset-type: miter
+```
+
+Use `offset-increment` when repeated attribute or relation renderings need to stack apart from each other:
+
+```yaml
+rules:
+  - type: Road
+    aspect: attribute
+    attribute-layer-type: speedProfile
+    geometry: [line]
+    color: "#00a86b"
+    width: 4
+    offset-increment: [0.8, 0, 0]
+```
+
+Labels are regular style leaves. Use `label-text-expression` to keep text data-driven:
+
+```yaml
+rules:
+  - type: Road
+    geometry: [label]
+    label-text-expression: "**.speedLimitKmh as string"
+    label-scale: 0.8
+    label-color: "#ffffff"
+    label-background-color: "#202020"
+```
 
 ### GLTF and AABB Geometry
 

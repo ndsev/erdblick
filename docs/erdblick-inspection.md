@@ -39,7 +39,8 @@ The tree view mirrors the internal inspection model rather than a flattened tabl
 - **Hover relations** to highlight related features on the map.
 - **Click feature IDs** to follow references.
 - **Open SourceData** from nodes that carry source references.
-- **Copy Search Path** from the context menu when you want to reuse the same field in Simfil search.
+- **Open the row action menu** with the three-dot button that appears on the left of a row when you hover it.
+- **Copy Search Path** from the row action menu when you want to reuse the same field in Simfil search.
 
 Erdblick also applies a few presentation rules that matter in practice:
 
@@ -52,6 +53,34 @@ Erdblick also applies a few presentation rules that matter in practice:
 When you hover validity-aware nodes in the tree, erdblick tries to highlight the most specific validity that matches the hovered attribute or subnode. If no single validity is the right match, it falls back to showing all validities attached to that node.
 
 `COMPLETE` means the attribute applies to the complete referenced geometry or feature scope.
+
+Search result selections can point at the same validity targets. When a feature-search result was produced in attribute scope, selecting the result focuses the owning feature and highlights the matched attribute or validity when that target is available.
+
+### Searching From Inspection
+
+The row action menu contains two search helpers for rows that expose a search path:
+
+- **Copy Search Path** copies the reusable Simfil path fragment for the row.
+- **Search for key/value** opens a feature search for the scalar value in the inspected map/layer context.
+
+`Search for key/value` is only offered for scalar values that can be represented as Simfil literals: numbers, booleans, strings, feature IDs, byte-array values rendered as scalar inspection values, and `NULL` values. Nested objects and arrays are not offered as direct key/value searches.
+
+Literal handling follows the inspected type:
+
+- strings and feature IDs are quoted
+- numbers stay numeric
+- booleans stay boolean
+- `NULL` becomes `null`
+
+The generated search uses the map and layer of the inspected tile as its initial **Map Layers** selection. This keeps the first run focused on the context that produced the inspected value; you can widen the map/layer selection from the Search panel afterwards.
+
+Typical workflow:
+
+1. Select a representative feature.
+2. Hover the attribute row you want to investigate.
+3. Open the three-dot row action menu.
+4. Choose **Search for key/value**.
+5. Use the Search panel to inspect, group, style, or export all matching results.
 
 ## Comparison Dialog
 
