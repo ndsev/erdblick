@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -23,9 +25,19 @@ using namespace mapget;
 namespace erdblick
 {
 
+struct TileLayerParser::SchemaCompletionRoot
+{
+    std::shared_ptr<mapget::StringPool> strings;
+    std::shared_ptr<simfil::ModelPool> model;
+    simfil::ModelNode::Ptr root;
+};
+
 namespace {
 
 constexpr int kSchemaCompletionDepth = 6;
+const auto kNoCompletionBudget = [] {
+    return false;
+};
 
 std::string completionTypeToString(simfil::CompletionCandidate::Type type)
 {
@@ -130,9 +142,10 @@ simfil::ModelNode::Ptr makeSchemaCompletionNode(
     std::shared_ptr<simfil::ModelPool> const& model,
     std::shared_ptr<mapget::SchemaRegistry const> const& registry,
     simfil::SchemaId schemaId,
-    int depth)
+    int depth,
+    std::function<bool()> const& budgetExhausted = kNoCompletionBudget)
 {
-    if (!registry || schemaId == simfil::NoSchemaId) {
+    if (!registry || schemaId == simfil::NoSchemaId || budgetExhausted()) {
         return model->newValue(std::string_view{});
     }
 
@@ -142,8 +155,11 @@ simfil::ModelNode::Ptr makeSchemaCompletionNode(
         (void)object->setSchema(schemaId);
         if (depth > 0) {
             for (auto const& fieldName : registry->directFields(schemaId)) {
+                if (budgetExhausted()) {
+                    break;
+                }
                 auto childSchema = registry->childSchema(schemaId, fieldName);
-                auto child = makeSchemaCompletionNode(model, registry, childSchema, depth - 1);
+                auto child = makeSchemaCompletionNode(model, registry, childSchema, depth - 1, budgetExhausted);
                 (void)object->addField(fieldName, child);
             }
         }
@@ -165,7 +181,8 @@ void addAttributeOverlayFields(
     simfil::model_ptr<simfil::Object>& attributeRoot,
     std::shared_ptr<simfil::ModelPool> const& model,
     std::shared_ptr<mapget::SchemaRegistry const> const& registry,
-    std::string const& featureType)
+    std::string const& featureType,
+    std::function<bool()> const& budgetExhausted = kNoCompletionBudget)
 {
     (void)attributeRoot->addField("$name", std::string_view{});
     (void)attributeRoot->addField("$layer", std::string_view{});
@@ -173,8 +190,8 @@ void addAttributeOverlayFields(
     (void)attributeRoot->addField("$validityCount", int64_t{1});
 
     auto featureSchema = registry ? registry->featureSchema(featureType) : simfil::NoSchemaId;
-    if (featureSchema != simfil::NoSchemaId) {
-        auto featureRoot = makeSchemaCompletionNode(model, registry, featureSchema, kSchemaCompletionDepth);
+    if (featureSchema != simfil::NoSchemaId && !budgetExhausted()) {
+        auto featureRoot = makeSchemaCompletionNode(model, registry, featureSchema, kSchemaCompletionDepth, budgetExhausted);
         (void)attributeRoot->addField("$feature", featureRoot);
     }
 }
@@ -595,13 +612,59 @@ std::optional<std::vector<std::string>> schemaPathFieldNames(
 
 constexpr simfil::SchemaId kAttributeSearchRootSchema = simfil::MaxSchemaId;
 
+class AttributeSearchRootSchema final : public simfil::ObjectSchema
+{
+public:
+    AttributeSearchRootSchema(
+        std::shared_ptr<simfil::StringPool> strings,
+        std::string attributeName)
+        : strings_(std::move(strings))
+        , attributeName_(std::move(attributeName))
+    {
+    }
+
+    auto symbolEqualityPaths(
+        simfil::StringId symbolId,
+        const std::function<const simfil::Schema*(simfil::SchemaId)>&) const -> std::vector<simfil::SchemaPath> override
+    {
+        if (!matchesAttributeName(symbolId)) {
+            return {};
+        }
+        return {simfil::SchemaPath{{simfil::SchemaPathSegment::Kind::Field, mapget::StringPool::OverlayNameStr}}};
+    }
+
+    auto scalarFieldPathsForSymbol(
+        simfil::StringId symbolId,
+        const std::function<const simfil::Schema*(simfil::SchemaId)>& queryFn) const -> std::vector<simfil::SchemaPath> override
+    {
+        if (!matchesAttributeName(symbolId)) {
+            return {};
+        }
+        auto path = simfil::Schema::firstScalarFieldPath(kAttributeSearchRootSchema, queryFn);
+        return path ? std::vector<simfil::SchemaPath>{std::move(*path)} : std::vector<simfil::SchemaPath>{};
+    }
+
+private:
+    bool matchesAttributeName(simfil::StringId symbolId) const
+    {
+        auto symbol = strings_ ? strings_->resolve(symbolId) : std::nullopt;
+        return symbol && *symbol == attributeName_;
+    }
+
+    std::shared_ptr<simfil::StringPool> strings_;
+    std::string attributeName_;
+};
+
 std::shared_ptr<simfil::ObjectSchema> makeAttributeSearchRootSchema(
     std::shared_ptr<mapget::SchemaRegistry const> const& registry,
     std::shared_ptr<simfil::StringPool> const& strings,
+    std::string const& attributeName,
     simfil::SchemaId attributeSchema,
     simfil::SchemaId featureSchema)
 {
-    auto root = std::make_shared<simfil::ObjectSchema>();
+    auto root = std::make_shared<AttributeSearchRootSchema>(
+        strings,
+        attributeName);
     for (auto const& fieldName : registry->directFields(attributeSchema)) {
         auto fieldId = strings->emplace(fieldName);
         if (!fieldId) {
@@ -632,7 +695,7 @@ std::shared_ptr<simfil::ObjectSchema> makeAttributeSearchRootSchema(
 
 void installAttributeSearchRootSchema(
     simfil::Environment& env,
-    std::shared_ptr<simfil::ObjectSchema> schema)
+    std::shared_ptr<simfil::Schema> schema)
 {
     auto registrySchemaLookup = std::move(env.querySchemaCallback);
     env.querySchemaCallback = [
@@ -662,7 +725,7 @@ tl::expected<FeatureScopeAstDebug, simfil::Error> compileFeatureScopeQueryAstDeb
     mapget::installCompletionSchemaRegistry(*env, featureScope.registry, strings);
     auto ast = simfil::compile(*env, query, simfil::CompileOptions{
         .any = false,
-        .autoWildcard = true,
+        .rewriteMode = simfil::RewriteMode::Schema,
         .rootSchema = featureScope.featureSchema});
     if (!ast) {
         return tl::unexpected(ast.error());
@@ -717,10 +780,10 @@ tl::expected<simfil::ASTPtr, simfil::Error> compileAttributeScopeQueryAst(
     mapget::installCompletionSchemaRegistry(*env, scope.registry, strings);
     installAttributeSearchRootSchema(
         *env,
-        makeAttributeSearchRootSchema(scope.registry, strings, scope.attributeSchema, scope.featureSchema));
+        makeAttributeSearchRootSchema(scope.registry, strings, scope.attrName, scope.attributeSchema, scope.featureSchema));
     return simfil::compile(*env, query, simfil::CompileOptions{
         .any = false,
-        .autoWildcard = true,
+        .rewriteMode = simfil::RewriteMode::Schema,
         .rootSchema = kAttributeSearchRootSchema});
 }
 
@@ -811,7 +874,7 @@ void analyzeFeatureRootQuery(
 
     auto ast = simfil::compile(*env, query, simfil::CompileOptions{
         .any = false,
-        .autoWildcard = true,
+        .rewriteMode = simfil::RewriteMode::Schema,
         .rootSchema = featureScope.featureSchema});
     if (!ast) {
         return;
@@ -861,11 +924,11 @@ void analyzeAttributeRootQuery(
     mapget::installCompletionSchemaRegistry(*env, scope.registry, strings);
     installAttributeSearchRootSchema(
         *env,
-        makeAttributeSearchRootSchema(scope.registry, strings, scope.attributeSchema, scope.featureSchema));
+        makeAttributeSearchRootSchema(scope.registry, strings, scope.attrName, scope.attributeSchema, scope.featureSchema));
 
     auto ast = simfil::compile(*env, query, simfil::CompileOptions{
         .any = false,
-        .autoWildcard = true,
+        .rewriteMode = simfil::RewriteMode::Schema,
         .rootSchema = kAttributeSearchRootSchema});
     if (!ast) {
         return;
@@ -1003,6 +1066,26 @@ struct SearchStyleSchemaMetadata
     std::optional<double> numericMinimum;
     std::optional<double> numericMaximum;
 };
+
+/** Builds enum metadata for feature `typeId` values advertised by the selected layer context. */
+SearchStyleSchemaMetadata typeIdSchemaMetadata(std::vector<std::string> typeIds)
+{
+    std::ranges::sort(typeIds);
+    auto duplicates = std::ranges::unique(typeIds);
+    typeIds.erase(duplicates.begin(), duplicates.end());
+    return {"enum", std::move(typeIds), std::nullopt, std::nullopt};
+}
+
+/** Returns all feature type ids a layer can produce. */
+std::vector<std::string> featureTypeIdsForLayer(mapget::LayerInfo const& layerInfo)
+{
+    std::vector<std::string> typeIds;
+    typeIds.reserve(layerInfo.featureTypes_.size());
+    for (auto const& featureType : layerInfo.featureTypes_) {
+        typeIds.push_back(featureType.name_);
+    }
+    return typeIds;
+}
 
 bool jsonSchemaHasType(nlohmann::json const& schema, std::string_view type)
 {
@@ -1402,6 +1485,8 @@ TileLayerParser::TileLayerParser()
 
 void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSourceInfoJson)
 {
+    schemaCompletionRoots_.clear();
+
     // Parse data source info
     auto srcInfoParsed = nlohmann::json::parse(dataSourceInfoJson.toString());
 
@@ -1572,6 +1657,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
 
 void TileLayerParser::setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info) {
     fallbackLayerInfo_ = std::move(info);
+    schemaCompletionRoots_.clear();
 }
 
 std::shared_ptr<mapget::LayerInfo>
@@ -1697,10 +1783,51 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     auto const includeFeatureScope = scope != "attribute";
     auto const includeAttributeScope = scope != "feature";
     auto const selectedLayers = selectedLayerFilterFromOptions(options);
-
     std::set<simfil::CompletionCandidate> mergedCandidates;
+    auto const completionStart = std::chrono::steady_clock::now();
+    auto const completionBudgetExhausted = [&]() {
+        if (opts.timeoutMs <= 0) {
+            return false;
+        }
+        auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - completionStart);
+        return elapsed.count() >= opts.timeoutMs;
+    };
+    auto cachedCompletionRoot = [&](std::string const& key, auto&& build) -> SchemaCompletionRoot* {
+        auto existing = schemaCompletionRoots_.find(key);
+        if (existing != schemaCompletionRoots_.end()) {
+            return existing->second.get();
+        }
+
+        auto entry = std::make_shared<SchemaCompletionRoot>();
+        entry->strings = std::make_shared<mapget::StringPool>("SearchCompletion");
+        entry->model = std::make_shared<simfil::ModelPool>(entry->strings);
+        entry->root = build(entry->model, entry->strings);
+        if (completionBudgetExhausted()) {
+            return nullptr;
+        }
+        auto [inserted, _] = schemaCompletionRoots_.emplace(key, std::move(entry));
+        return inserted->second.get();
+    };
+    auto completionCacheKey = [](std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+                                 std::string_view kind,
+                                 simfil::SchemaId schema,
+                                 simfil::SchemaId overlaySchema = simfil::NoSchemaId,
+                                 std::string_view qualifier = {}) {
+        std::ostringstream key;
+        key << reinterpret_cast<uintptr_t>(registry.get())
+            << ':' << kind
+            << ':' << schema
+            << ':' << overlaySchema
+            << ':' << qualifier;
+        return key.str();
+    };
+
     for (auto const& [_, dataSource] : info_) {
         for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (completionBudgetExhausted()) {
+                return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+            }
             if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
                 continue;
             }
@@ -1715,10 +1842,23 @@ NativeJsValue TileLayerParser::completeSearchQuery(
             for (auto const& featureType : layerInfo->featureTypes_) {
                 auto const featureSchema = registry->featureSchema(featureType.name_);
                 if (includeFeatureScope && featureSchema != simfil::NoSchemaId) {
-                    auto strings = std::make_shared<mapget::StringPool>("SearchCompletion");
-                    auto model = std::make_shared<simfil::ModelPool>(strings);
-                    auto root = makeSchemaCompletionNode(model, registry, featureSchema, kSchemaCompletionDepth);
-                    addCompletionCandidates(mergedCandidates, registry, strings, query, point, *root, opts);
+                    if (completionBudgetExhausted()) {
+                        return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+                    }
+                    auto* cachedRoot = cachedCompletionRoot(
+                        completionCacheKey(registry, "feature", featureSchema),
+                        [&](auto const& model, auto const&) {
+                            return makeSchemaCompletionNode(
+                                model,
+                                registry,
+                                featureSchema,
+                                kSchemaCompletionDepth,
+                                completionBudgetExhausted);
+                        });
+                    if (!cachedRoot) {
+                        return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+                    }
+                    addCompletionCandidates(mergedCandidates, registry, cachedRoot->strings, query, point, *cachedRoot->root, opts);
                 }
 
                 if (!includeAttributeScope) {
@@ -1745,18 +1885,52 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                         if (attributeSchema == simfil::NoSchemaId) {
                             continue;
                         }
-
-                        auto strings = std::make_shared<mapget::StringPool>("SearchCompletion");
-                        auto model = std::make_shared<simfil::ModelPool>(strings);
-                        auto attributeRoot = model->newObject();
-                        (void)attributeRoot->setSchema(attributeSchema);
-                        for (auto const& fieldName : registry->directFields(attributeSchema)) {
-                            auto childSchema = registry->childSchema(attributeSchema, fieldName);
-                            auto child = makeSchemaCompletionNode(model, registry, childSchema, kSchemaCompletionDepth - 1);
-                            (void)attributeRoot->addField(fieldName, child);
+                        if (completionBudgetExhausted()) {
+                            return completionCandidatesToJs(query, mergedCandidates, opts.limit);
                         }
-                        addAttributeOverlayFields(attributeRoot, model, registry, featureType.name_);
-                        addCompletionCandidates(mergedCandidates, registry, strings, query, point, *attributeRoot, opts);
+
+                        auto* cachedRoot = cachedCompletionRoot(
+                            completionCacheKey(
+                                registry,
+                                "attribute",
+                                attributeSchema,
+                                featureSchema,
+                                featureType.name_),
+                            [&](auto const& model, auto const&) -> simfil::ModelNode::Ptr {
+                                auto attributeRoot = model->newObject();
+                                (void)attributeRoot->setSchema(attributeSchema);
+                                for (auto const& fieldName : registry->directFields(attributeSchema)) {
+                                    if (completionBudgetExhausted()) {
+                                        break;
+                                    }
+                                    auto childSchema = registry->childSchema(attributeSchema, fieldName);
+                                    auto child = makeSchemaCompletionNode(
+                                        model,
+                                        registry,
+                                        childSchema,
+                                        kSchemaCompletionDepth - 1,
+                                        completionBudgetExhausted);
+                                    (void)attributeRoot->addField(fieldName, child);
+                                }
+                                addAttributeOverlayFields(
+                                    attributeRoot,
+                                    model,
+                                    registry,
+                                    featureType.name_,
+                                    completionBudgetExhausted);
+                                return attributeRoot;
+                            });
+                        if (!cachedRoot) {
+                            return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+                        }
+                        addCompletionCandidates(
+                            mergedCandidates,
+                            registry,
+                            cachedRoot->strings,
+                            query,
+                            point,
+                            *cachedRoot->root,
+                            opts);
                     }
                 }
             }
@@ -1942,6 +2116,14 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 "$feature",
                 activeFeatureSchemas);
             for (auto const& path : featurePaths) {
+                auto metadata = SearchStyleSchemaMetadata{
+                    path.valueKind,
+                    path.enumValues,
+                    path.numericMinimum,
+                    path.numericMaximum};
+                if (path.path == "$feature.typeId") {
+                    metadata = typeIdSchemaMetadata({attrScope.featureType});
+                }
                 addSearchStyleField(
                     fields,
                     seen,
@@ -1950,7 +2132,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     attrScope.layerId,
                     attrScope.attrName,
                     attrScope.featureType,
-                    {path.valueKind, path.enumValues, path.numericMinimum, path.numericMaximum});
+                    std::move(metadata));
             }
         }
     }
@@ -1968,6 +2150,16 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 if (!registry) {
                     continue;
                 }
+                auto const layerTypeIdMetadata = typeIdSchemaMetadata(featureTypeIdsForLayer(*layerInfo));
+                addSearchStyleField(
+                    fields,
+                    seen,
+                    "typeId",
+                    dataSource.mapId_,
+                    layerInfo->layerId_,
+                    "",
+                    "",
+                    layerTypeIdMetadata);
                 for (auto const& featureType : layerInfo->featureTypes_) {
                     auto const* featureSchemaJson = schemaForRegistryKey(*layerInfo, registry, "Feature:" + featureType.name_);
                     std::vector<SearchStyleFieldPath> paths;
@@ -1981,6 +2173,14 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                         "",
                         activeSchemas);
                     for (auto const& path : paths) {
+                        auto metadata = SearchStyleSchemaMetadata{
+                            path.valueKind,
+                            path.enumValues,
+                            path.numericMinimum,
+                            path.numericMaximum};
+                        if (path.path == "typeId") {
+                            metadata = layerTypeIdMetadata;
+                        }
                         addSearchStyleField(
                             fields,
                             seen,
@@ -1989,7 +2189,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                             layerInfo->layerId_,
                             "",
                             featureType.name_,
-                            {path.valueKind, path.enumValues, path.numericMinimum, path.numericMaximum});
+                            std::move(metadata));
                     }
                 }
             }

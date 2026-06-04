@@ -31,7 +31,7 @@ import {simfilHighlightStyle, simfilLanguage} from "./simfil-language";
             <div #editorHost class="simfil-expression-editor-host"></div>
             <search-completion-popup
                 [visible]="completion.visible"
-                [pending]="false"
+                [pending]="completion.pending"
                 [items]="completionItems"
                 [selectionIndex]="completion.selectionIndex"
                 [top]="completion.top"
@@ -88,7 +88,8 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         top: 0,
         left: 0,
         selectionIndex: 0,
-        visible: false
+        visible: false,
+        pending: false
     };
 
     /** Wires the completion service and DOM renderer used by the inline editor. */
@@ -188,6 +189,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
                         this.blurred.emit();
                         setTimeout(() => {
                             this.completion.visible = false;
+                            this.completion.pending = false;
                         }, 0);
                     },
                     click: event => {
@@ -229,7 +231,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     /** Handles Enter without letting the editor insert a newline in submit-capable inputs. */
     private handleEnterKey(): boolean {
-        if (this.completion.visible) {
+        if (this.shouldApplyCompletionOnEnter()) {
             this.applyCompletion();
             return true;
         }
@@ -290,7 +292,13 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         }
 
         if (this.completion.visible) {
-            if (event.key === "Enter" || event.key === "Tab") {
+            if (event.key === "Enter" && this.shouldApplyCompletionOnEnter()) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.applyCompletion();
+                return true;
+            }
+            if (event.key === "Tab") {
                 event.preventDefault();
                 event.stopPropagation();
                 this.applyCompletion();
@@ -323,6 +331,13 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         return false;
     }
 
+    /** Returns whether Enter should accept completion instead of submitting or keeping exact text. */
+    private shouldApplyCompletionOnEnter(): boolean {
+        const currentValue = this.editorView?.state.doc.toString() ?? this.value ?? "";
+        return this.completion.visible
+            && !this.searchService.hasExactCompletionCandidate(currentValue, this.ownerId());
+    }
+
     /** Prevents popup clicks from blurring the CodeMirror surface before selection applies. */
     protected onCompletionPopupDown(event: MouseEvent): void {
         event.preventDefault();
@@ -339,6 +354,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.valueChange.emit(this.value);
         this.completionItems = [];
         this.completion.visible = false;
+        this.completion.pending = false;
         this.focus();
     }
 
@@ -386,6 +402,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.completionItems = [];
         this.completion.selectionIndex = 0;
         this.completion.visible = false;
+        this.completion.pending = false;
     }
 
     /** Rebinds the completion stream when the owner id changes. */
@@ -406,6 +423,15 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             this.completion.visible = this.completionItems.length > 0 && focusValid;
             if (this.completion.visible) {
                 this.updateCursorPosition();
+            }
+        }));
+        this.completionSubscriptions.add(state.pending.pipe(distinctUntilChanged()).subscribe(pending => {
+            const focusValid = this.completion.visible || pending || !!this.editorView?.hasFocus;
+            this.completion.pending = pending && focusValid;
+            if (this.completion.pending) {
+                this.updateCursorPosition();
+            } else if (this.completionItems.length === 0) {
+                this.completion.visible = false;
             }
         }));
     }

@@ -179,6 +179,8 @@ public:
     std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
+    struct SchemaCompletionRoot;
+    std::map<std::string, std::shared_ptr<SchemaCompletionRoot>> schemaCompletionRoots_;
 
     /**
      * Resolve layer metadata for a `(mapId, layerId)` pair using loaded datasource info
