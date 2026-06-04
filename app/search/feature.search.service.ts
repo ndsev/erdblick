@@ -1,6 +1,7 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, filter, Subject, take} from "rxjs";
 import {
+    FeatureSearchAttributeScopeCandidate,
     SearchResultTileEntry,
     SearchResultTileEvictedPayload,
     SearchResultTilePayload,
@@ -8,8 +9,11 @@ import {
 } from "../mapdata/map-runtime.model";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {featureSearchResultFields} from "../mapdata/feature-search-runtime-state.model";
-import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
+import {
+    FeatureSearchResolvedDefinition,
+    featureSearchResultFields
+} from "../mapdata/feature-search-runtime-state.model";
+import {FeatureSearchSchemaService, FeatureSearchScopeAnalysis} from "../mapdata/feature-search-schema.service";
 import {
     CompletionCandidate,
     DiagnosticsMessage,
@@ -42,6 +46,11 @@ import {
     SearchResultPoint,
     SearchResultPointBucket
 } from "./search-result-density.model";
+import type {
+    SearchCompletionRequestMessage,
+    SearchCompletionWorkerOptions,
+    SearchCompletionResultMessage
+} from "./search-completion.worker.protocol";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -84,15 +93,25 @@ export interface FeatureSearchSession {
     diagnosticsBlobs: Uint8Array[];
     valueSummaries: SearchValueSummariesState;
     valueSummaryRevision: number;
+    schemaAnalysis: FeatureSearchSessionSchemaAnalysis;
     errors: Set<string>;
     progressByRequestKey: Map<string, SearchRequestProgress>;
     searchResultTilesBySourceKey: Map<string, SearchResultTileContribution>;
     searchResultPointsByFeatureKey: Map<string, SearchResultPoint>;
     searchResultPointsCache: SearchResultPoint[];
     searchResultPointBucketsCache: SearchResultPointBucket[];
+    searchResultPointBucketIndexBySourceKey: Map<string, number>;
     searchResultPointsCacheDirty: boolean;
     searchResultPointsVersion: number;
     searchResultDensityIndex: SearchResultDensityIndex;
+}
+
+export interface FeatureSearchSessionSchemaAnalysis {
+    signature: string;
+    status: "pending" | "ready" | "error";
+    concreteScope: "feature" | "attribute";
+    attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    error?: string;
 }
 
 interface SearchRequestProgress {
@@ -143,6 +162,7 @@ export interface FeatureSearchResultLayer extends FeatureSearchOverlayLayer {
 
 export interface CompletionOwnerState {
     candidates: BehaviorSubject<CompletionCandidate[]>;
+    pending: BehaviorSubject<boolean>;
     candidateList: CompletionCandidate[];
     requestSerial: number;
 }
@@ -150,6 +170,7 @@ export interface CompletionOwnerState {
 export interface FeatureSearchCompletionOptions {
     scope?: FeatureSearchScope;
     selectedMapLayers?: FeatureSearchMapLayerRef[];
+    timeoutMs?: number;
 }
 
 export interface FeatureSearchExportGroupingOption {
@@ -214,6 +235,7 @@ export class FeatureSearchService {
     private readonly completionStates = new Map<string, CompletionOwnerState>();
     private readonly completionTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly completionCandidates = this.completionStateForOwner(FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID).candidates;
+    readonly completionPending = this.completionStateForOwner(FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID).pending;
     completionCandidateLimit: number = 15;
 
     showFeatureSearchDialog: boolean = false;
@@ -223,7 +245,10 @@ export class FeatureSearchService {
     private locationMarkerGraphicUrl: string | null = null;
     private pendingResultDataRebuildSessionIds = new Set<string>();
     private pendingForcedGenerationIds = new Set<string>();
+    private pendingSchemaAnalysisSignatures = new Set<string>();
+    private pendingProgressEmissionSessionIds = new Set<string>();
     private resultDataRebuildRaf: number | null = null;
+    private progressEmissionRaf: number | null = null;
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
@@ -258,6 +283,7 @@ export class FeatureSearchService {
         });
         this.mapInfo.layerStateChanged.subscribe(reason => {
             if (reason === "datasources" && this.stateService.ready.getValue()) {
+                this.invalidateAllSchemaAnalysis();
                 this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
             }
         });
@@ -428,8 +454,6 @@ export class FeatureSearchService {
     private applyFeatureSearchDefinition(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
         const previous = session.definition;
         const normalizedColor = this.normalizeHexColor(definition.pinColor);
-        const previousFields = featureSearchResultFields(previous, entry => this.searchSchema.resolveSearchScope(entry));
-        const nextFields = featureSearchResultFields(definition, entry => this.searchSchema.resolveSearchScope(entry));
         const selectedLayersChanged = JSON.stringify(previous.selectedMapLayers)
             !== JSON.stringify(definition.selectedMapLayers);
         const selectedViewsChanged = JSON.stringify(previous.selectedViewIndices)
@@ -454,6 +478,11 @@ export class FeatureSearchService {
             return;
         }
 
+        const concreteScope = session.schemaAnalysis.status === "ready"
+            ? session.schemaAnalysis.concreteScope
+            : "feature";
+        const previousFields = featureSearchResultFields(previous, concreteScope);
+        const nextFields = featureSearchResultFields(definition, concreteScope);
         const searchGenerationChanged = previous.query !== definition.query
             || previous.scope !== definition.scope
             || selectedLayersChanged
@@ -558,13 +587,17 @@ export class FeatureSearchService {
             : {...definition, selectedMapLayers: fallbackLayers.map(ref => ({...ref}))});
     }
 
-    /** Starts a new feature search over the currently prioritized tiles. */
-    run(query: string): FeatureSearchSession {
+    /** Starts a new feature search over the currently prioritized tiles, optionally with explicit scope/layers. */
+    run(
+        query: string,
+        options: Partial<Pick<FeatureSearchStateEntry, "scope" | "selectedMapLayers" | "selectedViewIndices">> = {}
+    ): FeatureSearchSession {
         const entry = this.stateService.addFeatureSearch({
             query,
+            ...(options.scope ? {scope: options.scope} : {}),
             pinColor: this.nextDefaultSearchColor(),
-            selectedMapLayers: this.activeFeatureSearchLayers(),
-            selectedViewIndices: this.activeFeatureSearchViewIndices()
+            selectedMapLayers: options.selectedMapLayers ?? this.activeFeatureSearchLayers(),
+            selectedViewIndices: options.selectedViewIndices ?? this.activeFeatureSearchViewIndices()
         });
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
         if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
@@ -922,12 +955,14 @@ export class FeatureSearchService {
             diagnosticsBlobs: [],
             valueSummaries: this.emptyValueSummariesState("idle", 0),
             valueSummaryRevision: 0,
+            schemaAnalysis: this.initialSchemaAnalysis(definition),
             errors: new Set<string>(),
             progressByRequestKey: new Map<string, SearchRequestProgress>(),
             searchResultTilesBySourceKey: new Map<string, SearchResultTileContribution>(),
             searchResultPointsByFeatureKey: new Map<string, SearchResultPoint>(),
             searchResultPointsCache: [],
             searchResultPointBucketsCache: [],
+            searchResultPointBucketIndexBySourceKey: new Map<string, number>(),
             searchResultPointsCacheDirty: false,
             searchResultPointsVersion: 0,
             searchResultDensityIndex: new SearchResultDensityIndex()
@@ -944,11 +979,20 @@ export class FeatureSearchService {
         for (const id of this.pendingForcedGenerationIds) {
             forceGenerationIds.add(id);
         }
-        this.pendingForcedGenerationIds.clear();
+        const resolvedDefinitions: FeatureSearchResolvedDefinition[] = [];
+        for (const session of this.searchSessions.filter(session => session.definition.enabled)) {
+            const resolved = this.resolvedDefinitionForSession(session);
+            if (resolved) {
+                resolvedDefinitions.push(resolved);
+            }
+        }
+        for (const id of Array.from(this.pendingForcedGenerationIds)) {
+            if (resolvedDefinitions.some(definition => definition.id === id)) {
+                this.pendingForcedGenerationIds.delete(id);
+            }
+        }
         this.tileStream.setFeatureSearchDefinitions(
-            this.searchSessions
-                .filter(session => session.definition.enabled)
-                .map(session => session.definition),
+            resolvedDefinitions,
             {
                 ...options,
                 forceGenerationIds
@@ -1000,6 +1044,7 @@ export class FeatureSearchService {
     /** Clears one session and installs a fresh search group for the supplied query. */
     private resetSessionSearch(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
         session.definition = definition;
+        session.schemaAnalysis = this.initialSchemaAnalysis(definition);
         this.clearSessionResultData(session);
         session.refresh = 0;
         session.paused = definition.paused;
@@ -1025,6 +1070,139 @@ export class FeatureSearchService {
         this.resetServerSearchProgress(session, session.refresh);
         this.progress.next(session);
         this.syncSearchRequestsToMapService(options);
+    }
+
+    /** Builds conservative initial analysis without native schema work. */
+    private initialSchemaAnalysis(definition: FeatureSearchStateEntry): FeatureSearchSessionSchemaAnalysis {
+        const signature = this.searchSchema.searchScopeAnalysisSignature(
+            definition.query,
+            definition.scope,
+            definition.selectedMapLayers
+        );
+        if (definition.scope === "attribute") {
+            return {signature, status: "pending", concreteScope: "attribute", attributeScopes: []};
+        }
+        if (definition.scope === "feature") {
+            return {signature, status: "ready", concreteScope: "feature", attributeScopes: []};
+        }
+        return {signature, status: "pending", concreteScope: "feature", attributeScopes: []};
+    }
+
+    /** Drops schema-analysis caches for live sessions after datasource metadata changed. */
+    private invalidateAllSchemaAnalysis(): void {
+        this.pendingSchemaAnalysisSignatures.clear();
+        for (const session of this.searchSessions) {
+            session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
+        }
+    }
+
+    /** Returns the resolved definition consumed by MapTileStreamService, or null while auto-scope analysis is pending. */
+    private resolvedDefinitionForSession(session: FeatureSearchSession): FeatureSearchResolvedDefinition | null {
+        if (!this.ensureSessionSchemaAnalysis(session)) {
+            return null;
+        }
+        const concreteScope = session.schemaAnalysis.concreteScope;
+        return {
+            ...session.definition,
+            concreteScope,
+            backendQuery: this.backendSearchQueryForSession(session, concreteScope),
+            resultFields: featureSearchResultFields(session.definition, concreteScope)
+        };
+    }
+
+    /** Converts UI shorthand that only erdblick's synthetic schema understands into a backend-safe predicate. */
+    private backendSearchQueryForSession(
+        session: FeatureSearchSession,
+        concreteScope: "feature" | "attribute"
+    ): string {
+        if (concreteScope !== "attribute") {
+            return session.definition.query;
+        }
+        const identifier = this.exactIdentifierQuery(session.definition.query);
+        if (!identifier) {
+            return session.definition.query;
+        }
+        const matchesAttributeName = session.schemaAnalysis.attributeScopes.some(scope => scope.attrName === identifier);
+        return matchesAttributeName
+            ? `$name == ${JSON.stringify(identifier)}`
+            : session.definition.query;
+    }
+
+    /** Returns the identifier for a query that consists of exactly one bare symbol. */
+    private exactIdentifierQuery(query: string): string | null {
+        const trimmed = query.trim();
+        return /^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed) ? trimmed : null;
+    }
+
+    /** Ensures a session has async schema analysis for the current definition. */
+    private ensureSessionSchemaAnalysis(session: FeatureSearchSession): boolean {
+        const signature = this.searchSchema.searchScopeAnalysisSignature(
+            session.definition.query,
+            session.definition.scope,
+            session.definition.selectedMapLayers
+        );
+        if (session.schemaAnalysis.signature === signature && session.schemaAnalysis.status === "ready") {
+            return true;
+        }
+        if (session.schemaAnalysis.signature === signature && session.schemaAnalysis.status === "pending") {
+            if (session.definition.scope === "feature") {
+                session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
+                return true;
+            }
+            this.requestSessionSchemaAnalysis(session, signature);
+            return false;
+        }
+
+        session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
+        if (session.definition.scope === "feature") {
+            return true;
+        }
+
+        this.requestSessionSchemaAnalysis(session, signature);
+        this.progress.next(session);
+        return false;
+    }
+
+    /** Starts one worker-backed scope-analysis request unless the same request is already in flight. */
+    private requestSessionSchemaAnalysis(session: FeatureSearchSession, signature: string): void {
+        const requestKey = `${session.id}\u0000${signature}`;
+        if (this.pendingSchemaAnalysisSignatures.has(requestKey)) {
+            return;
+        }
+        this.pendingSchemaAnalysisSignatures.add(requestKey);
+        this.searchSchema.requestSearchScopeAnalysis(
+            session.definition.query,
+            session.definition.scope,
+            session.definition.selectedMapLayers
+        ).then(analysis => {
+            this.pendingSchemaAnalysisSignatures.delete(requestKey);
+            this.applySearchScopeAnalysis(session.id, analysis);
+        });
+    }
+
+    /** Applies a completed async schema-analysis result if the session still represents the same definition. */
+    private applySearchScopeAnalysis(sessionId: string, analysis: FeatureSearchScopeAnalysis): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        const currentSignature = this.searchSchema.searchScopeAnalysisSignature(
+            session.definition.query,
+            session.definition.scope,
+            session.definition.selectedMapLayers
+        );
+        if (analysis.signature !== currentSignature) {
+            return;
+        }
+        session.schemaAnalysis = {
+            signature: analysis.signature,
+            status: "ready",
+            concreteScope: analysis.concreteScope,
+            attributeScopes: analysis.attributeScopes,
+            ...(analysis.error ? {error: analysis.error} : {})
+        };
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
     }
 
     /** Generates a unique runtime id for one server-search run. */
@@ -1400,6 +1578,7 @@ export class FeatureSearchService {
         if (!state) {
             state = {
                 candidates: new BehaviorSubject<CompletionCandidate[]>([]),
+                pending: new BehaviorSubject<boolean>(false),
                 candidateList: [],
                 requestSerial: 0
             };
@@ -1417,6 +1596,7 @@ export class FeatureSearchService {
         const state = this.completionStateForOwner(normalizedOwnerId);
         state.requestSerial++;
         state.candidateList = [];
+        state.pending.next(false);
         state.candidates.next([]);
     }
 
@@ -1424,7 +1604,18 @@ export class FeatureSearchService {
      * Completes a query for the legacy omnibox owner.
      */
     public completeQuery(query: string, point: number | undefined) {
+        // The omnibox is global by design: it should see every schema, not only the active map-layer subset.
         this.completeQueryForOwner(FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID, query, point);
+    }
+
+    /** Returns whether completion already contains the exact current query as a valid candidate. */
+    public hasExactCompletionCandidate(
+        query: string,
+        ownerId: string = FeatureSearchService.DEFAULT_COMPLETION_OWNER_ID
+    ): boolean {
+        const trimmedQuery = query.trim();
+        const state = this.completionStateForOwner(ownerId);
+        return state.candidateList.some(candidate => candidate.query.trim() === trimmedQuery);
     }
 
     /**
@@ -1443,20 +1634,101 @@ export class FeatureSearchService {
         const caret = point ?? query.length;
         state.candidateList = [];
         state.candidates.next([]);
+        state.pending.next(true);
         const timer = setTimeout(() => {
             this.completionTimers.delete(normalizedOwnerId);
             const currentState = this.completionStateForOwner(normalizedOwnerId);
             if (currentState.requestSerial !== requestSerial) {
                 return;
             }
-            const candidates = this.completeQueryFromSchema(query, caret, options).slice(0, this.completionCandidateLimit);
-            if (currentState.requestSerial !== requestSerial) {
+            if (this.requestWorkerCompletion(normalizedOwnerId, requestSerial, query, caret, options)) {
                 return;
             }
+            const candidates = this.completeQueryFromSchema(query, caret, options).slice(0, this.completionCandidateLimit);
             currentState.candidateList = candidates;
+            currentState.pending.next(false);
             currentState.candidates.next(candidates);
         }, 0);
         this.completionTimers.set(normalizedOwnerId, timer);
+    }
+
+    /** Sends one completion request to the schema worker, returning false when fallback is needed. */
+    private requestWorkerCompletion(
+        ownerId: string,
+        requestSerial: number,
+        query: string,
+        point: number,
+        options: FeatureSearchCompletionOptions
+    ): boolean {
+        const message: SearchCompletionRequestMessage = {
+            type: "SearchCompletionRequest",
+            ownerId,
+            requestSerial,
+            query,
+            point,
+            options: this.completionWorkerOptions(options)
+        };
+        return this.searchSchema.requestCompletion(
+            message,
+            result => this.handleCompletionWorkerMessage(result)
+        );
+    }
+
+    /** Applies a worker completion result if it still matches the owner's latest request serial. */
+    private handleCompletionWorkerMessage(message: SearchCompletionResultMessage): void {
+        const state = this.completionStateForOwner(message.ownerId);
+        if (state.requestSerial !== message.requestSerial) {
+            return;
+        }
+        if (message.error) {
+            console.warn("Schema completion worker failed to complete a query.", message.error);
+        }
+        if (message.candidates.length > 0) {
+            state.candidateList = this.mergeCompletionCandidates(state.candidateList, message.candidates);
+            state.candidates.next(state.candidateList);
+        }
+        if (message.done) {
+            state.pending.next(false);
+            if (message.candidates.length === 0) {
+                state.candidates.next(state.candidateList);
+            }
+        }
+    }
+
+    /** Adds streamed candidate batches while preserving stable order and removing cross-layer duplicates. */
+    private mergeCompletionCandidates(
+        currentCandidates: CompletionCandidate[],
+        nextCandidates: CompletionCandidate[]
+    ): CompletionCandidate[] {
+        const merged = [...currentCandidates];
+        const known = new Set(currentCandidates.map(candidate => this.completionCandidateKey(candidate)));
+        for (const candidate of nextCandidates) {
+            const key = this.completionCandidateKey(candidate);
+            if (known.has(key)) {
+                continue;
+            }
+            known.add(key);
+            merged.push(candidate);
+            if (merged.length >= this.completionCandidateLimit) {
+                break;
+            }
+        }
+        return merged;
+    }
+
+    /** Builds a de-duplication key for completion candidates streamed from multiple schema contexts. */
+    private completionCandidateKey(candidate: CompletionCandidate): string {
+        return `${candidate.query}\u0000${candidate.begin}\u0000${candidate.end}\u0000${candidate.kind}\u0000${candidate.hint}`;
+    }
+
+    /** Converts UI completion options into the worker/native option shape. */
+    private completionWorkerOptions(options: FeatureSearchCompletionOptions): SearchCompletionWorkerOptions {
+        return {
+            limit: this.completionCandidateLimit,
+            timeoutMs: options.timeoutMs ?? 35,
+            ...(options.scope ? {scope: options.scope} : {}),
+            ...(options.selectedMapLayers !== undefined ? {selectedMapLayers: options.selectedMapLayers} : {})
+        };
     }
 
     /** Cancels a deferred completion computation that has not started yet. */
@@ -1478,6 +1750,7 @@ export class FeatureSearchService {
         try {
             const nativeOptions = {
                 limit: this.completionCandidateLimit,
+                timeoutMs: options.timeoutMs ?? 35,
                 ...(options.scope ? {scope: options.scope} : {}),
                 ...(options.selectedMapLayers !== undefined ? {selectedMapLayers: options.selectedMapLayers} : {})
             };
@@ -1547,8 +1820,14 @@ export class FeatureSearchService {
         const results: FeatureSearchResultEntry[] = [];
         const points: SearchResultPoint[] = [];
         const resultFields = payload.resultFields ?? [];
+        const sourceMapLayerIds = this.parseMapLayerIds(sourceTileKey);
+        const fallbackTileCenter = payload.entries.some(entry => !entry.position)
+            ? coreLib.getTilePosition(payload.sourceTileId)
+            : null;
         for (const entry of payload.entries) {
-            const {mapId, layerId} = this.parseMapLayerIds(entry.mapTileKey);
+            const {mapId, layerId} = entry.mapTileKey === sourceTileKey
+                ? sourceMapLayerIds
+                : this.parseMapLayerIds(entry.mapTileKey);
             const resultIndex = this.entryResultIndex(entry, results.length);
             const resultKey = this.searchResultEntryKey(sourceTileKey, entry.mapTileKey, resultIndex);
             const hoverFeatureId = this.searchResultHoverFeatureId(entry.featureId, entry);
@@ -1564,7 +1843,8 @@ export class FeatureSearchService {
                 resultIndex,
                 resultKey,
                 hoverFeatureId,
-                entry
+                entry,
+                fallbackTileCenter
             );
             if (point) {
                 points.push(point);
@@ -1604,6 +1884,18 @@ export class FeatureSearchService {
             points
         };
         const previousContribution = session.searchResultTilesBySourceKey.get(sourceTileKey);
+        if (previousContribution && payload.entryOffset !== undefined) {
+            this.appendSessionResultEntryBatch(session, previousContribution, contribution, Boolean(payload.entriesComplete));
+            this.applyProgressSnapshot(session, payload.tilesConsidered, payload.tilesCompleted);
+            const becameComplete = this.updateSessionCompletion(session);
+            session.endTime = Date.now();
+            session.timeElapsed = this.formatTime(session.endTime - session.startTime);
+            if (becameComplete) {
+                this.updateDiagnosticsForCompletedSearch(session);
+            }
+            this.scheduleProgressEmission(session);
+            return;
+        }
         session.searchResultTilesBySourceKey.set(sourceTileKey, contribution);
         this.markValueSummariesDirty(session);
         let emitProgressNow = true;
@@ -1805,7 +2097,7 @@ export class FeatureSearchService {
             .sort((lhs, rhs) => this.compareSearchResultTileContributions(lhs, rhs));
         for (const contribution of contributions) {
             totalFeatureCount += contribution.resultCount;
-            nextResults.push(...contribution.results);
+            this.appendArray(nextResults, contribution.results);
             if (contribution.diagnostics) {
                 nextDiagnosticsBlobs.push(contribution.diagnostics);
             }
@@ -1825,6 +2117,7 @@ export class FeatureSearchService {
         session.totalFeatureCount = totalFeatureCount;
         session.searchResultPointsByFeatureKey = nextPoints;
         session.searchResultPointBucketsCache = nextBuckets;
+        session.searchResultPointBucketIndexBySourceKey = this.searchResultPointBucketIndex(nextBuckets);
         session.searchResultPointsCacheDirty = true;
         session.searchResultPointsVersion += 1;
         this.bumpSearchResultLayersVersion();
@@ -1857,11 +2150,75 @@ export class FeatureSearchService {
     }
 
     /** Appends a new source tile contribution without touching previously aggregated result arrays. */
+    private appendSessionResultEntryBatch(
+        session: FeatureSearchSession,
+        contribution: SearchResultTileContribution,
+        batch: SearchResultTileContribution,
+        entriesComplete: boolean
+    ): void {
+        contribution.refresh = batch.refresh;
+        contribution.resultFields = batch.resultFields;
+        contribution.layerBlob = batch.layerBlob;
+        contribution.valueSummary = null;
+        this.appendArray(contribution.results, batch.results);
+        this.appendArray(contribution.points, batch.points);
+        this.appendArray(session.searchResults, batch.results);
+
+        let pointsChanged = false;
+        for (const point of batch.points) {
+            if (!session.searchResultPointsByFeatureKey.has(point.resultKey)) {
+                session.searchResultPointsByFeatureKey.set(point.resultKey, point);
+                pointsChanged = true;
+            }
+        }
+
+        if (entriesComplete && contribution.points.length > 0) {
+            session.searchResultDensityIndex.addContribution(contribution.sourceTileKey, contribution.points);
+            this.upsertSearchResultPointBucket(session, contribution);
+            pointsChanged = true;
+        }
+        if (pointsChanged || batch.results.length > 0) {
+            session.searchResultPointsCacheDirty = session.searchResultPointsCacheDirty || pointsChanged;
+            session.searchResultPointsVersion += pointsChanged ? 1 : 0;
+            if (pointsChanged) {
+                this.bumpSearchResultLayersVersion();
+            }
+        }
+    }
+
+    /** Appends or replaces the source-tile bucket exposed to search-result overlay code. */
+    private upsertSearchResultPointBucket(
+        session: FeatureSearchSession,
+        contribution: SearchResultTileContribution
+    ): void {
+        const bucket = this.searchResultPointBucketFromContribution(contribution);
+        if (!bucket) {
+            return;
+        }
+        const existingIndex = session.searchResultPointBucketIndexBySourceKey.get(contribution.sourceTileKey);
+        if (existingIndex !== undefined) {
+            session.searchResultPointBucketsCache[existingIndex] = bucket;
+            return;
+        }
+        session.searchResultPointBucketIndexBySourceKey.set(
+            contribution.sourceTileKey,
+            session.searchResultPointBucketsCache.length);
+        session.searchResultPointBucketsCache.push(bucket);
+    }
+
+    /** Builds the source-key index used to avoid O(n²) bucket replacement during broad streamed searches. */
+    private searchResultPointBucketIndex(buckets: SearchResultPointBucket[]): Map<string, number> {
+        const index = new Map<string, number>();
+        buckets.forEach((bucket, position) => index.set(bucket.sourceTileKey, position));
+        return index;
+    }
+
+    /** Appends a new source tile contribution without touching previously aggregated result arrays. */
     private appendSessionResultContribution(
         session: FeatureSearchSession,
         contribution: SearchResultTileContribution
     ): void {
-        session.searchResults.push(...contribution.results);
+        this.appendArray(session.searchResults, contribution.results);
         if (contribution.diagnostics) {
             session.diagnosticsBlobs.push(contribution.diagnostics);
         }
@@ -1871,6 +2228,9 @@ export class FeatureSearchService {
             session.searchResultDensityIndex.addContribution(contribution.sourceTileKey, contribution.points);
             const bucket = this.searchResultPointBucketFromContribution(contribution);
             if (bucket) {
+                session.searchResultPointBucketIndexBySourceKey.set(
+                    contribution.sourceTileKey,
+                    session.searchResultPointBucketsCache.length);
                 session.searchResultPointBucketsCache.push(bucket);
             }
         }
@@ -1886,6 +2246,13 @@ export class FeatureSearchService {
             session.searchResultPointsCacheDirty = session.searchResultPointsCacheDirty || pointsChanged;
             session.searchResultPointsVersion += 1;
             this.bumpSearchResultLayersVersion();
+        }
+    }
+
+    /** Appends large result batches without using spread syntax, which can exceed V8's argument limit. */
+    private appendArray<T>(target: T[], items: readonly T[]): void {
+        for (const item of items) {
+            target.push(item);
         }
     }
 
@@ -1916,6 +2283,28 @@ export class FeatureSearchService {
         this.sessionsChanged.next([...this.searchSessions]);
     }
 
+    /** Coalesces high-frequency streamed-result mutations into at most one Angular emission per frame. */
+    private scheduleProgressEmission(session: FeatureSearchSession): void {
+        this.pendingProgressEmissionSessionIds.add(session.id);
+        if (this.progressEmissionRaf !== null) {
+            return;
+        }
+        const schedule = typeof requestAnimationFrame === "function"
+            ? requestAnimationFrame
+            : ((callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 16) as unknown as number);
+        this.progressEmissionRaf = schedule(() => {
+            this.progressEmissionRaf = null;
+            const sessionIds = Array.from(this.pendingProgressEmissionSessionIds);
+            this.pendingProgressEmissionSessionIds.clear();
+            for (const sessionId of sessionIds) {
+                const currentSession = this.getInternalSession(sessionId);
+                if (currentSession) {
+                    this.progress.next(currentSession);
+                }
+            }
+        });
+    }
+
     /** Returns one session's cached marker list, rebuilding it only after mutations. */
     private getSessionSearchResultPoints(session: FeatureSearchSession): SearchResultPoint[] {
         if (session.searchResultPointsCacheDirty) {
@@ -1935,12 +2324,14 @@ export class FeatureSearchService {
         if (!session.searchResultPointsByFeatureKey.size
             && !session.searchResultPointsCache.length
             && !session.searchResultPointBucketsCache.length
+            && !session.searchResultPointBucketIndexBySourceKey.size
             && !session.searchResultPointsCacheDirty) {
             return false;
         }
         session.searchResultPointsByFeatureKey.clear();
         session.searchResultPointsCache = [];
         session.searchResultPointBucketsCache = [];
+        session.searchResultPointBucketIndexBySourceKey.clear();
         session.searchResultPointsCacheDirty = false;
         session.searchResultPointsVersion += 1;
         session.searchResultDensityIndex.clear();
@@ -2024,13 +2415,15 @@ export class FeatureSearchService {
         return hoverFeatureId;
     }
 
-    /** Creates a compact human-readable label that keeps multiple hits on the same feature distinguishable. */
+    /** Creates a compact human-readable label for the result tree. */
     private searchResultEntryLabel(
         entry: SearchResultTileEntry,
         resultFields: readonly string[],
-        resultIndex: number
+        _resultIndex: number
     ): string {
-        const attributeName = this.searchResultFieldValue(entry, resultFields, "$name");
+        const attributeName = entry.values
+            ? this.searchResultFieldValue(entry, resultFields, "$name")
+            : "";
         const attributeSuffix = attributeName
             || (this.hasFiniteIndex(entry.attributeIndex)
                 ? `attribute ${Math.max(0, Math.floor(entry.attributeIndex)) + 1}`
@@ -2040,7 +2433,7 @@ export class FeatureSearchService {
         if (detail) {
             return `${entry.featureId} - ${detail}`;
         }
-        return resultIndex > 0 ? `${entry.featureId} #${resultIndex + 1}` : entry.featureId;
+        return entry.featureId;
     }
 
     /** Formats one optional validity ordinal using one-based values for users. */
@@ -2083,7 +2476,10 @@ export class FeatureSearchService {
     }
 
     /**
-     * Creates a search marker if the match exposes a valid cartographic position.
+     * Creates a search marker, falling back to the source tile center for compact streamed entries.
+     *
+     * Default density-map rendering aggregates by tile anyway, so compact entries intentionally skip expensive
+     * per-result geometry-center extraction. Exact entry positions are still used when the native payload includes them.
      */
     private makeSearchResultPoint(
         sourceTileKey: string,
@@ -2097,16 +2493,17 @@ export class FeatureSearchService {
         resultIndex: number,
         resultKey: string,
         hoverFeatureId: string,
-        entry: SearchResultTileEntry
+        entry: SearchResultTileEntry,
+        fallbackTileCenter: {x: number; y: number; z: number} | null
     ): SearchResultPoint | null {
-        const cartographicRad = entry.position.cartographicRad;
-        const cartographic = entry.position.cartographic;
+        const cartographicRad = entry.position?.cartographicRad;
+        const cartographic = entry.position?.cartographic;
         const lon = cartographicRad
             ? GeoMath.toDegrees(cartographicRad.longitude)
-            : cartographic?.x;
+            : cartographic?.x ?? fallbackTileCenter?.x;
         const lat = cartographicRad
             ? GeoMath.toDegrees(cartographicRad.latitude)
-            : cartographic?.y;
+            : cartographic?.y ?? fallbackTileCenter?.y;
         if (lon === undefined || lat === undefined) {
             return null;
         }

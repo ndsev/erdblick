@@ -192,6 +192,12 @@ struct TileSearchResultLayer
     /** Compact entries consumed by the TypeScript search UI and low-fi marker path. */
     NativeJsValue resultEntries() const;
 
+    /** Exact result entries for a bounded half-open result-index range, including per-result display positions. */
+    NativeJsValue resultEntryRange(uint32_t offset, uint32_t limit) const;
+
+    /** Compact result entries for tree/density ingress without expensive per-result geometry-center conversion. */
+    NativeJsValue resultEntryRangeCompact(uint32_t offset, uint32_t limit) const;
+
     /**
      * Summarize withFields and trace values without materializing all samples in TypeScript.
      * @param histogramLimit Maximum number of histogram buckets returned per value stream.

@@ -4,7 +4,11 @@ import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 import {coreLib, initializeLibrary} from "../integrations/wasm";
 import {DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY} from "../shared/feature-search-state";
 import type {FeatureSearchStateEntry} from "../shared/feature-search-state";
-import {FeatureSearchRuntimeState} from "./feature-search-runtime-state.model";
+import {
+    FeatureSearchResolvedDefinition,
+    FeatureSearchRuntimeState,
+    featureSearchResultFields
+} from "./feature-search-runtime-state.model";
 import type {SearchLayerTileSet} from "./map-runtime.model";
 
 beforeAll(async () => {
@@ -12,8 +16,11 @@ beforeAll(async () => {
 });
 
 /** Creates the minimal persisted search definition needed by runtime request tests. */
-function searchDefinition(patch: Partial<FeatureSearchStateEntry> = {}): FeatureSearchStateEntry {
-    return {
+function searchDefinition(
+    patch: Partial<FeatureSearchStateEntry> = {},
+    concreteScope: "feature" | "attribute" = patch.scope === "attribute" ? "attribute" : "feature"
+): FeatureSearchResolvedDefinition {
+    const definition: FeatureSearchStateEntry = {
         id: "search-1",
         query: "typeId == 'Road'",
         scope: "auto",
@@ -28,6 +35,14 @@ function searchDefinition(patch: Partial<FeatureSearchStateEntry> = {}): Feature
         searchStyleRules: [],
         renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
         ...patch
+    };
+    return {
+        ...definition,
+        concreteScope,
+        backendQuery: patch.query === "WARNING_SIGN" && concreteScope === "attribute"
+            ? "$name == \"WARNING_SIGN\""
+            : definition.query,
+        resultFields: featureSearchResultFields(definition, concreteScope)
     };
 }
 
@@ -80,15 +95,12 @@ function visibleLayerTilePlan(
 }
 
 describe("FeatureSearchRuntimeState", () => {
-    it("sends resolver-normalized backend queries with search tile requests", () => {
-        const definition = searchDefinition({query: "WARNING_SIGN"});
+    it("sends resolved backend queries with search tile requests", () => {
+        const definition = searchDefinition({query: "WARNING_SIGN"}, "attribute");
         const runtime = new FeatureSearchRuntimeState(definition, {} as TileLayerParser);
         runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65537]));
 
-        const requests = runtime.buildPendingRequests(
-            () => "attribute",
-            () => '$name == "WARNING_SIGN"'
-        );
+        const requests = runtime.buildPendingRequests();
 
         expect(requests).toHaveLength(1);
         expect(requests[0]).toMatchObject({
@@ -96,17 +108,17 @@ describe("FeatureSearchRuntimeState", () => {
             layerId: "layerA",
             tileIds: [65537],
             searchId: "search-1",
-            searchQuery: '$name == "WARNING_SIGN"',
+            searchQuery: "$name == \"WARNING_SIGN\"",
             searchScope: "attribute"
         });
     });
 
-    it("treats backend query changes as a new search generation", () => {
-        const definition = searchDefinition({query: "WARNING_SIGN"});
+    it("treats query changes as a new search generation", () => {
+        const definition = searchDefinition({query: "WARNING_SIGN"}, "attribute");
         const runtime = new FeatureSearchRuntimeState(definition, {} as TileLayerParser);
         runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65537]));
 
-        runtime.applyDefinition(definition, () => "attribute", () => "WARNING_SIGN");
+        runtime.applyDefinition(definition);
         expect(runtime.refresh).toBe(1);
 
         const sourceTileKey = coreLib.getTileFeatureLayerKey("m1", "layerA", 65537n);
@@ -114,9 +126,7 @@ describe("FeatureSearchRuntimeState", () => {
         expect(runtime.tilesBySourceKey.has(sourceTileKey)).toBe(true);
 
         const removedTiles = runtime.applyDefinition(
-            definition,
-            () => "attribute",
-            () => '$name == "WARNING_SIGN"'
+            searchDefinition({query: "MOVABLE_WARNING_SIGN"}, "attribute")
         );
 
         expect(runtime.refresh).toBe(2);
@@ -132,7 +142,7 @@ describe("FeatureSearchRuntimeState", () => {
             [393218, 65538, 262146]
         ));
 
-        const requests = runtime.buildPendingRequests(() => "feature", definition => definition.query);
+        const requests = runtime.buildPendingRequests();
 
         expect(requests).toHaveLength(1);
         expect(requests[0].tileIds).toEqual([393218, 65538, 262146]);
@@ -148,7 +158,7 @@ describe("FeatureSearchRuntimeState", () => {
             new Set([262146, 393218])
         ));
 
-        const requests = runtime.buildPendingRequests(() => "feature", definition => definition.query);
+        const requests = runtime.buildPendingRequests();
 
         expect(requests).toHaveLength(1);
         expect(requests[0].tileIds).toEqual([393218, 262146, 65538]);
@@ -163,9 +173,36 @@ describe("FeatureSearchRuntimeState", () => {
             {mapId: "m1", layerId: "layerB", tileId: 196610}
         ]));
 
-        const requests = runtime.buildPendingRequests(() => "feature", definition => definition.query);
+        const requests = runtime.buildPendingRequests();
 
         expect(requests.map(request => request.layerId)).toEqual(["layerB", "layerA"]);
         expect(requests[0].tileIds).toEqual([65538, 196610]);
+    });
+
+    it("requests style filter, color, and label expressions as result fields", () => {
+        const runtime = new FeatureSearchRuntimeState(searchDefinition({
+            scope: "attribute",
+            searchStyleRules: [{
+                geometry: "label",
+                filter: [{field: "speedLimit.value", op: ">", value: 80}],
+                color: {
+                    mode: "categories",
+                    field: "featureClass",
+                    stops: [],
+                    fallbackColor: "#ea4336"
+                },
+                labelExpression: "speedLimit.value",
+                labelCustomExpression: false
+            }]
+        }, "attribute"), {} as TileLayerParser);
+        runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65537]));
+
+        const requests = runtime.buildPendingRequests();
+
+        expect(requests[0].withFields).toEqual([
+            "$name",
+            "featureClass",
+            "speedLimit.value"
+        ]);
     });
 });

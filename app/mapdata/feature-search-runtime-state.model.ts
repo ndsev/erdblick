@@ -7,16 +7,19 @@ import {
 import {SearchResultTile} from "./search-result-tile.model";
 import {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
 
-export type FeatureSearchScopeResolver = (definition: FeatureSearchStateEntry) => "feature" | "attribute";
-export type FeatureSearchBackendQueryResolver = (definition: FeatureSearchStateEntry) => string;
+export interface FeatureSearchResolvedDefinition extends FeatureSearchStateEntry {
+    concreteScope: "feature" | "attribute";
+    backendQuery: string;
+    resultFields: string[];
+}
 
 /** Extracts server-side result-field expressions needed by search-result styling. */
 export function featureSearchResultFields(
     definition: FeatureSearchStateEntry,
-    resolveScope: FeatureSearchScopeResolver
+    concreteScope: "feature" | "attribute"
 ): string[] {
     const fields = new Set<string>();
-    if (resolveScope(definition) === "attribute") {
+    if (concreteScope === "attribute") {
         fields.add("$name");
     }
     for (const rule of definition.searchStyleRules ?? []) {
@@ -28,6 +31,9 @@ export function featureSearchResultFields(
         const color = rule.color;
         if ((color.mode === "gradient" || color.mode === "categories") && color.field.trim()) {
             fields.add(color.field.trim());
+        }
+        if (rule.geometry === "label" && rule.labelExpression?.trim()) {
+            fields.add(rule.labelExpression.trim());
         }
     }
     return Array.from(fields).sort();
@@ -47,7 +53,7 @@ function normalizedSelectedLayerRefs(definition: FeatureSearchStateEntry): Featu
 export class FeatureSearchRuntimeState {
     readonly searchId: string;
     readonly tilesBySourceKey = new Map<string, SearchResultTile>();
-    definition: FeatureSearchStateEntry;
+    definition: FeatureSearchResolvedDefinition;
     refresh = 0;
 
     private definitionFingerprint = "";
@@ -57,7 +63,7 @@ export class FeatureSearchRuntimeState {
     private hasAdoptedVisibleTiles = false;
 
     constructor(
-        definition: FeatureSearchStateEntry,
+        definition: FeatureSearchResolvedDefinition,
         private readonly parser: TileLayerParser
     ) {
         this.searchId = definition.id;
@@ -66,16 +72,14 @@ export class FeatureSearchRuntimeState {
 
     /** Applies a normalized persisted definition and returns tiles invalidated by a new backend generation. */
     applyDefinition(
-        definition: FeatureSearchStateEntry,
-        resolveScope: FeatureSearchScopeResolver,
-        resolveBackendQuery: FeatureSearchBackendQueryResolver,
+        definition: FeatureSearchResolvedDefinition,
         forceGeneration = false
     ): SearchResultTile[] {
         this.definition = definition;
         if (forceGeneration) {
             this.generationSerial += 1;
         }
-        const fingerprint = this.buildDefinitionFingerprint(resolveScope, resolveBackendQuery);
+        const fingerprint = this.buildDefinitionFingerprint();
         if (fingerprint === this.definitionFingerprint) {
             return [];
         }
@@ -201,10 +205,7 @@ export class FeatureSearchRuntimeState {
     }
 
     /** Groups incomplete source tiles into concrete backend search requests. */
-    buildPendingRequests(
-        resolveScope: FeatureSearchScopeResolver,
-        resolveBackendQuery: FeatureSearchBackendQueryResolver
-    ): FeatureSearchTileRequest[] {
+    buildPendingRequests(): FeatureSearchTileRequest[] {
         const statesByLevelLayer = new Map<string, {
             mapId: string;
             layerId: string;
@@ -260,9 +261,7 @@ export class FeatureSearchRuntimeState {
                     entry.layerId,
                     tileIds,
                     priorityTileIds,
-                    this.refresh,
-                    resolveScope,
-                    resolveBackendQuery
+                    this.refresh
                 );
             });
     }
@@ -270,9 +269,7 @@ export class FeatureSearchRuntimeState {
     /** Creates empty tile requests that cancel or pause a server-side search on previous layers. */
     cancellationRequests(
         layerKeys: Iterable<string>,
-        refresh: number,
-        resolveScope: FeatureSearchScopeResolver,
-        resolveBackendQuery: FeatureSearchBackendQueryResolver
+        refresh: number
     ): FeatureSearchTileRequest[] {
         const cancellations: FeatureSearchTileRequest[] = [];
         for (const layerKey of layerKeys) {
@@ -286,9 +283,7 @@ export class FeatureSearchRuntimeState {
                 parsed.layerId,
                 [],
                 [],
-                refresh,
-                resolveScope,
-                resolveBackendQuery
+                refresh
             ));
         }
         return cancellations;
@@ -320,31 +315,26 @@ export class FeatureSearchRuntimeState {
     }
 
     /** Builds the stable logical-search fingerprint that owns the backend refresh generation. */
-    private buildDefinitionFingerprint(
-        resolveScope: FeatureSearchScopeResolver,
-        resolveBackendQuery: FeatureSearchBackendQueryResolver
-    ): string {
+    private buildDefinitionFingerprint(): string {
         return JSON.stringify({
             searchId: this.definition.id,
             generationSerial: this.generationSerial,
             query: this.definition.query,
-            backendQuery: resolveBackendQuery(this.definition),
-            scope: resolveScope(this.definition),
+            backendQuery: this.definition.backendQuery,
+            scope: this.definition.concreteScope,
             selectedMapLayers: normalizedSelectedLayerRefs(this.definition),
-            withFields: featureSearchResultFields(this.definition, resolveScope)
+            withFields: this.definition.resultFields
         });
     }
 
     /** Builds one concrete mapget search request object for a map/layer tile set. */
     private createTileRequest(
-        request: FeatureSearchStateEntry,
+        request: FeatureSearchResolvedDefinition,
         mapId: string,
         layerId: string,
         tileIds: number[],
         priorityTileIds: number[],
-        refresh: number,
-        resolveScope: FeatureSearchScopeResolver,
-        resolveBackendQuery: FeatureSearchBackendQueryResolver
+        refresh: number
     ): FeatureSearchTileRequest {
         const result: FeatureSearchTileRequest = {
             mapId,
@@ -352,13 +342,13 @@ export class FeatureSearchRuntimeState {
             tileIds,
             searchId: request.id,
             refresh,
-            searchQuery: resolveBackendQuery(request),
-            searchScope: resolveScope(request),
+            searchQuery: request.backendQuery,
+            searchScope: request.concreteScope,
         };
         if (priorityTileIds.length) {
             result.priorityTileIds = priorityTileIds;
         }
-        const withFields = featureSearchResultFields(request, resolveScope);
+        const withFields = request.resultFields;
         if (withFields.length) {
             result.withFields = withFields;
         }

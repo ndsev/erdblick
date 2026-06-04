@@ -195,6 +195,21 @@ void addHistogram(ValueSummary& summary, std::string value, uint32_t distinctLim
     summary.histogram.emplace(std::move(value), 1);
 }
 
+/** Format numeric samples for the histogram without hiding exact integer values. */
+std::string numericHistogramValue(double value)
+{
+    if (std::isfinite(value)
+        && std::floor(value) == value
+        && value >= static_cast<double>(std::numeric_limits<int64_t>::min())
+        && value <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+        return std::to_string(static_cast<int64_t>(value));
+    }
+    auto stream = std::ostringstream();
+    stream.precision(12);
+    stream << value;
+    return stream.str();
+}
+
 /** Accumulate one model node sample into a value summary. */
 void summarizeNode(ValueSummary& summary, simfil::ModelNode::Ptr const& node, uint32_t distinctLimit)
 {
@@ -217,10 +232,12 @@ void summarizeNode(ValueSummary& summary, simfil::ModelNode::Ptr const& node, ui
     case simfil::ValueType::Int:
         summary.integers++;
         addNumeric(summary, static_cast<double>(std::get<int64_t>(node->value())));
+        addHistogram(summary, std::to_string(std::get<int64_t>(node->value())), distinctLimit);
         break;
     case simfil::ValueType::Float:
         summary.numbers++;
         addNumeric(summary, std::get<double>(node->value()));
+        addHistogram(summary, numericHistogramValue(std::get<double>(node->value())), distinctLimit);
         break;
     case simfil::ValueType::String: {
         auto value = nodeStringValue(*node);
@@ -727,37 +744,54 @@ NativeJsValue TileSearchResultLayer::info() const
 
 NativeJsValue TileSearchResultLayer::resultEntries() const
 {
+    return resultEntryRange(0, 0);
+}
+
+namespace {
+
+NativeJsValue resultEntryRangeForLayer(
+    mapget::TileSearchResultLayer const& model,
+    uint32_t offset,
+    uint32_t limit,
+    bool includePosition)
+{
     auto entries = JsValue::List();
-    auto const layerInfo = model_->info();
-    auto const sourceMapId = layerInfo.value("sourceMapId", model_->mapId());
+    auto const layerInfo = model.info();
+    auto const sourceMapId = layerInfo.value("sourceMapId", model.mapId());
     auto const sourceLayerId = layerInfo.value(
         "sourceLayerId",
-        model_->layerInfo() ? model_->layerInfo()->layerId_ : std::string{});
-    auto const sourceTileId = layerInfo.value("sourceTileId", model_->tileId().value_);
+        model.layerInfo() ? model.layerInfo()->layerId_ : std::string{});
+    auto const sourceTileId = layerInfo.value("sourceTileId", model.tileId().value_);
     auto const sourceTileKey = mapget::MapTileKey(
         mapget::LayerType::Features,
         sourceMapId,
         sourceLayerId,
         mapget::TileId(sourceTileId)).toString();
 
-    for (size_t index = 0; index < model_->size(); ++index) {
-        auto result = model_->at(index);
+    auto const begin = std::min<size_t>(offset, model.size());
+    auto const end = limit == 0
+        ? model.size()
+        : std::min<size_t>(model.size(), begin + static_cast<size_t>(limit));
+
+    for (size_t index = begin; index < end; ++index) {
+        auto result = model.at(index);
         if (!result) {
             continue;
         }
 
-        auto const center = searchResultGeometryCenter(result);
-        auto const cartesian = wgsToCartesian<mapget::Point>(center);
         auto entry = JsValue::Dict({
             {"mapTileKey", JsValue(sourceTileKey)},
             {"featureId", JsValue(result->featureId() ? result->featureId()->toString() : std::string{})},
             {"resultIndex", JsValue(static_cast<double>(index))},
-            {"position", JsValue::Dict({
+        });
+        if (includePosition) {
+            auto const center = searchResultGeometryCenter(result);
+            auto const cartesian = wgsToCartesian<mapget::Point>(center);
+            entry.set("position", JsValue::Dict({
                 {"cartesian", JsValue(cartesian)},
                 {"cartographic", JsValue(center)}
-            })},
-            {"values", jsonToJsValue(result->toJson().value("values", nlohmann::json::array()))},
-        });
+            }));
+        }
         if (auto attributeIndex = result->attributeIndex()) {
             entry.set("attributeIndex", JsValue(static_cast<double>(*attributeIndex)));
         }
@@ -771,6 +805,18 @@ NativeJsValue TileSearchResultLayer::resultEntries() const
     }
 
     return *entries;
+}
+
+} // namespace
+
+NativeJsValue TileSearchResultLayer::resultEntryRange(uint32_t offset, uint32_t limit) const
+{
+    return resultEntryRangeForLayer(*model_, offset, limit, true);
+}
+
+NativeJsValue TileSearchResultLayer::resultEntryRangeCompact(uint32_t offset, uint32_t limit) const
+{
+    return resultEntryRangeForLayer(*model_, offset, limit, false);
 }
 
 NativeJsValue TileSearchResultLayer::valueSummaries(uint32_t histogramLimit, uint32_t distinctLimit) const

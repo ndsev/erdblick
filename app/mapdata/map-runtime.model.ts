@@ -70,7 +70,7 @@ export interface SearchResultTileEntry {
     mapTileKey: string;
     featureId: string;
     resultIndex: number;
-    position: {
+    position?: {
         cartesian: {x: number, y: number, z: number};
         cartographic: {x: number, y: number, z: number} | null;
         cartographicRad?: {longitude: number, latitude: number, height: number} | null;
@@ -88,6 +88,8 @@ export interface TileSearchResultLayerLike {
     nodeId(): string;
     resultFields?(): unknown;
     resultEntries?(): unknown;
+    resultEntryRange?(offset: number, limit: number): unknown;
+    resultEntryRangeCompact?(offset: number, limit: number): unknown;
     valueSummaries?(histogramLimit: number, distinctLimit: number): unknown;
     numResults?(): unknown;
     tileId(): unknown;
@@ -116,6 +118,8 @@ export interface SearchResultTilePayload {
     layerBlob: Uint8Array;
     diagnostics: Uint8Array | null;
     entries: SearchResultTileEntry[];
+    entryOffset?: number;
+    entriesComplete?: boolean;
 }
 
 /** Payload emitted when a search result tile leaves the runtime cache. */

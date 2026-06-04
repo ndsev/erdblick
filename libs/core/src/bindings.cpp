@@ -552,7 +552,9 @@ void setExceptionHandler(em::val handler) {
 /** Validate a SIMFIL query by compiling it against a fresh default environment. */
 void validateSimfil(const std::string &query) {
     auto env = mapget::makeEnvironment(simfil::Environment::WithNewStringCache);
-    simfil::compile(*env, query, false, true);
+    simfil::compile(*env, query, simfil::CompileOptions{
+        .any = false,
+        .rewriteMode = simfil::RewriteMode::None});
 }
 
 }
@@ -722,6 +724,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("resultFields", &TileSearchResultLayer::resultFields)
         .function("info", &TileSearchResultLayer::info)
         .function("resultEntries", &TileSearchResultLayer::resultEntries)
+        .function("resultEntryRange", &TileSearchResultLayer::resultEntryRange)
+        .function("resultEntryRangeCompact", &TileSearchResultLayer::resultEntryRangeCompact)
         .function("valueSummaries", &TileSearchResultLayer::valueSummaries)
         .function("toJson", &TileSearchResultLayer::toJson)
         .function("copyDiagnostics", &TileSearchResultLayer::copyDiagnostics);
