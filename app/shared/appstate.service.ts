@@ -2151,8 +2151,8 @@ export class AppStateService implements OnDestroy {
         return;
     }
 
-    /** Toggles one inspection panel between its base feature and a selected attribute/validity pseudo-feature id. */
-    toggleInspectionFeatureTarget(panelId: number, mapTileKey: string, targetFeatureId: string): void {
+    /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
+    toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
         const allPanels = this.selectionState.getValue();
         const panelIndex = allPanels.findIndex(panel => panel.id === panelId && panel.sourceData === undefined);
         if (panelIndex === -1) {

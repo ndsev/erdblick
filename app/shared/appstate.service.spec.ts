@@ -936,11 +936,11 @@ describe('AppStateService', () => {
             }
         ];
 
-        service.toggleInspectionFeatureTarget(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
+        service.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
         expect(service.selection[0].features[0].featureId).toBe('Road.1:attribute#2:validity#0');
         expect(service.selection[0].locked).toBe(true);
 
-        service.toggleInspectionFeatureTarget(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
+        service.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
         expect(service.selection[0].features[0].featureId).toBe('Road.1');
 
         service.ngOnDestroy();

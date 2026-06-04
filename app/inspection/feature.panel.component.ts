@@ -200,7 +200,7 @@ export class FeaturePanelComponent implements OnDestroy {
         return expansionState;
     }
 
-    /** Restores expansion state for stable inspection row ids without blocking target-focused auto-expansion. */
+    /** Restores expansion state for stable inspection row ids without blocking target-highlight auto-expansion. */
     private restoreTreeExpansionState(nodes: TreeTableNode[], expansionState: Map<string, boolean>): void {
         if (!expansionState.size) {
             return;
