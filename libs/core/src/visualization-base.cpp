@@ -112,12 +112,11 @@ std::optional<ParsedHighlightAttributeId> parseHighlightAttributeId(std::string_
     return result;
 }
 
-/** Build a cache key that keeps any-mode and wildcard-mode ASTs separate. */
-std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
+/** Build a cache key that keeps plain and any-wrapped ASTs separate. */
+std::string makeExpressionCacheKey(std::string_view expression, bool anyMode) {
     std::string key;
-    key.reserve(expression.size() + 3);
+    key.reserve(expression.size() + 2);
     key.push_back(anyMode ? '1' : '0');
-    key.push_back(autoWildcard ? '1' : '0');
     key.push_back(':');
     key.append(expression);
     return key;
@@ -387,7 +386,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
         relationContext,
         [this, &relationContext](auto&& expression)
         {
-            return visualization_.evaluateExpression(expression, *relationContext, false, false);
+            return visualization_.evaluateExpression(expression, *relationContext, false);
         },
         [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
         {
@@ -936,12 +935,12 @@ void FeatureLayerVisualizationBase::run()
         };
         boundEvalFun.eval_ = [this, &ensureEvaluationContext, &boundEvalFun](auto&& str)
         {
-            if (auto constantValue = evaluateConstantExpression(str, false, false)) {
+            if (auto constantValue = evaluateConstantExpression(str, false)) {
                 return std::move(*constantValue);
             }
             auto& context = ensureEvaluationContext();
             boundEvalFun.context_ = context;
-            return evaluateExpression(str, *context, false, false);
+            return evaluateExpression(str, *context, false);
         };
 
         auto const& candidateRuleIndices =
@@ -1512,21 +1511,22 @@ void FeatureLayerVisualizationBase::ensureEvaluationEnvironment()
 FeatureLayerVisualizationBase::CachedExpression*
 FeatureLayerVisualizationBase::getOrCompileExpression(
     std::string const& expression,
-    bool anyMode,
-    bool autoWildcard)
+    bool anyMode)
 {
     ensureEvaluationEnvironment();
     if (!evalEnvironment_) {
         return nullptr;
     }
 
-    auto cacheKey = makeExpressionCacheKey(expression, anyMode, autoWildcard);
+    auto cacheKey = makeExpressionCacheKey(expression, anyMode);
     auto [iter, inserted] = expressionCache_.try_emplace(std::move(cacheKey));
     if (!inserted) {
         return &iter->second;
     }
 
-    auto ast = simfil::compile(*evalEnvironment_, expression, anyMode, autoWildcard);
+    auto ast = simfil::compile(*evalEnvironment_, expression, simfil::CompileOptions{
+        .any = anyMode,
+        .rewriteMode = simfil::RewriteMode::None});
     if (!ast) {
         std::cout << "Error compiling " << expression << ": " << ast.error().message
                   << std::endl;
@@ -1614,10 +1614,9 @@ void FeatureLayerVisualizationBase::recordRuntimeStyleIssue(
 
 std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpression(
     std::string const& expression,
-    bool anyMode,
-    bool autoWildcard)
+    bool anyMode)
 {
-    auto* cached = getOrCompileExpression(expression, anyMode, autoWildcard);
+    auto* cached = getOrCompileExpression(expression, anyMode);
     if (!cached) {
         return std::nullopt;
     }
@@ -1631,10 +1630,9 @@ std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpr
 simfil::Value FeatureLayerVisualizationBase::evaluateExpression(
     std::string const& expression,
     simfil::ModelNode const& ctx,
-    bool anyMode,
-    bool autoWildcard)
+    bool anyMode)
 {
-    auto* cached = getOrCompileExpression(expression, anyMode, autoWildcard);
+    auto* cached = getOrCompileExpression(expression, anyMode);
     if (!cached || !cached->ast_ || !evalEnvironment_) {
         return simfil::Value::null();
     }
@@ -1733,7 +1731,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         attrEvaluationContext,
         [this, &attrEvaluationContext](auto&& str)
         {
-            return evaluateExpression(str, *attrEvaluationContext, false, false);
+            return evaluateExpression(str, *attrEvaluationContext, false);
         },
         [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
         {

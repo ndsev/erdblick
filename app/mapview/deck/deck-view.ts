@@ -1565,7 +1565,11 @@ export abstract class DeckMapView implements IRenderView {
                 }
                 if (highFidelityActive) {
                     if (searchLayer.renderStrategy.showHighFiResultDots) {
-                        highFiPinMarkers.push(...bucket.points.map(point => this.searchResultPointMarker(point)));
+                        // Dense searches can produce more per-feature pins than V8 accepts
+                        // as spread-call arguments; append one marker at a time.
+                        for (const point of bucket.points) {
+                            highFiPinMarkers.push(this.searchResultPointMarker(point));
+                        }
                     }
                     continue;
                 }

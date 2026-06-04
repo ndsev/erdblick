@@ -288,7 +288,29 @@ export function categoryStopsForEnumValues(
     }));
 }
 
-/** Creates numeric gradient stops from schema min/max bounds using the requested decade-based step. */
+/** Creates category stops from observed values, using heat colors for sorted scalar buckets. */
+export function categoryStopsForObservedValues(
+    values: string[],
+    valueKind: SearchStyleFieldValueKind | undefined,
+    nextId: () => number
+): SearchStyleCategoryStopDraft[] {
+    const numeric = isNumericStyleValueKind(valueKind)
+        && values.every(value => Number.isFinite(Number(value)));
+    const sortedValues = [...values].sort((lhs, rhs) => {
+        if (numeric) {
+            return Number(lhs) - Number(rhs);
+        }
+        return lhs.localeCompare(rhs);
+    });
+    return sortedValues.map((value, index) => ({
+        id: nextId(),
+        valueText: value,
+        color: gradientColorAt(index / Math.max(sortedValues.length - 1, 1)),
+        pending: false
+    }));
+}
+
+/** Creates at most eight numeric gradient stops with denser coverage in the lower half of the range. */
 export function gradientStopsForNumericRange(
     range: SearchStyleNumericRange | undefined,
     nextId: () => number
@@ -301,27 +323,61 @@ export function gradientStopsForNumericRange(
     }
 
     const span = range.max - range.min;
-    const step = Math.pow(10, Math.floor(Math.log10(span))) / 10;
-    const values: number[] = [];
-    for (let index = 0; index <= Math.ceil(span / step); ++index) {
-        const value = roundGradientValue(range.min + index * step, step);
-        if (value >= range.max) {
-            break;
+    const roundingStep = span / 10;
+    const offsets = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1];
+    const values = offsets.reduce<number[]>((result, offset, index) => {
+        const exactValue = index === offsets.length - 1
+            ? range.max
+            : range.min + span * offset;
+        const value = index === 0 || index === offsets.length - 1
+            ? exactValue
+            : roundGradientValue(exactValue, roundingStep);
+        if (result.length === 0 || result[result.length - 1] !== value) {
+            result.push(value);
         }
-        values.push(value);
-    }
-    if (values.length === 0 || values[0] !== range.min) {
-        values.unshift(range.min);
-    }
-    if (values[values.length - 1] !== range.max) {
-        values.push(range.max);
-    }
+        return result;
+    }, []);
 
     return values.map((value, index) => ({
         id: nextId(),
         value,
         color: gradientColorAt(index / Math.max(values.length - 1, 1))
     }));
+}
+
+/** Creates observed-data gradients with linear value spacing across the measured domain. */
+export function gradientStopsForObservedNumericRange(
+    range: SearchStyleNumericRange | undefined,
+    nextId: () => number
+): SearchStyleGradientStopDraft[] {
+    if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) {
+        return [];
+    }
+    if (range.min === range.max) {
+        return [{id: nextId(), value: range.min, color: gradientColorAt(0.5)}];
+    }
+
+    const stopCount = 8;
+    const span = range.max - range.min;
+    const roundingStep = span / (stopCount - 1);
+    const values = Array.from({length: stopCount}, (_, index) => {
+        if (index === 0) {
+            return range.min;
+        }
+        if (index === stopCount - 1) {
+            return range.max;
+        }
+        return roundGradientValue(range.min + span * (index / (stopCount - 1)), roundingStep);
+    }).filter((value, index, array) => index === 0 || value !== array[index - 1]);
+
+    return values.map((value, index) => {
+        const offset = index / Math.max(values.length - 1, 1);
+        return {
+            id: nextId(),
+            value,
+            color: gradientColorAt(offset)
+        };
+    });
 }
 
 /** Auto-populates gradient/category stops for one selected schema field. */

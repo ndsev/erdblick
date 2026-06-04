@@ -7,6 +7,7 @@ import {
     EMPTY_GRADIENT_PREVIEW_COLOR,
     gradientCss,
     gradientPreviewCss,
+    gradientStopsForObservedNumericRange,
     gradientStopsForNumericRange,
     gradientStopsNeedSorting,
     gradientStopsToDraft,
@@ -119,14 +120,31 @@ describe("search style color helpers", () => {
         expect(serializableGradientStops(draft)).toBeNull();
     });
 
-    it("auto-generates decade-stepped numeric gradients from schema ranges", () => {
+    it("auto-generates bounded lower-half-biased numeric gradients from schema ranges", () => {
         let nextId = 1;
         const stops = gradientStopsForNumericRange({min: 0, max: 255}, () => nextId++);
 
-        expect(stops.map(stop => stop.value).slice(0, 4)).toEqual([0, 10, 20, 30]);
-        expect(stops.at(-2)?.value).toBe(250);
+        expect(stops.map(stop => stop.value)).toEqual([0, 26, 51, 77, 102, 128, 191, 255]);
+        expect(stops.length).toBe(8);
         expect(stops.at(-1)?.value).toBe(255);
         expect(stops.every(stop => /^#[0-9a-f]{6}$/.test(stop.color))).toBe(true);
+    });
+
+    it("generates observed-data gradients across the whole measured domain", () => {
+        let nextId = 1;
+        const stops = gradientStopsForObservedNumericRange({min: 20, max: 90}, () => nextId++);
+
+        expect(stops.map(stop => stop.value)).toEqual([20, 30, 40, 50, 60, 70, 80, 90]);
+        expect(stops.map(stop => stop.color)).toEqual([
+            "#2149ff",
+            "#567dc4",
+            "#8ab18a",
+            "#bfe54f",
+            "#dede30",
+            "#e99c2d",
+            "#f45929",
+            "#ff1726"
+        ]);
     });
 
     it("auto-generates deterministic unique category colors for enum values", () => {

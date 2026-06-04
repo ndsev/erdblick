@@ -310,7 +310,8 @@ public:
         Point,
         Line,
         Polygon,
-        Mesh
+        Mesh,
+        Label
     };
 
     enum class SearchColorMode {
@@ -360,6 +361,7 @@ public:
         SearchColorMode colorMode = SearchColorMode::Solid;
         std::vector<SearchStyleFilter> filters;
         std::string colorField;
+        std::string labelExpression;
         std::vector<SearchColorStop> stops;
         std::array<uint8_t, 4> solidColor = {234, 67, 54, 190};
         std::array<uint8_t, 4> fallbackGeometryColor = {234, 67, 54, 190};
@@ -374,6 +376,9 @@ public:
         std::array<uint8_t, 4> surfaceColor = {234, 67, 54, 85};
         float lineWidth = 4.0f;
         float pointRadius = 6.0f;
+        bool label = false;
+        std::string labelText;
+        float labelSize = 14.0f;
     };
 
 private:
@@ -382,12 +387,14 @@ private:
         mapget::model_ptr<mapget::SearchResult> const& result,
         uint32_t resultIndex);
     void appendPoint(mapget::Point const& pointWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
+    void appendLabel(mapget::Point const& pointWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
     void appendPath(std::vector<mapget::Point> const& pointsWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
     void appendSurface(
         std::vector<mapget::Point> const& pointsWgs,
         std::vector<uint32_t> const& ringStarts,
         uint32_t resultIndex,
         SearchResolvedStyle const& style);
+    void appendMesh(std::vector<mapget::Point> const& pointsWgs, uint32_t resultIndex, SearchResolvedStyle const& style);
     void appendAabbFootprint(
         mapget::Point const& originWgs,
         mapget::Point const& sizeWgs,
@@ -403,10 +410,9 @@ private:
     [[nodiscard]] std::optional<SearchStyleValue> valueForField(
         mapget::model_ptr<mapget::SearchResult> const& result,
         std::string const& field) const;
-    [[nodiscard]] std::array<uint8_t, 4> colorForRule(
+    [[nodiscard]] std::optional<std::array<uint8_t, 4>> colorForRule(
         SearchStyleRule const& rule,
-        mapget::model_ptr<mapget::SearchResult> const& result,
-        std::array<uint8_t, 4> fallback) const;
+        mapget::model_ptr<mapget::SearchResult> const& result) const;
     [[nodiscard]] mapget::Point projectWgsPoint(mapget::Point const& wgsPoint) const;
     [[nodiscard]] JsValue coordinateOriginToJs() const;
     [[nodiscard]] JsValue resultFeatureIdsToJs() const;

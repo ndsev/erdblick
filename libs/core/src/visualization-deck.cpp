@@ -228,6 +228,9 @@ SearchGeometryKind searchGeometryFromString(std::string const& geometry)
     if (geometry == "mesh") {
         return SearchGeometryKind::Mesh;
     }
+    if (geometry == "label") {
+        return SearchGeometryKind::Label;
+    }
     return SearchGeometryKind::Any;
 }
 
@@ -255,6 +258,8 @@ bool geometryMatches(SearchGeometryKind ruleGeometry, mapget::GeomType geomType)
         return geomType == mapget::GeomType::Polygon || geomType == mapget::GeomType::AABB;
     case SearchGeometryKind::Mesh:
         return geomType == mapget::GeomType::Mesh || geomType == mapget::GeomType::GltfNodeIndex;
+    case SearchGeometryKind::Label:
+        return true;
     }
     return true;
 }
@@ -336,6 +341,7 @@ SearchStyleRule parseSearchStyleRule(
         : fallbackStyle.surfaceColor[3];
 
     rule.geometry = searchGeometryFromString(jsonString(ruleJson, "geometry", jsonString(ruleJson, "type", "any")));
+    rule.labelExpression = jsonString(ruleJson, "labelExpression", jsonString(ruleJson, "labelField"));
     if (auto const width = jsonNumber(ruleJson, "width")) {
         rule.width = static_cast<float>(std::max(0.0, *width));
     }
@@ -458,6 +464,17 @@ JsValue rgbaBytesFromColor(glm::fvec4 const& color)
     });
 }
 
+/** Convert byte RGBA colors into the JS array shape used by deck label layers. */
+JsValue rgbaBytesFromByteColor(std::array<std::uint8_t, 4> const& color)
+{
+    return JsValue::List({
+        JsValue(color[0]),
+        JsValue(color[1]),
+        JsValue(color[2]),
+        JsValue(color[3]),
+    });
+}
+
 /** Resolve the GLTF tint color without forcing untinted base rendering to black. */
 glm::fvec4 resolvedGltfTintColor(
     FeatureStyleRule const& rule,
@@ -530,6 +547,38 @@ std::vector<mapget::Point> geometryPoints(mapget::model_ptr<mapget::Geometry> co
         return true;
     });
     return points;
+}
+
+/** Return one cheap representative WGS point for label placement. */
+std::optional<mapget::Point> geometryLabelPoint(mapget::model_ptr<mapget::Geometry> const& geometry)
+{
+    if (!geometry) {
+        return std::nullopt;
+    }
+    switch (geometry->geomType()) {
+    case mapget::GeomType::Points:
+    case mapget::GeomType::Line:
+    case mapget::GeomType::Polygon:
+    case mapget::GeomType::Mesh: {
+        std::optional<mapget::Point> result;
+        geometry->forEachPoint([&](auto const& point) {
+            result = point;
+            return false;
+        });
+        return result;
+    }
+    case mapget::GeomType::AABB: {
+        auto const origin = geometry->aabbOrigin();
+        auto const size = geometry->aabbSize();
+        return mapget::Point{origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
+    }
+    case mapget::GeomType::GltfNodeIndex: {
+        auto const origin = geometry->gltfNodeAabbOrigin();
+        auto const size = geometry->gltfNodeAabbSize();
+        return mapget::Point{origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
+    }
+    }
+    return std::nullopt;
 }
 
 /** Return polygon ring starts in point-buffer order for hole-aware surface rendering. */
@@ -1607,6 +1656,12 @@ void DeckTileSearchResultLayerVisualization::appendResultGeometry(
     if (!style) {
         return;
     }
+    if (style->label) {
+        if (auto const labelPoint = geometryLabelPoint(geometry)) {
+            appendLabel(*labelPoint, resultIndex, *style);
+        }
+        return;
+    }
     switch (geometry->geomType()) {
     case mapget::GeomType::Points: {
         geometry->forEachPoint([&](auto const& point) {
@@ -1622,7 +1677,7 @@ void DeckTileSearchResultLayerVisualization::appendResultGeometry(
         appendSurface(geometryPoints(geometry), geometryPolygonRingStarts(geometry), resultIndex, *style);
         break;
     case mapget::GeomType::Mesh:
-        appendSurface(geometryPoints(geometry), {}, resultIndex, *style);
+        appendMesh(geometryPoints(geometry), resultIndex, *style);
         break;
     case mapget::GeomType::AABB:
         appendAabbFootprint(geometry->aabbOrigin(), geometry->aabbSize(), resultIndex, *style);
@@ -1653,6 +1708,33 @@ void DeckTileSearchResultLayerVisualization::appendPoint(
     buffers.radii.push_back(style.pointRadius);
     buffers.depthTests.push_back(0U);
     buffers.featureAddresses.push_back(resultIndex);
+    vertexCount_ += 1;
+}
+
+void DeckTileSearchResultLayerVisualization::appendLabel(
+    mapget::Point const& pointWgs,
+    uint32_t resultIndex,
+    SearchResolvedStyle const& style)
+{
+    if (style.labelText.empty() || style.labelSize <= 0.0f) {
+        return;
+    }
+    auto const point = projectWgsPoint(pointWgs);
+    buffers_.labelBillboard.push_back(JsValue::Dict({
+        {"featureAddress", JsValue(resultIndex)},
+        {"position", JsValue::Dict({
+            {"x", JsValue(point.x)},
+            {"y", JsValue(point.y)},
+            {"z", JsValue(point.z)},
+        })},
+        {"text", JsValue(style.labelText)},
+        {"fillColor", rgbaBytesFromByteColor(style.geometryColor)},
+        {"outlineColor", JsValue::List({JsValue(255), JsValue(255), JsValue(255), JsValue(220)})},
+        {"outlineWidth", JsValue(2.0)},
+        {"scale", JsValue(style.labelSize / 14.0f)},
+        {"billboard", JsValue(true)},
+        {"depthTest", JsValue(false)}
+    }));
     vertexCount_ += 1;
 }
 
@@ -1711,6 +1793,22 @@ void DeckTileSearchResultLayerVisualization::appendSurface(
     vertexCount_ += static_cast<uint32_t>(pointsWgs.size());
 }
 
+void DeckTileSearchResultLayerVisualization::appendMesh(
+    std::vector<mapget::Point> const& pointsWgs,
+    uint32_t resultIndex,
+    SearchResolvedStyle const& style)
+{
+    // Mesh geometry is already triangle-expanded. Treating the whole buffer as
+    // one polygon lets earcut connect unrelated triangles into visual spikes.
+    for (size_t index = 0; index + 2 < pointsWgs.size(); index += 3) {
+        appendSurface(
+            {pointsWgs[index], pointsWgs[index + 1], pointsWgs[index + 2]},
+            {},
+            resultIndex,
+            style);
+    }
+}
+
 void DeckTileSearchResultLayerVisualization::appendAabbFootprint(
     mapget::Point const& originWgs,
     mapget::Point const& sizeWgs,
@@ -1737,10 +1835,26 @@ DeckTileSearchResultLayerVisualization::styleForResultGeometry(
         auto resolved = fallbackStyle_;
         resolved.lineWidth = rule.width.value_or(resolved.lineWidth);
         resolved.pointRadius = rule.pointRadius.value_or(resolved.pointRadius);
-        resolved.geometryColor = colorForRule(rule, result, rule.fallbackGeometryColor);
+        auto const color = colorForRule(rule, result);
+        if (!color) {
+            continue;
+        }
+        resolved.geometryColor = *color;
         resolved.surfaceColor = withAlpha(
             resolved.geometryColor,
             rule.opacity ? opacityByte(*rule.opacity, rule.fallbackSurfaceColor[3]) : rule.fallbackSurfaceColor[3]);
+        if (rule.geometry == SearchGeometryKind::Label) {
+            auto const labelValue = valueForField(result, rule.labelExpression);
+            if (!labelValue) {
+                continue;
+            }
+            resolved.labelText = styleValueAsString(*labelValue);
+            if (resolved.labelText.empty()) {
+                continue;
+            }
+            resolved.label = true;
+            resolved.labelSize = rule.width.value_or(resolved.labelSize);
+        }
         return resolved;
     }
     return std::nullopt;
@@ -1786,10 +1900,9 @@ DeckTileSearchResultLayerVisualization::valueForField(
     return styleValueFromModelNode(*valueNode);
 }
 
-std::array<uint8_t, 4> DeckTileSearchResultLayerVisualization::colorForRule(
+std::optional<std::array<uint8_t, 4>> DeckTileSearchResultLayerVisualization::colorForRule(
     SearchStyleRule const& rule,
-    mapget::model_ptr<mapget::SearchResult> const& result,
-    std::array<uint8_t, 4> fallback) const
+    mapget::model_ptr<mapget::SearchResult> const& result) const
 {
     if (rule.colorMode == SearchColorMode::Solid) {
         return rule.solidColor;
@@ -1797,7 +1910,7 @@ std::array<uint8_t, 4> DeckTileSearchResultLayerVisualization::colorForRule(
 
     auto const actual = valueForField(result, rule.colorField);
     if (!actual) {
-        return fallback;
+        return std::nullopt;
     }
 
     if (rule.colorMode == SearchColorMode::Categories) {
@@ -1806,12 +1919,12 @@ std::array<uint8_t, 4> DeckTileSearchResultLayerVisualization::colorForRule(
                 return stop.color;
             }
         }
-        return fallback;
+        return std::nullopt;
     }
 
     auto const actualNumber = styleValueAsNumber(*actual);
     if (!actualNumber) {
-        return fallback;
+        return std::nullopt;
     }
     std::vector<SearchColorStop const*> numericStops;
     for (auto const& stop : rule.stops) {
@@ -1820,7 +1933,7 @@ std::array<uint8_t, 4> DeckTileSearchResultLayerVisualization::colorForRule(
         }
     }
     if (numericStops.empty()) {
-        return fallback;
+        return std::nullopt;
     }
     if (*actualNumber <= *numericStops.front()->numericValue) {
         return numericStops.front()->color;
@@ -1844,7 +1957,7 @@ std::array<uint8_t, 4> DeckTileSearchResultLayerVisualization::colorForRule(
         }
         return interpolated;
     }
-    return fallback;
+    return std::nullopt;
 }
 
 mapget::Point DeckTileSearchResultLayerVisualization::projectWgsPoint(

@@ -5,7 +5,7 @@ import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounceTime, distinctUntilChanged, skip, Subject} from "rxjs";
+import {debounceTime, distinctUntilChanged, filter, skip, Subject, take} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
@@ -51,7 +51,7 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
 
                 <search-completion-popup
                     [visible]="completion.visible"
-                    [pending]="false"
+                    [pending]="completion.pending"
                     [items]="completionItems"
                     [selectionIndex]="completion.selectionIndex"
                     [top]="completion.top"
@@ -158,10 +158,12 @@ export class SearchPanelComponent implements AfterViewInit {
         selectionIndex: 0,
         // True if the popup is visible
         visible: false,
+        // True while the worker is streaming schema completion batches.
+        pending: false,
         // Delay for requesting completion candidates
         completionDelay: 150,
         // Keep completion above Search Actions dialog without using a hardcoded global z-index.
-        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1,
+        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000,
     };
 
     mapSelectionVisible: boolean = false;
@@ -335,7 +337,7 @@ export class SearchPanelComponent implements AfterViewInit {
             }
         });
 
-        this.stateService.lastSearchHistoryEntryState.pipe(skip(2)).subscribe(entry => {
+        this.stateService.lastSearchHistoryEntryState.pipe(skip(1)).subscribe(entry => {
             if (!this.stateService.ready.getValue()) {
                 return;
             }
@@ -349,12 +351,14 @@ export class SearchPanelComponent implements AfterViewInit {
                 return;
             }
             if (resolvedEntry && !this.suppressHistoryExecution) {
-                this.searchInputValue = resolvedEntry.input;
-                this.runTarget(resolvedEntry);
-                this.dialog.close(new Event("close-on-execute"));
+                this.executeSearchHistoryEntry(resolvedEntry);
             }
             this.reloadSearchHistory();
         });
+        this.stateService.ready.pipe(
+            filter((ready): ready is true => ready),
+            take(1)
+        ).subscribe(() => this.executeCurrentSearchStateOnReady());
 
         this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
@@ -377,9 +381,12 @@ export class SearchPanelComponent implements AfterViewInit {
                 return item.query !== this.searchInputValue && item.source === this.searchInputValue;
             });
 
-            const length = this.completionItems.length
-            if (length <= this.completion.selectionIndex)
-                this.completion.selectionIndex = length;
+            const length = this.completionItems.length;
+            if (length === 0) {
+                this.completion.selectionIndex = 0;
+            } else if (this.completion.selectionIndex >= length) {
+                this.completion.selectionIndex = length - 1;
+            }
 
             // Only show the pop-up if the pop-up was prev. hidden
             // or the currently focused element is the query input.
@@ -389,12 +396,29 @@ export class SearchPanelComponent implements AfterViewInit {
             const textarea = this.textarea?.nativeElement;
             const focusValid =
                 this.completion.visible ||
+                this.completion.pending ||
                 textarea === document.activeElement;
 
             if (length > 0 && focusValid) {
                 this.refreshCompletionZIndex();
             }
             this.completion.visible = length > 0 && focusValid;
+        });
+
+        this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
+            const textarea = this.textarea?.nativeElement;
+            const focusValid =
+                this.completion.visible ||
+                pending ||
+                textarea === document.activeElement;
+
+            this.completion.pending = pending && focusValid;
+            if (this.completion.pending) {
+                this.refreshCompletionZIndex();
+                this.updateCursor();
+            } else if (this.completionItems.length === 0) {
+                this.completion.visible = false;
+            }
         });
 
         this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
@@ -435,6 +459,29 @@ export class SearchPanelComponent implements AfterViewInit {
         } finally {
             this.suppressHistoryExecution = false;
         }
+    }
+
+    /** Executes the URL/restored search state once startup finished. */
+    private executeCurrentSearchStateOnReady(): void {
+        const entry = this.resolveStateEntry(this.stateService.search);
+        if (!entry || isLegacySearchHistoryEntry(entry)) {
+            return;
+        }
+        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
+        if (!sameSearchHistoryEntry(lastEntry, entry)) {
+            this.withSuppressedHistoryExecution(() => {
+                this.stateService.lastSearchHistoryEntry = entry;
+            });
+        }
+        this.executeSearchHistoryEntry(entry);
+        this.reloadSearchHistory();
+    }
+
+    /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */
+    private executeSearchHistoryEntry(entry: SearchHistoryEntry): void {
+        this.searchInputValue = entry.input;
+        this.runTarget(entry);
+        this.dialog?.close(new Event("close-on-execute"));
     }
 
     /** Returns search targets applicable to an input value. */
@@ -816,7 +863,7 @@ export class SearchPanelComponent implements AfterViewInit {
     private refreshCompletionZIndex() {
         const container = this.dialog?.container();
         if (!container) {
-            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
+            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000;
             return;
         }
 
@@ -827,7 +874,7 @@ export class SearchPanelComponent implements AfterViewInit {
             : (Number.isFinite(computedZIndex)
                 ? computedZIndex
                 : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
-        this.completion.zIndex = dialogZIndex + 1;
+        this.completion.zIndex = dialogZIndex + 2000;
     }
 
     /**
@@ -966,6 +1013,7 @@ export class SearchPanelComponent implements AfterViewInit {
         
         setTimeout(() => {
             this.completion.visible = false;
+            this.completion.pending = false;
         }, 0);
     }
 
@@ -1026,18 +1074,19 @@ export class SearchPanelComponent implements AfterViewInit {
         if (event.key === 'Enter') {
             event.preventDefault();
 
-            if (this.completion.visible) {
+            if (this.shouldApplyCompletionOnEnter()) {
                 this.applyCompletion();
-                event.stopPropagation();
-            } else {
-                if (this.searchInputValue.trim() && this.activeSearchItems.length) {
-                    this.targetToHistory(this.activeSearchItems[0]);
-                } else {
-                    this.stateService.setSearchHistoryState(null);
-                }
-
-                textarea.blur();
+                return;
             }
+
+            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+                this.targetToHistory(this.activeSearchItems[0]);
+            } else {
+                this.stateService.setSearchHistoryState(null);
+            }
+
+            this.resetCompletion();
+            textarea.blur();
         } else if (event.key === 'Escape') {
             event.stopPropagation();
             if (this.completion.visible) {
@@ -1076,6 +1125,9 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.textarea.nativeElement.focus();
             } else {
                 let item = this.completionItems[this.completion.selectionIndex];
+                if (!item) {
+                    return;
+                }
                 this.setSearchValue(item.query);
 
                 let cursor = item.begin + item.text.length
@@ -1087,7 +1139,15 @@ export class SearchPanelComponent implements AfterViewInit {
 
             this.completionItems = [];
             this.completion.visible = false;
+            this.completion.pending = false;
         }
+    }
+
+    /** Returns whether Enter should accept a visible omnibox completion instead of executing the action. */
+    private shouldApplyCompletionOnEnter(): boolean {
+        return this.completion.visible
+            && this.completionItems.length > 0
+            && !this.searchService.hasExactCompletionCandidate(this.searchInputValue);
     }
 
     /**
@@ -1210,6 +1270,7 @@ export class SearchPanelComponent implements AfterViewInit {
     completeQuery(query: string, point: number | undefined) {
         if (!query) {
             this.completion.visible = false;
+            this.completion.pending = false;
             this.completionItems = [];
             this.searchService.clearCurrentCompletion();
             return;
@@ -1227,5 +1288,6 @@ export class SearchPanelComponent implements AfterViewInit {
         this.completion.selectionIndex = 0;
         this.completionItems = [];
         this.completion.visible = false;
+        this.completion.pending = false;
     }
 }

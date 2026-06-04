@@ -275,7 +275,6 @@ bool validateExpression(
     YAML::Node const& parent,
     std::string const& property,
     bool anyMode,
-    bool autoWildcard,
     std::string const& rulePath,
     std::string const& source,
     StyleValidationReport& report,
@@ -291,7 +290,9 @@ bool validateExpression(
     }
 
     auto env = mapget::makeEnvironment(simfil::Environment::WithNewStringCache);
-    auto ast = simfil::compile(*env, expression, anyMode, autoWildcard);
+    auto ast = simfil::compile(*env, expression, simfil::CompileOptions{
+        .any = anyMode,
+        .rewriteMode = simfil::RewriteMode::None});
     if (ast) {
         return true;
     }
@@ -684,12 +685,12 @@ bool validateStyleRuleYaml(
     markInvalid(validateVectorSize(ruleYaml, "label-pixel-offset", 2, rulePath, report, sourceRuleIndex));
     markInvalid(validateVectorSize(ruleYaml, "label-background-padding", 2, rulePath, report, sourceRuleIndex));
 
-    markInvalid(validateExpression(ruleYaml, "filter", true, false, rulePath, source, report, sourceRuleIndex));
-    markInvalid(validateExpression(ruleYaml, "attribute-filter", false, false, rulePath, source, report, sourceRuleIndex));
-    markInvalid(validateExpression(ruleYaml, "color-expression", false, false, rulePath, source, report, sourceRuleIndex));
-    markInvalid(validateExpression(ruleYaml, "arrow-expression", false, false, rulePath, source, report, sourceRuleIndex));
-    markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, false, rulePath, source, report, sourceRuleIndex));
-    markInvalid(validateExpression(ruleYaml, "label-text-expression", false, false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "filter", true, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "label-text-expression", false, rulePath, source, report, sourceRuleIndex));
 
     if (ruleYaml["first-of"].IsDefined() && ruleYaml["all-of"].IsDefined()) {
         auto& issue = report.addIssue(

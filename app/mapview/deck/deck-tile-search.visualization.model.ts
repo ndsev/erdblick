@@ -1,7 +1,8 @@
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
-import {PathLayer, ScatterplotLayer, SolidPolygonLayer} from "@deck.gl/layers";
+import {PathLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer, TextLayerProps} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {Matrix4} from "@math.gl/core";
+import type {Parameters as LumaParameters} from "@luma.gl/core";
 import {SearchResultTile} from "../../mapdata/search-result-tile.model";
 import {SceneMode} from "../../integrations/geo";
 import {coreLib, uint8ArrayToWasm} from "../../integrations/wasm";
@@ -13,6 +14,7 @@ import {
 } from "./deck-render.worker.pool";
 import {
     DeckGeometryBucketBuffers,
+    DeckLabelDatum,
     DeckPathBucketBuffers,
     DeckPointBucketBuffers,
     DeckSurfaceBucketBuffers,
@@ -76,6 +78,26 @@ interface DeckSearchSurfaceLayerData {
     };
 }
 
+interface DeckSearchLabelDatum {
+    featureAddress: number;
+    position: [number, number, number];
+    text: string;
+    fillColor: [number, number, number, number];
+    outlineColor: [number, number, number, number];
+    outlineWidth: number;
+    scale: number;
+    pixelOffset?: [number, number];
+}
+
+interface DeckSearchLabelLayerData {
+    length: number;
+    depthTest: boolean;
+    billboard: boolean;
+    coordinateOrigin: [number, number, number];
+    featureAddresses: Uint32Array;
+    data: DeckSearchLabelDatum[];
+}
+
 interface DeckSearchPickLayerMetadata {
     tileKey: string;
     searchResultFeatureIds: string[];
@@ -87,10 +109,15 @@ interface DeckSearchPathLayerMetadata extends DeckSearchPickLayerMetadata {
     dashJustified?: boolean;
 }
 
+interface DeckSearchLabelLayerProps extends TextLayerProps<DeckSearchLabelDatum>, DeckSearchPickLayerMetadata {
+    data: DeckSearchLabelDatum[];
+}
+
 interface DeckSearchWasmRenderOutput {
     surfaceLayerData: DeckSearchSurfaceLayerData[];
     pathLayerData: DeckSearchPathLayerData[];
     pointLayerData: DeckSearchPointLayerData[];
+    labelLayerData: DeckSearchLabelLayerData[];
     resultFeatureIds: string[];
     vertexCount: number;
     workerTimings: DeckWorkerTimings | null;
@@ -109,10 +136,10 @@ const RENDER_RANK_RENDER_ORDER_MAX = (2 ** 51) - 1;
 const RENDER_RANK_ORDER_STRIDE = 2;
 const RENDER_RANK_PRIORITY_STRIDE = 2 ** 52;
 const DECK_FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
-const DECK_NO_DEPTH_TEST_PARAMETERS = {
-    depthTest: false,
-    depthMask: false
-} as any;
+const DECK_NO_DEPTH_TEST_PARAMETERS: LumaParameters = {
+    depthWriteEnabled: false,
+    depthCompare: "always"
+};
 
 /** Queue-backed deck visualization for one streamed server-side search-result tile. */
 export class DeckTileSearchVisualization implements ITileVisualization {
@@ -135,6 +162,7 @@ export class DeckTileSearchVisualization implements ITileVisualization {
     private readonly surfaceLayerKeys = new Set<string>();
     private readonly pathLayerKeys = new Set<string>();
     private readonly pointLayerKeys = new Set<string>();
+    private readonly labelLayerKeys = new Set<string>();
 
     constructor(
         viewIndex: number,
@@ -213,9 +241,13 @@ export class DeckTileSearchVisualization implements ITileVisualization {
         for (const key of this.pointLayerKeys) {
             registry.remove(key);
         }
+        for (const key of this.labelLayerKeys) {
+            registry.remove(key);
+        }
         this.surfaceLayerKeys.clear();
         this.pathLayerKeys.clear();
         this.pointLayerKeys.clear();
+        this.labelLayerKeys.clear();
         this.rendered = false;
         this.tileDataVersionAtLastRender = -1;
     }
@@ -331,19 +363,23 @@ export class DeckTileSearchVisualization implements ITileVisualization {
             surfaceLayerData: this.buildSurfaceLayerData(result.coordinateOrigin, result.surface),
             pathLayerData: this.buildPathLayerData(result.coordinateOrigin, result.pathWorld),
             pointLayerData: this.buildPointLayerData(result.coordinateOrigin, result.pointWorld),
+            labelLayerData: [
+                ...this.buildLabelLayerData(result.coordinateOrigin, result.labelWorld, false),
+                ...this.buildLabelLayerData(result.coordinateOrigin, result.labelBillboard, true)
+            ],
             resultFeatureIds: result.resultFeatureIds ?? [],
             vertexCount: result.vertexCount,
             workerTimings: result.workerTimings ?? null
         };
     }
 
-    private resolveLayerKey(kind: "surface" | "path" | "point", depthTest: boolean): string {
+    private resolveLayerKey(kind: "surface" | "path" | "point" | "label", depthTest: boolean, billboard = false): string {
         return makeDeckLayerKey({
             tileKey: this.tile.mapTileKey,
             styleId: this.styleId,
             hoverMode: "base",
             kind,
-            variant: depthTest ? "search" : "search-overlay"
+            variant: `${depthTest ? "search" : "search-overlay"}${billboard ? "-billboard" : ""}`
         });
     }
 
@@ -355,6 +391,7 @@ export class DeckTileSearchVisualization implements ITileVisualization {
         const desiredSurfaceLayerKeys = new Set<string>();
         const desiredPathLayerKeys = new Set<string>();
         const desiredPointLayerKeys = new Set<string>();
+        const desiredLabelLayerKeys = new Set<string>();
 
         for (const surfaceLayerData of output.surfaceLayerData) {
             const key = this.resolveLayerKey("surface", surfaceLayerData.depthTest);
@@ -436,9 +473,40 @@ export class DeckTileSearchVisualization implements ITileVisualization {
             desiredPointLayerKeys.add(key);
         }
 
+        for (const labelLayerData of output.labelLayerData) {
+            const key = this.resolveLayerKey("label", labelLayerData.depthTest, labelLayerData.billboard);
+            registry.upsert(
+                key,
+                new TextLayer<DeckSearchLabelDatum, DeckSearchLabelLayerProps>({
+                    id: key,
+                    data: labelLayerData.data,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: labelLayerData.coordinateOrigin,
+                    getPosition: datum => datum.position,
+                    getText: datum => datum.text,
+                    getColor: datum => datum.fillColor,
+                    outlineColor: [255, 255, 255, 220],
+                    outlineWidth: 2,
+                    getSize: datum => Math.max(1, 14 * datum.scale),
+                    sizeUnits: "pixels",
+                    getPixelOffset: datum => datum.pixelOffset ?? [0, 0],
+                    billboard: labelLayerData.billboard,
+                    modelMatrix,
+                    parameters: this.layerParametersForDepthTest(labelLayerData.depthTest),
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey,
+                    searchResultFeatureIds: output.resultFeatureIds,
+                    featureAddresses: labelLayerData.featureAddresses
+                }),
+                675 + this.styleOrder
+            );
+            desiredLabelLayerKeys.add(key);
+        }
+
         this.reconcileLayerKeys(registry, this.surfaceLayerKeys, desiredSurfaceLayerKeys);
         this.reconcileLayerKeys(registry, this.pathLayerKeys, desiredPathLayerKeys);
         this.reconcileLayerKeys(registry, this.pointLayerKeys, desiredPointLayerKeys);
+        this.reconcileLayerKeys(registry, this.labelLayerKeys, desiredLabelLayerKeys);
     }
 
     private reconcileLayerKeys(
@@ -574,6 +642,59 @@ export class DeckTileSearchVisualization implements ITileVisualization {
                 getRadius: {value: raw.radii, size: 1}
             }
         }];
+    }
+
+    /** Converts object-based wasm label buffers into deck TextLayer data grouped by render flags. */
+    private buildLabelLayerData(
+        coordinateOriginRaw: Float64Array,
+        raw: DeckLabelDatum[],
+        fallbackBillboard: boolean
+    ): DeckSearchLabelLayerData[] {
+        const coordinateOrigin = this.coordinateOriginFromRaw(coordinateOriginRaw);
+        if (!coordinateOrigin || raw.length === 0) {
+            return [];
+        }
+
+        const groups = new Map<string, {
+            depthTest: boolean;
+            billboard: boolean;
+            data: DeckSearchLabelDatum[];
+            featureAddresses: number[];
+        }>();
+        for (const label of raw) {
+            const position = label.position;
+            if (!label.text || !position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+                continue;
+            }
+            const billboard = label.billboard ?? fallbackBillboard;
+            const depthTest = !!label.depthTest;
+            const key = `${billboard ? "billboard" : "world"}:${depthTest ? "depth" : "overlay"}`;
+            let group = groups.get(key);
+            if (!group) {
+                group = {depthTest, billboard, data: [], featureAddresses: []};
+                groups.set(key, group);
+            }
+            group.data.push({
+                featureAddress: label.featureAddress,
+                position: [position.x, position.y, position.z],
+                text: label.text,
+                fillColor: label.fillColor,
+                outlineColor: label.outlineColor,
+                outlineWidth: label.outlineWidth,
+                scale: label.scale,
+                ...(label.pixelOffset ? {pixelOffset: label.pixelOffset} : {})
+            });
+            group.featureAddresses.push(label.featureAddress);
+        }
+
+        return Array.from(groups.values()).flatMap(group => group.data.length > 0 ? [{
+            length: group.data.length,
+            depthTest: group.depthTest,
+            billboard: group.billboard,
+            coordinateOrigin,
+            featureAddresses: new Uint32Array(group.featureAddresses),
+            data: group.data
+        }] : []);
     }
 
     private modelMatrixForScene(sceneHandle: IRenderSceneHandle): Matrix4 | null {
