@@ -31,6 +31,7 @@ function searchDefinition(
         showResultsOnMap: true,
         pinColor: "#ea4336",
         selectedMapLayers: [],
+        selectedTileLevels: [13],
         selectedViewIndices: [0, 1],
         searchStyleRules: [],
         renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,

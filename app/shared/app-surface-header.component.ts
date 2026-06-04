@@ -53,6 +53,7 @@ export interface AppSurfaceHeaderAction {
                     <button type="button"
                             class="app-surface-header-title title"
                             [pTooltip]="titleTooltip || (locked ? 'Unlock ' + title : 'Lock ' + title)"
+                            [tooltipDisabled]="titleTooltipDisabled"
                             tooltipPosition="bottom"
                             (click)="handleTitleClick($event)"
                             (mousedown)="handleTitleMouseDown($event)">
@@ -68,6 +69,7 @@ export interface AppSurfaceHeaderAction {
                 } @else {
                     <div class="app-surface-header-title title"
                          [pTooltip]="titleTooltip || title"
+                         [tooltipDisabled]="titleTooltipDisabled"
                          tooltipPosition="bottom">
                         @if (titleIcon) {
                             <span class="material-symbols-outlined">{{ titleIcon }}</span>
@@ -167,6 +169,7 @@ export class AppSurfaceHeaderComponent implements OnDestroy {
 
     @Input() title = '';
     @Input() titleTooltip = '';
+    @Input() titleTooltipDisabled = false;
     @Input() titleIcon = '';
     @Input() lockable = false;
     @Input() locked = false;
@@ -217,6 +220,8 @@ export class AppSurfaceHeaderComponent implements OnDestroy {
         const target = event.target as HTMLElement | null;
         if (this.dragEnabled && event.button === 0 && target?.closest('.app-surface-header-title')) {
             this.trackTitleDragClickSuppression(event);
+            this.dragPointerDown.emit(event);
+            return;
         }
         if (!this.dragEnabled || event.button !== 0 || this.isInteractiveTarget(target)) {
             return;

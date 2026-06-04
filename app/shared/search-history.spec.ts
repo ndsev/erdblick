@@ -72,7 +72,7 @@ describe('search history helpers', () => {
             aabb: [[11.57549, 48.13743], [0, 0]],
             source: 'geonames-cities5000',
             providerId: 'mapget-offline',
-            providerName: 'Offline locations',
+            providerName: 'Place',
         };
         const entry = normalizeResolvedSearchHistoryEntry({
             version: 2,

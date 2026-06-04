@@ -34,6 +34,7 @@ import {
     SEARCH_DOCK_TAB_ID
 } from "../shared/appstate.service";
 import {
+    DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
     DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
     FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
@@ -456,6 +457,8 @@ export class FeatureSearchService {
         const normalizedColor = this.normalizeHexColor(definition.pinColor);
         const selectedLayersChanged = JSON.stringify(previous.selectedMapLayers)
             !== JSON.stringify(definition.selectedMapLayers);
+        const selectedTileLevelsChanged = JSON.stringify(previous.selectedTileLevels)
+            !== JSON.stringify(definition.selectedTileLevels);
         const selectedViewsChanged = JSON.stringify(previous.selectedViewIndices)
             !== JSON.stringify(definition.selectedViewIndices);
 
@@ -486,6 +489,7 @@ export class FeatureSearchService {
         const searchGenerationChanged = previous.query !== definition.query
             || previous.scope !== definition.scope
             || selectedLayersChanged
+            || selectedTileLevelsChanged
             || JSON.stringify(previousFields) !== JSON.stringify(nextFields);
 
         if (searchGenerationChanged) {
@@ -518,6 +522,7 @@ export class FeatureSearchService {
             || previous.bookmarked !== definition.bookmarked
             || previous.enabled !== definition.enabled
             || selectedLayersChanged
+            || selectedTileLevelsChanged
             || selectedViewsChanged) {
             this.progress.next(session);
         }
@@ -597,6 +602,7 @@ export class FeatureSearchService {
             ...(options.scope ? {scope: options.scope} : {}),
             pinColor: this.nextDefaultSearchColor(),
             selectedMapLayers: options.selectedMapLayers ?? this.activeFeatureSearchLayers(),
+            selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
             selectedViewIndices: options.selectedViewIndices ?? this.activeFeatureSearchViewIndices()
         });
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
@@ -829,6 +835,19 @@ export class FeatureSearchService {
         }
     }
 
+    /** Replaces the source tile levels used by one search. */
+    setSearchTileLevels(sessionId: string, selectedTileLevels: number[]): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {selectedTileLevels})) {
+            session.definition = {...session.definition, selectedTileLevels};
+            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+            this.progress.next(session);
+        }
+    }
+
     /** Replaces the map views that render one search's visualizations. */
     setSearchViewIndices(sessionId: string, selectedViewIndices: number[]): void {
         const session = this.getInternalSession(sessionId);
@@ -859,6 +878,66 @@ export class FeatureSearchService {
             this.stateService.isDockOpen = true;
         }
         this.notifySessionsChanged();
+    }
+
+    /** Creates a new search session from another session's configuration without copying runtime results. */
+    cloneSearch(sessionId: string): FeatureSearchSession | undefined {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return undefined;
+        }
+        const definition = session.definition;
+        const entry = this.stateService.addFeatureSearch({
+            query: definition.query,
+            scope: definition.scope,
+            autoUpdate: definition.autoUpdate,
+            bookmarked: definition.bookmarked,
+            enabled: definition.enabled,
+            paused: false,
+            showResultsOnMap: definition.showResultsOnMap,
+            pinColor: definition.pinColor,
+            selectedMapLayers: definition.selectedMapLayers.map(ref => ({...ref})),
+            selectedTileLevels: [...definition.selectedTileLevels],
+            selectedViewIndices: [...definition.selectedViewIndices],
+            searchStyleRules: this.cloneJsonCompatible(definition.searchStyleRules),
+            renderStrategy: {...definition.renderStrategy}
+        });
+        const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
+        if (this.isSessionDocked(session.id)) {
+            this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
+            this.moveDockedSurfaceToTop(layoutId);
+        } else {
+            this.positionClonedFloatingSearch(session.layoutId, layoutId);
+        }
+        this.notifySessionsChanged();
+        return this.getInternalSession(entry.id);
+    }
+
+    /** Clones simple persisted configuration objects without retaining shared draft references. */
+    private cloneJsonCompatible<T>(value: T): T {
+        return JSON.parse(JSON.stringify(value)) as T;
+    }
+
+    /** Places a floating clone near its source dialog while preserving viewport bounds. */
+    private positionClonedFloatingSearch(sourceLayoutId: string, cloneLayoutId: string): void {
+        const sourceLayout = this.stateService.getDialogLayout(sourceLayoutId);
+        if (!sourceLayout) {
+            this.ensureInitialFloatingDialogLayout(cloneLayoutId);
+            return;
+        }
+        const baseFontSize = this.stateService.baseFontSize || 16;
+        const offset = Math.round(baseFontSize * 1.25);
+        const width = sourceLayout.size.width;
+        const height = sourceLayout.size.height;
+        const left = Math.min(Math.max(0, sourceLayout.position.left + offset), Math.max(0, window.innerWidth - width));
+        const top = Math.min(Math.max(0, sourceLayout.position.top + offset), Math.max(0, window.innerHeight - height));
+        this.stateService.upsertDialogLayout(cloneLayoutId, {
+            position: {left, top},
+            size: {...sourceLayout.size},
+            open: false,
+            docked: false,
+            dockTab: SEARCH_DOCK_TAB_ID
+        });
     }
 
     /** Places a newly docked search before older docked searches, matching inspection dock behavior. */

@@ -1,3 +1,4 @@
+import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {HttpResponse} from "@angular/common/http";
 import {of, throwError} from "rxjs";
@@ -279,7 +280,7 @@ describe("AppConfigService", () => {
         expect(config.locationSearch.providers).toEqual([
             {
                 id: "mapget-offline",
-                name: "Offline locations",
+                name: "Place",
                 url: "/location",
                 headers: {},
                 enabled: true

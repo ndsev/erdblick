@@ -323,6 +323,7 @@ export class FeatureSearchRuntimeState {
             backendQuery: this.definition.backendQuery,
             scope: this.definition.concreteScope,
             selectedMapLayers: normalizedSelectedLayerRefs(this.definition),
+            selectedTileLevels: this.definition.selectedTileLevels,
             withFields: this.definition.resultFields
         });
     }

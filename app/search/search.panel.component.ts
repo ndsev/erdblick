@@ -26,7 +26,11 @@ import {
     SearchHistoryStateEntry,
     withSearchHistoryActionName
 } from "../shared/search-history";
-import {LocationSearchService, normalizeLocationSearchPayload} from "./location.search.service";
+import {
+    isSupportedLocationSearchQuery,
+    LocationSearchService,
+    normalizeLocationSearchPayload
+} from "./location.search.service";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
@@ -205,7 +209,8 @@ export class SearchPanelComponent implements AfterViewInit {
 
         /////////// Jump to mapget tile id
         let label = "tileId = ?";
-        if (this.jumpService.validateMapgetTileId(value)) {
+        const mapgetTileIdValid = this.jumpService.validateMapgetTileId(value);
+        if (mapgetTileIdValid) {
             label = `tileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -216,14 +221,15 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "Mapget Tile ID",
             label: label,
-            enabled: false,
+            enabled: mapgetTileIdValid,
             jump: (value: string) => { return this.parseMapgetTileId(value) },
             validate: (value: string) => { return this.jumpService.validateMapgetTileId(value) }
         });
 
         /////////// Jump to lon-lat
         label = "lon = ? | lat = ? | (level = ?)"
-        if (this.validateWGS84(value, true)) {
+        const lonLatValid = this.validateWGS84(value, true);
+        if (lonLatValid) {
             label = this.parseWgs84Coordinates(value, true)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -234,14 +240,15 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "WGS84 Lon-Lat Coordinates",
             label: label,
-            enabled: false,
+            enabled: lonLatValid,
             jump: (value: string) => { return this.parseWgs84Coordinates(value, true)?.target },
             validate: (value: string) => { return this.validateWGS84(value, true) }
         });
 
         /////////// Jump to lat-lon
         label = "lat = ? | lon = ? | (level = ?)"
-        if (this.validateWGS84(value, false)) {
+        const latLonValid = this.validateWGS84(value, false);
+        if (latLonValid) {
             label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -252,14 +259,14 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "WGS84 Lat-Lon Coordinates",
             label: label,
-            enabled: false,
+            enabled: latLonValid,
             jump: (value: string) => { return this.parseWgs84Coordinates(value, false)?.target },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
 
         /////////// Jump to Google Maps/OSM
         label = "lat = ? | lon = ?"
-        if (this.validateWGS84(value, false)) {
+        if (latLonValid) {
             label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -270,7 +277,7 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "Open WGS84 Lat-Lon in Google Maps",
             label: label,
-            enabled: false,
+            enabled: latLonValid,
             jump: (value: string) => { return this.openInGM(value) },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
@@ -280,7 +287,7 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "Open WGS84 Lat-Lon in Open Street Maps",
             label: label,
-            enabled: false,
+            enabled: latLonValid,
             jump: (value: string) => { return this.openInOSM(value) },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
@@ -317,6 +324,9 @@ export class SearchPanelComponent implements AfterViewInit {
             debounce(() => timer(this.locationSearchService.debounceMs)),
             switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
         ).subscribe(matches => {
+            if (!this.shouldRequestLocationSearch(this.searchInputValue)) {
+                return;
+            }
             this.locationSearchItems = matches.map(match => this.locationSearchService.createSearchTarget(match));
             this.setCurrentSearchItems(this.currentSearchItems());
             this.reloadSearchHistory();
@@ -324,7 +334,8 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.stateService.locationSearchResultLimitState.subscribe(() => {
-            this.locationSearchQueryChanged.next(this.searchInputValue);
+            this.updateLocationSearchQuery(this.searchInputValue);
+            this.refreshSearchMenu();
         });
 
         // TODO: Get rid of map selection, as soon as we support
@@ -942,15 +953,30 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!value) {
             this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
-            this.locationSearchItems = [];
-            this.locationSearchQueryChanged.next(value);
-            this.setCurrentSearchItems(this.currentSearchItems());
+            this.updateLocationSearchQuery(value);
             this.refreshSearchMenu();
             return;
         }
         this.jumpService.targetValueSubject.next(value);
-        this.locationSearchQueryChanged.next(value);
+        this.updateLocationSearchQuery(value);
         this.refreshSearchMenu();
+    }
+
+    /** Requests place completions only for Unicode name-like queries, not numeric ids or ZIP codes. */
+    private updateLocationSearchQuery(value: string): void {
+        if (this.shouldRequestLocationSearch(value)) {
+            this.locationSearchQueryChanged.next(value.trim());
+            return;
+        }
+        if (this.locationSearchItems.length) {
+            this.locationSearchItems = [];
+            this.setCurrentSearchItems(this.currentSearchItems());
+        }
+    }
+
+    /** Returns whether the current input is suitable for the configured place-name providers. */
+    private shouldRequestLocationSearch(value: string): boolean {
+        return isSupportedLocationSearchQuery(value);
     }
 
     /** Refreshes search menu state from the current input value. */

@@ -332,7 +332,7 @@ const DEFAULT_LOCATION_SEARCH_CONFIG: LocationSearchConfig = {
     providers: [
         {
             id: "mapget-offline",
-            name: "Offline locations",
+            name: "Place",
             url: "/location",
             headers: {},
             enabled: true

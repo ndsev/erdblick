@@ -17,6 +17,7 @@ import {displayFeatureId} from "../shared/tile-feature-id";
     template: `
         <app-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
                   [style]="dialogStyle" [persistLayout]="true" [layoutId]="layoutId"
+                  [dockDropCue]="true"
                   (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()"
                   (pointerdown)="focusPanel()" (focusin)="focusPanel()">
             <ng-template #header>
@@ -141,11 +142,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
 
-    private detachHeaderDownListener?: () => void;
-    private detachDragMoveListener?: () => void;
-    private detachDragUpListener?: () => void;
     private detachPointerUpListener?: () => void;
-    private dockElement?: HTMLElement;
 
     /** Wires dialog state to the active inspection panel and floating-dialog helpers. */
     constructor(private mapService: MapInfoService,
@@ -377,9 +374,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     /** Restores persisted layout state and wires dock-drag cues when the dialog opens. */
     protected onDialogShow() {
         this.focusPanel();
-        this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
-        this.bindDockDragCue();
         const panel = this.panel();
         const layout = this.stateService.ensureInspectionDialogLayout(
             panel.id,
@@ -421,7 +416,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (this.shouldDock()) {
             this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
         }
-        this.clearDockCue();
         this.dialogStack.bringToFront(this.dialog);
     }
 
@@ -455,10 +449,6 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     /** Tears down drag listeners and temporary dock cues owned by the dialog. */
     ngOnDestroy() {
         this.endDrag();
-        this.detachHeaderDownListener?.();
-        this.detachDragMoveListener?.();
-        this.detachDragUpListener?.();
-        this.clearDockCue();
     }
 
     /** Freezes expensive inspection trees while the floating dialog is being dragged. */
@@ -483,94 +473,9 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.sourceDataPanel?.unfreezeTree();
     }
 
-    /** Attaches mouse listeners that highlight the dock when the dialog can be dropped there. */
-    private bindDockDragCue() {
-        const container = this.getDialogContainer();
-        if (!container) {
-            return;
-        }
-        const header = container.querySelector('.p-dialog-header');
-        if (!header) {
-            return;
-        }
-        this.detachHeaderDownListener?.();
-        this.detachHeaderDownListener = this.renderer.listen(header, 'mousedown', () => {
-            this.detachDragMoveListener?.();
-            this.detachDragUpListener?.();
-            this.detachDragMoveListener = this.renderer.listen('window', 'mousemove', () => {
-                this.updateDockCue();
-            });
-            this.detachDragUpListener = this.renderer.listen('window', 'mouseup', () => {
-                this.clearDockCue();
-                this.detachDragMoveListener?.();
-                this.detachDragUpListener?.();
-                this.detachDragMoveListener = undefined;
-                this.detachDragUpListener = undefined;
-            });
-        });
-    }
-
     /** Returns whether the current floating dialog position should snap back into the dock. */
     private shouldDock(): boolean {
-        if (!this.getDialogContainer() || !this.dockElement) {
-            return false;
-        }
-        const overlap = this.getDockOverlap();
-        if (!overlap) {
-            return false;
-        }
-        const threshold = this.stateService.baseFontSize * 2;
-        return overlap.width >= threshold && overlap.height > 0;
-    }
-
-    /** Updates the dock highlight based on the current drag overlap. */
-    private updateDockCue() {
-        if (!this.dialog?.dragging) {
-            this.clearDockCue();
-            return;
-        }
-        if (this.shouldDock()) {
-            this.setDockCue(true);
-        } else {
-            this.setDockCue(false);
-        }
-    }
-
-    /** Computes the overlap area between the floating dialog and the dock container. */
-    private getDockOverlap(): {width: number, height: number} | undefined {
-        const container = this.getDialogContainer();
-        if (!container || !this.dockElement) {
-            return;
-        }
-        const dialogRect = container.getBoundingClientRect();
-        const dockRect = this.dockElement.getBoundingClientRect();
-        const left = Math.max(dialogRect.left, dockRect.left);
-        const right = Math.min(dialogRect.right, dockRect.right);
-        const top = Math.max(dialogRect.top, dockRect.top);
-        const bottom = Math.min(dialogRect.bottom, dockRect.bottom);
-        const width = Math.max(0, right - left);
-        const height = Math.max(0, bottom - top);
-        if (!width || !height) {
-            return;
-        }
-        return {width, height};
-    }
-
-    /** Adds or removes the CSS cue that marks the dock as a drag target. */
-    private setDockCue(active: boolean) {
-        if (!this.dockElement) {
-            return;
-        }
-        if (active) {
-            this.renderer.addClass(this.dockElement, 'dock-drop-active');
-        } else {
-            this.renderer.removeClass(this.dockElement, 'dock-drop-active');
-        }
-    }
-
-    /** Clears any active dock highlight cue. */
-    private clearDockCue() {
-        this.setDockCue(false);
+        return this.dialog?.overlapsDockDropTarget() ?? false;
     }
 
     /** Returns the rendered PrimeNG dialog container, if present. */

@@ -2027,7 +2027,7 @@ export class AppStateService implements OnDestroy {
 
         // Filter out features which are already selected. If there are none left, we don't need to do anything
         // unless we are explicitly clearing a source data selection.
-        if (featureSelection.length) {
+        if (featureSelection.length && !forceNewPanel) {
             featureSelection = featureSelection.filter(feature =>
                 !allPanels.some(panel =>
                     isFeaturePanel(panel) &&

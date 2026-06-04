@@ -400,9 +400,21 @@ main-bar {
   .collapsible-dock.dock-drop-active {
     box-shadow: inset 0 0 0 2px var(--p-primary-500);
     background: color-mix(in srgb, var(--p-primary-50) 65%, transparent);
-    .inspection-container {
-      visibility: collapse;
+
+    .drop-hint {
+      display: block;
     }
+  }
+
+  .collapsible-dock > .drop-hint {
+    display: none;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    border: 2px solid var(--p-primary-500);
+    background: color-mix(in srgb, var(--p-primary-50) 55%, transparent);
+    box-shadow: inset 0 0 0.7em color-mix(in srgb, var(--p-primary-500) 35%, transparent);
   }
 
   .resize-handle {
@@ -414,7 +426,7 @@ main-bar {
     cursor: col-resize;
     /* Large hit area, subtle visuals */
     background: transparent;
-    z-index: 2;
+    z-index: 40;
     touch-action: none;
   }
   .resize-handle:hover {
@@ -3357,14 +3369,24 @@ inspection-tree {
   }
 
   &.app-panel-stack.app-panel-resize-vertical .p-accordioncontent-content {
+    direction: rtl;
     overflow-x: hidden;
+
+    > * {
+      direction: ltr;
+    }
   }
 
-  .app-panel-stack.app-panel-expanded .p-accordioncontent-content {
+  &.app-panel-stack.app-panel-expanded .p-accordioncontent-content {
     height: min(60em, calc(100vh - 10em));
     max-height: calc(100vh - 10em);
+    direction: rtl;
     resize: vertical;
     overflow: auto;
+
+    > * {
+      direction: ltr;
+    }
   }
 }
 
@@ -3377,6 +3399,12 @@ inspection-tree {
 
   feature-search {
     min-width: 0;
+  }
+
+  &.reordering {
+    p-accordion-content {
+      visibility: collapse;
+    }
   }
 
   &.single-panel {
@@ -4476,7 +4504,7 @@ simfil-expression-input {
   display: grid;
   flex: 0 0 auto;
   gap: 0.5em;
-  grid-template-columns: minmax(0, 1fr) 8.5em;
+  grid-template-columns: minmax(0, 1fr) 7.5em 8.5em;
   margin: 0 0 0.35em 0;
   font-size: 0.9em;
   max-width: 100%;
@@ -4484,11 +4512,12 @@ simfil-expression-input {
   width: 100%;
 
   &.feature-search-layer-control-with-view {
-    grid-template-columns: minmax(0, 1fr) 8.5em 8.5em;
+    grid-template-columns: minmax(0, 1fr) 7.5em 8.5em 8.5em;
   }
 
   p-iftalabel,
   .feature-search-layer-select,
+  .feature-search-level-select,
   .feature-search-scope-select,
   .feature-search-view-select {
     align-self: stretch;
@@ -4500,6 +4529,10 @@ simfil-expression-input {
   .feature-search-layer-select {
     min-width: 0;
     overflow: hidden;
+  }
+
+  .feature-search-level-select {
+    width: 7.5em;
   }
 
   .feature-search-scope-select,

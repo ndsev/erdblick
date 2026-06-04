@@ -1,5 +1,7 @@
 import {
+    AfterViewInit,
     Component,
+    ElementRef,
     EventEmitter,
     Input,
     OnChanges,
@@ -38,7 +40,12 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 import {Subscription} from "rxjs";
 import {AppPanelComponent} from "../shared/app-panel.component";
 import type {AppSurfaceHeaderAction} from "../shared/app-surface-header.component";
-import {DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY} from "../shared/feature-search-state";
+import {
+    DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
+    DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
+    MAX_FEATURE_SEARCH_TILE_LEVEL,
+    MIN_FEATURE_SEARCH_TILE_LEVEL
+} from "../shared/feature-search-state";
 import type {
     FeatureSearchColorMode,
     FeatureSearchGeometryKind,
@@ -87,6 +94,11 @@ interface FeatureSearchLayerTreeNodeData {
 }
 
 interface FeatureSearchViewOption {
+    label: string;
+    value: number;
+}
+
+interface FeatureSearchTileLevelOption {
     label: string;
     value: number;
 }
@@ -146,6 +158,7 @@ interface FeatureSearchStyleRuleDraft {
                           [closeOnEscape]="false" [modal]="false" [closable]="false"
                           [visible]="featureSearchDialogVisible" (visibleChange)="onPanelVisibleChange($event)"
                           [draggable]="true" [resizable]="true"
+                          [dockDropCue]="true"
                           [persistLayout]="true" [persistOpenState]="false" [layoutId]="session.layoutId"
                           (onShow)="onDialogShow($event)"
                           (onDragEnd)="onDialogDragEnd()"
@@ -162,14 +175,15 @@ interface FeatureSearchStyleRuleDraft {
 
         <ng-template #searchHeader>
             <app-surface-header class="feature-search-surface-header"
-                                title="Search Loaded Features"
+                                [title]="featureSearchTitle()"
                                 titleIcon="search"
+                                [titleTooltipDisabled]="true"
                                 [hasSmartControl]="true"
                                 [dockMode]="isDocked() ? 'undock' : 'dock'"
                                 [sizeToggleVisible]="isDocked()"
                                 [sizeToggleDisabled]="dockedPanelCount <= 1"
                                 [expanded]="featureSearchExpanded"
-                                [dragEnabled]="isDocked()"
+                                [dragEnabled]="true"
                                 [extraActions]="featureSearchHeaderActions()"
                                 (focusRequest)="bringSurfaceToFront()"
                                 (dockRequest)="toggleDocked()"
@@ -189,7 +203,7 @@ interface FeatureSearchStyleRuleDraft {
         </ng-template>
 
         <ng-template #searchContent>
-            <div class="feature-search-content" [class.feature-search-content-disabled]="!searchEnabled()">
+            <div #featureSearchContentContainer class="feature-search-content" [class.feature-search-content-disabled]="!searchEnabled()">
             <div class="feature-search-query search-input">
                 <simfil-expression-input #featureSearchQueryInput
                                          class="feature-search-query-input"
@@ -224,6 +238,22 @@ interface FeatureSearchStyleRuleDraft {
                                   (ngModelChange)="onSearchMapLayerTreeSelectionChange($event)">
                     </p-treeselect>
                     <label for="feature-search-map-layers">Map Layers</label>
+                </p-iftalabel>
+                <p-iftalabel class="feature-search-level-select">
+                    <p-multiSelect inputId="feature-search-levels"
+                                   [options]="featureSearchTileLevelOptions"
+                                   [(ngModel)]="selectedTileLevels"
+                                   optionLabel="label"
+                                   optionValue="value"
+                                   [filter]="false"
+                                   [showToggleAll]="false"
+                                   [maxSelectedLabels]="1"
+                                   selectedItemsLabel="{0} levels"
+                                   [disabled]="!searchEnabled()"
+                                   appendTo="body"
+                                   (ngModelChange)="onSearchTileLevelsChange($event)">
+                    </p-multiSelect>
+                    <label for="feature-search-levels">Level</label>
                 </p-iftalabel>
                 <p-iftalabel class="feature-search-scope-select">
                     <p-select inputId="feature-search-scope"
@@ -303,7 +333,7 @@ interface FeatureSearchStyleRuleDraft {
                                 </p-multiSelect>
                             </div>
 
-                            <div class="feature-search-tree-host">
+                            <div #featureSearchTreeHost class="feature-search-tree-host">
                                 <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
                                         selectionMode="single"
                                         [metaKeySelection]="false"
@@ -844,7 +874,7 @@ interface FeatureSearchStyleRuleDraft {
 /**
  * Dialog that presents long-running feature-search progress, result grouping, styles, and diagnostics.
  */
-export class FeatureSearchComponent implements OnChanges, OnDestroy {
+export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     @Input({required: true}) searchId!: string;
     @Input() dockedPanelCount = 1;
     @Output() panelDragRequest = new EventEmitter<{session: FeatureSearchSession, event: PointerEvent}>();
@@ -885,6 +915,8 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     styleAttributeOptionsLoading = false;
     mapLayerTreeOptions: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
     selectedMapLayerTreeNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+    featureSearchTileLevelOptions: FeatureSearchTileLevelOption[] = [];
+    selectedTileLevels: number[] = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
     featureSearchViewOptions: FeatureSearchViewOption[] = [];
     selectedViewIndices: number[] = [];
     styleOperatorOptions: FeatureSearchStyleOption[] = [
@@ -962,12 +994,18 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     private mapLayerTreeOptionsSignature = "";
     private selectedMapLayersSignature = "";
     private initializedMapLayerSelectionSessionId = "";
+    private searchTileLevelOptionsSignature = "";
+    private selectedTileLevelsSignature = "";
     private searchViewOptionsSignature = "";
     private selectedViewIndicesSignature = "";
     private pendingBookmarkedCloseSessionId: string | null = null;
+    private resizeObserver?: ResizeObserver;
+    private treeScrollHeightRaf?: number;
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
+    @ViewChild('featureSearchContentContainer') featureSearchContentContainer?: ElementRef<HTMLElement>;
+    @ViewChild('featureSearchTreeHost') featureSearchTreeHost?: ElementRef<HTMLElement>;
     @ViewChild('featureSearchQueryInput') featureSearchQueryInput?: SimfilExpressionInputComponent;
     @ViewChild('featureSearchDialog') featureSearchDialog: AppDialogComponent | undefined;
     @ViewChild('featureSearchPanel') featureSearchPanel: AppPanelComponent | undefined;
@@ -1010,11 +1048,13 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
             this.refreshMapLayerTreeOptions();
+            this.refreshSearchTileLevelOptions(this.session);
             if (this.session) {
                 this.refreshFeatureSearchScopeSummary(this.session);
                 this.refreshStyleAttributeOptionsIfNeeded(this.session);
                 this.requestQueryDiagnosticsIfVisible(this.session);
                 this.syncMapLayerTreeSelection(this.session);
+                this.syncSelectedTileLevelsFromSession(this.session);
             }
         }));
         this.subscriptions.add(this.stateService.numViewsState.subscribe(() => {
@@ -2348,6 +2388,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.selectedMapLayersSignature = this.mapLayerKeySignature(
             this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes)
         );
+        this.refreshSearchTileLevelOptions(session);
         this.styleAttributeOptionsSessionSignature = "";
         this.updateDraftFeatureSearchScopeSummary(this.featureSearchScope);
         this.searchService.setSearchMapLayers(
@@ -2431,6 +2472,82 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.selectedViewIndices = nextIndices;
         this.selectedViewIndicesSignature = JSON.stringify(nextIndices);
         this.searchService.setSearchViewIndices(session.id, nextIndices);
+    }
+
+    /** Rebuilds the tile-level options from the supported search tile domain. */
+    private refreshSearchTileLevelOptions(session?: FeatureSearchSession): void {
+        const levels = new Set<number>();
+        for (let level = MIN_FEATURE_SEARCH_TILE_LEVEL; level <= MAX_FEATURE_SEARCH_TILE_LEVEL; level++) {
+            levels.add(level);
+        }
+        for (const level of session?.definition.selectedTileLevels ?? []) {
+            if (this.isSupportedFeatureSearchTileLevel(level)) {
+                levels.add(level);
+            }
+        }
+        for (const level of this.selectedTileLevels) {
+            if (this.isSupportedFeatureSearchTileLevel(level)) {
+                levels.add(level);
+            }
+        }
+        const nextLevels = Array.from(levels).sort((lhs, rhs) => lhs - rhs);
+        const signature = JSON.stringify(nextLevels);
+        if (signature === this.searchTileLevelOptionsSignature) {
+            return;
+        }
+        this.searchTileLevelOptionsSignature = signature;
+        this.featureSearchTileLevelOptions = nextLevels.map(level => ({
+            label: String(level),
+            value: level
+        }));
+        this.selectedTileLevels = this.normalizedSearchTileLevels(this.selectedTileLevels);
+    }
+
+    /** Keeps the UI level selection sorted, de-duplicated, and never empty. */
+    private normalizedSearchTileLevels(levels: number[] | null | undefined): number[] {
+        const selected = new Set<number>();
+        for (const value of levels ?? []) {
+            const level = Number(value);
+            if (this.isSupportedFeatureSearchTileLevel(level)) {
+                selected.add(level);
+            }
+        }
+        return Array.from(selected.size ? selected : new Set(DEFAULT_FEATURE_SEARCH_TILE_LEVELS))
+            .sort((lhs, rhs) => lhs - rhs);
+    }
+
+    /** Accepts the persisted tile-level domain without coupling the UI to one datasource's metadata. */
+    private isSupportedFeatureSearchTileLevel(value: unknown): value is number {
+        const level = Number(value);
+        return Number.isInteger(level)
+            && level >= MIN_FEATURE_SEARCH_TILE_LEVEL
+            && level <= MAX_FEATURE_SEARCH_TILE_LEVEL;
+    }
+
+    /** Synchronizes local tile-level controls from the active persisted search. */
+    private syncSelectedTileLevelsFromSession(session: FeatureSearchSession): void {
+        this.refreshSearchTileLevelOptions(session);
+        const nextLevels = this.normalizedSearchTileLevels(session.definition.selectedTileLevels);
+        const signature = JSON.stringify(nextLevels);
+        if (signature === this.selectedTileLevelsSignature) {
+            return;
+        }
+        this.selectedTileLevelsSignature = signature;
+        this.selectedTileLevels = nextLevels;
+        this.refreshSearchTileLevelOptions(session);
+    }
+
+    /** Persists user-selected source tile levels for this search definition. */
+    protected onSearchTileLevelsChange(levels: number[] | null | undefined): void {
+        const session = this.session;
+        if (!session || !this.searchEnabled()) {
+            return;
+        }
+        const nextLevels = this.normalizedSearchTileLevels(levels ?? []);
+        this.selectedTileLevels = nextLevels;
+        this.selectedTileLevelsSignature = JSON.stringify(nextLevels);
+        this.refreshSearchTileLevelOptions(session);
+        this.searchService.setSearchTileLevels(session.id, nextLevels);
     }
 
     /** Returns whether an editor field should be replaced by a schema-backed default. */
@@ -2521,6 +2638,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         }
     }
 
+    /** Starts watching the rendered tree host once Angular has materialized the active surface. */
+    ngAfterViewInit(): void {
+        this.refreshTreeResizeObserver();
+        this.scheduleTreeScrollHeightSync();
+    }
+
     /** Loads the current session snapshot for this component instance. */
     private bindSession(): void {
         const session = this.searchService.getSession(this.searchId);
@@ -2546,16 +2669,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             this.lastSearchQuery = session.definition.query;
             this.featureSearchScope = session.definition.scope;
             this.syncMapLayerTreeSelection(session);
-            this.syncSelectedViewIndicesFromSession(session);
-            this.refreshFeatureSearchScopeSummary(session);
-            this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
-            const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
-            const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
-            if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
-                this.onStyleRulesChanged();
-            } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
-                this.tryCreateAutoStyleRule(session);
-            }
+            this.syncSelectedTileLevelsFromSession(session);
+        this.syncSelectedViewIndicesFromSession(session);
+        this.refreshFeatureSearchScopeSummary(session);
+        this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
+        const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
+        const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
+        if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
+            this.onStyleRulesChanged();
+        } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
+            this.tryCreateAutoStyleRule(session);}
         }
         if (this.activeSearchGroupId !== session.runId) {
             this.activeSearchGroupId = session.runId;
@@ -2584,12 +2707,9 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             this.requestDiagnosticsValueSummaries();
         }
         this.syncStreamingResults(session);
-        if (this.isDocked()) {
-            this.stateService.isDockOpen = true;
-            if (this.surfacedDockedSearchId !== session.id) {
-                this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
-                this.surfacedDockedSearchId = session.id;
-            }
+        if (this.isDocked() && this.stateService.isDockOpen && this.surfacedDockedSearchId !== session.id) {
+            this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
+            this.surfacedDockedSearchId = session.id;
         }
         if (session.complete) {
             this.searchResultReady(this.completedSearchGroupId !== session.runId);
@@ -2634,6 +2754,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /** Stops feature search subscriptions when the component is destroyed. */
     ngOnDestroy() {
         this.subscriptions.unsubscribe();
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = undefined;
+        if (this.treeScrollHeightRaf !== undefined) {
+            window.cancelAnimationFrame(this.treeScrollHeightRaf);
+            this.treeScrollHeightRaf = undefined;
+        }
         if (this.styleAttributeOptionsRefreshTimer) {
             clearTimeout(this.styleAttributeOptionsRefreshTimer);
             this.styleAttributeOptionsRefreshTimer = null;
@@ -2649,10 +2775,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         return this.session?.definition.enabled ?? true;
     }
 
+    protected featureSearchTitle(): string {
+        return this.session?.definition.query.trim() || "Search Loaded Features";
+    }
+
     /**
      * Recomputes the virtual tree height once the dialog becomes measurable.
      */
     onDialogShow(event: any) {
+        this.refreshTreeResizeObserver();
         this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
         this.refreshCompletionZIndex();
@@ -2668,6 +2799,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     }
 
     protected onDockedPanelShow() {
+        this.refreshTreeResizeObserver();
         this.syncTreeScrollHeight();
         this.refreshCompletionZIndex();
     }
@@ -2689,16 +2821,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     }
 
     private shouldDockDialog(): boolean {
-        const dialog = this.featureSearchDialog?.container();
-        const dock = document.querySelector('.collapsible-dock') as HTMLElement | null;
-        if (!dialog || !dock) {
-            return false;
-        }
-        const dialogRect = dialog.getBoundingClientRect();
-        const dockRect = dock.getBoundingClientRect();
-        const overlapWidth = Math.max(0, Math.min(dialogRect.right, dockRect.right) - Math.max(dialogRect.left, dockRect.left));
-        const overlapHeight = Math.max(0, Math.min(dialogRect.bottom, dockRect.bottom) - Math.max(dialogRect.top, dockRect.top));
-        return overlapWidth >= this.stateService.baseFontSize * 2 && overlapHeight > 0;
+        return this.featureSearchDialog?.overlapsDockDropTarget() ?? false;
     }
 
     protected toggleDocked() {
@@ -2731,10 +2854,14 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     protected onHeaderPointerDown(event: PointerEvent) {
         const session = this.session;
-        if (!session || !this.isDocked() || event.button !== 0) {
+        if (!session || event.button !== 0) {
             return;
         }
-        this.panelDragRequest.emit({session, event});
+        if (this.isDocked()) {
+            this.panelDragRequest.emit({session, event});
+        } else {
+            this.featureSearchDialog?.startDrag(event);
+        }
     }
 
     protected expandFeatureSearchQueryInput() {
@@ -2809,6 +2936,9 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 this.requestDiagnosticsValueSummaries();
             }
         }
+        if (this.resultPanelIndex === "results") {
+            this.scheduleTreeScrollHeightSync();
+        }
     }
 
     protected onFeatureSearchAutoUpdateChange(autoUpdate: boolean): void {
@@ -2840,6 +2970,14 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark search',
                 icon: bookmarked ? 'pi pi-bookmark-fill' : 'pi pi-bookmark',
                 command: () => this.toggleSearchBookmarked()
+            },
+            {
+                label: 'Clone search',
+                tooltip: 'Clone search',
+                materialIcon: 'copy_all',
+                menuIcon: 'pi pi-copy',
+                disabled: !this.session,
+                command: () => this.cloneSearch()
             },
             {
                 label: 'Auto update area',
@@ -2893,6 +3031,12 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             return;
         }
         this.openSearchExportDialog(session.id);
+    }
+
+    protected cloneSearch(): void {
+        if (this.session) {
+            this.searchService.cloneSearch(this.session.id);
+        }
     }
 
     private openSearchExportDialog(sessionId: string, closeAfterExport = false): void {
@@ -3051,11 +3195,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
                 : "";
         if (mapTileKey && selectedFeatureId) {
             const keepDockedSearchVisible = this.isDocked();
-            this.stateService.setSelection(
+            const lockSelection = !!event?.originalEvent?.ctrlKey;
+            const panelId = this.stateService.setSelection(
                 [{mapTileKey, featureId: selectedFeatureId}],
                 undefined,
-                false,
+                lockSelection,
                 keepDockedSearchVisible);
+            if (lockSelection && panelId !== undefined) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
             this.inspectionSelection.focusOnFeature(this.stateService.focusedView, {
                 mapTileKey,
                 featureId: selectedFeatureId
@@ -3205,11 +3353,15 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
         this.surfacedDockedSearchId = "";
         this.mapLayerTreeOptions = [];
         this.selectedMapLayerTreeNodes = [];
+        this.featureSearchTileLevelOptions = [];
+        this.selectedTileLevels = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
         this.featureSearchViewOptions = [];
         this.selectedViewIndices = [];
         this.mapLayerTreeOptionsSignature = "";
         this.selectedMapLayersSignature = "";
         this.initializedMapLayerSelectionSessionId = "";
+        this.searchTileLevelOptionsSignature = "";
+        this.selectedTileLevelsSignature = "";
         this.searchViewOptionsSignature = "";
         this.selectedViewIndicesSignature = "";
         this.pendingBookmarkedCloseSessionId = null;
@@ -3436,12 +3588,16 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
 
     /** Updates the empty-message and filter state after streamed result-tree changes. */
     private updateResultTreeStatus(searchComplete: boolean): void {
+        const previousShowFilter = this.showFilter;
         if (this.resultsTree.length) {
             this.showFilter = true;
             this.resultsStatus = "No entries found.";
         } else if (searchComplete) {
             this.showFilter = false;
             this.resultsStatus = "No matches found.";
+        }
+        if (previousShowFilter !== this.showFilter) {
+            this.scheduleTreeScrollHeightSync();
         }
     }
 
@@ -3586,6 +3742,7 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
             this.showFilter = false;
             this.resultsStatus = "No matches found.";
         }
+        this.scheduleTreeScrollHeightSync();
         this.resultTreeInputLength = this.results.length;
         this.resultTreeGroupingSignature = selectedOrder.join(',');
     }
@@ -3593,30 +3750,60 @@ export class FeatureSearchComponent implements OnChanges, OnDestroy {
     /**
      * Derives the tree scroller height from the dialog size so virtual scrolling stays usable while resizing.
      */
-    syncTreeScrollHeight(event?: MouseEvent) {
-        const target = event?.target as HTMLElement | null;
-        const wrapper = target?.closest('.feature-search-dialog') as HTMLElement | null;
-        const dialog = this.featureSearchDialog?.container()
-            ?? (wrapper?.querySelector('.p-dialog') as HTMLElement | null);
-        const panel = this.featureSearchPanel?.container();
-        const container = dialog ?? wrapper ?? panel;
-        if (!container || !container.offsetHeight || !this.stateService.baseFontSize) {
+    syncTreeScrollHeight(_event?: MouseEvent) {
+        const host = this.featureSearchTreeHost?.nativeElement;
+        const hostHeight = host?.getBoundingClientRect().height ?? 0;
+        if (!host || hostHeight <= 0 || !this.stateService.baseFontSize) {
             return;
         }
 
-        // Compute scrollable height in em units to respect base font size
-        const currentEmHeight = container.offsetHeight / this.stateService.baseFontSize;
-        // Linear equation to compensate for the slight difference in the content height
-        // when the values are smaller or larger
-        this.scrollHeight = `${currentEmHeight + 0.0887574 * currentEmHeight - 14.9763}em`;
+        const treeElement = ((this.tree as any)?.el?.nativeElement ?? null) as HTMLElement | null;
+        const filterElement = treeElement?.querySelector<HTMLElement>('.p-tree-filter-container');
+        const treeStyles = treeElement ? window.getComputedStyle(treeElement) : undefined;
+        const treeVerticalPadding = treeStyles
+            ? (Number.parseFloat(treeStyles.paddingTop) || 0) + (Number.parseFloat(treeStyles.paddingBottom) || 0)
+            : 0;
+        const filterHeight = filterElement?.getBoundingClientRect().height ?? 0;
+        const nextHeight = Math.max(
+            this.stateService.baseFontSize * 6,
+            Math.floor(hostHeight - filterHeight - treeVerticalPadding)
+        );
+        this.scrollHeight = `${nextHeight}px`;
 
-        // Nudge the internal scroller to recalculate
-        setTimeout(() => {
+        window.requestAnimationFrame(() => {
             const scroller = (this.tree as any)?.scroller as Scroller | undefined;
             if (scroller) {
                 scroller.scrollHeight = this.scrollHeight;
-                scroller.calculateAutoSize();
+                scroller.calculateAutoSize?.();
             }
-        }, 1);
+        });
+    }
+
+    /** Keeps PrimeNG's virtual scroller synchronized with actual panel layout changes. */
+    private scheduleTreeScrollHeightSync(): void {
+        if (this.treeScrollHeightRaf !== undefined) {
+            return;
+        }
+        this.treeScrollHeightRaf = window.requestAnimationFrame(() => {
+            this.treeScrollHeightRaf = undefined;
+            this.syncTreeScrollHeight();
+        });
+    }
+
+    /** Observes the elements whose size changes affect the tree viewport. */
+    private refreshTreeResizeObserver(): void {
+        if (typeof ResizeObserver === "undefined") {
+            return;
+        }
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = new ResizeObserver(() => this.scheduleTreeScrollHeightSync());
+        const contentElement = this.featureSearchContentContainer?.nativeElement;
+        const treeHostElement = this.featureSearchTreeHost?.nativeElement;
+        if (contentElement) {
+            this.resizeObserver.observe(contentElement);
+        }
+        if (treeHostElement) {
+            this.resizeObserver.observe(treeHostElement);
+        }
     }
 }

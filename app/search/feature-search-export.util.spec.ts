@@ -23,6 +23,7 @@ describe("feature search JSON export helpers", () => {
             showResultsOnMap: true,
             pinColor: "#ea4336",
             selectedMapLayers: [{mapId: "MapA", layerId: "LayerA"}],
+            selectedTileLevels: [13],
             selectedViewIndices: [0, 1],
             searchStyleRules: [],
             renderStrategy: {
@@ -49,11 +50,13 @@ describe("feature search JSON export helpers", () => {
             "showResultsOnMap",
             "pinColor",
             "selectedMapLayers",
+            "selectedTileLevels",
             "selectedViewIndices",
             "searchStyleRules",
             "renderStrategy"
         ]);
         expect(exported.selectedMapLayers).toEqual([{mapId: "MapA", layerId: "LayerA"}]);
+        expect(exported.selectedTileLevels).toEqual([13]);
         expect(exported.selectedViewIndices).toEqual([0, 1]);
     });
 
@@ -222,6 +225,7 @@ function searchDefinition(): FeatureSearchStateEntry {
         showResultsOnMap: true,
         pinColor: "#ea4336",
         selectedMapLayers: [{mapId: "MapA", layerId: "LayerA"}],
+        selectedTileLevels: [13],
         selectedViewIndices: [0, 1],
         searchStyleRules: [],
         renderStrategy: {

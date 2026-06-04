@@ -121,6 +121,7 @@ export class MapRenderService {
         this.mapInfo.styleOptionChanged.subscribe(([optionNode, viewIndex]) => {
             this.applyStyleOptionChange(optionNode, viewIndex);
         });
+        this.stateService.featureSearchState.subscribe(() => queueMicrotask(() => this.updateVisualizations()));
         this.viewState.viewStateChanged.subscribe(() => this.updateVisualizations());
         this.tileStream.tileDataChanged.subscribe(change => {
             if (change.reason === "loaded") {
@@ -725,10 +726,15 @@ export class MapRenderService {
     /** Removes normal feature tile visualizations from all views. */
     private removeFeatureTileVisualizations(tileKey: string): void {
         for (const state of this.viewStates()) {
-            for (const visualization of state.removeVisualizations(undefined, tileKey)) {
-                this.tileVisualizationDestructionTopic.next(visualization);
+            const featureVisualizations = Array.from(state.getVisualizations(undefined, tileKey))
+                .filter(visualization => !(visualization instanceof DeckTileSearchVisualization));
+            for (const visualization of featureVisualizations) {
+                for (const removed of state.removeVisualizations(visualization.styleId, tileKey)) {
+                    this.tileVisualizationDestructionTopic.next(removed);
+                }
             }
-            state.visualizationQueue.retain(visualization => visualization.tile.mapTileKey !== tileKey);
+            state.visualizationQueue.retain(visualization =>
+                visualization.tile.mapTileKey !== tileKey || visualization instanceof DeckTileSearchVisualization);
         }
     }
 

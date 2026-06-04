@@ -59,6 +59,7 @@ export interface FeatureSearchStateEntry {
     showResultsOnMap: boolean;
     pinColor: string;
     selectedMapLayers: FeatureSearchMapLayerRef[];
+    selectedTileLevels: number[];
     selectedViewIndices: number[];
     searchStyleRules: FeatureSearchStyleRule[];
     renderStrategy: FeatureSearchRenderStrategy;
@@ -76,6 +77,8 @@ const MAX_FILTERS_PER_RULE = 25;
 const MAX_COLOR_STOPS_PER_RULE = 512;
 const MAX_SELECTED_SEARCH_LAYERS = 500;
 const MAX_SUPPORTED_FEATURE_SEARCH_VIEWS = 2;
+export const MIN_FEATURE_SEARCH_TILE_LEVEL = 0;
+export const MAX_FEATURE_SEARCH_TILE_LEVEL = 22;
 const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "polygon", "mesh", "label"]);
 const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
 const MIN_HIGH_FIDELITY_VISIBLE_TILES = 1;
@@ -86,6 +89,8 @@ export const DEFAULT_FEATURE_SEARCH_VIEW_INDICES: number[] = Array.from(
     {length: MAX_SUPPORTED_FEATURE_SEARCH_VIEWS},
     (_, index) => index
 );
+export const DEFAULT_FEATURE_SEARCH_TILE_LEVEL = 13;
+export const DEFAULT_FEATURE_SEARCH_TILE_LEVELS: number[] = [DEFAULT_FEATURE_SEARCH_TILE_LEVEL];
 
 export const DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY: FeatureSearchRenderStrategy = {
     showLowFiDots: true,
@@ -249,6 +254,28 @@ function normalizeSearchViewIndices(value: unknown): number[] {
     return indices.sort((lhs, rhs) => lhs - rhs);
 }
 
+export function normalizeFeatureSearchTileLevels(value: unknown): number[] {
+    if (!Array.isArray(value)) {
+        return [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
+    }
+    const seen = new Set<number>();
+    const levels: number[] = [];
+    for (const item of value) {
+        const level = Number(item);
+        if (!Number.isInteger(level)
+            || level < MIN_FEATURE_SEARCH_TILE_LEVEL
+            || level > MAX_FEATURE_SEARCH_TILE_LEVEL
+            || seen.has(level)) {
+            continue;
+        }
+        seen.add(level);
+        levels.push(level);
+    }
+    return levels.length
+        ? levels.sort((lhs, rhs) => lhs - rhs)
+        : [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
+}
+
 function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchColorMode {
     const nested = raw["color"];
     if (nested && typeof nested === "object" && !Array.isArray(nested)) {
@@ -399,6 +426,7 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         showResultsOnMap: normalizeBoolean(raw["showResultsOnMap"], true),
         pinColor: normalizeHexColor(raw["pinColor"]),
         selectedMapLayers,
+        selectedTileLevels: normalizeFeatureSearchTileLevels(raw["selectedTileLevels"]),
         selectedViewIndices: normalizeSearchViewIndices(raw["selectedViewIndices"]),
         searchStyleRules: styleRules,
         renderStrategy: normalizeFeatureSearchRenderStrategy(raw["renderStrategy"])
@@ -446,6 +474,7 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
         showResultsOnMap: true,
         pinColor: DEFAULT_PIN_COLOR,
         selectedMapLayers: [],
+        selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
         selectedViewIndices: [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES],
         searchStyleRules: [],
         renderStrategy: DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,

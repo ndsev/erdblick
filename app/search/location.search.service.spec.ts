@@ -1,8 +1,13 @@
+import "@angular/compiler";
 import {firstValueFrom, of, throwError} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
 import {LocationSearchProviderConfig} from "../shared/app-config.service";
-import {LocationSearchService, normalizeLocationSearchPayload} from "./location.search.service";
+import {
+    isSupportedLocationSearchQuery,
+    LocationSearchService,
+    normalizeLocationSearchPayload
+} from "./location.search.service";
 
 class HttpClientStub {
     get = vi.fn();
@@ -11,7 +16,7 @@ class HttpClientStub {
 const createService = (providers: LocationSearchProviderConfig[] = [
     {
         id: "mapget-offline",
-        name: "Offline locations",
+        name: "Place",
         url: "/location",
         headers: {},
         enabled: true
@@ -74,7 +79,7 @@ describe("LocationSearchService", () => {
             countryCode: "DE",
             population: 1260391,
             providerId: "mapget-offline",
-            providerName: "Offline locations"
+            providerName: "Place"
         });
         expect(matches[1].id).toBe("geonames:5690557");
 
@@ -182,6 +187,22 @@ describe("LocationSearchService", () => {
         const failing = createService();
         failing.httpClient.get.mockReturnValue(throwError(() => new Error("offline")));
         expect(await firstValueFrom(failing.service.search("munich", 10))).toEqual([]);
+    });
+
+    it("only accepts place-name queries for location search", async () => {
+        expect(isSupportedLocationSearchQuery("Munich")).toBe(true);
+        expect(isSupportedLocationSearchQuery("Sao Paulo")).toBe(true);
+        expect(isSupportedLocationSearchQuery("Lodz")).toBe(true);
+        expect(isSupportedLocationSearchQuery("Tokyo")).toBe(true);
+        expect(isSupportedLocationSearchQuery("東京")).toBe(true);
+        expect(isSupportedLocationSearchQuery("St. John's")).toBe(true);
+
+        const {service, httpClient} = createService();
+        expect(await firstValueFrom(service.search("12345", 10))).toEqual([]);
+        expect(await firstValueFrom(service.search("Berlin 10115", 10))).toEqual([]);
+        expect(await firstValueFrom(service.search("48.137 11.575", 10))).toEqual([]);
+        expect(await firstValueFrom(service.search("Munich2", 10))).toEqual([]);
+        expect(httpClient.get).not.toHaveBeenCalled();
     });
 
     it("rejects invalid location payloads", () => {

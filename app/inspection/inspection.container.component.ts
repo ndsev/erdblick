@@ -3,12 +3,13 @@ import {InspectionSelectionService} from "./inspection-selection.service";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {Subscription} from "rxjs";
+import {DockedPanelDragController, DockedPanelDragOffset} from "../shared/docked-panel-drag.controller";
 
 @Component({
     selector: 'inspection-container',
     template: `
         <div #dockContainer class="inspection-container" data-testid="inspection-container"
-             [ngClass]="{'reordering': isReordering, 'single-panel': dockedPanels.length === 1, 'multi-panel': dockedPanels.length > 1}">
+             [ngClass]="{'reordering': dockDrag.state.isReordering, 'single-panel': dockedPanels.length === 1, 'multi-panel': dockedPanels.length > 1}">
             @if (dockedPanels.length > 0) {
                 <div class="dock-filter">
                     <p-iconfield class="input-container">
@@ -37,9 +38,9 @@ import {Subscription} from "rxjs";
                 @if (panel.features.length > 0 || panel.sourceData !== undefined) {
                     <inspection-panel [panel]="panel"
                                       [dockedPanelCount]="dockedPanels.length"
-                                      [ngClass]="{'dragging': dragPanelId === panel.id,
-                                                  'drop-before': dropBeforeId === panel.id,
-                                                  'drop-after': dropAfterId === panel.id}"
+                                      [ngClass]="{'dragging': dockDrag.state.draggedId === panel.id,
+                                                  'drop-before': dockDrag.state.dropBeforeId === panel.id,
+                                                  'drop-after': dockDrag.state.dropAfterId === panel.id}"
                                       [attr.data-panel-id]="panel.id"
                                       [(filterText)]="dockFilterText"
                                       (ejectedPanel)="onEject($event)"
@@ -55,28 +56,31 @@ import {Subscription} from "rxjs";
 /** Hosts docked inspection panels and manages drag-based docking/reordering. */
 export class InspectionContainerComponent implements OnDestroy {
     dockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
-    isReordering = false;
     dockFilterText = '';
-    dragPanelId?: number;
-    dropBeforeId?: number;
-    dropAfterId?: number;
+    protected readonly dockDrag: DockedPanelDragController<number>;
 
     @ViewChild('dockContainer') private dockContainerRef?: ElementRef<HTMLDivElement>;
 
-    private dragStart?: {x: number, y: number};
-    private dragPointerId?: number;
-    private dragMode?: 'reorder' | 'undock';
-    private dragActive = false;
-    private dropIndex?: number;
-    private detachMove?: () => void;
-    private detachUp?: () => void;
-    private dragPreviewElement?: HTMLDivElement;
-    private dragPreviewOffset = {x: 0, y: 0};
     private readonly subscriptions = new Subscription();
 
     constructor(private stateService: AppStateService,
                 private mapService: InspectionSelectionService,
                 private renderer: Renderer2) {
+        this.dockDrag = new DockedPanelDragController<number>({
+            renderer: this.renderer,
+            baseFontSize: () => this.stateService.baseFontSize,
+            container: () => this.dockContainerRef?.nativeElement,
+            itemSelector: 'inspection-panel',
+            readId: element => {
+                const id = Number(element.dataset['panelId']);
+                return Number.isNaN(id) ? undefined : id;
+            },
+            previewClass: 'inspection-drag-preview',
+            previewHeaderClass: 'inspection-drag-preview-header',
+            previewFillClass: 'inspection-drag-preview-fill',
+            applyReorder: nextDisplayOrder => this.stateService.reorderInspectionPanels(nextDisplayOrder),
+            undock: (panelId, event, offset) => this.queueUndock(panelId, event, offset)
+        });
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
@@ -89,7 +93,7 @@ export class InspectionContainerComponent implements OnDestroy {
     /** Clears transient drag state when the container is destroyed. */
     ngOnDestroy() {
         this.subscriptions.unsubscribe();
-        this.resetDockDrag();
+        this.dockDrag.destroy();
     }
 
     /** Turns a docked panel into a floating dialog. */
@@ -99,235 +103,15 @@ export class InspectionContainerComponent implements OnDestroy {
 
     /** Starts dock drag tracking for a docked inspection header. */
     onPanelDragRequest(payload: {panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}) {
-        if (this.dragActive) {
-            return;
-        }
-        const event = payload.event;
-        if (event.button !== 0) {
-            return;
-        }
-        this.dragPanelId = payload.panel.id;
-        this.dragPointerId = event.pointerId;
-        this.dragStart = {x: event.clientX, y: event.clientY};
-        this.dragMode = undefined;
-        this.dragActive = false;
-        this.dropIndex = undefined;
-        this.dropBeforeId = undefined;
-        this.dropAfterId = undefined;
-        this.clearDragPreview();
-        this.detachMove?.();
-        this.detachUp?.();
-        this.detachMove = this.renderer.listen('window', 'pointermove', (ev: PointerEvent) => this.onDockDragMove(ev));
-        this.detachUp = this.renderer.listen('window', 'pointerup', (ev: PointerEvent) => this.onDockDragEnd(ev));
-    }
-
-    /** Switches between reorder and undock modes once the pointer movement passes the drag threshold. */
-    private onDockDragMove(event: PointerEvent) {
-        if (!this.dragStart || event.pointerId !== this.dragPointerId) {
-            return;
-        }
-        const dx = event.clientX - this.dragStart.x;
-        const dy = event.clientY - this.dragStart.y;
-        const threshold = this.stateService.baseFontSize * 0.5;
-        const distance = Math.hypot(dx, dy);
-        if (!this.dragActive && distance < threshold) {
-            return;
-        }
-        if (!this.dragActive) {
-            this.dragActive = true;
-            document.body.classList.add('dialog-dragging');
-        }
-        this.ensureDragPreview(event);
-        this.positionDragPreview(event.clientX, event.clientY);
-        if (!this.dragMode) {
-            this.dragMode = this.isPointInDock(event.clientX, event.clientY) ? 'reorder' : 'undock';
-            if (this.dragMode === 'reorder') {
-                this.isReordering = true;
-            }
-        }
-        if (this.dragMode === 'reorder') {
-            if (this.isPointInDock(event.clientX, event.clientY)) {
-                this.updateDropTarget(event.clientY);
-            } else {
-                this.dropIndex = undefined;
-                this.dropBeforeId = undefined;
-                this.dropAfterId = undefined;
-            }
-        }
-    }
-
-    /** Applies the final reorder or undock action when the pointer is released. */
-    private onDockDragEnd(event: PointerEvent) {
-        if (event.pointerId !== this.dragPointerId) {
-            return;
-        }
-        const panelId = this.dragPanelId;
-        const dragActive = this.dragActive;
-        const dragMode = this.dragMode;
-        const inDock = this.isPointInDock(event.clientX, event.clientY);
-
-        if (dragActive && panelId !== undefined) {
-            if (!inDock) {
-                this.queueUndock(panelId, event);
-            } else if (dragMode === 'reorder') {
-                this.updateDropTarget(event.clientY);
-                this.applyReorder(panelId);
-            }
-        }
-
-        this.resetDockDrag();
-    }
-
-    /** Writes the new dock order back into app state if the dragged panel moved. */
-    private applyReorder(panelId: number) {
-        const displayOrder = this.dockedPanels.map(panel => panel.id);
-        if (displayOrder.length < 2) {
-            return;
-        }
-        const filtered = displayOrder.filter(id => id !== panelId);
-        const dropIndex = this.dropIndex ?? filtered.length;
-        const clampedIndex = Math.min(Math.max(dropIndex, 0), filtered.length);
-        const nextDisplayOrder = filtered.slice();
-        nextDisplayOrder.splice(clampedIndex, 0, panelId);
-        if (!this.ordersEqual(displayOrder, nextDisplayOrder)) {
-            this.stateService.reorderInspectionPanels(nextDisplayOrder);
-        }
-    }
-
-    /** Checks whether two inspection panel orderings are identical. */
-    private ordersEqual(a: number[], b: number[]): boolean {
-        if (a.length !== b.length) {
-            return false;
-        }
-        for (let i = 0; i < a.length; i++) {
-            if (a[i] !== b[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** Computes where the dragged panel would be inserted based on the current pointer position. */
-    private updateDropTarget(clientY: number) {
-        if (!this.dockContainerRef || this.dragPanelId === undefined) {
-            return;
-        }
-        const elements = Array.from(this.dockContainerRef.nativeElement.querySelectorAll<HTMLElement>('inspection-panel'))
-            .map(el => ({el, id: Number(el.dataset['panelId'])}))
-            .filter(entry => !Number.isNaN(entry.id) && entry.id !== this.dragPanelId);
-        if (!elements.length) {
-            this.dropIndex = 0;
-            this.dropBeforeId = undefined;
-            this.dropAfterId = undefined;
-            return;
-        }
-        let dropIndex = elements.length;
-        for (let i = 0; i < elements.length; i++) {
-            const rect = elements[i].el.getBoundingClientRect();
-            const mid = rect.top + rect.height / 2;
-            if (clientY < mid) {
-                dropIndex = i;
-                break;
-            }
-        }
-        this.dropIndex = dropIndex;
-        this.dropBeforeId = dropIndex < elements.length ? elements[dropIndex].id : undefined;
-        this.dropAfterId = dropIndex >= elements.length ? elements[elements.length - 1].id : undefined;
+        this.dockDrag.start(payload.panel.id, payload.event);
     }
 
     /** Defers undocking until after pointerup so PrimeNG dialog drag startup sees a clean event stream. */
-    private queueUndock(panelId: number, event: PointerEvent) {
-        const fallbackOffset = this.stateService.baseFontSize;
-        const offsetX = this.dragPreviewElement ? this.dragPreviewOffset.x : fallbackOffset;
-        const offsetY = this.dragPreviewElement ? this.dragPreviewOffset.y : fallbackOffset;
-        const left = Math.max(0, Math.round(event.clientX - offsetX));
-        const top = Math.max(0, Math.round(event.clientY - offsetY));
+    private queueUndock(panelId: number, event: PointerEvent, offset: DockedPanelDragOffset) {
+        const left = Math.max(0, Math.round(event.clientX - offset.x));
+        const top = Math.max(0, Math.round(event.clientY - offset.y));
         this.stateService.setInspectionDialogPosition(panelId, {left, top});
         this.stateService.setInspectionPanelUndockedState(panelId, true);
-    }
-
-    /** Returns whether a screen point lies inside the inspection dock. */
-    private isPointInDock(x: number, y: number): boolean {
-        const rect = this.dockContainerRef?.nativeElement.getBoundingClientRect();
-        if (!rect) {
-            return false;
-        }
-        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-    }
-
-    /** Creates the floating drag preview element on first actual movement. */
-    private ensureDragPreview(event: PointerEvent) {
-        if (this.dragPreviewElement || !this.dockContainerRef || this.dragPanelId === undefined) {
-            return;
-        }
-        const panelElement = this.dockContainerRef.nativeElement
-            .querySelector<HTMLElement>(`inspection-panel[data-panel-id="${this.dragPanelId}"]`);
-        if (!panelElement) {
-            return;
-        }
-        const panelRect = panelElement.getBoundingClientRect();
-        const pointerStartX = this.dragStart?.x ?? event.clientX;
-        const pointerStartY = this.dragStart?.y ?? event.clientY;
-        this.dragPreviewOffset = {
-            x: Math.min(Math.max(pointerStartX - panelRect.left, 0), panelRect.width),
-            y: Math.min(Math.max(pointerStartY - panelRect.top, 0), panelRect.height)
-        };
-
-        const previewElement = this.renderer.createElement('div') as HTMLDivElement;
-        this.renderer.addClass(previewElement, 'inspection-drag-preview');
-        this.renderer.setStyle(previewElement, 'width', `${Math.round(panelRect.width)}px`);
-        this.renderer.setStyle(previewElement, 'height', `${Math.round(panelRect.height)}px`);
-
-        const headerElement = panelElement.querySelector<HTMLElement>('.p-accordionheader');
-        if (headerElement) {
-            const headerClone = headerElement.cloneNode(true) as HTMLElement;
-            this.renderer.addClass(headerClone, 'inspection-drag-preview-header');
-            this.renderer.appendChild(previewElement, headerClone);
-        }
-        const fillElement = this.renderer.createElement('div') as HTMLDivElement;
-        this.renderer.addClass(fillElement, 'inspection-drag-preview-fill');
-        this.renderer.appendChild(previewElement, fillElement);
-
-        this.renderer.appendChild(document.body, previewElement);
-        this.dragPreviewElement = previewElement;
-    }
-
-    /** Keeps the drag preview visually attached to the pointer. */
-    private positionDragPreview(clientX: number, clientY: number) {
-        if (!this.dragPreviewElement) {
-            return;
-        }
-        this.renderer.setStyle(this.dragPreviewElement, 'left', `${Math.round(clientX - this.dragPreviewOffset.x)}px`);
-        this.renderer.setStyle(this.dragPreviewElement, 'top', `${Math.round(clientY - this.dragPreviewOffset.y)}px`);
-    }
-
-    /** Removes the temporary drag preview node from the DOM. */
-    private clearDragPreview() {
-        if (!this.dragPreviewElement) {
-            return;
-        }
-        this.dragPreviewElement.remove();
-        this.dragPreviewElement = undefined;
-        this.dragPreviewOffset = {x: 0, y: 0};
-    }
-
-    /** Clears every piece of transient state used by dock drag-and-drop. */
-    private resetDockDrag() {
-        this.detachMove?.();
-        this.detachUp?.();
-        this.detachMove = undefined;
-        this.detachUp = undefined;
-        this.clearDragPreview();
-        this.dragStart = undefined;
-        this.dragPointerId = undefined;
-        this.dragMode = undefined;
-        this.dragActive = false;
-        this.dragPanelId = undefined;
-        this.dropIndex = undefined;
-        this.dropBeforeId = undefined;
-        this.dropAfterId = undefined;
-        this.isReordering = false;
-        document.body.classList.remove('dialog-dragging');
     }
 
     /** Closes the dock container and clears the auto-collapse state in app state. */

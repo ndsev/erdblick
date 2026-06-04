@@ -1534,18 +1534,19 @@ export class MapTileStreamService {
         let requestOrder = 0;
         for (const ref of this.availableFeatureSearchLayerRefs(definition.selectedMapLayers)) {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-                const level = this.viewState.getEffectiveMapLayerLevel(viewIndex, ref.mapId, ref.layerId);
-                const tileIds = this.viewState.visibleSearchTileIdsForLevel(viewIndex, level);
-                for (const tileId of tileIds) {
-                    const tileMapLayerKey = coreLib.getTileFeatureLayerKey(ref.mapId, ref.layerId, tileId);
-                    this.trackVisibleSearchLayerTile(
-                        coverage,
-                        ref.mapId,
-                        ref.layerId,
-                        tileId,
-                        requestOrder++,
-                        this.selectedTileKeys.has(tileMapLayerKey)
-                    );
+                for (const level of definition.selectedTileLevels) {
+                    const tileIds = this.viewState.visibleSearchTileIdsForLevel(viewIndex, level);
+                    for (const tileId of tileIds) {
+                        const tileMapLayerKey = coreLib.getTileFeatureLayerKey(ref.mapId, ref.layerId, tileId);
+                        this.trackVisibleSearchLayerTile(
+                            coverage,
+                            ref.mapId,
+                            ref.layerId,
+                            tileId,
+                            requestOrder++,
+                            this.selectedTileKeys.has(tileMapLayerKey)
+                        );
+                    }
                 }
             }
         }

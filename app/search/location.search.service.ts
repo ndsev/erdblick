@@ -25,6 +25,14 @@ export interface LocationSearchMatch {
     providerName: string;
 }
 
+const LOCATION_SEARCH_QUERY_PATTERN = /^\p{L}[\p{L}\p{M}\p{Zs}.'’,\-]*$/u;
+
+/** Returns whether a query is suitable for configured place-name providers. */
+export function isSupportedLocationSearchQuery(value: string): boolean {
+    const query = value.trim().normalize("NFC");
+    return query.length > 0 && LOCATION_SEARCH_QUERY_PATTERN.test(query);
+}
+
 /** Returns a normalized location payload, or null if the shape is not executable. */
 export function normalizeLocationSearchPayload(raw: unknown): LocationSearchMatch | null {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -255,7 +263,7 @@ export class LocationSearchService {
     /** Requests location matches from every enabled configured provider. */
     search(query: string, limit: number): Observable<LocationSearchMatch[]> {
         const trimmedQuery = query.trim();
-        if (trimmedQuery.length < this.minCharacters) {
+        if (!isSupportedLocationSearchQuery(trimmedQuery) || trimmedQuery.length < this.minCharacters) {
             return of([]);
         }
 

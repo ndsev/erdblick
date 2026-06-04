@@ -181,11 +181,8 @@ export class MapViewStateService {
     }
 
     /** Returns whether a search-result source tile is in view, without consulting Map Panel visibility. */
-    showsFeatureSearchTileInView(viewIndex: number, mapId: string, layerId: string, tileId: bigint): boolean {
-        const level = this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
-        if (coreLib.getTileLevel(tileId) !== level) {
-            return false;
-        }
+    showsFeatureSearchTileInView(viewIndex: number, _mapId: string, _layerId: string, tileId: bigint): boolean {
+        const level = Number(coreLib.getTileLevel(tileId));
         return this.visibleSearchTileIdSetForLevel(viewIndex, level).has(tileId);
     }
 
