@@ -134,6 +134,14 @@ public:
     OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
     /** Convert a field using an already translated key. */
     OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
+    /** Convert a field using independent display and path metadata. */
+    OptionalValueAndType convertField(
+        JsValue const& fieldName,
+        FieldOrIndex const& path,
+        simfil::ModelNode::Ptr const& value);
+
+    /** Copy display/search metadata from a flattened child node to its visible parent. */
+    static void inheritFlattenedChild(InspectionNode& parent, InspectionNode const& child);
 
     /**
      * Store one referenced feature id as inspection node payload.

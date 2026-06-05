@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <set>
@@ -548,6 +549,69 @@ void collectInspectionHoverIds(
     }
 }
 
+nlohmann::json const* findInspectionNode(
+    nlohmann::json const& node,
+    std::function<bool(nlohmann::json const&)> const& predicate)
+{
+    if (node.is_array()) {
+        for (auto const& child : node) {
+            if (auto const* result = findInspectionNode(child, predicate)) {
+                return result;
+            }
+        }
+        return nullptr;
+    }
+
+    if (!node.is_object()) {
+        return nullptr;
+    }
+
+    if (predicate(node)) {
+        return &node;
+    }
+
+    if (node.contains("children")) {
+        return findInspectionNode(node.at("children"), predicate);
+    }
+    return nullptr;
+}
+
+nlohmann::json const* findInspectionNodeByKey(nlohmann::json const& node, std::string const& key)
+{
+    return findInspectionNode(node, [&key](nlohmann::json const& candidate) {
+        return candidate.value("key", nlohmann::json{}) == key;
+    });
+}
+
+nlohmann::json const* findInspectionNodeByGeoJsonPath(nlohmann::json const& node, std::string const& path)
+{
+    return findInspectionNode(node, [&path](nlohmann::json const& candidate) {
+        return candidate.value("geoJsonPath", std::string{}) == path;
+    });
+}
+
+void collectInspectionGeoJsonPaths(nlohmann::json const& node, std::vector<std::string>& paths)
+{
+    if (node.is_array()) {
+        for (auto const& child : node) {
+            collectInspectionGeoJsonPaths(child, paths);
+        }
+        return;
+    }
+
+    if (!node.is_object()) {
+        return;
+    }
+
+    if (node.contains("geoJsonPath")) {
+        paths.push_back(node.value("geoJsonPath", std::string{}));
+    }
+
+    if (node.contains("children")) {
+        collectInspectionGeoJsonPaths(node.at("children"), paths);
+    }
+}
+
 bool hasRenderedPathGeometry(nlohmann::json const& renderResult)
 {
     auto const& pathWorld = renderResult["pathWorld"]["positions"];
@@ -674,6 +738,97 @@ TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erd
             hoverIds.begin(),
             hoverIds.end(),
             "Way.1:attribute#1:validity#0") != hoverIds.end());
+}
+
+TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto testObject = tile->newObject();
+    auto items = tile->newArray();
+    items->append(tile->newValue("A"));
+    items->append(tile->newValue("B"));
+    REQUIRE(testObject->addField("items", items).has_value());
+
+    auto objectItems = tile->newArray();
+    auto objectItem = tile->newObject();
+    REQUIRE(objectItem->addField("code", "C").has_value());
+    objectItems->append(objectItem);
+    REQUIRE(testObject->addField("objectItems", objectItems).has_value());
+
+    REQUIRE(feature->attributes()->addField("test", testObject).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.items.*"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.items[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.objectItems.*"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.objectItems[0].code"));
+
+    std::vector<std::string> paths;
+    collectInspectionGeoJsonPaths(*inspection, paths);
+    REQUIRE(std::ranges::none_of(paths, [](std::string const& path) {
+        return path.find(".[\"0\"]") != std::string::npos;
+    }));
+}
+
+TEST_CASE("FeatureInspection copies propagated attribute value search path", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("SPEED_LIMIT_METRIC");
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("speedLimitKmh", int64_t(50)).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
+    REQUIRE(attrNode);
+    REQUIRE(attrNode->value("value", 0) == 50);
+    REQUIRE(
+        attrNode->value("geoJsonPath", std::string{}) ==
+        "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
+}
+
+TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspection]")
+{
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::TileId::fromWgs84(42., 11., 13),
+        "RelationInspectionNode",
+        "RelationInspectionMap",
+        relationTestLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+    tile->setIdPrefix({{"areaId", "Area"}});
+
+    auto const center = tile->tileId().center();
+    auto source = tile->newFeature("Diamond", {{"diamondId", 1}});
+    source->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+    auto relation = source->addRelation(
+        "hasPoi",
+        "PointOfInterest",
+        {{"areaId", "Area"}, {"pointId", 200}});
+    relation->sourceValidity()->newDirection(mapget::Validity::Direction::Positive);
+    relation->targetValidity()->newDirection(mapget::Validity::Direction::Negative);
+
+    auto inspection = InspectionConverter().convert(source);
+
+    auto const* relationGroup = findInspectionNodeByKey(*inspection, "hasPoi");
+    REQUIRE(relationGroup);
+    REQUIRE(relationGroup->value("geoJsonPath", std::string{}) == "relations.*{name = \"hasPoi\"}");
+
+    auto const* targetRow = findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target");
+    REQUIRE(targetRow);
+    REQUIRE(targetRow->value("value", std::string{}).find("PointOfInterest") != std::string::npos);
+
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].sourceValidity.direction"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].targetValidity.direction"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target.sourceValidity.direction"));
 }
 
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
