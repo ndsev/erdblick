@@ -360,7 +360,7 @@ interface FeatureSearchStyleRuleDraft {
                     <!-- Results -->
                     <p-tabpanel value="results">
                         <div class="feature-search-results-panel">
-                            <div style="width: 100%; display: flex; gap: 0.25em; flex-direction: row; align-items: center">
+                            <div style="width: 100%; display: flex; gap: 0.25em; flex-direction: row; align-items: center; padding: 0.25em 0">
                                 <label for="feature-search-grouping">Group</label>
                                 <p-multiSelect inputId="feature-search-grouping"
                                                style="width: 100%"
