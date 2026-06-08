@@ -9,6 +9,7 @@ import type {
     MapTileStreamStatusPayload,
     MapTileStreamTransportCompressionStats
 } from "./tilestream";
+import type {TileSearchResultLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {
     BackendRequestProgress,
@@ -16,13 +17,13 @@ import {
     MapTileKey,
     RequestedLayerProgressState,
     SearchLayerTileSet,
+    SearchCoverageChangedPayload,
     SearchResultTileEntry,
     SearchResultTileEvictedPayload,
     SearchResultTilePayload,
     SearchResultTileRemovedPayload,
     SelectionTileRequest,
-    TileDataChange,
-    TileSearchResultLayerLike
+    TileDataChange
 } from "./map-runtime.model";
 import {RelationLocateRequest, RelationLocateResolution, RelationLocateResult} from "./relation-locate.model";
 import {SearchResultTile} from "./search-result-tile.model";
@@ -67,7 +68,6 @@ interface SearchResultEntryExtractionContext {
     sourceTileId: bigint;
     requestOrder: number;
     resultCount: number;
-    extractionCount: number;
     resultFields: string[];
     layerBlob: Uint8Array;
     includeExactPositions: boolean;
@@ -86,6 +86,7 @@ export class MapTileStreamService {
     public readonly searchResultTileReceived = new Subject<SearchResultTilePayload>();
     public readonly searchResultTileEvicted = new Subject<SearchResultTileEvictedPayload>();
     public readonly searchStatusReceived = new Subject<MapTileStreamSearchStatusPayload>();
+    public readonly searchCoverageChanged = new Subject<SearchCoverageChangedPayload>();
     /** Search-result source-tile state changed; consumers may reconcile render/UI projections. */
     public readonly searchResultTileChanged = new Subject<SearchResultTile>();
     /** Search-result source-tile state left the active runtime cache. */
@@ -149,6 +150,7 @@ export class MapTileStreamService {
             console.error("Tile WebSocket error.", event);
         };
         await this.mapInfo.reloadDataSources();
+        this.scheduleUpdate();
     }
 
     /** Returns whether tile loading and parsing are currently paused. */
@@ -687,7 +689,7 @@ export class MapTileStreamService {
     /** Parses a streamed TileSearchResultLayer and forwards its compact UI payload. */
     private addTileSearchResultLayer(searchResultLayerBlob: Uint8Array) {
         const searchResultLayer = uint8ArrayToWasm(wasmBlob => {
-            return this.mapInfo.tileLayerParser.readTileSearchResultLayer(wasmBlob) as TileSearchResultLayerLike;
+            return this.mapInfo.tileLayerParser.readTileSearchResultLayer(wasmBlob);
         }, searchResultLayerBlob);
         if (!searchResultLayer) {
             return;
@@ -695,16 +697,15 @@ export class MapTileStreamService {
 
         let releaseSearchResultLayer = true;
         try {
-            const rawInfo = (searchResultLayer.info?.() ?? {}) as Record<string, unknown>;
+            const rawInfo = searchResultLayer.info() as Record<string, unknown>;
             const searchId = typeof rawInfo["searchId"] === "string" ? rawInfo["searchId"] : "";
             if (!searchId) {
                 return;
             }
 
             const refresh = Number(rawInfo["refresh"] ?? 0);
-            const resultFieldsValue = searchResultLayer.resultFields?.();
+            const resultFieldsValue = searchResultLayer.resultFields();
             const resultFields = Array.isArray(resultFieldsValue) ? resultFieldsValue.map(String) : [];
-            const resultCountValue = Number(rawInfo["resultCount"] ?? searchResultLayer.numResults?.() ?? 0);
             const tileId = this.bigIntFromUnknown(searchResultLayer.tileId());
             const sourceMapId = typeof rawInfo["sourceMapId"] === "string"
                 ? rawInfo["sourceMapId"]
@@ -717,11 +718,7 @@ export class MapTileStreamService {
                 : tileId;
             const sourceTileKey = coreLib.getTileFeatureLayerKey(sourceMapId, sourceLayerId, sourceTileId);
             const normalizedRefresh = Number.isFinite(refresh) ? refresh : 0;
-            const extractionCountValue = Number(searchResultLayer.numResults?.() ?? resultCountValue ?? 0);
-            const extractionCount = Number.isFinite(extractionCountValue)
-                ? Math.max(0, Math.floor(extractionCountValue))
-                : 0;
-            const resultCount = Number.isFinite(resultCountValue) ? resultCountValue : extractionCount;
+            const resultCount = Math.max(0, Math.floor(searchResultLayer.numResults()));
             const acceptedTile = this.acceptSearchResultTileLayer(
                 searchId,
                 normalizedRefresh,
@@ -734,12 +731,7 @@ export class MapTileStreamService {
                 return;
             }
 
-            const diagnostics = searchResultLayer.copyDiagnostics
-                ? uint8ArrayFromWasm(buffer => {
-                    searchResultLayer.copyDiagnostics?.(buffer);
-                    return true;
-                })
-                : null;
+            const diagnostics = uint8ArrayFromWasm(buffer => searchResultLayer.copyDiagnostics(buffer));
             const progress = this.activeFeatureSearches.get(searchId)?.progressSnapshot() ?? {
                 tilesConsidered: 0,
                 tilesCompleted: 0
@@ -756,7 +748,6 @@ export class MapTileStreamService {
                 sourceTileId,
                 requestOrder: acceptedTile.requestOrder,
                 resultCount,
-                extractionCount,
                 resultFields,
                 layerBlob: searchResultLayerBlob,
                 includeExactPositions: this.searchResultEntriesNeedExactPositions(searchId)
@@ -769,42 +760,38 @@ export class MapTileStreamService {
                 diagnostics,
                 entries: [],
                 entryOffset: 0,
-                entriesComplete: extractionCount === 0
+                entriesComplete: resultCount === 0
             });
-            if (extractionCount > 0) {
+            if (resultCount > 0) {
                 releaseSearchResultLayer = false;
                 this.scheduleSearchResultEntryExtraction(searchResultLayer, payloadBase);
             }
         } finally {
             if (releaseSearchResultLayer) {
-                searchResultLayer.delete?.();
+                searchResultLayer.delete();
             }
         }
     }
 
     /** Streams expensive per-result entry extraction in small browser-frame chunks. */
     private scheduleSearchResultEntryExtraction(
-        searchResultLayer: TileSearchResultLayerLike,
+        searchResultLayer: TileSearchResultLayer,
         payloadBase: SearchResultEntryExtractionContext
     ): void {
         let offset = 0;
         const runBatch = () => {
             const extractEntries = this.searchResultEntryExtractor(searchResultLayer, payloadBase.includeExactPositions);
-            if (!extractEntries) {
-                searchResultLayer.delete?.();
-                return;
-            }
             if (!this.isCurrentSearchResultTilePayload(payloadBase)) {
-                searchResultLayer.delete?.();
+                searchResultLayer.delete();
                 return;
             }
 
             const startedAt = performance.now();
-            while (offset < payloadBase.extractionCount) {
+            while (offset < payloadBase.resultCount) {
                 const batchOffset = offset;
                 const batchLimit = Math.min(
                     this.searchResultEntryBatchSize,
-                    payloadBase.extractionCount - batchOffset);
+                    payloadBase.resultCount - batchOffset);
                 const rawEntriesValue = extractEntries(batchOffset, batchLimit);
                 const entries = this.normalizeSearchResultEntries(rawEntriesValue, payloadBase.sourceTileKey);
                 offset = batchOffset + batchLimit;
@@ -819,7 +806,7 @@ export class MapTileStreamService {
                     diagnostics: null,
                     entries,
                     entryOffset: batchOffset,
-                    entriesComplete: offset >= payloadBase.extractionCount
+                    entriesComplete: offset >= payloadBase.resultCount
                 });
 
                 if (performance.now() - startedAt >= this.searchResultEntryFrameBudgetMs) {
@@ -827,11 +814,11 @@ export class MapTileStreamService {
                 }
             }
 
-            if (offset < payloadBase.extractionCount) {
+            if (offset < payloadBase.resultCount) {
                 requestAnimationFrame(runBatch);
                 return;
             }
-            searchResultLayer.delete?.();
+            searchResultLayer.delete();
         };
         requestAnimationFrame(runBatch);
     }
@@ -844,16 +831,12 @@ export class MapTileStreamService {
 
     /** Selects the cheapest native result-entry extractor that still satisfies the current visualization strategy. */
     private searchResultEntryExtractor(
-        searchResultLayer: TileSearchResultLayerLike,
+        searchResultLayer: TileSearchResultLayer,
         includeExactPositions: boolean
-    ): ((offset: number, limit: number) => unknown) | null {
-        if (!includeExactPositions && searchResultLayer.resultEntryRangeCompact) {
-            return (offset, limit) => searchResultLayer.resultEntryRangeCompact!(offset, limit);
-        }
-        if (searchResultLayer.resultEntryRange) {
-            return (offset, limit) => searchResultLayer.resultEntryRange!(offset, limit);
-        }
-        return null;
+    ): (offset: number, limit: number) => unknown {
+        return includeExactPositions
+            ? (offset, limit) => searchResultLayer.resultEntryRange(offset, limit)
+            : (offset, limit) => searchResultLayer.resultEntryRangeCompact(offset, limit);
     }
 
     /** Converts untyped native entry objects to canonical frontend entries for one source tile. */
@@ -920,7 +903,7 @@ export class MapTileStreamService {
 
     /** Recomputes the logical `/tiles` request from visible tiles and pinned selection tiles. */
     private async updateMapDataRequest() {
-        if (this.tilePipelinePaused) {
+        if (this.tilePipelinePaused || !this.tileStream) {
             return;
         }
 
@@ -1509,7 +1492,11 @@ export class MapTileStreamService {
 
             const runtimeVisibleLayerTiles = this.featureSearchCoverageTiles(runtime.definition);
             if (runtime.shouldAdoptVisibleTiles()) {
-                this.disposeSearchResultTiles(runtime.adoptVisibleTiles(runtimeVisibleLayerTiles), true);
+                const coverageUpdate = runtime.adoptVisibleTiles(runtimeVisibleLayerTiles);
+                this.disposeSearchResultTiles(coverageUpdate.removedTiles, true);
+                if (coverageUpdate.changed) {
+                    this.emitSearchCoverageChanged(runtime);
+                }
             }
 
             requests.push(...runtime.buildPendingRequests());
@@ -1528,13 +1515,23 @@ export class MapTileStreamService {
         return requests;
     }
 
+    /** Announces a frontend coverage-generation change before backend progress statuses catch up. */
+    private emitSearchCoverageChanged(runtime: FeatureSearchRuntimeState): void {
+        const progress = runtime.progressSnapshot();
+        this.searchCoverageChanged.next({
+            searchId: runtime.searchId,
+            refresh: runtime.refresh,
+            ...progress
+        });
+    }
+
     /** Builds search-local source-tile coverage from selected layers and current viewports, ignoring Map Panel visibility. */
     private featureSearchCoverageTiles(definition: FeatureSearchStateEntry): Map<string, SearchLayerTileSet> {
         const coverage = new Map<string, SearchLayerTileSet>();
         let requestOrder = 0;
         for (const ref of this.availableFeatureSearchLayerRefs(definition.selectedMapLayers)) {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-                for (const level of definition.selectedTileLevels) {
+                for (const level of this.effectiveFeatureSearchTileLevels(definition, ref, viewIndex)) {
                     const tileIds = this.viewState.visibleSearchTileIdsForLevel(viewIndex, level);
                     for (const tileId of tileIds) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(ref.mapId, ref.layerId, tileId);
@@ -1551,6 +1548,19 @@ export class MapTileStreamService {
             }
         }
         return coverage;
+    }
+
+    /** Returns explicit search levels, or the current viewport-derived auto level when the selection is empty. */
+    private effectiveFeatureSearchTileLevels(
+        definition: FeatureSearchStateEntry,
+        ref: FeatureSearchMapLayerRef,
+        viewIndex: number
+    ): number[] {
+        if (definition.selectedTileLevels.length) {
+            return definition.selectedTileLevels;
+        }
+        const autoLevel = this.viewState.autoSearchTileLevel(viewIndex, ref.mapId, ref.layerId);
+        return autoLevel === null ? [] : [autoLevel];
     }
 
     /** Returns selected feature-search layers that still exist in datasource metadata, de-duplicated in state order. */

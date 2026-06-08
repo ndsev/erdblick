@@ -249,7 +249,7 @@ describe('AppStateService', () => {
 
         const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
         expect(stored[0].selectedMapLayers).toEqual([]);
-        expect(stored[0].selectedTileLevels).toEqual([13]);
+        expect(stored[0].selectedTileLevels).toEqual([]);
         expect(stored[0].selectedViewIndices).toEqual([0, 1]);
 
         service.ngOnDestroy();
@@ -425,6 +425,37 @@ describe('AppStateService', () => {
 
         expect(service.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
         expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 30 });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('uses the configured default background opacity when a persisted layer no longer exists', async () => {
+        const routerStub = createRouterStub({ bg: 'world-overview~100' });
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        const resolvedState = service.resolveBackgroundState(
+            0,
+            [{
+                id: 'osm',
+                name: 'OpenStreetMap',
+                type: 'xyz',
+                urlTemplate: 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                headers: {},
+                defaultOpacity: 6,
+                minZoom: 0,
+                maxZoom: 19,
+                tileSize: 256
+            }],
+            'osm'
+        );
+
+        expect(resolvedState).toEqual({ layerId: 'osm', opacity: 6 });
 
         service.ngOnDestroy();
         routerStub.events.complete();

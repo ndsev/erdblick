@@ -83,6 +83,7 @@ interface DeckSearchLabelDatum {
     position: [number, number, number];
     text: string;
     fillColor: [number, number, number, number];
+    backgroundColor: [number, number, number, number];
     outlineColor: [number, number, number, number];
     outlineWidth: number;
     scale: number;
@@ -485,11 +486,14 @@ export class DeckTileSearchVisualization implements ITileVisualization {
                     getPosition: datum => datum.position,
                     getText: datum => datum.text,
                     getColor: datum => datum.fillColor,
+                    getBackgroundColor: datum => datum.backgroundColor,
                     outlineColor: [255, 255, 255, 220],
                     outlineWidth: 2,
                     getSize: datum => Math.max(1, 14 * datum.scale),
                     sizeUnits: "pixels",
                     getPixelOffset: datum => datum.pixelOffset ?? [0, 0],
+                    background: true,
+                    backgroundPadding: [6, 3],
                     billboard: labelLayerData.billboard,
                     modelMatrix,
                     parameters: this.layerParametersForDepthTest(labelLayerData.depthTest),
@@ -679,6 +683,7 @@ export class DeckTileSearchVisualization implements ITileVisualization {
                 position: [position.x, position.y, position.z],
                 text: label.text,
                 fillColor: label.fillColor,
+                backgroundColor: label.backgroundColor ?? [17, 24, 39, 225],
                 outlineColor: label.outlineColor,
                 outlineWidth: label.outlineWidth,
                 scale: label.scale,

@@ -236,6 +236,21 @@ NativeJsValue completionCandidatesToJs(
         }
     }
 
+    std::set<std::string> fieldCandidateTexts;
+    for (auto const& item : normalized) {
+        if (item.type == simfil::CompletionCandidate::Type::FIELD) {
+            fieldCandidateTexts.insert(item.text);
+        }
+    }
+    if (!fieldCandidateTexts.empty()) {
+        normalized.erase(
+            std::remove_if(normalized.begin(), normalized.end(), [&](auto const& item) {
+                return item.type == simfil::CompletionCandidate::Type::CONSTANT
+                    && fieldCandidateTexts.contains(completionConstantSymbol(item.text));
+            }),
+            normalized.end());
+    }
+
     size_t count = 0;
     for (auto const& item : normalized) {
         if (limit && count >= limit) {
@@ -350,6 +365,28 @@ struct SearchStyleFieldInfo
     std::optional<double> numericMaximum;
 };
 
+struct SearchQueryMapLayerInfo
+{
+    std::string mapId;
+    std::string layerId;
+};
+
+struct SearchQueryMapLayerInference
+{
+    std::vector<SearchQueryMapLayerInfo> mapLayers;
+    std::set<std::string> matchedFieldNames;
+    std::set<std::string> matchedEnumValues;
+    std::set<std::string> seenMapLayerKeys;
+};
+
+struct QueryLayerTerms
+{
+    std::set<std::string> leafFields;
+    std::set<std::string> enumValues;
+    std::set<std::string> attributeNameLiterals;
+    std::set<std::string> attributeLayerLiterals;
+};
+
 struct SearchStyleFieldPath
 {
     std::string path;
@@ -360,95 +397,76 @@ struct SearchStyleFieldPath
     std::optional<double> numericMaximum;
 };
 
-/** Returns string literals from direct positive comparisons such as `$name == "SpeedLimit"`. */
-std::set<std::string> positiveStringLiteralsForIdentifier(
-    std::string const& query,
-    std::string const& identifier)
+/** Adds one inferred search map/layer while preserving first-seen order. */
+void addInferredSearchMapLayer(
+    SearchQueryMapLayerInference& inference,
+    std::string const& mapId,
+    std::string const& layerId)
 {
-    std::set<std::string> literals;
-    bool inString = false;
-    char quote = '\0';
-    bool escaped = false;
-    for (size_t i = 0; i < query.size();) {
-        auto const c = query[i];
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == quote) {
-                inString = false;
-            }
-            ++i;
-            continue;
-        }
-        if (c == '"' || c == '\'') {
-            inString = true;
-            quote = c;
-            ++i;
-            continue;
-        }
+    auto const key = mapId + "\n" + layerId;
+    if (mapId.empty() || layerId.empty() || !inference.seenMapLayerKeys.insert(key).second) {
+        return;
+    }
+    inference.mapLayers.push_back({mapId, layerId});
+}
 
-        auto const isStart = std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$';
-        if (!isStart) {
-            ++i;
-            continue;
-        }
-        auto const start = i;
-        ++i;
-        while (i < query.size()) {
-            auto const next = query[i];
-            if (!std::isalnum(static_cast<unsigned char>(next)) && next != '_' && next != '$') {
-                break;
-            }
-            ++i;
-        }
-        if (query.substr(start, i - start) != identifier || (start > 0 && query[start - 1] == '.')) {
-            continue;
-        }
+/** Adds one schema-relevant field term extracted from simfil's AST. */
+void addQueryLeafField(QueryLayerTerms& terms, std::string fieldName)
+{
+    if (fieldName.empty() || fieldName == "_" || fieldName.starts_with("$")) {
+        return;
+    }
+    // Schema-free simfil parses unquoted enum constants as fields. Checking
+    // leaf fields against enum indices preserves SPEED_LIMIT_END-style scope
+    // inference without compiling once per schema.
+    terms.leafFields.insert(fieldName);
+    terms.enumValues.insert(std::move(fieldName));
+}
 
-        auto j = i;
-        while (j < query.size() && std::isspace(static_cast<unsigned char>(query[j]))) {
-            ++j;
-        }
-        if (j + 1 < query.size() && query[j] == '=' && query[j + 1] == '=') {
-            j += 2;
-        }
-        else if (j < query.size() && query[j] == '=') {
-            ++j;
-        }
-        else {
-            continue;
-        }
-        while (j < query.size() && std::isspace(static_cast<unsigned char>(query[j]))) {
-            ++j;
-        }
-        if (j >= query.size() || (query[j] != '"' && query[j] != '\'')) {
-            continue;
-        }
+/** Adds one string constant as an enum candidate for schema-layer inference. */
+void addQueryStringLiteral(QueryLayerTerms& terms, std::string literal)
+{
+    if (!literal.empty()) {
+        terms.enumValues.insert(std::move(literal));
+    }
+}
 
-        auto const literalQuote = query[j++];
-        std::string literal;
-        bool literalEscaped = false;
-        while (j < query.size()) {
-            auto const literalChar = query[j++];
-            if (literalEscaped) {
-                literal.push_back(literalChar);
-                literalEscaped = false;
-                continue;
-            }
-            if (literalChar == '\\') {
-                literalEscaped = true;
-                continue;
-            }
-            if (literalChar == literalQuote) {
-                literals.insert(literal);
-                break;
-            }
-            literal.push_back(literalChar);
+/** Compiles once with simfil and extracts schema-index lookup terms from the AST. */
+tl::expected<QueryLayerTerms, simfil::Error> compileQueryLayerTerms(std::string const& query)
+{
+    auto strings = std::make_shared<mapget::StringPool>("SearchScopeTerms");
+    auto env = mapget::makeEnvironment(strings);
+    auto ast = simfil::compile(*env, query, simfil::CompileOptions{
+        .any = false,
+        .rewriteMode = simfil::RewriteMode::None});
+    if (!ast) {
+        return tl::unexpected(ast.error());
+    }
+
+    QueryLayerTerms terms;
+    auto astTerms = simfil::referencedQueryTerms(**ast);
+    for (auto const& fieldName : astTerms.leafFields) {
+        addQueryLeafField(terms, fieldName);
+    }
+    for (auto const& literal : astTerms.stringLiterals) {
+        addQueryStringLiteral(terms, literal);
+    }
+    for (auto const& comparison : astTerms.positiveFieldStringComparisons) {
+        if (comparison.fieldName == "$name") {
+            terms.attributeNameLiterals.insert(comparison.value);
+        }
+        else if (comparison.fieldName == "$layer") {
+            terms.attributeLayerLiterals.insert(comparison.value);
         }
     }
-    return literals;
+    return terms;
+}
+
+/** Returns empty terms when the query does not parse yet. */
+QueryLayerTerms queryLayerTermsOrEmpty(std::string const& query)
+{
+    auto terms = compileQueryLayerTerms(query);
+    return terms ? std::move(*terms) : QueryLayerTerms{};
 }
 
 /** Collects every attribute context that can be styled or searched through schema metadata. */
@@ -558,38 +576,10 @@ bool literalsMatchName(std::set<std::string> const& literals, std::string const&
     });
 }
 
-struct QueryScopeAnalysis
-{
-    std::vector<AttributeScopeInfo> attributeScopes;
-    std::set<std::string> seenScopeKeys;
-    bool hasFeatureOwnedPath = false;
-    bool hasUnknownOwnedPath = false;
-    bool hasDynamicOrBroadAccess = false;
-};
-
 std::string attributeScopeKey(AttributeScopeInfo const& scope)
 {
     return scope.mapId + "\n" + scope.layerId + "\n" + scope.featureType + "\n"
         + scope.attrLayerName + "\n" + scope.attrName;
-}
-
-void addAnalyzedAttributeScope(
-    QueryScopeAnalysis& analysis,
-    std::vector<AttributeScopeInfo> const& allScopes,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
-    mapget::SchemaRegistry::AttributePathOwner const& owner)
-{
-    for (auto const& scope : allScopes) {
-        if (scope.registry == registry
-            && scope.featureType == owner.featureType_
-            && scope.attrLayerName == owner.attributeLayerName_
-            && scope.attrName == owner.attributeName_) {
-            auto key = attributeScopeKey(scope);
-            if (analysis.seenScopeKeys.insert(key).second) {
-                analysis.attributeScopes.push_back(scope);
-            }
-        }
-    }
 }
 
 std::optional<std::vector<std::string>> schemaPathFieldNames(
@@ -610,6 +600,27 @@ std::optional<std::vector<std::string>> schemaPathFieldNames(
     return fieldNames;
 }
 
+/** Convert a mapget registry path into the compile-local SIMFIL string pool. */
+std::optional<simfil::SchemaPath> schemaPathFromNamedPath(
+    std::shared_ptr<simfil::StringPool> const& strings,
+    mapget::SchemaRegistry::NamedSchemaPath const& namedPath)
+{
+    simfil::SchemaPath path;
+    path.reserve(namedPath.size());
+    for (auto const& segment : namedPath) {
+        if (segment.kind_ == simfil::SchemaPathSegment::Kind::ArrayElement) {
+            path.push_back({simfil::SchemaPathSegment::Kind::ArrayElement, 0});
+            continue;
+        }
+        auto fieldId = strings->emplace(segment.field_);
+        if (!fieldId) {
+            return std::nullopt;
+        }
+        path.push_back({simfil::SchemaPathSegment::Kind::Field, *fieldId});
+    }
+    return path;
+}
+
 constexpr simfil::SchemaId kAttributeSearchRootSchema = simfil::MaxSchemaId;
 
 class AttributeSearchRootSchema final : public simfil::ObjectSchema
@@ -617,9 +628,11 @@ class AttributeSearchRootSchema final : public simfil::ObjectSchema
 public:
     AttributeSearchRootSchema(
         std::shared_ptr<simfil::StringPool> strings,
-        std::string attributeName)
+        std::string attributeName,
+        std::vector<simfil::SchemaPath> scalarFieldPaths)
         : strings_(std::move(strings))
         , attributeName_(std::move(attributeName))
+        , scalarFieldPaths_(std::move(scalarFieldPaths))
     {
     }
 
@@ -635,13 +648,12 @@ public:
 
     auto scalarFieldPathsForSymbol(
         simfil::StringId symbolId,
-        const std::function<const simfil::Schema*(simfil::SchemaId)>& queryFn) const -> std::vector<simfil::SchemaPath> override
+        const std::function<const simfil::Schema*(simfil::SchemaId)>&) const -> std::vector<simfil::SchemaPath> override
     {
         if (!matchesAttributeName(symbolId)) {
             return {};
         }
-        auto path = simfil::Schema::firstScalarFieldPath(kAttributeSearchRootSchema, queryFn);
-        return path ? std::vector<simfil::SchemaPath>{std::move(*path)} : std::vector<simfil::SchemaPath>{};
+        return scalarFieldPaths_;
     }
 
 private:
@@ -653,6 +665,7 @@ private:
 
     std::shared_ptr<simfil::StringPool> strings_;
     std::string attributeName_;
+    std::vector<simfil::SchemaPath> scalarFieldPaths_;
 };
 
 std::shared_ptr<simfil::ObjectSchema> makeAttributeSearchRootSchema(
@@ -662,9 +675,22 @@ std::shared_ptr<simfil::ObjectSchema> makeAttributeSearchRootSchema(
     simfil::SchemaId attributeSchema,
     simfil::SchemaId featureSchema)
 {
+    std::vector<simfil::SchemaPath> scalarFieldPaths;
+    auto const attributeTypeCode = registry->attributeTypeCode(attributeSchema);
+    auto const namedPaths = registry->scalarFieldPathsForAttribute(
+        attributeSchema,
+        attributeTypeCode.empty() ? attributeName : attributeTypeCode);
+    scalarFieldPaths.reserve(namedPaths.size());
+    for (auto const& namedPath : namedPaths) {
+        if (auto path = schemaPathFromNamedPath(strings, namedPath)) {
+            scalarFieldPaths.push_back(std::move(*path));
+        }
+    }
+
     auto root = std::make_shared<AttributeSearchRootSchema>(
         strings,
-        attributeName);
+        attributeName,
+        std::move(scalarFieldPaths));
     for (auto const& fieldName : registry->directFields(attributeSchema)) {
         auto fieldId = strings->emplace(fieldName);
         if (!fieldId) {
@@ -862,130 +888,12 @@ void appendSchemaAstDiagnostics(
     }
 }
 
-void analyzeFeatureRootQuery(
-    QueryScopeAnalysis& analysis,
-    std::vector<AttributeScopeInfo> const& allAttributeScopes,
-    FeatureSchemaInfo const& featureScope,
-    std::string const& query)
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchScopeAnalysis");
-    auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionSchemaRegistry(*env, featureScope.registry, strings);
-
-    auto ast = simfil::compile(*env, query, simfil::CompileOptions{
-        .any = false,
-        .rewriteMode = simfil::RewriteMode::Schema,
-        .rootSchema = featureScope.featureSchema});
-    if (!ast) {
-        return;
-    }
-
-    auto references = simfil::referencedSchemaPaths(*env, **ast, featureScope.featureSchema);
-    if (!references) {
-        return;
-    }
-    analysis.hasDynamicOrBroadAccess = analysis.hasDynamicOrBroadAccess || references->hasDynamicAccess;
-
-    for (auto const& reference : references->paths) {
-        auto fieldNames = schemaPathFieldNames(*env, reference.path);
-        if (!fieldNames) {
-            analysis.hasUnknownOwnedPath = true;
-            continue;
-        }
-        if (!fieldNames->empty() && fieldNames->front().starts_with("$")) {
-            // Attribute-root overlay fields are handled by the attribute-root pass.
-            continue;
-        }
-        auto owner = featureScope.registry->ownerForPath(
-            featureScope.featureType,
-            featureScope.featureSchema,
-            *fieldNames);
-        switch (owner.kind_) {
-        case mapget::SchemaRegistry::PathOwnerKind::Attribute:
-            addAnalyzedAttributeScope(analysis, allAttributeScopes, featureScope.registry, owner.attribute_);
-            break;
-        case mapget::SchemaRegistry::PathOwnerKind::Feature:
-            analysis.hasFeatureOwnedPath = true;
-            break;
-        case mapget::SchemaRegistry::PathOwnerKind::Unknown:
-            analysis.hasUnknownOwnedPath = true;
-            break;
-        }
-    }
-}
-
-void analyzeAttributeRootQuery(
-    QueryScopeAnalysis& analysis,
-    AttributeScopeInfo const& scope,
-    std::string const& query)
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchScopeAnalysis");
-    auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionSchemaRegistry(*env, scope.registry, strings);
-    installAttributeSearchRootSchema(
-        *env,
-        makeAttributeSearchRootSchema(scope.registry, strings, scope.attrName, scope.attributeSchema, scope.featureSchema));
-
-    auto ast = simfil::compile(*env, query, simfil::CompileOptions{
-        .any = false,
-        .rewriteMode = simfil::RewriteMode::Schema,
-        .rootSchema = kAttributeSearchRootSchema});
-    if (!ast) {
-        return;
-    }
-
-    auto references = simfil::referencedSchemaPaths(*env, **ast, kAttributeSearchRootSchema);
-    if (!references) {
-        return;
-    }
-    if (references->hasDynamicAccess) {
-        analysis.hasDynamicOrBroadAccess = true;
-        return;
-    }
-    if (references->hasUnresolvedAccess) {
-        return;
-    }
-
-    bool matchedAttributeField = false;
-    for (auto const& reference : references->paths) {
-        auto fieldNames = schemaPathFieldNames(*env, reference.path);
-        if (!fieldNames || fieldNames->empty()) {
-            analysis.hasUnknownOwnedPath = true;
-            continue;
-        }
-        if (fieldNames->front() == "$feature") {
-            if (reference.viaWildcard) {
-                // Recursive attribute-root queries like `**.speedLimit` also find the same field
-                // through the synthetic `$feature` mirror. That mirror must not veto attribute
-                // scope when the query also matches a direct attribute field.
-                continue;
-            }
-            analysis.hasFeatureOwnedPath = true;
-            continue;
-        }
-        if (fieldNames->front().starts_with("$")) {
-            matchedAttributeField = true;
-            continue;
-        }
-        matchedAttributeField = true;
-    }
-
-    if (matchedAttributeField) {
-        mapget::SchemaRegistry::AttributePathOwner owner;
-        owner.featureType_ = scope.featureType;
-        owner.attributeLayerName_ = scope.attrLayerName;
-        owner.attributeName_ = scope.attrName;
-        owner.attributeSchema_ = scope.attributeSchema;
-        addAnalyzedAttributeScope(analysis, {scope}, scope.registry, owner);
-    }
-}
-
 std::vector<AttributeScopeInfo> filterScopesByAttributeLiterals(
     std::vector<AttributeScopeInfo> scopes,
-    std::string const& query)
+    QueryLayerTerms const& terms)
 {
-    auto const attributeNameLiterals = positiveStringLiteralsForIdentifier(query, "$name");
-    auto const attributeLayerLiterals = positiveStringLiteralsForIdentifier(query, "$layer");
+    auto const& attributeNameLiterals = terms.attributeNameLiterals;
+    auto const& attributeLayerLiterals = terms.attributeLayerLiterals;
     if (attributeNameLiterals.empty() && attributeLayerLiterals.empty()) {
         return scopes;
     }
@@ -1003,6 +911,12 @@ std::vector<AttributeScopeInfo> filterScopesByAttributeLiterals(
     return filtered;
 }
 
+bool schemaMatchesQueryLayerTerms(
+    mapget::SchemaRegistry const& registry,
+    simfil::SchemaId schemaId,
+    QueryLayerTerms const& terms,
+    SearchQueryMapLayerInference* inference = nullptr);
+
 /** Resolves the exact attribute contexts implied by schema-referenced query paths. */
 std::vector<AttributeScopeInfo> resolveAttributeScopesForQuery(
     std::map<std::string, mapget::DataSourceInfo> const& infos,
@@ -1014,19 +928,105 @@ std::vector<AttributeScopeInfo> resolveAttributeScopesForQuery(
         return {};
     }
 
-    QueryScopeAnalysis analysis;
-    for (auto const& featureScope : collectFeatureSchemaScopes(infos, selectedLayers)) {
-        analyzeFeatureRootQuery(analysis, allAttributeScopes, featureScope, query);
-    }
-    for (auto const& attributeScope : allAttributeScopes) {
-        analyzeAttributeRootQuery(analysis, attributeScope, query);
-    }
-
-    if (analysis.hasFeatureOwnedPath || analysis.hasUnknownOwnedPath || analysis.hasDynamicOrBroadAccess) {
+    auto const terms = queryLayerTermsOrEmpty(query);
+    if (terms.leafFields.empty() && terms.enumValues.empty()) {
         return {};
     }
 
-    return filterScopesByAttributeLiterals(std::move(analysis.attributeScopes), query);
+    bool hasFeatureOwnedTerm = false;
+    for (auto const& featureScope : collectFeatureSchemaScopes(infos, selectedLayers)) {
+        for (auto const& fieldName : terms.leafFields) {
+            if (!featureScope.registry->canHaveField(featureScope.featureSchema, fieldName)) {
+                continue;
+            }
+            std::vector<std::string> fieldPath{fieldName};
+            auto owner = featureScope.registry->ownerForPath(
+                featureScope.featureType,
+                featureScope.featureSchema,
+                fieldPath);
+            if (owner.kind_ == mapget::SchemaRegistry::PathOwnerKind::Feature) {
+                hasFeatureOwnedTerm = true;
+                break;
+            }
+        }
+        if (hasFeatureOwnedTerm) {
+            break;
+        }
+    }
+
+    std::vector<AttributeScopeInfo> attributeScopes;
+    for (auto const& attributeScope : allAttributeScopes) {
+        auto const attributeTypeCode = attributeScope.registry->attributeTypeCode(attributeScope.attributeSchema);
+        if (schemaMatchesQueryLayerTerms(*attributeScope.registry, attributeScope.attributeSchema, terms)
+            || terms.leafFields.contains(attributeScope.attrName)
+            || terms.enumValues.contains(attributeScope.attrName)
+            || (!attributeTypeCode.empty() && terms.enumValues.contains(std::string(attributeTypeCode)))) {
+            attributeScopes.push_back(attributeScope);
+        }
+    }
+
+    if (hasFeatureOwnedTerm && !attributeScopes.empty()) {
+        return {};
+    }
+
+    return filterScopesByAttributeLiterals(std::move(attributeScopes), terms);
+}
+
+/** Return whether a schema can contain a field or enum term collected from the query. */
+bool schemaMatchesQueryLayerTerms(
+    mapget::SchemaRegistry const& registry,
+    simfil::SchemaId schemaId,
+    QueryLayerTerms const& terms,
+    SearchQueryMapLayerInference* inference)
+{
+    bool matched = false;
+    for (auto const& fieldName : terms.leafFields) {
+        if (registry.canHaveField(schemaId, fieldName)) {
+            if (inference) {
+                inference->matchedFieldNames.insert(fieldName);
+            }
+            matched = true;
+        }
+    }
+    for (auto const& enumValue : terms.enumValues) {
+        if (registry.canHaveEnumSymbol(schemaId, enumValue)
+            || !registry.constantTypeNames(schemaId, enumValue).empty()) {
+            if (inference) {
+                inference->matchedEnumValues.insert(enumValue);
+            }
+            matched = true;
+        }
+    }
+    return matched;
+}
+
+/** Infers search map/layers from schema-referenced leaf fields and enum string constants. */
+SearchQueryMapLayerInference resolveMapLayersForQuery(
+    std::map<std::string, mapget::DataSourceInfo> const& infos,
+    std::string const& query,
+    SelectedLayerFilter const& selectedLayers = {})
+{
+    SearchQueryMapLayerInference inference;
+    if (query.empty()) {
+        return inference;
+    }
+
+    auto const terms = queryLayerTermsOrEmpty(query);
+    if (terms.leafFields.empty() && terms.enumValues.empty()) {
+        return inference;
+    }
+
+    for (auto const& featureScope : collectFeatureSchemaScopes(infos, selectedLayers)) {
+        if (schemaMatchesQueryLayerTerms(*featureScope.registry, featureScope.featureSchema, terms, &inference)) {
+            addInferredSearchMapLayer(inference, featureScope.mapId, featureScope.layerId);
+        }
+    }
+    for (auto const& attrScope : collectAttributeScopes(infos, selectedLayers)) {
+        if (schemaMatchesQueryLayerTerms(*attrScope.registry, attrScope.attributeSchema, terms, &inference)) {
+            addInferredSearchMapLayer(inference, attrScope.mapId, attrScope.layerId);
+        }
+    }
+    return inference;
 }
 
 /** Returns whether a schema field can be appended with dot notation in a style-field path. */
@@ -1440,6 +1440,35 @@ NativeJsValue attributeScopesToJs(std::vector<AttributeScopeInfo> const& scopes)
             {"layerId", JsValue(scope.layerId)}
         }));
     }
+    return *result;
+}
+
+/** Converts schema-backed search map/layer inference into the embind JS value shape. */
+NativeJsValue mapLayerInferenceToJs(SearchQueryMapLayerInference const& inference)
+{
+    auto mapLayers = JsValue::List();
+    for (auto const& layer : inference.mapLayers) {
+        mapLayers.push(JsValue::Dict({
+            {"mapId", JsValue(layer.mapId)},
+            {"layerId", JsValue(layer.layerId)}
+        }));
+    }
+
+    auto matchedFieldNames = JsValue::List();
+    for (auto const& fieldName : inference.matchedFieldNames) {
+        matchedFieldNames.push(JsValue(fieldName));
+    }
+
+    auto matchedEnumValues = JsValue::List();
+    for (auto const& enumValue : inference.matchedEnumValues) {
+        matchedEnumValues.push(JsValue(enumValue));
+    }
+
+    auto result = JsValue::Dict({
+        {"mapLayers", mapLayers},
+        {"matchedFieldNames", matchedFieldNames},
+        {"matchedEnumValues", matchedEnumValues}
+    });
     return *result;
 }
 
@@ -1949,6 +1978,15 @@ bool TileLayerParser::isAttributeScopeSearchQuery(std::string const& query, Nati
 NativeJsValue TileLayerParser::getAttributeScopeForQuery(std::string const& query, NativeJsValue const& options_) const
 {
     return attributeScopesToJs(resolveAttributeScopesForQuery(info_, query, selectedLayerFilterFromOptions(JsValue(options_))));
+}
+
+/** Returns map/layers whose schemas are addressed by the query's leaf fields or enum string constants. */
+NativeJsValue TileLayerParser::getMapLayersForQuery(std::string const& query, NativeJsValue const& options_) const
+{
+    return mapLayerInferenceToJs(resolveMapLayersForQuery(
+        info_,
+        query,
+        selectedLayerFilterFromOptions(JsValue(options_))));
 }
 
 /** Returns schema-AST diagnostics generated by the same parser passes that infer search scope. */

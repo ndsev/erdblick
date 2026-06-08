@@ -127,7 +127,40 @@ nlohmann::json speedLimitLayerInfoJson(std::string const& layerId, std::string c
                     {"attributeTypeCode", "SPEED_LIMIT_METRIC"}
                 }},
                 {"properties", {
-                    {"attributeValue", {{"$ref", "#/$defs/SpeedLimitMetricValue"}}}
+                    {"_sourceData", {
+                        {"type", "array"},
+                        {"items", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"address", {{"type", "integer"}}}
+                            }}
+                        }}
+                    }},
+                    {"attributeValue", {{"$ref", "#/$defs/SpeedLimitMetricValue"}}},
+                    {"conditions", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"conditionValue", {{"type", "integer"}}}
+                        }}
+                    }},
+                    {"properties", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"propertyValue", {{"type", "integer"}}}
+                        }}
+                    }},
+                    {"references", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"referenceValue", {{"type", "integer"}}}
+                        }}
+                    }},
+                    {"validity", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"validityValue", {{"type", "integer"}}}
+                        }}
+                    }}
                 }}
             }},
             {"SpeedLimitMetricValue", {
@@ -848,6 +881,9 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
 
     REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimitKmh", options));
     REQUIRE(parser.isAttributeScopeSearchQuery("**.speedLimitKmh > 80", options));
+    REQUIRE(parser.isAttributeScopeSearchQuery("SPEED_LIMIT_METRIC", options));
+    REQUIRE(parser.isAttributeScopeSearchQuery("\"SPEED_LIMIT_METRIC\"", options));
+    REQUIRE(parser.isAttributeScopeSearchQuery("SPEED_LIMIT_METRIC > 80", options));
 
     auto scopes = parser.getAttributeScopeForQuery("**.speedLimitKmh", options);
     REQUIRE(scopes.is_array());
@@ -856,6 +892,18 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
     auto comparisonScopes = parser.getAttributeScopeForQuery("**.speedLimitKmh > 80", options);
     REQUIRE(comparisonScopes.is_array());
     REQUIRE(comparisonScopes.size() == 2);
+
+    auto standaloneScopes = parser.getAttributeScopeForQuery("SPEED_LIMIT_METRIC", options);
+    REQUIRE(standaloneScopes.is_array());
+    REQUIRE(standaloneScopes.size() == 2);
+
+    auto quotedStandaloneScopes = parser.getAttributeScopeForQuery("\"SPEED_LIMIT_METRIC\"", options);
+    REQUIRE(quotedStandaloneScopes.is_array());
+    REQUIRE(quotedStandaloneScopes.size() == 2);
+
+    auto shorthandScopes = parser.getAttributeScopeForQuery("SPEED_LIMIT_METRIC > 80", options);
+    REQUIRE(shorthandScopes.is_array());
+    REQUIRE(shorthandScopes.size() == 2);
 
     std::set<std::tuple<std::string, std::string, std::string>> scopeKeys;
     for (auto const& scope : scopes) {
@@ -984,6 +1032,14 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
         }
         return false;
     };
+    auto hasTextType = [](NativeJsValue const& completions, std::string const& text, std::string const& type) {
+        for (auto const& completion : completions) {
+            if (completion.at("text") == text && completion.at("type") == type) {
+                return true;
+            }
+        }
+        return false;
+    };
     auto hasCompletionType = [](NativeJsValue const& completions, std::string const& type) {
         for (auto const& completion : completions) {
             if (completion.value("type", std::string{}) == type) {
@@ -993,8 +1049,9 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
         return false;
     };
 
-    REQUIRE(hasHint(warningCompletions, "WARNING_SIGN", "enum RulesAttributeType"));
-    REQUIRE(hasHint(speedCompletions, "SPEED_LIMIT_END", "enum WarningSign"));
+    REQUIRE(hasTextType(warningCompletions, "WARNING_SIGN", "Field"));
+    REQUIRE_FALSE(hasTextType(warningCompletions, "\"WARNING_SIGN\"", "Constant"));
+    REQUIRE(hasHint(speedCompletions, "\"SPEED_LIMIT_END\"", "enum WarningSign"));
     REQUIRE_FALSE(hasCompletionType(warningCompletions, "Hint"));
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
 }
@@ -1297,6 +1354,60 @@ TEST_CASE("DeckTileSearchResultLayerVisualization does not connect point-cloud v
     auto result = nlohmann::json(visualization.renderResult());
     REQUIRE(result["pathWorld"]["positions"].empty());
     REQUIRE(result["pointWorld"]["positions"].size() == 30);
+}
+
+TEST_CASE("DeckTileSearchResultLayerVisualization renders every matching style rule", "[erdblick.renderer]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("SearchResultMultiRuleNode");
+    auto layer = std::make_shared<mapget::TileSearchResultLayer>(
+        mapget::TileId::fromWgs84(42.0, 11.0, 13),
+        strings->nodeId_,
+        "LineTestMap",
+        lineTestLayerInfo(),
+        strings);
+    layer->setResultFields({"name"});
+
+    auto const center = layer->tileId().center();
+    auto geometry = layer->newGeometryCollection();
+    auto line = geometry->newGeometry(mapget::GeomType::Line);
+    line->append({center.x, center.y, 0.0});
+    line->append({center.x + 0.01, center.y + 0.01, 0.0});
+
+    auto featureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
+    layer->newSearchResult(
+        featureId,
+        geometry,
+        std::vector<simfil::ModelNode::Ptr>{layer->newValue("Main Street")});
+
+    DeckTileSearchResultLayerVisualization visualization(0, "LineTestMap/LineLayer/0", R"json({
+        "rules": [
+            {
+                "geometry": "line",
+                "width": 3,
+                "color": {"mode": "solid", "color": "#ff0000"}
+            },
+            {
+                "geometry": "line",
+                "width": 5,
+                "color": {"mode": "solid", "color": "#0000ff"}
+            },
+            {
+                "geometry": "label",
+                "width": 14,
+                "labelExpression": "name",
+                "color": {"mode": "solid", "color": "#ffffff"}
+            }
+        ]
+    })json");
+    visualization.addTileSearchResultLayer(TileSearchResultLayer(layer));
+    visualization.run();
+
+    auto result = nlohmann::json(visualization.renderResult());
+    REQUIRE(result["pathWorld"]["startIndices"].size() == 3);
+    REQUIRE(result["pathWorld"]["featureAddresses"].size() == 2);
+    REQUIRE(result["pathWorld"]["positions"].size() == 12);
+    REQUIRE(result["labelBillboard"].size() == 1);
+    REQUIRE(result["labelBillboard"][0]["text"] == "Main Street");
 }
 
 TEST_CASE("TileSearchResultLayer value summaries aggregate fields and typed traces", "[erdblick.search]")

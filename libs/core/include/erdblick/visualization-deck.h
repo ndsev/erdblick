@@ -309,6 +309,7 @@ public:
         Any,
         Point,
         Line,
+        Surface,
         Polygon,
         Mesh,
         Label
@@ -364,6 +365,7 @@ public:
         std::string labelExpression;
         std::vector<SearchColorStop> stops;
         std::array<uint8_t, 4> solidColor = {234, 67, 54, 190};
+        std::array<uint8_t, 4> labelBackgroundColor = {17, 24, 39, 225};
         std::array<uint8_t, 4> fallbackGeometryColor = {234, 67, 54, 190};
         std::array<uint8_t, 4> fallbackSurfaceColor = {234, 67, 54, 85};
         std::optional<float> width;
@@ -378,7 +380,8 @@ public:
         float pointRadius = 6.0f;
         bool label = false;
         std::string labelText;
-        float labelSize = 14.0f;
+        std::array<uint8_t, 4> labelBackgroundColor = {17, 24, 39, 225};
+        float labelSize = 22.0f;
     };
 
 private:
@@ -400,7 +403,14 @@ private:
         mapget::Point const& sizeWgs,
         uint32_t resultIndex,
         SearchResolvedStyle const& style);
-    [[nodiscard]] std::optional<SearchResolvedStyle> styleForResultGeometry(
+    /** Emit one geometry with one already-resolved search style rule. */
+    void appendStyledResultGeometry(
+        mapget::model_ptr<mapget::Geometry> const& geometry,
+        uint32_t resultIndex,
+        SearchResolvedStyle const& style);
+    /** Resolve one search style rule for one result/geometry pair without consulting sibling rules. */
+    [[nodiscard]] std::optional<SearchResolvedStyle> styleForRuleResultGeometry(
+        SearchStyleRule const& rule,
         mapget::model_ptr<mapget::SearchResult> const& result,
         mapget::GeomType geomType) const;
     [[nodiscard]] bool ruleMatches(

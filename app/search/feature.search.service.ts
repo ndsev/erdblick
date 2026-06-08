@@ -2,10 +2,10 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, filter, Subject, take} from "rxjs";
 import {
     FeatureSearchAttributeScopeCandidate,
+    SearchCoverageChangedPayload,
     SearchResultTileEntry,
     SearchResultTileEvictedPayload,
-    SearchResultTilePayload,
-    TileSearchResultLayerLike
+    SearchResultTilePayload
 } from "../mapdata/map-runtime.model";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
@@ -174,6 +174,54 @@ export interface FeatureSearchCompletionOptions {
     timeoutMs?: number;
 }
 
+export interface FeatureSearchActionPayload {
+    selectedMapLayers: FeatureSearchMapLayerRef[];
+}
+
+/** Extracts a compact feature-search payload from a schema completion candidate. */
+export function featureSearchActionPayloadFromCompletion(
+    candidate: CompletionCandidate | null | undefined
+): FeatureSearchActionPayload | undefined {
+    const selectedMapLayers = uniqueFeatureSearchMapLayers(candidate?.originLayers ?? []);
+    return selectedMapLayers.length ? {selectedMapLayers} : undefined;
+}
+
+/** Extracts selected map/layers from a persisted or transient feature-search action payload. */
+export function featureSearchSelectedMapLayersFromPayload(payload: unknown): FeatureSearchMapLayerRef[] | undefined {
+    const record = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null;
+    const selectedMapLayers = Array.isArray(record?.["selectedMapLayers"])
+        ? record["selectedMapLayers"]
+        : [];
+    const result = uniqueFeatureSearchMapLayers(selectedMapLayers.flatMap(item => {
+        const raw = item && typeof item === "object" && !Array.isArray(item)
+            ? item as Record<string, unknown>
+            : null;
+        const mapId = typeof raw?.["mapId"] === "string" ? raw["mapId"] : "";
+        const layerId = typeof raw?.["layerId"] === "string" ? raw["layerId"] : "";
+        return mapId && layerId ? [{mapId, layerId}] : [];
+    }));
+    return result.length ? result : undefined;
+}
+
+/** Returns unique feature-search map/layer refs in first-seen order. */
+function uniqueFeatureSearchMapLayers(refs: FeatureSearchMapLayerRef[]): FeatureSearchMapLayerRef[] {
+    const result: FeatureSearchMapLayerRef[] = [];
+    const seen = new Set<string>();
+    for (const ref of refs) {
+        const mapId = ref.mapId?.trim();
+        const layerId = ref.layerId?.trim();
+        const key = JSON.stringify([mapId, layerId]);
+        if (!mapId || !layerId || seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        result.push({mapId, layerId});
+    }
+    return result;
+}
+
 export interface FeatureSearchExportGroupingOption {
     id: number;
     name: string;
@@ -281,6 +329,9 @@ export class FeatureSearchService {
         });
         this.tileStream.searchStatusReceived.subscribe(status => {
             this.applyServerSearchStatus(status);
+        });
+        this.tileStream.searchCoverageChanged.subscribe(payload => {
+            this.applySearchCoverageChanged(payload);
         });
         this.mapInfo.layerStateChanged.subscribe(reason => {
             if (reason === "datasources" && this.stateService.ready.getValue()) {
@@ -565,31 +616,9 @@ export class FeatureSearchService {
         return [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES];
     }
 
-    /** Reconciles state after filling legacy empty layer selections with currently active feature layers. */
+    /** Reconciles persisted feature-search definitions with live runtime sessions. */
     private reconcilePersistedFeatureSearchState(definitions: FeatureSearchStateEntry[]): void {
-        const hydrated = this.hydrateEmptySelectedSearchLayers(definitions);
-        if (hydrated) {
-            this.stateService.featureSearches = hydrated;
-            return;
-        }
         this.reconcileFeatureSearchState(definitions);
-    }
-
-    /**
-     * Treats an empty selected-layer list as uninitialized state, not as "search nowhere".
-     *
-     * The search request scheduler cannot produce tiles without selected source layers.
-     * Older persisted searches and URL-created searches did not carry this field, so
-     * reload would otherwise restore a panel that never issues backend requests.
-     */
-    private hydrateEmptySelectedSearchLayers(definitions: FeatureSearchStateEntry[]): FeatureSearchStateEntry[] | null {
-        const fallbackLayers = this.activeFeatureSearchLayers();
-        if (fallbackLayers.length === 0 || definitions.every(definition => definition.selectedMapLayers.length > 0)) {
-            return null;
-        }
-        return definitions.map(definition => definition.selectedMapLayers.length > 0
-            ? definition
-            : {...definition, selectedMapLayers: fallbackLayers.map(ref => ({...ref}))});
     }
 
     /** Starts a new feature search over the currently prioritized tiles, optionally with explicit scope/layers. */
@@ -601,7 +630,9 @@ export class FeatureSearchService {
             query,
             ...(options.scope ? {scope: options.scope} : {}),
             pinColor: this.nextDefaultSearchColor(),
-            selectedMapLayers: options.selectedMapLayers ?? this.activeFeatureSearchLayers(),
+            selectedMapLayers: options.selectedMapLayers === undefined
+                ? this.activeFeatureSearchLayers()
+                : this.mapLayersForSearchContext(options.selectedMapLayers),
             selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
             selectedViewIndices: options.selectedViewIndices ?? this.activeFeatureSearchViewIndices()
         });
@@ -1158,13 +1189,12 @@ export class FeatureSearchService {
             definition.scope,
             definition.selectedMapLayers
         );
-        if (definition.scope === "attribute") {
-            return {signature, status: "pending", concreteScope: "attribute", attributeScopes: []};
-        }
-        if (definition.scope === "feature") {
-            return {signature, status: "ready", concreteScope: "feature", attributeScopes: []};
-        }
-        return {signature, status: "pending", concreteScope: "feature", attributeScopes: []};
+        return {
+            signature,
+            status: "pending",
+            concreteScope: definition.scope === "attribute" ? "attribute" : "feature",
+            attributeScopes: []
+        };
     }
 
     /** Drops schema-analysis caches for live sessions after datasource metadata changed. */
@@ -1197,7 +1227,7 @@ export class FeatureSearchService {
         if (concreteScope !== "attribute") {
             return session.definition.query;
         }
-        const identifier = this.exactIdentifierQuery(session.definition.query);
+        const identifier = this.exactNameQuery(session.definition.query);
         if (!identifier) {
             return session.definition.query;
         }
@@ -1207,10 +1237,21 @@ export class FeatureSearchService {
             : session.definition.query;
     }
 
-    /** Returns the identifier for a query that consists of exactly one bare symbol. */
-    private exactIdentifierQuery(query: string): string | null {
+    /** Returns the name for a query that consists of exactly one bare identifier or quoted string. */
+    private exactNameQuery(query: string): string | null {
         const trimmed = query.trim();
-        return /^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed) ? trimmed : null;
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+            return trimmed;
+        }
+        if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            try {
+                const parsed = JSON.parse(trimmed) as unknown;
+                return typeof parsed === "string" ? parsed : null;
+            } catch {
+                return null;
+            }
+        }
+        return null;
     }
 
     /** Ensures a session has async schema analysis for the current definition. */
@@ -1224,19 +1265,11 @@ export class FeatureSearchService {
             return true;
         }
         if (session.schemaAnalysis.signature === signature && session.schemaAnalysis.status === "pending") {
-            if (session.definition.scope === "feature") {
-                session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
-                return true;
-            }
             this.requestSessionSchemaAnalysis(session, signature);
             return false;
         }
 
         session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
-        if (session.definition.scope === "feature") {
-            return true;
-        }
-
         this.requestSessionSchemaAnalysis(session, signature);
         this.progress.next(session);
         return false;
@@ -1273,6 +1306,14 @@ export class FeatureSearchService {
         if (analysis.signature !== currentSignature) {
             return;
         }
+        this.applyReadySearchScopeAnalysis(session, analysis);
+    }
+
+    /** Installs a completed selected-layer scope analysis and lets backend search requests proceed. */
+    private applyReadySearchScopeAnalysis(session: FeatureSearchSession, analysis: FeatureSearchScopeAnalysis): void {
+        if (this.applyInferredSearchMapLayers(session, analysis.inferredMapLayers)) {
+            return;
+        }
         session.schemaAnalysis = {
             signature: analysis.signature,
             status: "ready",
@@ -1282,6 +1323,87 @@ export class FeatureSearchService {
         };
         this.progress.next(session);
         this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+    }
+
+    /** Narrows source layers to the query-compatible subset inferred from all known schemas. */
+    private applyInferredSearchMapLayers(
+        session: FeatureSearchSession,
+        inferredMapLayers: FeatureSearchMapLayerRef[]
+    ): boolean {
+        const selectedMapLayers = this.mapLayersForSearchContext(inferredMapLayers, session.definition.selectedMapLayers);
+        return selectedMapLayers.length
+            ? this.applySearchMapLayerSelection(session, selectedMapLayers)
+            : false;
+    }
+
+    /** Applies detected schema-context layers to a search using the same source-layer selection rule as auto-scope. */
+    applySearchMapLayersForDetectedContext(
+        sessionId: string,
+        detectedMapLayers: FeatureSearchMapLayerRef[]
+    ): boolean {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return false;
+        }
+
+        const selectedMapLayers = this.mapLayersForSearchContext(detectedMapLayers, session.definition.selectedMapLayers);
+        return selectedMapLayers.length
+            ? this.applySearchMapLayerSelection(session, selectedMapLayers)
+            : false;
+    }
+
+    /** Resolves detected query-context layers against current search selection and active map layers. */
+    private mapLayersForSearchContext(
+        detectedMapLayers: FeatureSearchMapLayerRef[],
+        selectedMapLayers: FeatureSearchMapLayerRef[] = []
+    ): FeatureSearchMapLayerRef[] {
+        const detectedSelection = uniqueFeatureSearchMapLayers(detectedMapLayers);
+        if (!detectedSelection.length) {
+            return [];
+        }
+
+        const selectedOverlap = this.overlappingMapLayers(selectedMapLayers, detectedSelection);
+        if (selectedOverlap.length) {
+            return selectedOverlap;
+        }
+
+        const activeOverlap = this.overlappingMapLayers(this.activeFeatureSearchLayers(), detectedSelection);
+        return activeOverlap.length ? activeOverlap : detectedSelection;
+    }
+
+    /** Applies a schema-inferred source-layer selection unless it is already the persisted selection. */
+    private applySearchMapLayerSelection(
+        session: FeatureSearchSession,
+        selectedMapLayers: FeatureSearchMapLayerRef[]
+    ): boolean {
+        const normalizedLayers = uniqueFeatureSearchMapLayers(selectedMapLayers);
+        if (this.sameSelectedMapLayers(session.definition.selectedMapLayers, normalizedLayers)) {
+            return false;
+        }
+        if (this.stateService.patchFeatureSearch(session.id, {selectedMapLayers: normalizedLayers})) {
+            return true;
+        }
+
+        const nextDefinition = {...session.definition, selectedMapLayers: normalizedLayers};
+        this.resetSessionSearch(session, nextDefinition);
+        this.progress.next(session);
+        this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+        return true;
+    }
+
+    /** Returns current layer refs that are also present in the inferred query scope. */
+    private overlappingMapLayers(
+        currentLayers: FeatureSearchMapLayerRef[],
+        inferredLayers: FeatureSearchMapLayerRef[]
+    ): FeatureSearchMapLayerRef[] {
+        const inferredKeys = new Set(inferredLayers.map(ref => JSON.stringify([ref.mapId, ref.layerId])));
+        return uniqueFeatureSearchMapLayers(currentLayers)
+            .filter(ref => inferredKeys.has(JSON.stringify([ref.mapId, ref.layerId])));
+    }
+
+    /** Returns whether two source-layer selections are equivalent after normalization. */
+    private sameSelectedMapLayers(lhs: FeatureSearchMapLayerRef[], rhs: FeatureSearchMapLayerRef[]): boolean {
+        return JSON.stringify(uniqueFeatureSearchMapLayers(lhs)) === JSON.stringify(uniqueFeatureSearchMapLayers(rhs));
     }
 
     /** Generates a unique runtime id for one server-search run. */
@@ -1403,21 +1525,21 @@ export class FeatureSearchService {
         }
 
         const searchResultLayer = uint8ArrayToWasm(wasmBlob => {
-            return this.mapInfo.tileLayerParser.readTileSearchResultLayer(wasmBlob) as TileSearchResultLayerLike;
+            return this.mapInfo.tileLayerParser.readTileSearchResultLayer(wasmBlob);
         }, contribution.layerBlob);
         if (!searchResultLayer) {
             return null;
         }
 
         try {
-            const rawSummaries = searchResultLayer.valueSummaries?.(
+            const rawSummaries = searchResultLayer.valueSummaries(
                 FeatureSearchService.VALUE_SUMMARY_HISTOGRAM_LIMIT,
                 FeatureSearchService.VALUE_SUMMARY_DISTINCT_LIMIT
             );
             contribution.valueSummary = this.normalizeTileValueSummaries(rawSummaries);
             return contribution.valueSummary;
         } finally {
-            searchResultLayer.delete?.();
+            searchResultLayer.delete();
         }
     }
 
@@ -1723,15 +1845,13 @@ export class FeatureSearchService {
             if (this.requestWorkerCompletion(normalizedOwnerId, requestSerial, query, caret, options)) {
                 return;
             }
-            const candidates = this.completeQueryFromSchema(query, caret, options).slice(0, this.completionCandidateLimit);
-            currentState.candidateList = candidates;
             currentState.pending.next(false);
-            currentState.candidates.next(candidates);
+            currentState.candidates.next([]);
         }, 0);
         this.completionTimers.set(normalizedOwnerId, timer);
     }
 
-    /** Sends one completion request to the schema worker, returning false when fallback is needed. */
+    /** Sends one completion request to the schema worker, returning false when completion is unavailable. */
     private requestWorkerCompletion(
         ownerId: string,
         requestSerial: number,
@@ -1780,19 +1900,56 @@ export class FeatureSearchService {
         nextCandidates: CompletionCandidate[]
     ): CompletionCandidate[] {
         const merged = [...currentCandidates];
-        const known = new Set(currentCandidates.map(candidate => this.completionCandidateKey(candidate)));
+        const indexByKey = new Map(currentCandidates.map((candidate, index) => [
+            this.completionCandidateKey(candidate),
+            index
+        ]));
         for (const candidate of nextCandidates) {
             const key = this.completionCandidateKey(candidate);
-            if (known.has(key)) {
+            const existingIndex = indexByKey.get(key);
+            if (existingIndex !== undefined) {
+                merged[existingIndex] = this.mergeCompletionCandidateOrigins(merged[existingIndex]!, candidate);
                 continue;
             }
-            known.add(key);
-            merged.push(candidate);
             if (merged.length >= this.completionCandidateLimit) {
-                break;
+                continue;
             }
+            indexByKey.set(key, merged.length);
+            merged.push(candidate);
         }
         return merged;
+    }
+
+    /** Preserves all schema origins when identical completion text is produced by multiple layers. */
+    private mergeCompletionCandidateOrigins(
+        currentCandidate: CompletionCandidate,
+        nextCandidate: CompletionCandidate
+    ): CompletionCandidate {
+        const originLayers = this.mergeCompletionOriginLayers(
+            currentCandidate.originLayers ?? [],
+            nextCandidate.originLayers ?? []
+        );
+        return originLayers.length
+            ? {...currentCandidate, originLayers}
+            : currentCandidate;
+    }
+
+    /** Returns unique completion-origin layers in first-seen order. */
+    private mergeCompletionOriginLayers(
+        currentLayers: FeatureSearchMapLayerRef[],
+        nextLayers: FeatureSearchMapLayerRef[]
+    ): FeatureSearchMapLayerRef[] {
+        const result: FeatureSearchMapLayerRef[] = [];
+        const seen = new Set<string>();
+        for (const layer of [...currentLayers, ...nextLayers]) {
+            const key = JSON.stringify([layer.mapId, layer.layerId]);
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            result.push(layer);
+        }
+        return result;
     }
 
     /** Builds a de-duplication key for completion candidates streamed from multiple schema contexts. */
@@ -1818,63 +1975,6 @@ export class FeatureSearchService {
         }
         clearTimeout(timer);
         this.completionTimers.delete(ownerId);
-    }
-
-    /** Produces main-thread completion candidates from LayerInfo.featureModelSchema when available. */
-    private completeQueryFromSchema(
-        query: string,
-        point: number,
-        options: FeatureSearchCompletionOptions = {}
-    ): CompletionCandidate[] {
-        try {
-            const nativeOptions = {
-                limit: this.completionCandidateLimit,
-                timeoutMs: options.timeoutMs ?? 35,
-                ...(options.scope ? {scope: options.scope} : {}),
-                ...(options.selectedMapLayers !== undefined ? {selectedMapLayers: options.selectedMapLayers} : {})
-            };
-            const rawCandidates = this.mapInfo.tileLayerParser.completeSearchQuery(query, point, {
-                ...nativeOptions
-            });
-            if (!Array.isArray(rawCandidates)) {
-                return [];
-            }
-
-            return rawCandidates
-                .map(item => this.toCompletionCandidate(query, item))
-                .filter((candidate): candidate is CompletionCandidate => candidate !== null);
-        } catch (error) {
-            console.warn("Failed to complete search query from schema metadata.", error);
-            return [];
-        }
-    }
-
-    /** Normalizes one native SIMFIL completion object into the UI model. */
-    private toCompletionCandidate(sourceQuery: string, item: unknown): CompletionCandidate | null {
-        const candidate = item && typeof item === "object"
-            ? item as Record<string, unknown>
-            : null;
-        const rangeValue = candidate?.["range"];
-        const range = Array.isArray(rangeValue) ? rangeValue : [];
-        const begin = Number(range[0] ?? 0);
-        const end = Number(range[1] ?? 0);
-        const queryValue = candidate?.["query"];
-        if (!Number.isFinite(begin) || !Number.isFinite(end) || typeof queryValue !== "string") {
-            return null;
-        }
-        const hintValue = candidate?.["hint"];
-        const rawKind = String(candidate?.["type"] ?? "").toLowerCase();
-        const rawHint = typeof hintValue === "string" ? hintValue : "";
-        const enumKind = rawKind === "constant" && rawHint.startsWith("enum ") ? rawHint : "";
-        return {
-            text: String(candidate?.["text"] ?? ""),
-            kind: enumKind || rawKind,
-            begin,
-            end,
-            query: queryValue,
-            source: sourceQuery,
-            hint: enumKind ? "" : rawHint
-        };
     }
 
     /** Integrates one streamed mapget search-result tile into the matching session. */
@@ -2030,13 +2130,19 @@ export class FeatureSearchService {
             session.errors.add(status.error);
         }
 
-        const isTerminal = status.state === "Success" || status.state === "Aborted" || status.state === "Failed";
+        if (status.state === "Aborted") {
+            this.progress.next(session);
+            return;
+        }
+
+        const isTerminal = status.state === "Success" || status.state === "Failed";
         const key = this.serverSearchStatusKey(status);
-        const previous = session.progressByRequestKey.get(key);
+        const isRequestStart = status.state === "Open";
+        const previous = isRequestStart ? undefined : session.progressByRequestKey.get(key);
         const queuedRaw = this.nonNegativeNumber(status.tilesQueued, previous?.tilesQueued ?? 0);
         const queued = isTerminal && queuedRaw === 0 ? Math.max(1, previous?.tilesQueued ?? 0) : queuedRaw;
         const searched = this.nonNegativeNumber(status.tilesSearched, previous?.tilesSearched ?? 0);
-        const chunksReported = status.chunksEmitted !== undefined || !!previous?.chunksReported;
+        const chunksReported = status.chunksEmitted !== undefined || (!isRequestStart && !!previous?.chunksReported);
         const chunksEmitted = chunksReported
             ? this.nonNegativeNumber(status.chunksEmitted, previous?.chunksEmitted ?? 0)
             : (previous?.chunksEmitted ?? 0);
@@ -2068,6 +2174,38 @@ export class FeatureSearchService {
         session.backendComplete = session.paused || (progressEntries.length > 0 && progressEntries.every(item => item.terminal));
         this.updateSearchResultIngressProgress(session);
         session.totalFeatureCount = progressEntries.reduce((sum, item) => sum + item.matches, 0);
+        const becameComplete = this.updateSessionCompletion(session);
+        if (becameComplete) {
+            session.endTime = Date.now();
+            session.timeElapsed = this.formatTime(session.endTime - session.startTime);
+            this.updateDiagnosticsForCompletedSearch(session);
+        }
+        this.progress.next(session);
+    }
+
+    /** Resets frontend-only progress when auto-update adopts a new visible search tile set. */
+    private applySearchCoverageChanged(payload: SearchCoverageChangedPayload): void {
+        const session = this.getInternalSession(payload.searchId);
+        if (!session) {
+            return;
+        }
+        const refresh = Number(payload.refresh ?? 0);
+        if (refresh < session.refresh) {
+            return;
+        }
+        if (refresh > session.refresh) {
+            this.resetSessionForServerRefresh(session, refresh);
+        }
+
+        session.progressByRequestKey.clear();
+        const total = this.nonNegativeNumber(payload.tilesConsidered, 0);
+        const completed = this.nonNegativeNumber(payload.tilesCompleted, 0);
+        session.progressTotal = Math.max(1, total);
+        session.progressDone = total === 0
+            ? 1
+            : Math.min(session.progressTotal, completed);
+        this.updateSearchResultIngressProgress(session);
+        session.backendComplete = session.paused || completed >= total;
         const becameComplete = this.updateSessionCompletion(session);
         if (becameComplete) {
             session.endTime = Date.now();
@@ -2157,6 +2295,12 @@ export class FeatureSearchService {
         if (session.paused) {
             session.complete = true;
             return !wasComplete;
+        }
+        // Full-area coverage is the canonical completion signal. Individual
+        // request status entries can be invalidated by auto-update races and
+        // should not keep a session open once every considered tile is done.
+        if (session.progressTotal > 0 && session.progressDone >= session.progressTotal) {
+            session.backendComplete = true;
         }
         const ingressComplete = session.resultTileIngressTotal === 0
             || session.resultTileIngressDone >= session.resultTileIngressTotal;

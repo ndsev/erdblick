@@ -1,8 +1,7 @@
 import {Injectable} from "@angular/core";
 import {
     FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate,
-    FeatureSearchStyleValueKind
+    FeatureSearchStyleFieldCandidate
 } from "./map-runtime.model";
 import {MapInfoService} from "./map-info.service";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
@@ -26,14 +25,13 @@ export interface FeatureSearchDiagnosticMessage {
     fix: null | string;
 }
 
-interface FeatureSearchSchemaOptions {
-    selectedMapLayers?: FeatureSearchMapLayerRef[];
-}
-
 export interface FeatureSearchScopeAnalysis {
     signature: string;
     concreteScope: "feature" | "attribute";
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    inferredMapLayers: FeatureSearchMapLayerRef[];
+    matchedFieldNames: string[];
+    matchedEnumValues: string[];
     error?: string;
 }
 
@@ -105,26 +103,13 @@ export class FeatureSearchSchemaService {
             return cached;
         }
 
-        if (scope === "feature") {
-            const result = Promise.resolve({
-                signature,
-                concreteScope: scope,
-                attributeScopes: []
-            } satisfies FeatureSearchScopeAnalysis);
-            this.scopeAnalysisByQueryCache.set(signature, result);
-            return result;
-        }
-
         const worker = this.schemaWorker("analysis");
         if (!worker) {
-            const result = Promise.resolve({
+            const result = Promise.resolve(this.workerUnavailableScopeAnalysis(
                 signature,
-                concreteScope: scope === "attribute" ? "attribute" : "feature",
-                attributeScopes: [],
-                error: scope === "attribute"
-                    ? "Schema worker is unavailable; attribute scope will run without attribute-name narrowing."
-                    : "Schema worker is unavailable; auto scope fell back to feature scope."
-            } satisfies FeatureSearchScopeAnalysis);
+                scope,
+                "Schema worker is unavailable; search schema analysis is disabled."
+            ));
             this.scopeAnalysisByQueryCache.set(signature, result);
             return result;
         }
@@ -158,7 +143,7 @@ export class FeatureSearchSchemaService {
         }
         const worker = this.schemaWorker("analysis");
         if (!worker) {
-            return Promise.resolve(this.searchStyleFieldsForQuery(query, scope, selectedMapLayers));
+            return Promise.resolve([]);
         }
 
         this.syncWorkerDataSourceInfo("analysis");
@@ -188,7 +173,7 @@ export class FeatureSearchSchemaService {
         }
         const worker = this.schemaWorker("analysis");
         if (!worker) {
-            return Promise.resolve(this.searchQueryAstDiagnostics(query, scope, selectedMapLayers));
+            return Promise.resolve([]);
         }
 
         this.syncWorkerDataSourceInfo("analysis");
@@ -220,64 +205,21 @@ export class FeatureSearchSchemaService {
         return true;
     }
 
-    /** Returns schema-backed field expressions available to search-result style rules. */
-    private searchStyleFieldsForQuery(
-        query: string,
+    /** Builds a non-blocking failure result when schema workers are unavailable. */
+    private workerUnavailableScopeAnalysis(
+        signature: string,
         scope: FeatureSearchScope,
-        selectedMapLayers?: FeatureSearchMapLayerRef[]
-    ): FeatureSearchStyleFieldCandidate[] {
-        const cacheKey = `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
-        const cached = this.searchStyleFieldsByQueryCache.get(cacheKey);
-        if (cached) {
-            return cached;
-        }
-        try {
-            const candidates = this.mapInfo.tileLayerParser.searchStyleFieldsForQuery(
-                query,
-                scope,
-                this.schemaOptions(selectedMapLayers)
-            );
-            const normalized = this.normalizeSearchStyleFieldCandidates(candidates);
-            this.searchStyleFieldsByQueryCache.set(cacheKey, normalized);
-            return normalized;
-        } catch (error) {
-            console.warn("Failed to enumerate feature-search style fields from schema metadata.", error);
-            return [];
-        }
-    }
-
-    /** Builds debug diagnostics for the schema-aware ASTs used by auto-scope and style-field inference. */
-    private searchQueryAstDiagnostics(
-        query: string,
-        scope: FeatureSearchScope,
-        selectedMapLayers?: FeatureSearchMapLayerRef[]
-    ): FeatureSearchDiagnosticMessage[] {
-        const cacheKey = `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
-        const cached = this.searchAstDiagnosticsByQueryCache.get(cacheKey);
-        if (cached) {
-            return cached;
-        }
-        try {
-            const rawMessages = this.mapInfo.tileLayerParser.searchQueryAstDiagnostics(
-                query,
-                scope,
-                this.schemaOptions(selectedMapLayers)
-            );
-            if (!Array.isArray(rawMessages)) {
-                return [];
-            }
-            const normalized = rawMessages.flatMap(message => this.toDiagnosticsMessage(query, message));
-            this.searchAstDiagnosticsByQueryCache.set(cacheKey, normalized);
-            return normalized;
-        } catch (error) {
-            console.warn("Failed to build schema AST diagnostics for feature search.", error);
-            return [];
-        }
-    }
-
-    /** Builds parser options from the currently selected search map/layer scope. */
-    private schemaOptions(selectedMapLayers?: FeatureSearchMapLayerRef[]): FeatureSearchSchemaOptions {
-        return selectedMapLayers === undefined ? {} : {selectedMapLayers};
+        error: string
+    ): FeatureSearchScopeAnalysis {
+        return {
+            signature,
+            concreteScope: scope === "attribute" ? "attribute" : "feature",
+            attributeScopes: [],
+            inferredMapLayers: [],
+            matchedFieldNames: [],
+            matchedEnumValues: [],
+            error
+        };
     }
 
     /** Returns a stable cache key fragment for selected map/layer refs. */
@@ -319,7 +261,7 @@ export class FeatureSearchSchemaService {
             state.worker = worker;
             return worker;
         } catch (error) {
-            console.warn(`Failed to create schema ${kind} worker; falling back to main-thread schema helpers.`, error);
+            console.warn(`Failed to create schema ${kind} worker. Schema-backed search helpers are disabled.`, error);
             state.failed = true;
             return null;
         }
@@ -397,6 +339,9 @@ export class FeatureSearchSchemaService {
             signature: pending.signature,
             concreteScope: message.concreteScope,
             attributeScopes: message.attributeScopes,
+            inferredMapLayers: message.inferredMapLayers,
+            matchedFieldNames: message.matchedFieldNames,
+            matchedEnumValues: message.matchedEnumValues,
             ...(message.error ? {error: message.error} : {})
         });
     }
@@ -474,6 +419,9 @@ export class FeatureSearchSchemaService {
                 signature: pending.signature,
                 concreteScope: "feature",
                 attributeScopes: [],
+                inferredMapLayers: [],
+                matchedFieldNames: [],
+                matchedEnumValues: [],
                 error: message
             });
         }
@@ -485,101 +433,5 @@ export class FeatureSearchSchemaService {
             this.pendingQueryDiagnostics.delete(requestId);
             pending.resolve([]);
         }
-    }
-
-    /** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
-    private normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyleFieldCandidate[] {
-        if (!Array.isArray(value)) {
-            return [];
-        }
-        return value.flatMap(item => {
-            if (!item || typeof item !== "object" || Array.isArray(item)) {
-                return [];
-            }
-            const raw = item as Record<string, unknown>;
-            const path = typeof raw["path"] === "string" ? raw["path"] : "";
-            const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
-            const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
-            if (!path || !mapId || !layerId) {
-                return [];
-            }
-            const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
-            const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
-            const valueKind = this.normalizeStyleFieldValueKind(raw["valueKind"]);
-            const enumValues = Array.isArray(raw["enumValues"])
-                ? raw["enumValues"].filter((item): item is string => typeof item === "string")
-                : [];
-            const numericRange = this.normalizeStyleFieldNumericRange(raw["numericRange"]);
-            return [{
-                path,
-                mapId,
-                layerId,
-                attrName,
-                featureType,
-                valueKind,
-                enumValues,
-                ...(numericRange ? {numericRange} : {})
-            }];
-        });
-    }
-
-    /** Normalizes optional native numeric range metadata for schema-backed style fields. */
-    private normalizeStyleFieldNumericRange(value: unknown): {min: number; max: number} | undefined {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-            return undefined;
-        }
-        const raw = value as Record<string, unknown>;
-        const min = typeof raw["min"] === "number" ? raw["min"] : Number.NaN;
-        const max = typeof raw["max"] === "number" ? raw["max"] : Number.NaN;
-        return Number.isFinite(min) && Number.isFinite(max) && min <= max
-            ? {min, max}
-            : undefined;
-    }
-
-    /** Normalizes native value-kind strings while keeping old WASM builds usable. */
-    private normalizeStyleFieldValueKind(value: unknown): FeatureSearchStyleValueKind {
-        switch (value) {
-            case "number":
-            case "integer":
-            case "string":
-            case "boolean":
-            case "enum":
-            case "object":
-            case "array":
-            case "unknown":
-                return value;
-            default:
-                return "unknown";
-        }
-    }
-
-    /** Normalizes untyped WASM diagnostics into the UI diagnostics shape. */
-    private toDiagnosticsMessage(defaultQuery: string, value: unknown): FeatureSearchDiagnosticMessage[] {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-            return [];
-        }
-        const raw = value as Record<string, unknown>;
-        const message = typeof raw["message"] === "string" ? raw["message"] : "";
-        if (!message) {
-            return [];
-        }
-        const query = typeof raw["query"] === "string" ? raw["query"] : defaultQuery;
-        const rawLocation = raw["location"];
-        const location = rawLocation && typeof rawLocation === "object" && !Array.isArray(rawLocation)
-            ? this.toDiagnosticsLocation(rawLocation as Record<string, unknown>)
-            : undefined;
-        return [{
-            query,
-            message,
-            location,
-            fix: typeof raw["fix"] === "string" ? raw["fix"] : null
-        }];
-    }
-
-    /** Normalizes optional source-location data carried by native diagnostics. */
-    private toDiagnosticsLocation(value: Record<string, unknown>): {offset: number, size: number} | undefined {
-        const offset = typeof value["offset"] === "number" ? value["offset"] : undefined;
-        const size = typeof value["size"] === "number" ? value["size"] : undefined;
-        return offset !== undefined && size !== undefined ? {offset, size} : undefined;
     }
 }

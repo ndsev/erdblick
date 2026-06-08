@@ -1,3 +1,5 @@
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+
 /** Counts of scalar and placeholder value kinds observed in a search value stream. */
 export interface SearchValueKindCounts {
     integer: number;
@@ -86,4 +88,5 @@ export interface CompletionCandidate {
     query: string;
     source: string;
     hint: string;
+    originLayers?: FeatureSearchMapLayerRef[];
 }

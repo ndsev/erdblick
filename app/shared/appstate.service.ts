@@ -14,7 +14,8 @@ import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostic
 import {
     BackgroundLayerConfig,
     clampBackgroundOpacity,
-    DEFAULT_BACKGROUND_LAYER_ID
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY
 } from "./app-config.service";
 import {
     historyEntryDedupeKey,
@@ -615,7 +616,7 @@ export class AppStateService implements OnDestroy {
         name: 'background',
         defaultValue: {
             layerId: DEFAULT_BACKGROUND_LAYER_ID,
-            opacity: 100,
+            opacity: DEFAULT_BACKGROUND_OPACITY,
         },
         schema: z.string(),
         toStorage: (value: BackgroundLayerViewState) => `${encodeURIComponent(value.layerId ?? '')}~${clampBackgroundOpacity(value.opacity)}`,
@@ -1881,10 +1882,13 @@ export class AppStateService implements OnDestroy {
             return rawState;
         }
 
-        if (defaultBackgroundLayerId && availableLayerIds.has(defaultBackgroundLayerId)) {
+        const defaultLayer = defaultBackgroundLayerId
+            ? availableLayers.find(layer => layer.id === defaultBackgroundLayerId)
+            : undefined;
+        if (defaultLayer) {
             return {
-                layerId: defaultBackgroundLayerId,
-                opacity: rawState.opacity
+                layerId: defaultLayer.id,
+                opacity: defaultLayer.defaultOpacity
             };
         }
 

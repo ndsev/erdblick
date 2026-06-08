@@ -132,7 +132,11 @@ function recordFromUnknown(value: unknown): Record<string, unknown> | null {
 }
 
 /** Normalizes one native SIMFIL completion object into the UI model. */
-function normalizeCompletionCandidate(sourceQuery: string, item: unknown): CompletionCandidate | null {
+function normalizeCompletionCandidate(
+    sourceQuery: string,
+    item: unknown,
+    originLayers: FeatureSearchMapLayerRef[] = []
+): CompletionCandidate | null {
     const candidate = recordFromUnknown(item);
     const rangeValue = candidate?.["range"];
     const range = Array.isArray(rangeValue) ? rangeValue : [];
@@ -153,7 +157,8 @@ function normalizeCompletionCandidate(sourceQuery: string, item: unknown): Compl
         end,
         query: queryValue,
         source: sourceQuery,
-        hint: enumKind ? "" : rawHint
+        hint: enumKind ? "" : rawHint,
+        ...(originLayers.length ? {originLayers} : {})
     };
 }
 
@@ -203,6 +208,47 @@ function normalizeAttributeScopeCandidates(value: unknown): FeatureSearchAttribu
             ? [{attrName, attrLayerName, featureType, mapId, layerId}]
             : [];
     });
+}
+
+/** Normalizes untrusted map/layer refs returned by native schema analysis. */
+function normalizeMapLayerRefs(value: unknown): FeatureSearchMapLayerRef[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const refs: FeatureSearchMapLayerRef[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+        const raw = recordFromUnknown(item);
+        const mapId = typeof raw?.["mapId"] === "string" ? raw["mapId"] : "";
+        const layerId = typeof raw?.["layerId"] === "string" ? raw["layerId"] : "";
+        const key = `${mapId}\u0000${layerId}`;
+        if (!mapId || !layerId || seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        refs.push({mapId, layerId});
+    }
+    return refs;
+}
+
+/** Normalizes untrusted string arrays returned by native schema analysis. */
+function normalizeStringList(value: unknown): string[] {
+    return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : [];
+}
+
+/** Normalizes native map-layer inference into the worker protocol shape. */
+function normalizeMapLayerInference(value: unknown): Pick<
+    SearchScopeAnalysisResultMessage,
+    "inferredMapLayers" | "matchedFieldNames" | "matchedEnumValues"
+> {
+    const raw = recordFromUnknown(value);
+    return {
+        inferredMapLayers: normalizeMapLayerRefs(raw?.["mapLayers"]),
+        matchedFieldNames: normalizeStringList(raw?.["matchedFieldNames"]),
+        matchedEnumValues: normalizeStringList(raw?.["matchedEnumValues"])
+    };
 }
 
 /** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
@@ -293,7 +339,7 @@ function completeQueryInContext(
     );
     return Array.isArray(rawCandidates)
         ? rawCandidates
-            .map(item => normalizeCompletionCandidate(message.query, item))
+            .map(item => normalizeCompletionCandidate(message.query, item, context.selectedMapLayers ?? []))
             .filter((candidate): candidate is CompletionCandidate => candidate !== null)
         : [];
 }
@@ -383,7 +429,10 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
             type: "SearchScopeAnalysisResult",
             requestId: message.requestId,
             concreteScope: message.scope === "attribute" ? "attribute" : "feature",
-            attributeScopes: []
+            attributeScopes: [],
+            inferredMapLayers: [],
+            matchedFieldNames: [],
+            matchedEnumValues: []
         } satisfies SearchScopeAnalysisResultMessage);
         return;
     }
@@ -394,6 +443,9 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
             message.query,
             schemaOptions(message.selectedMapLayers)
         ));
+    const mapLayerInference = normalizeMapLayerInference(
+        activeParser.getMapLayersForQuery(message.query, schemaOptions())
+    );
     const concreteScope = message.scope === "attribute" || (message.scope === "auto" && attributeScopes.length > 0)
         ? "attribute"
         : "feature";
@@ -401,7 +453,8 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
         type: "SearchScopeAnalysisResult",
         requestId: message.requestId,
         concreteScope,
-        attributeScopes
+        attributeScopes,
+        ...mapLayerInference
     } satisfies SearchScopeAnalysisResultMessage);
 }
 
@@ -477,6 +530,9 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
                 requestId: message.requestId,
                 concreteScope: message.scope === "attribute" ? "attribute" : "feature",
                 attributeScopes: [],
+                inferredMapLayers: [],
+                matchedFieldNames: [],
+                matchedEnumValues: [],
                 error: error instanceof Error ? error.message : String(error)
             } satisfies SearchScopeAnalysisResultMessage);
         } else if (message.type === "SearchStyleFieldsRequest") {

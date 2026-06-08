@@ -127,6 +127,7 @@ export interface DeckLabelDatum {
     position: {x: number, y: number, z: number};
     text: string;
     fillColor: [number, number, number, number];
+    backgroundColor?: [number, number, number, number];
     outlineColor: [number, number, number, number];
     outlineWidth: number;
     scale: number;

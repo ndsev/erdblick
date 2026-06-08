@@ -222,6 +222,9 @@ SearchGeometryKind searchGeometryFromString(std::string const& geometry)
     if (geometry == "line") {
         return SearchGeometryKind::Line;
     }
+    if (geometry == "surface") {
+        return SearchGeometryKind::Surface;
+    }
     if (geometry == "polygon") {
         return SearchGeometryKind::Polygon;
     }
@@ -254,6 +257,11 @@ bool geometryMatches(SearchGeometryKind ruleGeometry, mapget::GeomType geomType)
         return geomType == mapget::GeomType::Points;
     case SearchGeometryKind::Line:
         return geomType == mapget::GeomType::Line;
+    case SearchGeometryKind::Surface:
+        return geomType == mapget::GeomType::Polygon
+            || geomType == mapget::GeomType::AABB
+            || geomType == mapget::GeomType::Mesh
+            || geomType == mapget::GeomType::GltfNodeIndex;
     case SearchGeometryKind::Polygon:
         return geomType == mapget::GeomType::Polygon || geomType == mapget::GeomType::AABB;
     case SearchGeometryKind::Mesh:
@@ -342,6 +350,10 @@ SearchStyleRule parseSearchStyleRule(
 
     rule.geometry = searchGeometryFromString(jsonString(ruleJson, "geometry", jsonString(ruleJson, "type", "any")));
     rule.labelExpression = jsonString(ruleJson, "labelExpression", jsonString(ruleJson, "labelField"));
+    rule.labelBackgroundColor = colorBytesFromString(
+        jsonString(ruleJson, "labelBackgroundColor", "#111827"),
+        rule.labelBackgroundColor,
+        rule.labelBackgroundColor[3]);
     if (auto const width = jsonNumber(ruleJson, "width")) {
         rule.width = static_cast<float>(std::max(0.0, *width));
     }
@@ -1652,41 +1664,50 @@ void DeckTileSearchResultLayerVisualization::appendResultGeometry(
         return;
     }
 
-    auto const style = styleForResultGeometry(result, geometry->geomType());
-    if (!style) {
-        return;
+    for (auto const& rule : styleRules_) {
+        auto const style = styleForRuleResultGeometry(rule, result, geometry->geomType());
+        if (style) {
+            appendStyledResultGeometry(geometry, resultIndex, *style);
+        }
     }
-    if (style->label) {
+}
+
+void DeckTileSearchResultLayerVisualization::appendStyledResultGeometry(
+    mapget::model_ptr<mapget::Geometry> const& geometry,
+    uint32_t resultIndex,
+    SearchResolvedStyle const& style)
+{
+    if (style.label) {
         if (auto const labelPoint = geometryLabelPoint(geometry)) {
-            appendLabel(*labelPoint, resultIndex, *style);
+            appendLabel(*labelPoint, resultIndex, style);
         }
         return;
     }
     switch (geometry->geomType()) {
     case mapget::GeomType::Points: {
         geometry->forEachPoint([&](auto const& point) {
-            appendPoint(point, resultIndex, *style);
+            appendPoint(point, resultIndex, style);
             return true;
         });
         break;
     }
     case mapget::GeomType::Line:
-        appendPath(geometryPoints(geometry), resultIndex, *style);
+        appendPath(geometryPoints(geometry), resultIndex, style);
         break;
     case mapget::GeomType::Polygon:
-        appendSurface(geometryPoints(geometry), geometryPolygonRingStarts(geometry), resultIndex, *style);
+        appendSurface(geometryPoints(geometry), geometryPolygonRingStarts(geometry), resultIndex, style);
         break;
     case mapget::GeomType::Mesh:
-        appendMesh(geometryPoints(geometry), resultIndex, *style);
+        appendMesh(geometryPoints(geometry), resultIndex, style);
         break;
     case mapget::GeomType::AABB:
-        appendAabbFootprint(geometry->aabbOrigin(), geometry->aabbSize(), resultIndex, *style);
+        appendAabbFootprint(geometry->aabbOrigin(), geometry->aabbSize(), resultIndex, style);
         break;
     case mapget::GeomType::GltfNodeIndex:
         // Search-result rendering intentionally stays self-contained. GLTF hits
         // therefore render as their copied bounds instead of depending on a
         // source tile GLB asset being resident in the client.
-        appendAabbFootprint(geometry->gltfNodeAabbOrigin(), geometry->gltfNodeAabbSize(), resultIndex, *style);
+        appendAabbFootprint(geometry->gltfNodeAabbOrigin(), geometry->gltfNodeAabbSize(), resultIndex, style);
         break;
     }
 }
@@ -1729,6 +1750,7 @@ void DeckTileSearchResultLayerVisualization::appendLabel(
         })},
         {"text", JsValue(style.labelText)},
         {"fillColor", rgbaBytesFromByteColor(style.geometryColor)},
+        {"backgroundColor", rgbaBytesFromByteColor(style.labelBackgroundColor)},
         {"outlineColor", JsValue::List({JsValue(255), JsValue(255), JsValue(255), JsValue(220)})},
         {"outlineWidth", JsValue(2.0)},
         {"scale", JsValue(style.labelSize / 14.0f)},
@@ -1824,40 +1846,39 @@ void DeckTileSearchResultLayerVisualization::appendAabbFootprint(
 }
 
 std::optional<DeckTileSearchResultLayerVisualization::SearchResolvedStyle>
-DeckTileSearchResultLayerVisualization::styleForResultGeometry(
+DeckTileSearchResultLayerVisualization::styleForRuleResultGeometry(
+    SearchStyleRule const& rule,
     mapget::model_ptr<mapget::SearchResult> const& result,
     mapget::GeomType geomType) const
 {
-    for (auto const& rule : styleRules_) {
-        if (!ruleMatches(rule, result, geomType)) {
-            continue;
-        }
-        auto resolved = fallbackStyle_;
-        resolved.lineWidth = rule.width.value_or(resolved.lineWidth);
-        resolved.pointRadius = rule.pointRadius.value_or(resolved.pointRadius);
-        auto const color = colorForRule(rule, result);
-        if (!color) {
-            continue;
-        }
-        resolved.geometryColor = *color;
-        resolved.surfaceColor = withAlpha(
-            resolved.geometryColor,
-            rule.opacity ? opacityByte(*rule.opacity, rule.fallbackSurfaceColor[3]) : rule.fallbackSurfaceColor[3]);
-        if (rule.geometry == SearchGeometryKind::Label) {
-            auto const labelValue = valueForField(result, rule.labelExpression);
-            if (!labelValue) {
-                continue;
-            }
-            resolved.labelText = styleValueAsString(*labelValue);
-            if (resolved.labelText.empty()) {
-                continue;
-            }
-            resolved.label = true;
-            resolved.labelSize = rule.width.value_or(resolved.labelSize);
-        }
-        return resolved;
+    if (!ruleMatches(rule, result, geomType)) {
+        return std::nullopt;
     }
-    return std::nullopt;
+    auto resolved = fallbackStyle_;
+    resolved.lineWidth = rule.width.value_or(resolved.lineWidth);
+    resolved.pointRadius = rule.pointRadius.value_or(resolved.pointRadius);
+    auto const color = colorForRule(rule, result);
+    if (!color) {
+        return std::nullopt;
+    }
+    resolved.geometryColor = *color;
+    resolved.surfaceColor = withAlpha(
+        resolved.geometryColor,
+        rule.opacity ? opacityByte(*rule.opacity, rule.fallbackSurfaceColor[3]) : rule.fallbackSurfaceColor[3]);
+    if (rule.geometry == SearchGeometryKind::Label) {
+        auto const labelValue = valueForField(result, rule.labelExpression);
+        if (!labelValue) {
+            return std::nullopt;
+        }
+        resolved.labelText = styleValueAsString(*labelValue);
+        if (resolved.labelText.empty()) {
+            return std::nullopt;
+        }
+        resolved.label = true;
+        resolved.labelSize = rule.width.value_or(resolved.labelSize);
+        resolved.labelBackgroundColor = rule.labelBackgroundColor;
+    }
+    return resolved;
 }
 
 bool DeckTileSearchResultLayerVisualization::ruleMatches(

@@ -3,7 +3,13 @@ import {describe, expect, it, vi} from "vitest";
 import {HttpResponse} from "@angular/common/http";
 import {of, throwError} from "rxjs";
 
-import {AppConfigService, ServerConfigResponse} from "./app-config.service";
+import {
+    AppConfigService,
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY,
+    DEFAULT_XYZ_BACKGROUND_MAX_ZOOM,
+    ServerConfigResponse
+} from "./app-config.service";
 
 class HttpClientStub {
     get = vi.fn();
@@ -288,6 +294,82 @@ describe("AppConfigService", () => {
         ]);
         expect(config.locationSearch.minCharacters).toBe(2);
         expect(config.locationSearch.debounceMs).toBe(150);
+    });
+
+    it("uses OSM as the built-in fallback background without requiring Blue Marble", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({});
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.defaultBackgroundLayerId).toBe(DEFAULT_BACKGROUND_LAYER_ID);
+        expect(config.backgroundLayers).toEqual([
+            expect.objectContaining({
+                id: "osm",
+                defaultOpacity: DEFAULT_BACKGROUND_OPACITY,
+                maxZoom: 19
+            })
+        ]);
+        expect(config.backgroundLayers.some(layer => layer.id === "world-overview")).toBe(false);
+    });
+
+    it("falls back to the first configured background when Blue Marble is removed", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    backgroundLayers: [
+                        {
+                            id: "osm",
+                            name: "OpenStreetMap",
+                            type: "xyz",
+                            urlTemplate: "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                            defaultOpacity: 6,
+                            maxZoom: 19
+                        }
+                    ],
+                    defaultBackgroundLayerId: "world-overview"
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.defaultBackgroundLayerId).toBe("osm");
+        expect(config.backgroundLayers.map(layer => layer.id)).toEqual(["osm"]);
+    });
+
+    it("allows custom XYZ satellite layers to omit maxZoom while still reaching high levels", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    backgroundLayers: [
+                        {
+                            id: "satellite",
+                            name: "Satellite",
+                            type: "xyz",
+                            urlTemplate: "https://tiles.example.com/{z}/{x}/{y}.jpg"
+                        }
+                    ],
+                    defaultBackgroundLayerId: "satellite"
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.backgroundLayers[0]).toEqual(expect.objectContaining({
+            id: "satellite",
+            maxZoom: DEFAULT_XYZ_BACKGROUND_MAX_ZOOM
+        }));
     });
 
     it("accepts location provider adapters from static config.json", async () => {

@@ -119,6 +119,13 @@ public:
     NativeJsValue getAttributeScopeForQuery(std::string const& query, NativeJsValue const& options) const;
 
     /**
+     * Return map/layer refs whose schema appears to be addressed by the supplied query.
+     *
+     * The result is a dictionary with `mapLayers`, `matchedFieldNames`, and `matchedEnumValues`.
+     */
+    NativeJsValue getMapLayersForQuery(std::string const& query, NativeJsValue const& options) const;
+
+    /**
      * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
      */
     NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope, NativeJsValue const& options) const;

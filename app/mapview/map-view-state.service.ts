@@ -124,6 +124,11 @@ export class MapViewStateService {
         return this.ensureVisibleSearchTileIdsForLevel(viewIndex, level);
     }
 
+    /** Chooses the automatic source level used by searches without an explicit level selection. */
+    autoSearchTileLevel(viewIndex: number, mapId: string, layerId: string): number | null {
+        return this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, null);
+    }
+
     /** Returns viewport tile ids as a set for hot-path source-tile visibility checks. */
     visibleTileIdSetForLevel(viewIndex: number, level: number): Set<bigint> {
         const viewState = this.viewVisualizationState[viewIndex];
@@ -345,19 +350,23 @@ export class MapViewStateService {
     }
 
     /** Chooses the deepest advertised level whose tile density stays below the auto-level threshold. */
+    private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number): number;
+    private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: null): number | null;
     private autoSelectedMapLayerLevel(
         viewIndex: number,
         mapId: string,
         layerId: string,
-        fallbackLevel: number
-    ): number {
+        fallbackLevel: number | null
+    ): number | null {
         const advertisedLevels = this.advertisedLayerLevels(mapId, layerId);
         if (!advertisedLevels.length) {
             return fallbackLevel;
         }
         const viewport = this.viewVisualizationState[viewIndex]?.viewport;
         if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
-            return this.clampLayerLevelToAdvertised(fallbackLevel, advertisedLevels);
+            return fallbackLevel === null
+                ? advertisedLevels[advertisedLevels.length - 1]
+                : this.clampLayerLevelToAdvertised(fallbackLevel, advertisedLevels);
         }
         for (let index = advertisedLevels.length - 1; index >= 0; index--) {
             const candidateLevel = advertisedLevels[index];

@@ -54,6 +54,9 @@ export interface SearchScopeAnalysisResultMessage {
     requestId: number;
     concreteScope: "feature" | "attribute";
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    inferredMapLayers: FeatureSearchMapLayerRef[];
+    matchedFieldNames: string[];
+    matchedEnumValues: string[];
     error?: string;
 }
 

@@ -206,4 +206,22 @@ describe("FeatureSearchRuntimeState", () => {
             "speedLimit.value"
         ]);
     });
+
+    it("reports coverage changes only when the source tile set changes", () => {
+        const runtime = new FeatureSearchRuntimeState(searchDefinition(), {} as TileLayerParser);
+
+        const firstUpdate = runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65537, 65538]));
+        const unchangedUpdate = runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65538, 65537]));
+        const expandedUpdate = runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65537, 65538, 65539]));
+        const reducedUpdate = runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [65537]));
+
+        expect(firstUpdate.changed).toBe(true);
+        expect(firstUpdate.removedTiles).toHaveLength(0);
+        expect(unchangedUpdate.changed).toBe(false);
+        expect(unchangedUpdate.removedTiles).toHaveLength(0);
+        expect(expandedUpdate.changed).toBe(true);
+        expect(expandedUpdate.removedTiles).toHaveLength(0);
+        expect(reducedUpdate.changed).toBe(true);
+        expect(reducedUpdate.removedTiles).toHaveLength(2);
+    });
 });

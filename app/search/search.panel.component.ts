@@ -7,7 +7,10 @@ import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {debounce, debounceTime, distinctUntilChanged, skip, Subject, switchMap, timer, filter, take} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {FeatureSearchService} from "./feature.search.service";
+import {
+    FeatureSearchService,
+    featureSearchActionPayloadFromCompletion
+} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.model";
 import {coreLib} from "../integrations/wasm";
@@ -64,7 +67,7 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                     [left]="completion.left"
                     [zIndex]="completion.zIndex"
                     (popupMouseDown)="onCompletionPopupDown($event)"
-                    (candidateSelected)="applyCompletion($event.query)">
+                    (candidateSelected)="applyCompletion($event)">
                 </search-completion-popup>
             </div>
 
@@ -181,6 +184,7 @@ export class SearchPanelComponent implements AfterViewInit {
         // Keep completion above Search Actions dialog without using a hardcoded global z-index.
         zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000,
     };
+    private acceptedCompletionCandidate: CompletionCandidate | null = null;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
@@ -515,6 +519,11 @@ export class SearchPanelComponent implements AfterViewInit {
     /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */
     private executeSearchHistoryEntry(entry: SearchHistoryEntry): void {
         this.searchInputValue = entry.input;
+        // Feature searches have their own persisted panel state. Omnibox history
+        // only restores the query text and must not create another search on reload.
+        if (entry.actionId === "features") {
+            return;
+        }
         this.runTarget(entry);
         this.dialog?.close(new Event("close-on-execute"));
     }
@@ -581,7 +590,11 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!trimmedInput) {
             return null;
         }
-        const payload = normalizeSearchHistoryPayload(target.payload);
+        const payload = normalizeSearchHistoryPayload(
+            target.id === "features"
+                ? this.featureSearchPayloadForInput(trimmedInput) ?? target.payload
+                : target.payload
+        );
         return {
             version: 2,
             actionId: target.id,
@@ -590,6 +603,14 @@ export class SearchPanelComponent implements AfterViewInit {
             ...(payload !== undefined ? {payload} : {}),
             savedAt: Date.now()
         };
+    }
+
+    /** Returns completion-derived feature-search payload when the input still matches the accepted candidate. */
+    private featureSearchPayloadForInput(input: string): unknown {
+        const candidate = this.acceptedCompletionCandidate;
+        return candidate?.query.trim() === input.trim()
+            ? featureSearchActionPayloadFromCompletion(candidate)
+            : undefined;
     }
 
     /** Converts a legacy index-based history entry to target-id form. */
@@ -950,6 +971,9 @@ export class SearchPanelComponent implements AfterViewInit {
      */
     setSearchValue(value: string) {
         this.searchInputValue = value;
+        if (this.acceptedCompletionCandidate?.query.trim() !== value.trim()) {
+            this.acceptedCompletionCandidate = null;
+        }
         if (!value) {
             this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
@@ -1032,6 +1056,12 @@ export class SearchPanelComponent implements AfterViewInit {
     targetToHistory(target: SearchTarget) {
         const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
         if (entry) {
+            if (target.id === "features") {
+                this.withSuppressedHistoryExecution(() => this.stateService.setSearchHistoryState(entry));
+                this.runTarget(entry);
+                this.dialog?.close(new Event("close-on-execute"));
+                return;
+            }
             this.stateService.setSearchHistoryState(entry);
         }
     }
@@ -1205,17 +1235,18 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Applies either an explicit completion string or the currently selected completion candidate.
      */
-    applyCompletion(text: string | undefined = undefined) {
-        if (this.completion.visible || text) {
-            if (text !== undefined) {
-                this.setSearchValue(text);
+    applyCompletion(completion: CompletionCandidate | string | undefined = undefined) {
+        if (this.completion.visible || completion) {
+            if (typeof completion === "string") {
+                this.setSearchValue(completion);
                 this.textarea.nativeElement.focus();
             } else {
-                let item = this.completionItems[this.completion.selectionIndex];
+                const item = completion ?? this.completionItems[this.completion.selectionIndex];
                 if (!item) {
                     return;
                 }
                 this.setSearchValue(item.query);
+                this.acceptedCompletionCandidate = item;
 
                 let cursor = item.begin + item.text.length
                 setTimeout(() => {

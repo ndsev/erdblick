@@ -40,10 +40,6 @@ interface SearchResultStyleSpec {
     rules: FeatureSearchStateEntry["searchStyleRules"];
 }
 
-type FeatureLayerStyleWithFidelity = FeatureLayerStyle & {
-    hasExplicitLowFidelityRules(): boolean;
-};
-
 type HighlightFeatureGroup = {features: FeatureWrapper[], color?: string, id?: number};
 
 /**
@@ -338,7 +334,7 @@ export class MapRenderService {
                     const styleEntry = this.styleService.styles.get(styleId);
                     const styleHasExplicitLowFidelityRules =
                         styleEntry
-                            ? (styleEntry.featureLayerStyle as FeatureLayerStyleWithFidelity).hasExplicitLowFidelityRules()
+                            ? styleEntry.featureLayerStyle.hasExplicitLowFidelityRules()
                             : true;
                     const lowFiLodPolicyChanged =
                         styleHasExplicitLowFidelityRules && previousMaxLowFiLod !== tileVisu.maxLowFiLod;

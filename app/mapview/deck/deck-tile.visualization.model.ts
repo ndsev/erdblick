@@ -50,13 +50,6 @@ import {
     releaseDeckTileGltfAsset
 } from "./deck-gltf-node.layer";
 
-/** Style wrapper for wasm styles that expose erdblick-specific lifecycle and fidelity helpers. */
-interface StyleWithIsDeleted extends FeatureLayerStyle {
-    isDeleted(): boolean;
-    hasExplicitLowFidelityRules(): boolean;
-    hasRelationRules(mode: HighlightMode): boolean;
-}
-
 /** Deck-scene subset consumed by tile visualizations when they need the registry or scene mode. */
 interface DeckSceneHandle {
     deck?: unknown;
@@ -357,7 +350,7 @@ export class DeckTileVisualization implements ITileVisualization {
     public readonly styleId: string;
     public styleOrder: number;
 
-    private readonly style: StyleWithIsDeleted;
+    private readonly style: FeatureLayerStyle;
     private readonly styleSource: string;
     private readonly styleSourceRef: StyleSourceRef;
     private readonly recordStyleIssues: (issues: StyleValidationIssue[]) => void;
@@ -422,7 +415,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 recordStyleIssues: (issues: StyleValidationIssue[]) => void = () => {}) {
         this.tile = tile;
         this.pointMergeService = pointMergeService;
-        this.style = style as StyleWithIsDeleted;
+        this.style = style;
         this.styleSource = styleSource;
         this.styleId = this.style.name();
         this.styleSourceRef = styleSourceRef ?? {

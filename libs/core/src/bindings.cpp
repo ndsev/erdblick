@@ -822,6 +822,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("completeSearchQuery", &TileLayerParser::completeSearchQuery)
         .function("isAttributeScopeSearchQuery", &TileLayerParser::isAttributeScopeSearchQuery)
         .function("getAttributeScopeForQuery", &TileLayerParser::getAttributeScopeForQuery)
+        .function("getMapLayersForQuery", &TileLayerParser::getMapLayersForQuery)
         .function("searchQueryAstDiagnostics", &TileLayerParser::searchQueryAstDiagnostics)
         .function("searchStyleFieldsForQuery", &TileLayerParser::searchStyleFieldsForQuery)
         .function(

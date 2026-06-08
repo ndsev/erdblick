@@ -3,13 +3,17 @@ import {HttpClient} from "@angular/common/http";
 import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
 import {z} from "zod";
 
-/**
- * Stable internal id for the built-in bundled background.
- *
- * The user-facing name now says "Blue Marble", but the persisted id stays
- * `world-overview` so existing URLs and local state keep resolving cleanly.
- */
-export const DEFAULT_BACKGROUND_LAYER_ID = "world-overview";
+/** Background layer id used when neither URL nor stored state selects a layer. */
+export const DEFAULT_BACKGROUND_LAYER_ID = "osm";
+
+/** Default background opacity chosen for the shipped OSM layer so map data stays dominant. */
+export const DEFAULT_BACKGROUND_OPACITY = 6;
+
+/** Highest XYZ zoom requested when a custom background does not declare its own maxZoom. */
+export const DEFAULT_XYZ_BACKGROUND_MAX_ZOOM = 22;
+
+/** Highest WMS zoom requested when a custom background does not declare its own maxZoom. */
+export const DEFAULT_WMS_BACKGROUND_MAX_ZOOM = 22;
 
 /** Tooltip shown for WMS backgrounds to make the known deck.gl limitations explicit. */
 export const WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP =
@@ -297,25 +301,13 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
 
 const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
     {
-        id: DEFAULT_BACKGROUND_LAYER_ID,
-        name: "Blue Marble",
-        type: "xyz",
-        urlTemplate: "bundle/images/backgrounds/world-overview/{z}/{x}/{y}.jpg",
-        attribution: "NASA Blue Marble: Next Generation (July 2004)",
-        headers: {},
-        defaultOpacity: 100,
-        minZoom: 0,
-        maxZoom: 5,
-        tileSize: 256
-    },
-    {
         id: "osm",
         name: "OpenStreetMap",
         type: "xyz",
         urlTemplate: "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
         attribution: "© OpenStreetMap contributors",
         headers: {},
-        defaultOpacity: 6,
+        defaultOpacity: DEFAULT_BACKGROUND_OPACITY,
         minZoom: 0,
         maxZoom: 19,
         tileSize: 256
@@ -668,7 +660,7 @@ export class AppConfigService {
 
         const rawBackgroundLayers = rawConfig.backgroundLayers?.length
             ? rawConfig.backgroundLayers
-            // Keep the bundled fallback backgrounds available even when config.json omits the section.
+            // Keep a minimal, non-Blue-Marble fallback available when config.json omits the section.
             : DEFAULT_BACKGROUND_LAYERS;
         const backgroundLayers = rawBackgroundLayers.map(layer => this.normalizeBackgroundLayer(layer));
         const defaultBackgroundLayerId = this.resolveDefaultBackgroundLayerId(
@@ -762,7 +754,11 @@ export class AppConfigService {
     private normalizeBackgroundLayer(layer: RawBackgroundLayerConfig): BackgroundLayerConfig {
         const defaultOpacity = clampBackgroundOpacity(layer.defaultOpacity ?? 100);
         const minZoom = layer.minZoom ?? 0;
-        const maxZoom = layer.maxZoom ?? (layer.type === "xyz" ? 19 : 22);
+        const maxZoom = layer.maxZoom ?? (
+            layer.type === "xyz"
+                ? DEFAULT_XYZ_BACKGROUND_MAX_ZOOM
+                : DEFAULT_WMS_BACKGROUND_MAX_ZOOM
+        );
 
         if (layer.type === "xyz") {
             return {

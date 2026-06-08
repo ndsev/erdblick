@@ -66,6 +66,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     @Output() blurred = new EventEmitter<void>();
     @Output() submitted = new EventEmitter<void>();
     @Output() escaped = new EventEmitter<void>();
+    @Output() completionAccepted = new EventEmitter<CompletionCandidate>();
 
     @ViewChild("editorHost", {static: true}) private editorHost!: ElementRef<HTMLElement>;
 
@@ -352,6 +353,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.setEditorValue(item.query, item.begin + item.text.length);
         this.value = item.query;
         this.valueChange.emit(this.value);
+        this.completionAccepted.emit(item);
         this.completionItems = [];
         this.completion.visible = false;
         this.completion.pending = false;

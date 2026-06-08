@@ -13,6 +13,11 @@ export interface FeatureSearchResolvedDefinition extends FeatureSearchStateEntry
     resultFields: string[];
 }
 
+export interface FeatureSearchCoverageUpdate {
+    removedTiles: SearchResultTile[];
+    changed: boolean;
+}
+
 /** Extracts server-side result-field expressions needed by search-result styling. */
 export function featureSearchResultFields(
     definition: FeatureSearchStateEntry,
@@ -118,10 +123,11 @@ export class FeatureSearchRuntimeState {
         this.updateSerial += 1;
     }
 
-    /** Replaces desired tile coverage and returns tiles evicted from the search area. */
-    adoptVisibleTiles(visibleLayerTiles: Map<string, SearchLayerTileSet>): SearchResultTile[] {
+    /** Replaces desired tile coverage and reports whether the source-tile set changed. */
+    adoptVisibleTiles(visibleLayerTiles: Map<string, SearchLayerTileSet>): FeatureSearchCoverageUpdate {
         const removedTiles: SearchResultTile[] = [];
         const desiredKeys = new Set<string>();
+        let changed = false;
         for (const entry of visibleLayerTiles.values()) {
             for (const visibleTile of entry.tiles.values()) {
                 const tileId = visibleTile.tileId;
@@ -149,6 +155,7 @@ export class FeatureSearchRuntimeState {
                     visibleTile.priority,
                     visibleTile.requestOrder
                 ));
+                changed = true;
             }
         }
 
@@ -156,11 +163,12 @@ export class FeatureSearchRuntimeState {
             if (!desiredKeys.has(sourceTileKey)) {
                 this.tilesBySourceKey.delete(sourceTileKey);
                 removedTiles.push(tile);
+                changed = true;
             }
         }
         this.lastUpdateSerial = this.updateSerial;
         this.hasAdoptedVisibleTiles = true;
-        return removedTiles;
+        return {removedTiles, changed};
     }
 
     /** Keeps completed results but makes unfinished tiles eligible for another request. */

@@ -81,24 +81,6 @@ export interface SearchResultTileEntry {
     validityCount?: number;
 }
 
-/** Narrow TypeScript shape for native TileSearchResultLayer bindings used by stream parsing. */
-export interface TileSearchResultLayerLike {
-    copyDiagnostics?(buffer: unknown): void;
-    info?(): unknown;
-    nodeId(): string;
-    resultFields?(): unknown;
-    resultEntries?(): unknown;
-    resultEntryRange?(offset: number, limit: number): unknown;
-    resultEntryRangeCompact?(offset: number, limit: number): unknown;
-    valueSummaries?(histogramLimit: number, distinctLimit: number): unknown;
-    numResults?(): unknown;
-    tileId(): unknown;
-    mapId(): string;
-    layerId(): string;
-    diagnostics?(): Uint8Array | null;
-    delete?(): void;
-}
-
 /** Compact frontend payload emitted when a search result tile arrives. */
 export interface SearchResultTilePayload {
     searchId: string;
@@ -126,6 +108,14 @@ export interface SearchResultTilePayload {
 export interface SearchResultTileEvictedPayload {
     searchId: string;
     sourceTileKey: MapTileKey;
+}
+
+/** Search source-tile coverage changed before backend statuses for the new request generation arrive. */
+export interface SearchCoverageChangedPayload {
+    searchId: string;
+    refresh: number;
+    tilesConsidered: number;
+    tilesCompleted: number;
 }
 
 /** Internal render-invalidation payload for a removed high-fidelity search-result tile. */
