@@ -36,6 +36,7 @@ import {CompletionCandidate, DiagnosticsMessage, SearchValueSummariesState, Sear
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
+import {Scroller} from "primeng/scroller";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {Subscription} from "rxjs";
@@ -152,7 +153,6 @@ interface FeatureSearchStyleRuleDraft {
         @if (session) {
             @if (isDocked()) {
                 <app-panel #featureSearchPanel class="feature-search-panel" data-testid="feature-search-docked-panel"
-                           styleClass="feature-search-panel"
                            [layoutId]="session.layoutId" [persistLayout]="true"
                            [dockedPanelCount]="dockedPanelCount"
                            [expanded]="featureSearchExpanded"
@@ -173,7 +173,7 @@ interface FeatureSearchStyleRuleDraft {
                           [persistLayout]="true" [persistOpenState]="false" [layoutId]="session.layoutId"
                           (onShow)="onDialogShow($event)"
                           (onDragEnd)="onDialogDragEnd()"
-                          (onResizeEnd)="refreshTreeLayout($event)" (onHide)="onHide($event)">
+                          (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
                     <ng-template #header>
                         <ng-container *ngTemplateOutlet="searchHeader"></ng-container>
                     </ng-template>
@@ -992,7 +992,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     showFilter: boolean = false;
     resultsStatus: string = "Loading...";
-    scrollHeight: string = "flex";
+    scrollHeight: string = "28.5em";
     featureSearchExpanded = false;
     featureSearchQuery = "";
     featureSearchQueryDirty = false;
@@ -1045,7 +1045,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private selectedViewIndicesSignature = "";
     private pendingBookmarkedCloseSessionId: string | null = null;
     private resizeObserver?: ResizeObserver;
-    private treeLayoutRaf?: number;
+    private treeScrollHeightRaf?: number;
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
@@ -2961,7 +2961,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Starts watching the rendered tree host once Angular has materialized the active surface. */
     ngAfterViewInit(): void {
         this.refreshTreeResizeObserver();
-        this.scheduleTreeLayoutRefresh();
+        this.scheduleTreeScrollHeightSync();
     }
 
     /** Loads the current session snapshot for this component instance. */
@@ -3076,9 +3076,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.subscriptions.unsubscribe();
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
-        if (this.treeLayoutRaf !== undefined) {
-            window.cancelAnimationFrame(this.treeLayoutRaf);
-            this.treeLayoutRaf = undefined;
+        if (this.treeScrollHeightRaf !== undefined) {
+            window.cancelAnimationFrame(this.treeScrollHeightRaf);
+            this.treeScrollHeightRaf = undefined;
         }
         if (this.styleAttributeOptionsRefreshTimer) {
             clearTimeout(this.styleAttributeOptionsRefreshTimer);
@@ -3104,7 +3104,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
      */
     onDialogShow(event: any) {
         this.refreshTreeResizeObserver();
-        this.refreshTreeLayout(event);
+        this.syncTreeScrollHeight(event);
         this.dialogStack.bringToFront(this.featureSearchDialog);
         this.refreshCompletionZIndex();
     }
@@ -3120,7 +3120,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     protected onDockedPanelShow() {
         this.refreshTreeResizeObserver();
-        this.refreshTreeLayout();
+        this.syncTreeScrollHeight();
         this.refreshCompletionZIndex();
     }
 
@@ -3154,7 +3154,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.featureSearchExpanded = false;
             setTimeout(() => this.dialogStack.bringToFront(this.featureSearchDialog), 0);
         } else {
-            setTimeout(() => this.refreshTreeLayout(), 0);
+            setTimeout(() => this.syncTreeScrollHeight(), 0);
         }
     }
 
@@ -3163,7 +3163,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return;
         }
         this.featureSearchExpanded = !this.featureSearchExpanded;
-        setTimeout(() => this.refreshTreeLayout(), 0);
+        setTimeout(() => this.syncTreeScrollHeight(), 0);
     }
 
     protected onSearchColorChange(color: string) {
@@ -3275,7 +3275,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             }
         }
         if (this.resultPanelIndex === "results") {
-            this.scheduleTreeLayoutRefresh();
+            this.scheduleTreeScrollHeightSync();
         }
     }
 
@@ -3850,6 +3850,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             node = {
                 key: nodeKey,
                 selectable: false,
+                // Expanding every group forces PrimeNG to flatten very large result trees
+                // while streamed ingress is still active; keep the leaf-heavy level closed.
                 expanded: this.resultTreeGroupExpandedByDefault(depth, selectedOrder),
                 children: [],
                 data: {count: 0}
@@ -3870,9 +3872,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
     }
 
-    /** Keeps search result grouping expanded by default so results are immediately visible. */
-    private resultTreeGroupExpandedByDefault(_depth: number, selectedOrder: number[]): boolean {
-        return selectedOrder.length > 0;
+    /** Expands shallow grouping context only; broad searches should not render all leaves immediately. */
+    private resultTreeGroupExpandedByDefault(depth: number, selectedOrder: number[]): boolean {
+        return selectedOrder.length > 1 && depth < selectedOrder.length - 1;
     }
 
     /** Cancels a scheduled streamed result-tree append pass after resets or full rebuilds. */
@@ -3936,7 +3938,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.resultsStatus = "No matches found.";
         }
         if (previousShowFilter !== this.showFilter) {
-            this.scheduleTreeLayoutRefresh();
+            this.scheduleTreeScrollHeightSync();
         }
     }
 
@@ -4081,35 +4083,61 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.showFilter = false;
             this.resultsStatus = "No matches found.";
         }
-        this.scheduleTreeLayoutRefresh();
+        this.scheduleTreeScrollHeightSync();
         this.resultTreeInputLength = this.results.length;
         this.resultTreeGroupingSignature = selectedOrder.join(',');
     }
 
     /**
-     * Reinitializes PrimeNG's virtual scroller after tab visibility or container size changes.
+     * Derives the tree scroller height from the dialog size so virtual scrolling stays usable while resizing.
      */
-    refreshTreeLayout(_event?: MouseEvent) {
+    syncTreeScrollHeight(_event?: MouseEvent) {
+        const host = this.featureSearchTreeHost?.nativeElement;
+        const hostHeight = host?.getBoundingClientRect().height ?? 0;
+        if (!host || hostHeight <= 0 || !this.stateService.baseFontSize) {
+            return;
+        }
+
+        const treeElement = ((this.tree as any)?.el?.nativeElement ?? null) as HTMLElement | null;
+        const filterElement = treeElement?.querySelector<HTMLElement>('.p-tree-filter-container');
+        const treeStyles = treeElement ? window.getComputedStyle(treeElement) : undefined;
+        const treeVerticalPadding = treeStyles
+            ? (Number.parseFloat(treeStyles.paddingTop) || 0) + (Number.parseFloat(treeStyles.paddingBottom) || 0)
+            : 0;
+        const filterHeight = filterElement?.getBoundingClientRect().height ?? 0;
+        const nextHeight = Math.max(
+            this.stateService.baseFontSize * 6,
+            Math.floor(hostHeight - filterHeight - treeVerticalPadding)
+        );
+        this.scrollHeight = `${nextHeight}px`;
+
         window.requestAnimationFrame(() => {
-            (this.tree as any)?.scroller?.init?.();
+            const scroller = (this.tree as any)?.scroller as Scroller | undefined;
+            if (scroller) {
+                scroller.scrollHeight = this.scrollHeight;
+                scroller.calculateAutoSize?.();
+            }
         });
     }
 
     /** Keeps PrimeNG's virtual scroller synchronized with actual panel layout changes. */
-    private scheduleTreeLayoutRefresh(): void {
-        if (this.treeLayoutRaf !== undefined) {
+    private scheduleTreeScrollHeightSync(): void {
+        if (this.treeScrollHeightRaf !== undefined) {
             return;
         }
-        this.treeLayoutRaf = window.requestAnimationFrame(() => {
-            this.treeLayoutRaf = undefined;
-            this.refreshTreeLayout();
+        this.treeScrollHeightRaf = window.requestAnimationFrame(() => {
+            this.treeScrollHeightRaf = undefined;
+            this.syncTreeScrollHeight();
         });
     }
 
     /** Observes the elements whose size changes affect the tree viewport. */
     private refreshTreeResizeObserver(): void {
+        if (typeof ResizeObserver === "undefined") {
+            return;
+        }
         this.resizeObserver?.disconnect();
-        this.resizeObserver = new ResizeObserver(() => this.scheduleTreeLayoutRefresh());
+        this.resizeObserver = new ResizeObserver(() => this.scheduleTreeScrollHeightSync());
         const contentElement = this.featureSearchContentContainer?.nativeElement;
         const treeHostElement = this.featureSearchTreeHost?.nativeElement;
         if (contentElement) {
