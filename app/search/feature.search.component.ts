@@ -96,6 +96,13 @@ interface FeatureSearchLayerTreeNodeData {
     layerId?: string;
 }
 
+interface FeatureSearchLayerTreeNodeSelectionState {
+    selectedLeafCount: number;
+    totalLeafCount: number;
+    checked: boolean;
+    partial: boolean;
+}
+
 interface FeatureSearchViewOption {
     label: string;
     value: number;
@@ -233,14 +240,33 @@ interface FeatureSearchStyleRuleDraft {
                 <p-iftalabel class="feature-search-layer-select">
                     <p-treeselect inputId="feature-search-map-layers"
                                   [options]="mapLayerTreeOptions"
-                                  [(ngModel)]="selectedMapLayerTreeNodes"
-                                  selectionMode="checkbox"
+                                  [selectionMode]="mapLayerTreeSelectionMode"
+                                  placeholder="No layers selected"
                                   [filter]="true"
                                   [showClear]="false"
                                   [disabled]="!searchEnabled()"
                                   scrollHeight="24em"
                                   appendTo="body"
-                                  (ngModelChange)="onSearchMapLayerTreeSelectionChange($event)">
+                                  (onNodeExpand)="onSearchMapLayerTreeNodeExpansionChange($event, true)"
+                                  (onNodeCollapse)="onSearchMapLayerTreeNodeExpansionChange($event, false)">
+                        <ng-template #value let-placeholder="placeholder">
+                            {{ selectedMapLayerTreeValueLabel(selectedMapLayerTreeNodes, placeholder) }}
+                        </ng-template>
+                        <ng-template let-node pTemplate="default">
+                            <span class="feature-search-map-layer-tree-node"
+                                  (click)="onSearchMapLayerTreeNodeToggle(node, $event)">
+                                <p-checkbox [ngModel]="isSearchMapLayerTreeNodeChecked(node)"
+                                            [binary]="true"
+                                            [indeterminate]="isSearchMapLayerTreeNodePartial(node)"
+                                            [readonly]="true"
+                                            [disabled]="!searchEnabled()"
+                                            [tabindex]="-1"
+                                            [ariaLabel]="node.label"
+                                            (click)="$event.preventDefault()">
+                                </p-checkbox>
+                                <span class="feature-search-map-layer-tree-node-label">{{ node.label }}</span>
+                            </span>
+                        </ng-template>
                     </p-treeselect>
                     <label for="feature-search-map-layers">Map Layers</label>
                 </p-iftalabel>
@@ -1006,6 +1032,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private queryDiagnosticsSessionSignature = "";
     private readonly autoStyleRuleAttemptSignatures = new Set<string>();
     private mapLayerTreeOptionsSignature = "";
+    // PrimeNG supports null at runtime to disable tree selection, but its TreeSelect type excludes it.
+    protected readonly mapLayerTreeSelectionMode = null as unknown as "single";
+    private mapLayerTreeSelectionState = new Map<string, FeatureSearchLayerTreeNodeSelectionState>();
+    private mapLayerTreeExpandedKeys = new Set<string>();
+    private mapLayerTreeExpansionInitialized = false;
     private selectedMapLayersSignature = "";
     private initializedMapLayerSelectionSessionId = "";
     private searchTileLevelOptionsSignature = "";
@@ -2262,6 +2293,36 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return `layer:${this.searchLayerKey(mapId, layerId)}`;
     }
 
+    private searchLayerKeyFromTreeNode(node: TreeNode<FeatureSearchLayerTreeNodeData>): string | null {
+        return node.data?.kind === "layer" && node.data.mapId && node.data.layerId
+            ? this.searchLayerKey(node.data.mapId, node.data.layerId)
+            : null;
+    }
+
+    private mapLayerTreeNodeForKey(key: string): TreeNode<FeatureSearchLayerTreeNodeData> | null {
+        const visit = (
+            node: TreeNode<FeatureSearchLayerTreeNodeData>
+        ): TreeNode<FeatureSearchLayerTreeNodeData> | null => {
+            if (node.key === key) {
+                return node;
+            }
+            for (const child of node.children ?? []) {
+                const matched = visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+                if (matched) {
+                    return matched;
+                }
+            }
+            return null;
+        };
+        for (const node of this.mapLayerTreeOptions) {
+            const matched = visit(node);
+            if (matched) {
+                return matched;
+            }
+        }
+        return null;
+    }
+
     private refreshMapLayerTreeOptions(): void {
         const sourceSignature = this.availableSearchMapLayerSignature();
         if (sourceSignature === this.mapLayerTreeOptionsSignature) {
@@ -2272,8 +2333,14 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             .filter((node): node is TreeNode<FeatureSearchLayerTreeNodeData> => !!node);
         this.mapLayerTreeOptionsSignature = sourceSignature;
         this.mapLayerTreeOptions = options;
+        if (!this.mapLayerTreeExpansionInitialized) {
+            this.mapLayerTreeExpandedKeys = this.expandedMapLayerTreeNodeKeys(this.mapLayerTreeOptions);
+            this.mapLayerTreeExpansionInitialized = true;
+        } else {
+            this.applyMapLayerTreeExpandedState(this.mapLayerTreeOptions, this.mapLayerTreeExpandedKeys);
+        }
         const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
-        this.selectedMapLayerTreeNodes = this.mapLayerTreeNodesForKeys(selectedKeys);
+        this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
     }
 
     /** Signatures the searchable map/layer set without allocating the PrimeNG tree first. */
@@ -2340,8 +2407,15 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     ): Set<string> {
         const selectedKeys = new Set<string>();
         const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
-            if (node.data?.kind === "layer" && node.data.mapId && node.data.layerId) {
-                selectedKeys.add(this.searchLayerKey(node.data.mapId, node.data.layerId));
+            const layerKey = this.searchLayerKeyFromTreeNode(node);
+            if (layerKey) {
+                selectedKeys.add(layerKey);
+                return;
+            }
+            const sourceNode = node.key ? this.mapLayerTreeNodeForKey(node.key) : null;
+            if (sourceNode && sourceNode !== node) {
+                visit(sourceNode);
+                return;
             }
             for (const child of node.children ?? []) {
                 visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
@@ -2375,24 +2449,201 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
     }
 
-    private mapLayerTreeNodesForKeys(selectedKeys: Set<string>): TreeNode<FeatureSearchLayerTreeNodeData>[] {
-        const selectedNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+    private selectedMapLayerLabelsFromTreeNodes(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    ): string[] {
+        const labelsByKey = new Map<string, string>();
         const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
-            if (node.data?.kind === "layer"
-                && node.data.mapId
-                && node.data.layerId
-                && selectedKeys.has(this.searchLayerKey(node.data.mapId, node.data.layerId))) {
-                selectedNodes.push(node);
+            const layerKey = this.searchLayerKeyFromTreeNode(node);
+            if (layerKey) {
+                labelsByKey.set(layerKey, node.label ?? layerKey);
+            }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of nodes ?? []) {
+            visit(node);
+        }
+        return Array.from(labelsByKey.entries())
+            .sort((lhs, rhs) => lhs[0].localeCompare(rhs[0]))
+            .map(([, label]) => label);
+    }
+
+    protected selectedMapLayerTreeValueLabel(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined,
+        placeholder?: string
+    ): string {
+        const labels = this.selectedMapLayerLabelsFromTreeNodes(nodes);
+        return labels.length ? labels.join(", ") : placeholder || "No layers selected";
+    }
+
+    private setSelectedMapLayerTreeLeafKeys(
+        selectedKeys: Set<string>,
+        expandedKeys = this.expandedMapLayerTreeNodeKeys(this.mapLayerTreeOptions)
+    ): void {
+        this.mapLayerTreeExpandedKeys = expandedKeys;
+        this.mapLayerTreeExpansionInitialized = true;
+        this.mapLayerTreeOptions = this.cloneMapLayerTreeNodes(this.mapLayerTreeOptions);
+        this.applyMapLayerTreeExpandedState(this.mapLayerTreeOptions, expandedKeys);
+        this.selectedMapLayerTreeNodes = this.mapLayerTreeSelectionForLeafKeys(selectedKeys);
+    }
+
+    private cloneMapLayerTreeNodes(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    ): TreeNode<FeatureSearchLayerTreeNodeData>[] {
+        return (nodes ?? []).map(node => ({
+            ...node,
+            parent: undefined,
+            children: node.children
+                ? this.cloneMapLayerTreeNodes(node.children as TreeNode<FeatureSearchLayerTreeNodeData>[])
+                : undefined
+        }));
+    }
+
+    private mapLayerTreeSelectionForLeafKeys(
+        selectedKeys: Set<string>
+    ): TreeNode<FeatureSearchLayerTreeNodeData>[] {
+        const selectedNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+        this.mapLayerTreeSelectionState = this.mapLayerTreeSelectionStateByNodeKey(selectedKeys);
+        this.collectSelectedMapLayerLeafNodes(this.mapLayerTreeOptions, selectedKeys, selectedNodes);
+        return selectedNodes;
+    }
+
+    private collectSelectedMapLayerLeafNodes(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined,
+        selectedKeys: Set<string>,
+        selectedNodes: TreeNode<FeatureSearchLayerTreeNodeData>[]
+    ): void {
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            const layerKey = this.searchLayerKeyFromTreeNode(node);
+            if (layerKey) {
+                if (selectedKeys.has(layerKey)) {
+                    selectedNodes.push(node);
+                }
                 return;
             }
             for (const child of node.children ?? []) {
                 visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
             }
         };
+        for (const node of nodes ?? []) {
+            visit(node);
+        }
+    }
+
+    private mapLayerTreeSelectionStateByNodeKey(
+        selectedKeys: Set<string>
+    ): Map<string, FeatureSearchLayerTreeNodeSelectionState> {
+        const stateByNodeKey = new Map<string, FeatureSearchLayerTreeNodeSelectionState>();
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>): {selected: number; total: number} => {
+            const layerKey = this.searchLayerKeyFromTreeNode(node);
+            if (layerKey) {
+                const selected = selectedKeys.has(layerKey);
+                const state = {
+                    selectedLeafCount: selected ? 1 : 0,
+                    totalLeafCount: 1,
+                    checked: selected,
+                    partial: false
+                };
+                if (node.key) {
+                    stateByNodeKey.set(node.key, state);
+                }
+                return {selected: selected ? 1 : 0, total: 1};
+            }
+            let selected = 0;
+            let total = 0;
+            for (const child of node.children ?? []) {
+                const childState = visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+                selected += childState.selected;
+                total += childState.total;
+            }
+            if (node.key) {
+                stateByNodeKey.set(node.key, {
+                    selectedLeafCount: selected,
+                    totalLeafCount: total,
+                    checked: total > 0 && selected === total,
+                    partial: selected > 0 && selected < total
+                });
+            }
+            return {selected, total};
+        };
         for (const node of this.mapLayerTreeOptions) {
             visit(node);
         }
-        return selectedNodes;
+        return stateByNodeKey;
+    }
+
+    private mapLayerTreeSelectionStateForNode(
+        node: TreeNode<FeatureSearchLayerTreeNodeData>
+    ): FeatureSearchLayerTreeNodeSelectionState | undefined {
+        return node.key ? this.mapLayerTreeSelectionState.get(node.key) : undefined;
+    }
+
+    protected isSearchMapLayerTreeNodeChecked(node: TreeNode<FeatureSearchLayerTreeNodeData>): boolean {
+        return this.mapLayerTreeSelectionStateForNode(node)?.checked ?? false;
+    }
+
+    protected isSearchMapLayerTreeNodePartial(node: TreeNode<FeatureSearchLayerTreeNodeData>): boolean {
+        return this.mapLayerTreeSelectionStateForNode(node)?.partial ?? false;
+    }
+
+    private mapLayerTreeLeafKeysForNode(
+        node: TreeNode<FeatureSearchLayerTreeNodeData>
+    ): Set<string> {
+        const sourceNode = node.key ? this.mapLayerTreeNodeForKey(node.key) ?? node : node;
+        const leafKeys = new Set<string>();
+        const visit = (candidate: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            const layerKey = this.searchLayerKeyFromTreeNode(candidate);
+            if (layerKey) {
+                leafKeys.add(layerKey);
+                return;
+            }
+            for (const child of candidate.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        visit(sourceNode);
+        return leafKeys;
+    }
+
+    private expandedMapLayerTreeNodeKeys(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    ): Set<string> {
+        const expandedKeys = new Set<string>();
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            if (node.expanded && node.key) {
+                expandedKeys.add(node.key);
+            }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of nodes ?? []) {
+            visit(node);
+        }
+        return expandedKeys;
+    }
+
+    private applyMapLayerTreeExpandedState(
+        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined,
+        expandedKeys: Set<string>,
+        expandedNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = []
+    ): TreeNode<FeatureSearchLayerTreeNodeData>[] {
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>) => {
+            const expanded = !!node.key && expandedKeys.has(node.key);
+            node.expanded = expanded;
+            if (expanded) {
+                expandedNodes.push(node);
+            }
+            for (const child of node.children ?? []) {
+                visit(child as TreeNode<FeatureSearchLayerTreeNodeData>);
+            }
+        };
+        for (const node of nodes ?? []) {
+            visit(node);
+        }
+        return expandedNodes;
     }
 
     private mapLayerKeySignature(selectedKeys: Set<string>): string {
@@ -2406,25 +2657,36 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             const selectedKeys = new Set(session.definition.selectedMapLayers
                 .map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
             this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
-            this.selectedMapLayerTreeNodes = this.mapLayerTreeNodesForKeys(selectedKeys);
+            this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
             return;
         }
         const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
         this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
-        this.selectedMapLayerTreeNodes = this.mapLayerTreeNodesForKeys(selectedKeys);
+        this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
     }
 
-    protected onSearchMapLayerTreeSelectionChange(
-        nodes: TreeNode<FeatureSearchLayerTreeNodeData>[] | null | undefined
+    protected onSearchMapLayerTreeNodeToggle(
+        node: TreeNode<FeatureSearchLayerTreeNodeData>,
+        event?: Event
     ): void {
+        event?.stopPropagation();
         const session = this.session;
         if (!session || !this.searchEnabled()) {
             return;
         }
-        this.selectedMapLayerTreeNodes = nodes ?? [];
-        this.selectedMapLayersSignature = this.mapLayerKeySignature(
-            this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes)
-        );
+        const expandedKeys = new Set(this.mapLayerTreeExpandedKeys);
+        const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
+        const state = this.mapLayerTreeSelectionStateForNode(node);
+        const select = !state?.checked;
+        for (const layerKey of this.mapLayerTreeLeafKeysForNode(node)) {
+            if (select) {
+                selectedKeys.add(layerKey);
+            } else {
+                selectedKeys.delete(layerKey);
+            }
+        }
+        this.setSelectedMapLayerTreeLeafKeys(selectedKeys, expandedKeys);
+        this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
         this.refreshSearchTileLevelOptions(session);
         this.styleAttributeOptionsSessionSignature = "";
         this.updateDraftFeatureSearchScopeSummary(this.featureSearchScope);
@@ -2432,6 +2694,23 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             session.id,
             this.selectedMapLayerRefsFromTreeNodes(this.selectedMapLayerTreeNodes)
         );
+    }
+
+    protected onSearchMapLayerTreeNodeExpansionChange(
+        event?: {node?: TreeNode<FeatureSearchLayerTreeNodeData>},
+        expanded?: boolean
+    ): void {
+        if (event?.node?.key && expanded !== undefined) {
+            if (expanded) {
+                this.mapLayerTreeExpandedKeys.add(event.node.key);
+            } else {
+                this.mapLayerTreeExpandedKeys.delete(event.node.key);
+            }
+            this.applyMapLayerTreeExpandedState(this.mapLayerTreeOptions, this.mapLayerTreeExpandedKeys);
+        } else {
+            this.mapLayerTreeExpandedKeys = this.expandedMapLayerTreeNodeKeys(this.mapLayerTreeOptions);
+        }
+        this.mapLayerTreeExpansionInitialized = true;
     }
 
     /** Returns the selected search layer scope used by schema completion and field pickers. */
@@ -3412,6 +3691,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.surfacedDockedSearchId = "";
         this.mapLayerTreeOptions = [];
         this.selectedMapLayerTreeNodes = [];
+        this.mapLayerTreeSelectionState.clear();
+        this.mapLayerTreeExpandedKeys.clear();
+        this.mapLayerTreeExpansionInitialized = false;
         this.featureSearchTileLevelOptions = [];
         this.selectedTileLevels = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
         this.featureSearchViewOptions = [];

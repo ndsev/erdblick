@@ -3324,7 +3324,7 @@ inspection-tree {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
-    padding: 0 0.5em 0.5em 0.5em;
+    padding: 0.25em;
     min-height: 0;
     overflow: hidden;
   }
@@ -4566,6 +4566,23 @@ simfil-expression-input {
   }
 }
 
+.p-treeselect-overlay .feature-search-map-layer-tree-node {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 0.5em;
+  min-width: 0;
+
+  p-checkbox {
+    flex: 0 0 auto;
+  }
+
+  .feature-search-map-layer-tree-node-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 .feature-search-awaiting {
   align-items: center;
   display: flex;
@@ -4635,6 +4652,10 @@ simfil-expression-input {
     flex-wrap: wrap;
     gap: 0.5em;
     font-size: 0.9em;
+
+    .p-multiselect {
+      width: 100%;
+    }
   }
 
   .feature-search-style-rules {
