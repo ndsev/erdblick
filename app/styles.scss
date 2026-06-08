@@ -443,6 +443,15 @@ main-bar {
   min-width: 0;
 }
 
+.app-panel-host-single {
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.app-panel-host-stack {
+  flex: 0 0 auto;
+}
+
 .collapsible-dock > .dock-empty {
   position: relative;
   flex: 1;
@@ -502,11 +511,18 @@ main-bar {
 }
 
 .app-panel-content {
+  box-sizing: border-box;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.app-panel-content-fixed {
+  flex: 0 0 auto;
 }
 
 .app-panel-resize-fill {
@@ -533,17 +549,26 @@ main-bar {
   min-height: 0;
 }
 
-.app-panel-stack.app-panel-resize-vertical:not(.inspect-panel) .p-accordioncontent-content {
-  min-height: 15em;
-  max-height: calc(100vh - 10em);
-  resize: vertical;
-  overflow: auto;
+.app-panel-stack.app-panel-resize-vertical .p-accordioncontent-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
 }
 
-.app-panel-stack.app-panel-expanded:not(.inspect-panel) .p-accordioncontent-content {
-  height: auto;
-  max-height: none;
-  resize: none;
+.app-panel-stack.app-panel-resize-vertical .app-panel-content-resizable {
+  border-bottom: solid 0.1em var(--p-form-field-border-color);
+  direction: rtl;
+  max-height: calc(100vh - 6em);
+  min-height: 15em;
+  overflow: hidden;
+  padding-bottom: 0.5em;
+  resize: vertical;
+}
+
+.app-panel-stack.app-panel-resize-vertical .app-panel-content-resizable > * {
+  direction: ltr;
 }
 
 app-surface-header {
@@ -555,16 +580,17 @@ app-surface-header {
 .app-surface-header {
   align-items: center;
   display: flex;
+  gap: 0.25em;
   justify-content: space-between;
   min-width: 0;
   width: 100%;
   container-type: inline-size;
 
   & > * {
+    align-items: center;
     display: flex;
     gap: 0.25em;
-    justify-content: center;
-    align-items: center;
+    min-width: 0;
   }
 }
 
@@ -574,9 +600,11 @@ app-surface-header {
 
 .app-surface-header-title-group {
   flex: 1 1 auto;
+  justify-content: flex-start;
   margin-right: 0.25em;
   max-width: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .app-surface-header-title {
@@ -585,7 +613,7 @@ app-surface-header {
   border: 0;
   color: inherit;
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   font: inherit;
   font-weight: bold;
   gap: 0.15em;
@@ -593,6 +621,7 @@ app-surface-header {
   max-width: 100%;
   overflow: hidden;
   padding: 0.15em 0.15em 0.15em 0;
+  text-align: left;
   white-space: nowrap;
 }
 
@@ -615,15 +644,17 @@ app-surface-header {
 }
 
 .app-surface-header-title-text {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .app-surface-header-actions {
   flex: 0 0 auto;
+  justify-content: flex-end;
   margin-left: auto;
 }
 
@@ -689,6 +720,10 @@ app-surface-header {
 .app-dialog .p-dialog-header,
 .app-panel .p-accordionheader {
   overflow: visible;
+}
+
+.app-panel .p-accordionheader {
+  padding: 0.25em 0.25em 0.25em 0.5em;
 }
 
 diagnostics-indicator {
@@ -2073,77 +2108,6 @@ inspection-tree {
       height: 1.5em;
       width: 1.5em;
     }
-
-    .inspector-title {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-      container-type: inline-size;
-
-      & > * {
-        display: flex;
-        gap: 0.25em;
-        justify-content: center;
-        align-items: center;
-      }
-
-      .title-container {
-        min-width: 0;
-        max-width: 100%;
-        margin-right: 0.25em;
-        &.feature {
-          flex: 1 1 auto;
-        }
-
-        .title {
-          flex: 1 1 auto;
-          min-width: 0;
-          max-width: 100%;
-          white-space: nowrap;
-          font-weight: bold;
-          display: flex;
-          gap: 0.125em;
-          align-items: center;
-          cursor: pointer;
-          padding: 0.15em 0.15em 0.15em 0;
-          overflow: hidden;
-
-          &:hover {
-            color: var(--p-primary-contrast-color);
-            border-radius: 6px;
-            background-color: var(--p-primary-color);
-
-            span {
-              color: inherit;
-            }
-          }
-
-          .material-symbols-outlined {
-            font-size: 1.25em;
-          }
-
-          .title-span {
-            flex: 1 1 auto;
-            min-width: 0;
-            text-overflow: ellipsis;
-            overflow: hidden;
-          }
-        }
-      }
-
-      & > :last-child {
-        flex: 0 0 auto;
-        margin-left: auto;
-      }
-
-      .p-button {
-        width: 1.75em !important;
-        height: 1.75em !important;
-        margin: 0;
-      }
-
-    }
   }
 
   .p-dialog-content {
@@ -2656,6 +2620,28 @@ inspection-tree {
     overflow: hidden;
   }
 
+  .inspect-panel .app-panel-content,
+  .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container,
+  .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container feature-panel,
+  .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container sourcedata-panel,
+  .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container inspection-tree,
+  .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container .p-treetable {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
+    height: 100%;
+    max-height: none;
+    min-width: 0;
+    overflow: hidden;
+    padding-bottom: 0;
+    resize: none;
+    width: 100%;
+  }
+
   &.single-panel {
     overflow-y: hidden;
 
@@ -2699,24 +2685,7 @@ inspection-tree {
     }
 
     .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 auto;
       height: 100% !important;
-      max-height: none;
-      min-height: 0;
-      resize: none;
-      padding-bottom: 0;
-    }
-
-    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container feature-panel,
-    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container sourcedata-panel,
-    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container inspection-tree,
-    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container .p-treetable {
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 auto;
-      min-height: 0;
     }
   }
 
@@ -2724,10 +2693,7 @@ inspection-tree {
     overflow-y: auto;
 
     .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
-      min-height: 15em;
-      resize: vertical;
-      overflow: auto;
-      border-bottom: solid 0.1em var(--p-form-field-border-color);
+      min-height: 0;
     }
   }
 
@@ -2741,7 +2707,7 @@ inspection-tree {
     opacity: 0.6;
   }
 
-  inspection-panel.dragging .inspector-title {
+  inspection-panel.dragging .app-surface-header {
     cursor: grabbing;
   }
 
@@ -2756,86 +2722,11 @@ inspection-tree {
   .inspect-panel {
     min-width: 30em;
 
-    .inspector-title {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: calc(100% - 1.5em);
-      cursor: grab;
-      container-type: inline-size;
-
-      & > * {
-        display: flex;
-        gap: 0.25em;
-        justify-content: center;
-        align-items: center;
-      }
-
-      .title-container {
-        min-width: 0;
-        max-width: 100%;
-        margin-right: 0.25em;
-        &.feature {
-          flex: 1 1 auto;
-        }
-
-        .title {
-          flex: 1 1 auto;
-          min-width: 0;
-          max-width: 100%;
-          white-space: nowrap;
-          display: flex;
-          gap: 0.125em;
-          align-items: center;
-          cursor: pointer;
-          padding: 0.15em 0.15em 0.15em 0;
-          overflow: hidden;
-
-          &:hover {
-            color: var(--p-primary-contrast-color);
-            border-radius: 6px;
-            background-color: var(--p-primary-color);
-
-            span {
-              color: inherit;
-            }
-          }
-
-          .material-symbols-outlined {
-            font-size: 1.25em;
-          }
-
-          .title-span {
-            flex: 1 1 auto;
-            min-width: 0;
-            text-overflow: ellipsis;
-            overflow: hidden;
-          }
-        }
-      }
-
-      & > :last-child {
-        flex: 0 0 auto;
-        margin-left: auto;
-      }
-
-
-      .p-button {
-        width: 1.75em !important;
-        height: 1.75em !important;
-        margin: 0;
-      }
-
-    }
-
     .p-accordionpanel {
       border: none;
     }
 
     .p-accordionheader {
-      padding: 0.25em 0.25em 0.25em 0.5em;
-      overflow: visible;
-
       .p-colorpicker-panel {
         z-index: 9500;
       }
@@ -2884,15 +2775,13 @@ inspection-tree {
     }
 
     .resizable-container {
-      width: 30em;
-      height: 20em;
-      min-width: 20em;
-      min-height: 15em;
-      resize: vertical;
-      overflow: auto;
-      direction: rtl;
-      max-height: calc(100vh - 6em);
-      padding-bottom: 0.5em;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      width: 100%;
 
       * {
         direction: ltr;
@@ -3004,7 +2893,7 @@ inspection-tree {
     }
   }
 
-  .inspection-drag-preview-header .inspector-title {
+  .inspection-drag-preview-header .app-surface-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -3013,14 +2902,14 @@ inspection-tree {
     cursor: grabbing;
   }
 
-  .inspection-drag-preview-header .inspector-title > * {
+  .inspection-drag-preview-header .app-surface-header > * {
     display: flex;
     gap: 0.25em;
     justify-content: center;
     align-items: center;
   }
 
-  .inspection-drag-preview-header .inspector-title .title {
+  .inspection-drag-preview-header .app-surface-header-title {
     max-width: 20em;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3035,7 +2924,7 @@ inspection-tree {
     }
   }
 
-  .inspection-drag-preview-header .inspector-title .p-button {
+  .inspection-drag-preview-header .app-surface-header .p-button {
     width: 1.75em !important;
     height: 1.75em !important;
     margin: 0;
@@ -3346,17 +3235,10 @@ inspection-tree {
 
 .feature-search-panel {
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
   min-width: 0;
   width: 100%;
-
-  .p-accordionheader {
-    padding: 0.25em 0.25em 0.25em 0.5em;
-    overflow: visible;
-  }
 
   .p-accordioncontent-content {
     display: flex;
@@ -3365,28 +3247,7 @@ inspection-tree {
     min-height: 0;
     min-width: 0;
     max-width: 100%;
-    padding: 0 0.5em 0.5em 0.5em;
-  }
-
-  &.app-panel-stack.app-panel-resize-vertical .p-accordioncontent-content {
-    direction: rtl;
-    overflow-x: hidden;
-
-    > * {
-      direction: ltr;
-    }
-  }
-
-  &.app-panel-stack.app-panel-expanded .p-accordioncontent-content {
-    height: min(60em, calc(100vh - 10em));
-    max-height: calc(100vh - 10em);
-    direction: rtl;
-    resize: vertical;
-    overflow: auto;
-
-    > * {
-      direction: ltr;
-    }
+    padding: 0;
   }
 }
 
@@ -3394,11 +3255,22 @@ inspection-tree {
   display: flex !important;
   flex-direction: column;
   gap: 0.25em;
+  height: 100%;
+  min-height: 0;
   overflow-x: clip;
+  overflow-y: auto;
   width: 100%;
 
   feature-search {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
     min-width: 0;
+  }
+
+  feature-search:only-child {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   &.reordering {
@@ -4456,6 +4328,18 @@ inspection-tree {
   opacity: 0.52;
 }
 
+.feature-search-content {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 0.5em 0.5em 0.5em;
+  width: 100%;
+}
+
 simfil-expression-input,
 search-style-color {
   display: block;
@@ -4644,14 +4528,14 @@ simfil-expression-input {
     overflow: hidden;
   }
 
-  .feature-search-grouping {
+  .feature-search-grouping-select {
     align-items: center;
-    display: flex;
+    display: block;
     flex: 0 0 auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 0.5em;
     font-size: 0.9em;
+    margin: 0 0 0.35em 0;
+    min-width: 0;
+    width: 100%;
 
     .p-multiselect {
       width: 100%;

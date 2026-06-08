@@ -31,12 +31,12 @@ export interface AppSurfaceHeaderAction {
 @Component({
     selector: 'app-surface-header',
     template: `
-        <div class="app-surface-header inspector-title"
+        <div class="app-surface-header"
              [ngClass]="{'app-surface-header-focused': focused, 'app-surface-header-drag': dragEnabled}"
              (pointerdown)="onPointerDown($event)"
              (focusin)="focusRequest.emit($event)">
-            <span class="app-surface-header-title-group title-container"
-                  [class.feature]="featureTitle">
+            <span class="app-surface-header-title-group"
+                  [class.app-surface-header-title-group-feature]="featureTitle">
                 @if (hasSmartControl || focusable) {
                     <span class="inspection-focus-indicator"
                           [class.inspection-focus-indicator-active]="focusable && focused">
@@ -51,7 +51,7 @@ export interface AppSurfaceHeaderAction {
                 }
                 @if (lockable) {
                     <button type="button"
-                            class="app-surface-header-title title"
+                            class="app-surface-header-title"
                             [pTooltip]="titleTooltip || (locked ? 'Unlock ' + title : 'Lock ' + title)"
                             [tooltipDisabled]="titleTooltipDisabled"
                             tooltipPosition="bottom"
@@ -64,17 +64,17 @@ export interface AppSurfaceHeaderAction {
                                 lock_open_right
                             }
                         </span>
-                        <span class="app-surface-header-title-text title-span">{{ title }}</span>
+                        <span class="app-surface-header-title-text">{{ title }}</span>
                     </button>
                 } @else {
-                    <div class="app-surface-header-title title"
+                    <div class="app-surface-header-title"
                          [pTooltip]="titleTooltip || title"
                          [tooltipDisabled]="titleTooltipDisabled"
                          tooltipPosition="bottom">
                         @if (titleIcon) {
                             <span class="material-symbols-outlined">{{ titleIcon }}</span>
                         }
-                        <span class="app-surface-header-title-text title-span">{{ title }}</span>
+                        <span class="app-surface-header-title-text">{{ title }}</span>
                     </div>
                 }
                 <ng-content select="[surfaceHeaderAfterTitle]"></ng-content>

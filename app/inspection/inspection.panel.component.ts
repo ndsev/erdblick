@@ -1,9 +1,7 @@
-import {AfterViewInit, Component, ElementRef, input, OnDestroy, output, Renderer2, ViewChild, effect} from "@angular/core";
+import {Component, input, output, ViewChild, effect} from "@angular/core";
 import {Popover} from "primeng/popover";
 import {
     AppStateService,
-    DEFAULT_DOCKED_EM_HEIGHT,
-    DEFAULT_EM_WIDTH,
     InspectionComparisonOption,
     InspectionPanelModel
 } from "../shared/appstate.service";
@@ -15,6 +13,7 @@ import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
 import {displayFeatureId} from "../shared/tile-feature-id";
+import {AppPanelComponent} from "../shared/app-panel.component";
 
 /** Select option for switching between source-data layers within one inspected tile. */
 interface SourceLayerMenuItem {
@@ -33,11 +32,17 @@ interface InspectionPanelContentAdapter {
     selector: 'inspection-panel',
     template: `
         <app-panel class="inspect-panel" styleClass="inspect-panel" data-testid="inspection-panel"
+                   #inspectionAppPanel
+                   [layoutId]="inspectionPanelLayoutId()"
+                   [persistLayout]="true"
                    [collapsed]="accordionValue !== '0'"
                    (collapsedChange)="accordionValue = $event ? null : '0'"
                    [dockedPanelCount]="dockedPanelCount()"
                    [expanded]="isExpanded"
+                   (expandedChange)="isExpanded = $event"
+                   [preferredBodyHeightEm]="measurePreferredPanelHeightEm"
                    [transitionOptions]="accordionTransitionOptions"
+                   (bodySizeChange)="refreshPanelContentLayout()"
                    (focusRequest)="focusPanel()">
             <ng-template #header>
                     <app-surface-header [title]="title"
@@ -85,15 +90,7 @@ interface InspectionPanelContentAdapter {
             </ng-template>
 
             <ng-template #content>
-                    <div class="resizable-container" #resizeableContainer
-                         [style.width.%]="100"
-                         [style.height.em]="panel().size[1]"
-                         (mouseup)="onInspectionContainerResize($event, panel())"
-                         [ngClass]="{'resizable-container-expanded': isExpanded}">
-                        <!--                        <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
-                        <!--                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
-                        <!--                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
-                        <!--                        </div>-->
+                    <div class="resizable-container">
                         @if (errorMessage) {
                             <div>
                                 <strong>Error</strong><br>{{ errorMessage }}
@@ -136,12 +133,6 @@ interface InspectionPanelContentAdapter {
         </p-popover>
     `,
     styles: [`
-        @media only screen and (max-width: 56em) {
-            .resizable-container-expanded {
-                height: calc(100vh - 3em);
-            }
-        }
-
         .inspection-focus-indicator {
             align-items: center;
             border: 2px solid transparent;
@@ -158,7 +149,7 @@ interface InspectionPanelContentAdapter {
     standalone: false
 })
 /** Docked accordion variant of an inspection panel. */
-export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
+export class InspectionPanelComponent {
     title = "";
     isExpanded: boolean = false;
     errorMessage: string = "";
@@ -177,23 +168,20 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     accordionValue: string | null = '0';
     readonly accordionTransitionOptions = '320ms cubic-bezier(0.22, 1, 0.36, 1)';
 
-    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
+    @ViewChild('inspectionAppPanel') inspectionAppPanel?: AppPanelComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
-    private autoExpandRafFirst?: number;
-    private autoExpandRafSecond?: number;
     isMetadata: boolean = false;
+    protected readonly measurePreferredPanelHeightEm = () => this.getPanelContentAdapter()?.measurePreferredHeightEm();
 
     constructor(private mapService: MapInfoService,
                 private inspectionSelection: InspectionSelectionService,
-                public stateService: AppStateService,
-                private renderer: Renderer2) {
+                public stateService: AppStateService) {
         effect(() => {
             this.title = "";
             this.errorMessage = "";
             const panel = this.panel();
-            this.isExpanded = this.isPanelHeightExpanded(panel.size[1]);
             if (panel.sourceData !== undefined) {
                 const selection = panel.sourceData!;
                 const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
@@ -238,12 +226,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         });
     }
 
-    /** Performs the first layout sync after the docked panel has a rendered body. */
-    ngAfterViewInit() {
-        this.detectSafari();
-        this.scheduleAutoExpand();
-    }
-
     /** Applies the currently selected source-data layer switch. */
     protected onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
@@ -254,31 +236,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     /** Stops header interaction propagation while using the source-data layer dropdown. */
     protected onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
-    }
-
-    protected onInspectionContainerResize(event: MouseEvent, panel: InspectionPanelModel<FeatureWrapper> | undefined): void {
-        if (!panel) {
-            return;
-        }
-        const element = event.target as HTMLElement;
-        if (!element.classList.contains("resizable-container") || !element.offsetWidth || !element.offsetHeight) {
-            return;
-        }
-
-        const currentEmWidth = element.offsetWidth / this.stateService.baseFontSize;
-        const currentEmHeight = element.offsetHeight / this.stateService.baseFontSize;
-        panel.size[0] = currentEmWidth < DEFAULT_EM_WIDTH ? DEFAULT_EM_WIDTH : currentEmWidth;
-        panel.size[1] = currentEmHeight;
-        this.isExpanded = this.isPanelHeightExpanded(currentEmHeight);
-        this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
-    }
-
-    /** Detects Safari because its resize/accordion behavior needs different animation defaults. */
-    private detectSafari() {
-        const isSafari = /Safari/i.test(navigator.userAgent);
-        if (isSafari) {
-            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
-        }
     }
 
     /** Surfaces source-data loading failures inline inside the docked panel. */
@@ -328,13 +285,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         if (!this.showDockAutoSizeToggle()) {
             return;
         }
-        const panel = this.panel();
-        const nextHeight = this.isExpanded ?
-            DEFAULT_DOCKED_EM_HEIGHT :
-            this.computeExpandedHeightEm(panel);
-        this.applyPanelHeight(panel, nextHeight);
-        this.isExpanded = this.isPanelHeightExpanded(nextHeight);
-        this.refreshPanelContentLayout();
+        this.inspectionAppPanel?.toggleExpanded();
     }
 
     /** Moves the camera to the first feature represented by this panel. */
@@ -441,25 +392,8 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         );
     }
 
-    private computeExpandedHeightEm(panel: InspectionPanelModel<FeatureWrapper>): number {
-        const contentHeight = this.getPanelContentAdapter()?.measurePreferredHeightEm();
-        if (contentHeight === undefined || !Number.isFinite(contentHeight)) {
-            return Math.max(panel.size[1], DEFAULT_DOCKED_EM_HEIGHT);
-        }
-        return Math.max(contentHeight, panel.size[1], DEFAULT_DOCKED_EM_HEIGHT);
-    }
-
-    /** Persists the current body height in both local state and shared app state. */
-    private applyPanelHeight(panel: InspectionPanelModel<FeatureWrapper>, heightEm: number) {
-        if (!Number.isFinite(heightEm) || heightEm <= 0) {
-            return;
-        }
-        panel.size[1] = heightEm;
-        this.stateService.setInspectionPanelSize(panel.id, [panel.size[0], heightEm]);
-    }
-
     /** Refreshes whichever content component is currently mounted inside the panel body. */
-    private refreshPanelContentLayout() {
+    protected refreshPanelContentLayout() {
         const refresh = () => this.getPanelContentAdapter()?.refreshLayout();
         window.requestAnimationFrame(() => {
             window.requestAnimationFrame(() => refresh());
@@ -470,8 +404,8 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         return this.panel().sourceData !== undefined ? this.sourceDataPanel : this.featurePanel;
     }
 
-    private isPanelHeightExpanded(heightEm: number): boolean {
-        return heightEm > DEFAULT_DOCKED_EM_HEIGHT + 0.1;
+    protected inspectionPanelLayoutId(): string {
+        return `inspection:${this.panel().id}`;
     }
 
     /** Opens the compare popover from either an inline action or the collapsed action menu. */
@@ -511,32 +445,4 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
         this.comparePopover.hide();
     }
 
-    /** Clears pending auto-expand work when the docked panel is destroyed. */
-    ngOnDestroy() {
-        this.clearScheduledAutoExpand();
-    }
-
-    /** Defers content-fit height measurement until after the accordion body is laid out. */
-    private scheduleAutoExpand() {
-        this.clearScheduledAutoExpand();
-        this.autoExpandRafFirst = window.requestAnimationFrame(() => {
-            this.autoExpandRafFirst = undefined;
-            this.autoExpandRafSecond = window.requestAnimationFrame(() => {
-                this.autoExpandRafSecond = undefined;
-                this.accordionValue = '0';
-            });
-        });
-    }
-
-    /** Cancels any deferred auto-expand measurement. */
-    private clearScheduledAutoExpand() {
-        if (this.autoExpandRafFirst !== undefined) {
-            window.cancelAnimationFrame(this.autoExpandRafFirst);
-            this.autoExpandRafFirst = undefined;
-        }
-        if (this.autoExpandRafSecond !== undefined) {
-            window.cancelAnimationFrame(this.autoExpandRafSecond);
-            this.autoExpandRafSecond = undefined;
-        }
-    }
 }
