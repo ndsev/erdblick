@@ -272,6 +272,26 @@ bool geometryMatches(SearchGeometryKind ruleGeometry, mapget::GeomType geomType)
     return true;
 }
 
+/** Return the geometry type that search-result styling should see for this result geometry. */
+mapget::GeomType searchResultRenderGeomType(
+    mapget::model_ptr<mapget::SearchResult> const& result,
+    mapget::model_ptr<mapget::Geometry> const& geometry)
+{
+    if (!result || !geometry || geometry->geomType() != mapget::GeomType::Line) {
+        return geometry ? geometry->geomType() : mapget::GeomType::Points;
+    }
+    auto const validityCount = result->validityCount();
+    if (!result->attributeIndex() || !result->validityIndex() || !validityCount || *validityCount <= 1U) {
+        return mapget::GeomType::Line;
+    }
+    // Older search-result chunks can encode one point per attribute validity as
+    // a line geometry. Rendering that shape as a path connects unrelated points.
+    if (geometry->numPoints() == *validityCount) {
+        return mapget::GeomType::Points;
+    }
+    return mapget::GeomType::Line;
+}
+
 bool evaluateSearchFilter(
     SearchStyleValue const& actual,
     SearchOperator op,
@@ -1665,15 +1685,17 @@ void DeckTileSearchResultLayerVisualization::appendResultGeometry(
     }
 
     for (auto const& rule : styleRules_) {
-        auto const style = styleForRuleResultGeometry(rule, result, geometry->geomType());
+        auto const renderGeomType = searchResultRenderGeomType(result, geometry);
+        auto const style = styleForRuleResultGeometry(rule, result, renderGeomType);
         if (style) {
-            appendStyledResultGeometry(geometry, resultIndex, *style);
+            appendStyledResultGeometry(geometry, renderGeomType, resultIndex, *style);
         }
     }
 }
 
 void DeckTileSearchResultLayerVisualization::appendStyledResultGeometry(
     mapget::model_ptr<mapget::Geometry> const& geometry,
+    mapget::GeomType renderGeomType,
     uint32_t resultIndex,
     SearchResolvedStyle const& style)
 {
@@ -1683,7 +1705,7 @@ void DeckTileSearchResultLayerVisualization::appendStyledResultGeometry(
         }
         return;
     }
-    switch (geometry->geomType()) {
+    switch (renderGeomType) {
     case mapget::GeomType::Points: {
         geometry->forEachPoint([&](auto const& point) {
             appendPoint(point, resultIndex, style);

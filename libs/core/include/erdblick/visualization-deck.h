@@ -406,6 +406,7 @@ private:
     /** Emit one geometry with one already-resolved search style rule. */
     void appendStyledResultGeometry(
         mapget::model_ptr<mapget::Geometry> const& geometry,
+        mapget::GeomType renderGeomType,
         uint32_t resultIndex,
         SearchResolvedStyle const& style);
     /** Resolve one search style rule for one result/geometry pair without consulting sibling rules. */
