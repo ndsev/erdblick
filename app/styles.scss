@@ -4448,6 +4448,18 @@ simfil-expression-input {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .feature-search-layer-select .p-treeselect-label,
+  .feature-search-layer-select .p-treeselect-label.p-placeholder,
+  .feature-search-layer-select .p-treeselect-label.p-treeselect-label-empty {
+    color: var(--p-treeselect-color, var(--p-form-field-color, var(--p-text-color)));
+  }
+
+  .feature-search-level-select .p-multiselect-label,
+  .feature-search-level-select .p-multiselect-label.p-placeholder,
+  .feature-search-level-select .p-multiselect-label.p-multiselect-label-empty {
+    color: var(--p-multiselect-color, var(--p-form-field-color, var(--p-text-color)));
+  }
 }
 
 .p-treeselect-overlay .feature-search-map-layer-tree-node {
