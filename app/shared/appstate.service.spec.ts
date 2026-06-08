@@ -277,7 +277,7 @@ describe('AppStateService', () => {
             version: 2,
             actionId: 'features',
             input: '**.speed > 80',
-            actionName: 'Search Loaded Features',
+            actionName: 'Search Features and Attributes',
             savedAt: 42,
         });
         await flushMicrotasks();

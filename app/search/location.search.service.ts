@@ -13,6 +13,11 @@ import {SearchTarget} from "./jump.service";
 export type LocationPoint = [number, number];
 export type LocationAabb = [LocationPoint, LocationPoint];
 
+const MAPGET_LOCATION_PROVIDER_ID = "mapget-offline";
+const MAPGET_LOCATION_ENDPOINT_URL = "/location";
+const LOCATION_SEARCH_TARGET_PREFIX = "loc:";
+const LOCATION_SEARCH_RESTORE_LIMIT = 50;
+
 export interface LocationSearchMatch {
     id: string;
     name: string;
@@ -23,6 +28,11 @@ export interface LocationSearchMatch {
     population?: number;
     providerId: string;
     providerName: string;
+}
+
+export interface LocationSearchRestoreResult {
+    target: SearchTarget | null;
+    error?: string;
 }
 
 const LOCATION_SEARCH_QUERY_PATTERN = /^\p{L}[\p{L}\p{M}\p{Zs}.'’,\-]*$/u;
@@ -299,7 +309,70 @@ export class LocationSearchService {
 
     /** Creates a stable search action id for one provider result. */
     targetId(match: LocationSearchMatch): string {
-        return `loc:${match.providerId}:${match.id}`;
+        return `${LOCATION_SEARCH_TARGET_PREFIX}${match.providerId}:${match.id}`;
+    }
+
+    /** Returns whether an action id belongs to a transient location-search target. */
+    isLocationTargetId(actionId: string): boolean {
+        return actionId.startsWith(LOCATION_SEARCH_TARGET_PREFIX);
+    }
+
+    /**
+     * Restores a compact URL/search-state location target through the built-in mapget /location endpoint.
+     */
+    restoreMapgetLocationTarget(actionId: string, query: string): Observable<LocationSearchRestoreResult> {
+        const providerId = this.providerIdFromTargetId(actionId);
+        if (!providerId) {
+            return of({
+                target: null,
+                error: `Cannot restore location search result "${actionId}": the saved action id is malformed.`
+            });
+        }
+        if (providerId !== MAPGET_LOCATION_PROVIDER_ID) {
+            return of({
+                target: null,
+                error: `Cannot restore location search result "${actionId}": only mapget /location results can be restored without a saved payload.`
+            });
+        }
+
+        const provider = this.configuredMapgetLocationProvider();
+        if (!provider) {
+            return of({
+                target: null,
+                error: "Cannot restore location search result: mapget /location search is not enabled in the frontend configuration."
+            });
+        }
+        if (!provider.enabled) {
+            return of({
+                target: null,
+                error: "Cannot restore location search result: mapget /location search is disabled in the frontend configuration."
+            });
+        }
+
+        const trimmedQuery = query.trim();
+        if (!isSupportedLocationSearchQuery(trimmedQuery) || trimmedQuery.length < this.minCharacters) {
+            return of({
+                target: null,
+                error: `Cannot restore location search result "${actionId}": "${trimmedQuery}" is not a valid location-search query.`
+            });
+        }
+
+        return this.searchProviderRequest(provider, trimmedQuery, LOCATION_SEARCH_RESTORE_LIMIT).pipe(
+            map(matches => {
+                const match = matches.find(candidate => this.targetId(candidate) === actionId);
+                if (!match) {
+                    return {
+                        target: null,
+                        error: `Cannot restore location search result "${actionId}": mapget /location returned no matching result for "${trimmedQuery}".`
+                    };
+                }
+                return {target: this.createSearchTarget(match)};
+            }),
+            catchError(error => of({
+                target: null,
+                error: `Cannot restore location search result "${actionId}": mapget /location request failed (${this.httpErrorDescription(error)}).`
+            }))
+        );
     }
 
     /** Returns the transient map label for an executable location payload. */
@@ -308,6 +381,18 @@ export class LocationSearchService {
     }
 
     private searchProvider(
+        provider: LocationSearchProviderConfig,
+        query: string,
+        limit: number): Observable<LocationSearchMatch[]> {
+        return this.searchProviderRequest(provider, query, limit).pipe(
+            catchError(error => {
+                console.warn(`[LocationSearchService] ${provider.id} request failed`, error);
+                return of([]);
+            })
+        );
+    }
+
+    private searchProviderRequest(
         provider: LocationSearchProviderConfig,
         query: string,
         limit: number): Observable<LocationSearchMatch[]> {
@@ -321,12 +406,46 @@ export class LocationSearchService {
         const headers = new HttpHeaders(provider.headers ?? {});
 
         return this.httpClient.get<unknown>(provider.url, {params, headers}).pipe(
-            map(payload => this.normalizeProviderResponse(provider, payload)),
-            catchError(error => {
-                console.warn(`[LocationSearchService] ${provider.id} request failed`, error);
-                return of([]);
-            })
+            map(payload => this.normalizeProviderResponse(provider, payload))
         );
+    }
+
+    private providerIdFromTargetId(actionId: string): string | null {
+        if (!this.isLocationTargetId(actionId)) {
+            return null;
+        }
+        const rest = actionId.slice(LOCATION_SEARCH_TARGET_PREFIX.length);
+        const separator = rest.indexOf(":");
+        if (separator <= 0) {
+            return null;
+        }
+        return rest.slice(0, separator);
+    }
+
+    private configuredMapgetLocationProvider(): LocationSearchProviderConfig | undefined {
+        return this.configService.snapshot.locationSearch.providers.find(provider =>
+            provider.id === MAPGET_LOCATION_PROVIDER_ID && provider.url === MAPGET_LOCATION_ENDPOINT_URL);
+    }
+
+    private httpErrorDescription(error: unknown): string {
+        const candidate = error as {status?: unknown; statusText?: unknown; message?: unknown; url?: unknown} | null;
+        if (!candidate || typeof candidate !== "object") {
+            return String(error);
+        }
+        const parts: string[] = [];
+        if (typeof candidate.status === "number") {
+            parts.push(`HTTP ${candidate.status}`);
+        }
+        if (typeof candidate.statusText === "string" && candidate.statusText.trim()) {
+            parts.push(candidate.statusText.trim());
+        }
+        if (typeof candidate.message === "string" && candidate.message.trim()) {
+            parts.push(candidate.message.trim());
+        }
+        if (typeof candidate.url === "string" && candidate.url.trim()) {
+            parts.push(candidate.url.trim());
+        }
+        return parts.length ? parts.join(", ") : String(error);
     }
 
     private normalizeProviderResponse(

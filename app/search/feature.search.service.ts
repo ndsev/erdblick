@@ -364,6 +364,13 @@ export class FeatureSearchService {
         return this.getInternalSession(id);
     }
 
+    /** Returns whether a saved feature-search panel already represents this query. */
+    hasPersistedSearchForQuery(query: string): boolean {
+        const normalizedQuery = query.trim();
+        return normalizedQuery.length > 0
+            && this.stateService.featureSearches.some(entry => entry.query.trim() === normalizedQuery);
+    }
+
     /** Starts lazy native aggregation of withFields and trace values for the Diagnostics tab. */
     requestValueSummaries(sessionId: string): void {
         const session = this.getInternalSession(sessionId);

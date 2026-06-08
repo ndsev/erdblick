@@ -14,6 +14,8 @@ import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/apps
 import {Cartographic, Rectangle} from "../integrations/geo";
 import {AppConfigService} from "../shared/app-config.service";
 
+export const FEATURE_SEARCH_TARGET_ID = "features";
+
 /**
  * Response shape returned by the backend /locate endpoint for jump-target resolution.
  */
@@ -155,10 +157,10 @@ export class JumpTargetService {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
         return {
-            id: "features",
+            id: FEATURE_SEARCH_TARGET_ID,
             icon: "pi-bolt",
             color: "blue",
-            name: "Search Loaded Features",
+            name: "Search Features and Attributes",
             label: label,
             enabled: false,
             execute: (value: string, payload?: unknown) => {

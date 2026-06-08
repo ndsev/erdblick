@@ -189,6 +189,81 @@ describe("LocationSearchService", () => {
         expect(await firstValueFrom(failing.service.search("munich", 10))).toEqual([]);
     });
 
+    it("restores compact mapget location targets through the /location endpoint", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockReturnValue(of([
+            {
+                id: "geonames:5690557",
+                name: "Munich, US",
+                lonLat: [-98.83926, 46.80667]
+            },
+            {
+                id: "geonames:2867714",
+                name: "Munich, DE",
+                lonLat: [11.57549, 48.13743],
+                countryCode: "DE"
+            }
+        ]));
+
+        const result = await firstValueFrom(
+            service.restoreMapgetLocationTarget("loc:mapget-offline:geonames:2867714", "munich")
+        );
+        const requestOptions = httpClient.get.mock.calls[0][1];
+
+        expect(httpClient.get).toHaveBeenCalledWith("/location", expect.any(Object));
+        expect(requestOptions.params.get("name")).toBe("munich");
+        expect(requestOptions.params.get("limit")).toBe("50");
+        expect(result.error).toBeUndefined();
+        expect(result.target?.id).toBe("loc:mapget-offline:geonames:2867714");
+        expect(result.target?.jump?.("munich", result.target.payload)).toEqual([48.13743, 11.57549, 0]);
+    });
+
+    it("reports disabled mapget location restore precisely", async () => {
+        const {service, httpClient} = createService([
+            {id: "mapget-offline", name: "Place", url: "/location", headers: {}, enabled: false}
+        ]);
+
+        const result = await firstValueFrom(
+            service.restoreMapgetLocationTarget("loc:mapget-offline:geonames:2867714", "munich")
+        );
+
+        expect(result.target).toBeNull();
+        expect(result.error).toContain("mapget /location search is disabled");
+        expect(httpClient.get).not.toHaveBeenCalled();
+    });
+
+    it("reports mapget location endpoint request failures during restore", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockReturnValue(throwError(() => ({
+            status: 503,
+            statusText: "Service Unavailable",
+            url: "/location"
+        })));
+
+        const result = await firstValueFrom(
+            service.restoreMapgetLocationTarget("loc:mapget-offline:geonames:2867714", "munich")
+        );
+
+        expect(result.target).toBeNull();
+        expect(result.error).toContain("mapget /location request failed");
+        expect(result.error).toContain("HTTP 503");
+        expect(result.error).toContain("Service Unavailable");
+    });
+
+    it("reports compact non-mapget location targets as unsupported", async () => {
+        const {service, httpClient} = createService([
+            {id: "external", name: "External", url: "https://example.test/location", headers: {}, enabled: true}
+        ]);
+
+        const result = await firstValueFrom(
+            service.restoreMapgetLocationTarget("loc:external:place.1", "munich")
+        );
+
+        expect(result.target).toBeNull();
+        expect(result.error).toContain("only mapget /location results can be restored");
+        expect(httpClient.get).not.toHaveBeenCalled();
+    });
+
     it("only accepts place-name queries for location search", async () => {
         expect(isSupportedLocationSearchQuery("Munich")).toBe(true);
         expect(isSupportedLocationSearchQuery("Sao Paulo")).toBe(true);

@@ -3514,9 +3514,7 @@ inspection-tree {
 
 .map-layer-dialog {
   .close-maps-button {
-    position: absolute;
-    top: 0.25em;
-    right: 0.25em;
+    margin: 0 0 0 auto;
     visibility: collapse;
 
     .p-button {

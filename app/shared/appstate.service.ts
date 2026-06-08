@@ -359,6 +359,7 @@ export class AppStateService implements OnDestroy {
     private lastMergedUrlSyncAt = 0;
     // One-shot guard used to keep inbound v1 links stable during passive startup.
     private skipNextUrlSync = false;
+    private initialSearchStateReplayConsumed = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -1769,6 +1770,13 @@ export class AppStateService implements OnDestroy {
     set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
     get search() {return this.searchState.getValue();}
     set search(val: SearchStateValue) {this.searchState.next(val);};
+    consumeInitialSearchStateReplay(): boolean {
+        if (this.initialSearchStateReplayConsumed) {
+            return false;
+        }
+        this.initialSearchStateReplayConsumed = true;
+        return true;
+    }
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
