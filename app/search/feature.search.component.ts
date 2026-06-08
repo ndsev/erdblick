@@ -156,7 +156,11 @@ interface FeatureSearchStyleRuleDraft {
                            [layoutId]="session.layoutId" [persistLayout]="true"
                            [dockedPanelCount]="dockedPanelCount"
                            [expanded]="featureSearchExpanded"
-                           (onShow)="onDockedPanelShow()">
+                           (expandedChange)="featureSearchExpanded = $event"
+                           [preferredBodyHeightEm]="measurePreferredFeatureSearchHeightEm"
+                           [maxBodyHeightEm]="60"
+                           (onShow)="onDockedPanelShow()"
+                           (bodySizeChange)="onDockedPanelBodySizeChange()">
                     <ng-template #header>
                         <ng-container *ngTemplateOutlet="searchHeader"></ng-container>
                     </ng-template>
@@ -356,14 +360,22 @@ interface FeatureSearchStyleRuleDraft {
                     <!-- Results -->
                     <p-tabpanel value="results">
                         <div class="feature-search-results-panel">
-                            <div class="feature-search-grouping">
-                                <span>Group:</span>
-                                <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
-                                               [showToggleAll]="false" (ngModelChange)="onGroupingOptionsChange($event)"
-                                               placeholder="Select Grouping" [maxSelectedLabels]="5"
-                                               display="chip" optionLabel="name">
-                                </p-multiSelect>
+                            <div style="width: 100%; display: flex; gap: 0.25em; flex-direction: row; align-items: center; padding: 0.25em 0">
+                                <label for="feature-search-grouping">Group</label>
+                                <p-multiSelect inputId="feature-search-grouping"
+                                               style="width: 100%"
+                                               [options]="grouping"
+                                               [(ngModel)]="selectedGroupingOptions"
+                                               [filter]="false"
+                                               [showToggleAll]="false"
+                                               (ngModelChange)="onGroupingOptionsChange($event)"
+                                               placeholder="Select Grouping"
+                                               [maxSelectedLabels]="5"
+                                               display="chip"
+                                               optionLabel="name">
+                                </p-multiSelect> 
                             </div>
+                            
 
                             <div #featureSearchTreeHost class="feature-search-tree-host">
                                 <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
@@ -1046,6 +1058,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private pendingBookmarkedCloseSessionId: string | null = null;
     private resizeObserver?: ResizeObserver;
     private treeScrollHeightRaf?: number;
+    protected readonly measurePreferredFeatureSearchHeightEm = () => this.measurePreferredBodyHeightEm();
 
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
@@ -3124,6 +3137,19 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.refreshCompletionZIndex();
     }
 
+    protected onDockedPanelBodySizeChange(): void {
+        this.syncTreeScrollHeight();
+    }
+
+    private measurePreferredBodyHeightEm(): number | undefined {
+        const content = this.featureSearchContentContainer?.nativeElement;
+        if (!content || !this.stateService.baseFontSize) {
+            return undefined;
+        }
+        const height = content.scrollHeight / this.stateService.baseFontSize;
+        return Number.isFinite(height) && height > 0 ? height : undefined;
+    }
+
     protected bringSurfaceToFront() {
         if (!this.isDocked()) {
             this.dialogStack.bringToFront(this.featureSearchDialog);
@@ -3162,8 +3188,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (this.dockedPanelCount <= 1) {
             return;
         }
-        this.featureSearchExpanded = !this.featureSearchExpanded;
-        setTimeout(() => this.syncTreeScrollHeight(), 0);
+        this.featureSearchPanel?.toggleExpanded();
     }
 
     protected onSearchColorChange(color: string) {
