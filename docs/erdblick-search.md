@@ -29,6 +29,7 @@ The palette closes automatically when you click the map or another control, but 
 | Action | Input syntax | Result |
 | --- | --- | --- |
 | **Search Loaded Features** | Any valid Simfil expression | Opens a feature-search panel for the query. The panel streams result layers from the backend, keeps its own result tree, and can be docked, undocked, paused, refreshed, styled, bookmarked, or closed independently. |
+| **Place / Location Matches** | Place-name text such as `Munich` | Shows matching locations from the configured location providers. Selecting a match jumps the active view to that place, drops the location marker, and briefly labels the chosen result on the map. |
 | **Mapget Tile ID** | `<tileId>` (integer without spaces) | Navigates to the requested tile by computing its bounding box. Useful for links copied from logs or SourceData tools. |
 | **WGS84 Lon-Lat Coordinates** | `lon, lat` or `lon lat [level]` (decimal) / `12°34'56"W 48°01'30"N [level]` (DMS) | Positions the active view on the provided longitude/latitude pair. An optional zoom `level` snaps to the matching tile. |
 | **WGS84 Lat-Lon Coordinates** | `lat, lon` or `lat lon [level]` (decimal/DMS) | Same as above but with the order reversed for users accustomed to `lat,lon` input. |
@@ -39,6 +40,20 @@ The palette closes automatically when you click the map or another control, but 
 
 All coordinate targets accept decimal or degree-minute-second formats. When you include a zoom level, erdblick converts the coordinates into a tile rectangle before animating the camera.
 <!-- --8<-- [end:jump-targets] -->
+
+### Place-Name Location Search
+
+<!-- --8<-- [start:location-search] -->
+Location search is part of the same palette as coordinate jumps and feature search. Type a place name such as `Munich`, wait for the configured providers to return matches, and select the desired result from the active actions list.
+
+Erdblick only sends name-like queries to location providers. Numeric IDs, coordinates, and mixed strings such as postal-code searches stay with the normal jump and feature-search targets. The default minimum query length is two characters.
+
+Location results are sorted by population when the provider supplies it, then by name, provider, and stable result id. Selecting a result moves the active view to its WGS84 coordinate, enables the location marker, and shows a short-lived label with the selected place name. The selected result is stored in search history with enough payload to rerun it later in the same browser profile.
+
+Use **Edit -> Settings -> Location Matches** to control how many location matches the palette asks providers to return. The default is 10; the supported range is 1 to 50.
+<!-- --8<-- [end:location-search] -->
+
+![Place-name location search](screenshots/search-location-matches.png)
 
 ### Feature Jump Targets
 
@@ -75,7 +90,8 @@ Important controls:
 - **Map Layers** - restrict the search to selected maps and layers. This also narrows schema-aware completion and style-field pickers.
 - **Scope** - choose `Auto`, `Feature`, or `Attribute`. Feature scope evaluates once per feature. Attribute scope evaluates once per attribute/validity context and exposes `$name`, `$layer`, `$feature`, `$validityIndex`, and `$validityCount`. Auto chooses attribute scope when schema metadata proves that the query targets attribute-layer fields.
 - **View** - in split view, choose where the result layer is visualized: left view, right view, or both. Auto-update follows the visible tiles of the selected view set.
-- **Auto update area** - when enabled, panning, zooming, layer changes, and split-view changes refresh the search area automatically. When disabled, use **Update area** to search the current visible tiles manually.
+- **Auto update area** - when enabled, panning, zooming, layer changes, and split-view changes refresh the search area automatically. When disabled, use **Update area** to replace the search area with the current visible tiles without changing the query.
+- **Refresh / rerun** - refresh repeats the active search over its current area. When the query text is dirty, the same action becomes **Rerun search** and commits the edited query before searching.
 - **Bookmark** - keep important searches in state and protect them from accidental close. Closing a bookmarked search prompts you to confirm, with an option to export first.
 - **Pause, resume, and stop** - pause or stop long searches without closing the panel. Pausing preserves current results; stopping terminates the active backend run for that session.
 <!-- --8<-- [end:feature-search] -->
@@ -91,7 +107,7 @@ The **Results** tab is built for large streamed result sets.
 - **Selection** is a normal feature-selection entry point. Clicking a result focuses the map, opens or updates inspection, and highlights the matched feature.
 - **Attribute-scope selection** can focus a specific attribute/validity target instead of only the owning feature. When validity geometry is available, the map highlight follows that validity.
 - **Hovering** a result previews the matching feature or attribute target without changing the selected inspection.
-- **Export as JSON** writes the search configuration and/or result data for offline analysis. Treat the exact JSON fields as an integration format, not as a hand-edited user format.
+- **Export as JSON** writes the search configuration and/or result data for offline analysis. Exports preserve enough map/layer/result metadata to reopen the investigation context and are useful before closing a bookmarked search. Treat the exact JSON fields as an integration format, not as a hand-edited user format.
 <!-- --8<-- [end:results] -->
 
 ## Result Visualization
@@ -122,13 +138,16 @@ High-fi visualization draws styled result geometry when the visible tile count i
 
 Search style rules are evaluated only for the result layer of the current search.
 
-- **Add Rule** creates another rule. Reset restores a rule to its generated defaults; delete removes it.
+- **Add Rule** creates another rule. Reset restores a rule to its generated defaults; delete removes it. Rule names are only local labels for keeping several result styles readable.
 - Rule headers show compact summaries for geometry, filters, color mode, and preview colors.
-- **Filter** conditions can use schema-backed field pickers, comparison operators, numeric inputs, enum value pickers, text values, or custom Simfil expressions.
-- **Geom** chooses the rendered kind: any geometry, line, polygon, mesh, point, or label. Labels can use a selected field or a custom label expression.
-- **Color** supports solid colors, numeric gradients, and categories for enum/string-like values. **Update from data** uses the Diagnostics/Values summaries from the current result set when available.
+- **Filter** conditions can use schema-backed field pickers, comparison operators, numeric inputs, enum value pickers, text values, or custom Simfil expressions. Multiple conditions inside one rule are combined for that rule.
+- **Geom** chooses the rendered kind: any geometry, line, polygon, mesh, point, or label. Geometry rules expose the relevant width, size and opacity controls for the selected kind.
+- **Labels** can use a selected field or a custom label expression. Common labels are speed-limit values, feature types, validation rule IDs, and issue IDs.
+- **Color** supports solid colors, numeric gradients, and categories for enum/string-like values. Category and gradient modes include a fallback color for missing or unmatched values. **Update from data** uses the Diagnostics/Values summaries from the current result set when available.
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
+
+Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->
 
 ## Search Diagnostics
@@ -137,10 +156,10 @@ Auto-created rules prefer fields mentioned by the query. Manual edits stop those
 The **Diagnostics** tab explains what the current search did and helps tune queries.
 
 - **Messages** lists backend or parser diagnostics. When a message offers a fix, click **Fix** to rewrite the query in the input.
-- **Query** shows the active query, effective scope, elapsed time, searched feature count, and matched result count.
+- **Query** shows the active query, effective scope, elapsed time, searched feature count, matched result count, and schema-derived notes when they are available.
 - **Values** summarizes result fields and `trace()` output. Cards include sample counts, missing/null counts, kind counts, numeric min/max/average values, histograms, and trace call timings.
 
-Values are loaded lazily and may wait until result chunks have finished ingress. Use them when you want to understand the distribution behind a search before creating labels, categories, or gradients.
+Values are loaded lazily and may wait until result chunks have finished ingress. Use them when you want to understand the distribution behind a search before creating labels, categories, or gradients. Useful trace expressions include `trace(typeId)`, `trace(**.speedLimitKmh)`, and named traces such as `trace(valueKph, name="speed limits")` when several measurements should appear as separate value cards.
 <!-- --8<-- [end:diagnostics] -->
 
 ## Crafting Feature Queries
@@ -150,8 +169,9 @@ When you compose Simfil expressions, start from the data that erdblick actually 
 
 - Use inspection to explore one feature. Open the three-dot hover menu on the left of a scalar row and choose **Copy Search Path** to copy the exact Simfil path.
 - From the same row menu, choose **Search for key/value** to open a search for that scalar value in the inspected map/layer context.
-- Keep early queries simple, for example `speedLimitKmh > 80`, `**.speedLimitKmh > 80`, or an enum-like attribute such as `WARNING_SIGN`.
+- Keep early queries simple, for example `speedLimitKmh > 80`, `**.speedLimitKmh > 80`, or a completed enum value such as `"SPEED_LIMIT_END"`.
 - Use attribute scope for validity-specific searches, for example to find all matching warning-sign or speed-limit validities and then inspect the matched validity geometry.
+- Search transition-validity payloads through their semantic fields when present, for example `transitionNumber == 1` or `fromConnectedEnd == "END"`.
 - Use `trace()` when you want diagnostics instead of only yes/no filtering, for example `trace(typeId)` or `trace(**.speedLimitKmh)`.
 - Combine conditions with `and`, `or`, and `not` once the individual pieces are known to work.
 
@@ -166,7 +186,7 @@ Search inputs offer live assistance while you type:
 - **Schema-aware completion** suggests fields, enum-like string constants, and function names. It respects the selected map layers and the selected search scope where possible.
 - **Non-blocking completion** runs outside the main UI path. Suggestions can briefly lag behind datasource metadata changes, but typing and panel interaction should remain responsive.
 - **Wildcard shortcuts** can be expanded through schema metadata. If a datasource schema proves where `speedLimitKmh` exists, a short expression such as `speedLimitKmh > 80` can target the concrete field without forcing you to write the complete path.
-- **Enum constants** can be written as unquoted uppercase symbols when the schema identifies them as enum-like values, for example `WARNING_SIGN`.
+- **Enum constants** are suggested from schema metadata as quoted string literals, for example `"SPEED_LIMIT_END"`. If the same token is also a reachable field, completion prefers the unquoted field form, for example `SPEED_LIMIT_METRIC`.
 - **Forced field access** is available when a token could be interpreted several ways. Use `_.FIELD` or `["FIELD"]` to make a name a field access.
 - **Inline diagnostics** appear before or during a search for parse errors, ambiguous schema rewrites, missing fields, and fixable query patterns.
 
@@ -183,6 +203,7 @@ If search behaves unexpectedly, check these common failure modes first:
 - **Results seem incomplete** - verify the selected map layers, selected split views, current visible area, tile budgets, and Auto update area setting.
 - **Search progress appears stuck** - open Diagnostics and compare backend search, result ingress, and result-tree progress. Large result sets can spend visible time building the result tree after backend matches already arrived.
 - **A short field query is ambiguous** - use a more explicit path, force field access with `_.FIELD`, or restrict Map Layers so the schema resolver has fewer possible targets.
+- **A broad search is too slow** - narrow Map Layers, search a smaller area first, prefer schema-resolved fields over recursive wildcards when possible, and use density visualization before enabling high-fi labels over many tiles.
 - **Search keeps erroring** - open the Diagnostics tab and apply available fixes. If the same query fails against one datasource only, export diagnostics and include the selected map/layer information in the bug report.
 - **Feature jump shows multiple maps** - select the desired map from the prompt or cancel to abort the jump.
 

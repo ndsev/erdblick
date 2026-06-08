@@ -60,9 +60,7 @@ Once split view is active, a few recurring patterns make it easier to compare da
 - **Search comparison** - run the same query against different map/layer selections, bind one search to the left view and another to the right view, then group results by map/layer or use result labels/categories to compare distributions.
 - **2D vs 3D** - enable `lay` and `pos`, disable `proj`. Switch only one pane to 2D, leaving the other in 3D to compare interactions.
 
-_[Screenshot placeholder: Two panes showing different styles, sync toggles highlighted.]_
-
-_[Screenshot placeholder: Split view with the Search View selector open.]_
+![Split view search selector](screenshots/split-search-view-selector.png)
 
 ## Tips and Troubleshooting
 

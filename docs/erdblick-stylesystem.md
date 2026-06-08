@@ -175,6 +175,22 @@ rules:
     offset-increment: [0.8, 0, 0]
 ```
 
+Attribute-aware highlights can combine attribute filtering, validity geometry, arrows and stacked offsets. This is useful when several matched attributes share the same road geometry:
+
+```yaml
+rules:
+  - type: Road
+    aspect: attribute
+    attribute-layer-type: speedProfile
+    attribute-type: SPEED_LIMIT
+    attribute-validity-geom: any
+    geometry: [line]
+    color-expression: valueKph > 80 and "#d6452f" or "#2f80ed"
+    width: 5
+    arrow: forward
+    offset-increment: [0.8, 0, 0]
+```
+
 Labels are regular style leaves. Use `label-text-expression` to keep text data-driven:
 
 ```yaml
@@ -185,6 +201,22 @@ rules:
     label-scale: 0.8
     label-color: "#ffffff"
     label-background-color: "#202020"
+```
+
+For dense point layers, `point-merge-grid-cell` merges coincident points and exposes `$mergeCount` for labels:
+
+```yaml
+rules:
+  - type: ValidationIssue
+    geometry: [point]
+    color: "#f2994a"
+    width: 10
+    point-merge-grid-cell: [2, 2, 0]
+
+  - type: ValidationIssue
+    geometry: [label]
+    label-text-expression: "$mergeCount > 1 and $mergeCount as string or ruleId"
+    label-scale: 0.8
 ```
 
 ### GLTF and AABB Geometry
@@ -308,11 +340,11 @@ Per-layer overrides in the Maps & Layers panel map directly to these options. Be
 
 ## Attribute Validity Visualization
 
-Attribute validities (for example positional or range validities) are exposed through the dedicated `Attributes` style sheet:
+Attribute validities (for example positional or range validities) are best visualized through Search result styles or focused inspection highlights:
 
-- Enable the `Attributes` style in the Styles dialog to make validity overlays available.
-- Use the style’s options (for example “Position Validity”, “Range Validity”) to control which validity classes are rendered.
-- Combine the style with feature selection: by default, validity overlays are drawn only for selected features, keeping the scene readable.
+- Use Search result styles for broad, query-specific validity overlays.
+- Use inspection row actions to highlight a single attribute or validity while keeping the rest of the scene readable.
+- Use `aspect: attribute` rules when a persistent project style really needs to render validity geometry directly.
 
 !!! warning "Use global validity overlays sparingly"
     Enabling validity visualization for all features in a large viewport can be expensive. Start with selection-based overlays and narrow attribute filters, then only widen the scope when you are sure that performance remains acceptable.

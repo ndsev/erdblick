@@ -123,6 +123,7 @@ Open **Edit -> Settings** to access the main viewer preferences:
 
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
+- **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
 - **Tile pull compression** toggles compressed tile downloads
 - **Threaded tile rendering** and **Render worker count override** control deck.gl-side rendering parallelism
 - **Pin low-fi rendering to max LOD** changes the low-fidelity culling policy

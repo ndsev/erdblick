@@ -24,8 +24,6 @@ If the UI feels sluggish or frame rates drop when you move the camera, a few sim
 - Use Chromium-based browsers for the best WebGL throughput. Firefox/Safari generally render fewer tiles per frame.
 - Open **Tools -> Performance Statistics** and capture the relevant diagnostics before changing the scene further.
 
-_[Screenshot placeholder: Preferences dialog showing tile limit sliders used for tuning.]_
-
 ## Styles Look Wrong
 
 When only the styling looks off—colors, labels, or overlays—but the tiles themselves are present, focus on the style configuration before suspecting the data:

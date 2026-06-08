@@ -349,15 +349,17 @@ flowchart LR
     SearchPanel[SearchPanelComponent<br>command palette]
     FeatureSearch[FeatureSearchComponent<br>search dialog]
     SearchSvc[FeatureSearchService<br>sessions and results]
+    SchemaSvc[FeatureSearchSchemaService<br>completion and analysis]
     JumpSvc[JumpTargetService<br>jump targets]
   end
-  MapInfo[MapInfoService<br>schema helpers]
+  MapInfo[MapInfoService<br>datasource metadata]
+  Workers[Search workers<br>completion and analysis]
   TileStream[MapTileStreamService<br>search stream]
   RenderSvc[MapRenderService<br>result geometry]
   InspectionSelection[InspectionSelectionService<br>hover/focus]
   State[AppStateService<br>search state]
-  Core[WASM core<br>TileLayerParser completion]
-  Backend[Backend<br>/tiles and /locate]
+  Core[WASM core<br>TileLayerParser helpers]
+  Backend[Backend<br>/tiles WebSocket and /locate]
 
   SearchPanel --> SearchSvc
   SearchPanel --> JumpSvc
@@ -365,10 +367,13 @@ flowchart LR
   FeatureSearch --> SearchSvc
 
   SearchSvc --> MapInfo
+  SearchSvc --> SchemaSvc
   SearchSvc --> TileStream
   SearchSvc --> InspectionSelection
   SearchSvc --> State
-  SearchSvc --> Core
+  SchemaSvc --> Workers
+  Workers --> Core
+  SchemaSvc -.fallback.-> Core
   TileStream --> Backend
   TileStream --> Core
   RenderSvc --> TileStream
@@ -379,14 +384,15 @@ From the perspective of this group:
 
 - `SearchPanelComponent` implements the command palette UX and hands off parsing and execution to `FeatureSearchService` and `JumpTargetService`.
 - `FeatureSearchComponent` provides the dedicated search dialog including diagnostics and tracing.
-- `FeatureSearchService` orchestrates persisted search sessions, schema-backed completion requests, server progress, diagnostics, low-fi result pins, and aggregated result lists.
+- `FeatureSearchService` orchestrates persisted search sessions, scope-analysis scheduling, server progress, diagnostics, low-fi result pins, and aggregated result lists.
+- `FeatureSearchSchemaService` owns schema-backed completion, auto-scope inference, search-style field enumeration, query-AST diagnostics, and the completion/analysis worker lanes.
 - `JumpTargetService` offers additional jump targets (tile IDs, feature IDs, SourceData) on top of the palette.
-- `MapInfoService` exposes schema-backed completion, auto-scope inference, search-style field enumeration, and jump-target filtering.
-- `MapTileStreamService` turns active search sessions into `/tiles` search requests and streams `TileSearchResultLayer` payloads.
+- `MapInfoService` owns datasource metadata and the shared `TileLayerParser`; schema workers receive mirrored `/sources` metadata through `FeatureSearchSchemaService`.
+- `MapTileStreamService` turns resolved active search sessions into `/tiles` WebSocket request updates and streams `TileSearchResultLayer` payloads.
 - `MapRenderService` schedules high-fidelity result geometry rendering for the cached search-result tiles.
 - `InspectionSelectionService` handles result hover/focus handoff to the inspection system.
 - `AppStateService` records the currently active search and keeps history in sync with URLs.
-- `TileLayerParser` provides schema-aware completion and conservative auto-scope inference from datasource metadata.
+- `TileLayerParser` provides schema-aware completion roots, conservative auto-scope inference, query-AST diagnostics, and search-style field enumeration from datasource metadata.
 - The backend evaluates feature and attribute searches server-side through `/tiles`; `/locate` is still used when resolving external references.
 
 ### Inspection and SourceData (inspection/*)
@@ -701,24 +707,29 @@ Aside from in-process exceptions, a few error classes originate from IO or backe
 
 In general, treat the browser console and the statistics dialog as complementary tools: the console tells you what failed, the stats dialog tells you which tiles and styles were affected or unusually slow.
 
-## Feature Search/Query completion
+## Feature Search Architecture
 
-Feature search is server-side. The frontend owns session state, request composition, completion, and rendering of streamed result layers:
+Feature search is server-side. The frontend owns session state, request composition, completion, scope analysis, diagnostics display, and rendering of streamed result layers. The detailed architecture, including completion, auto-scope, attribute search, query rewrites, schema-based SIMFIL optimization, and diagnostics, is documented in [Erdblick Search Architecture](erdblick-search-architecture.md).
 
 ```mermaid
 sequenceDiagram
   participant UI as SearchPanelComponent
   participant Search as FeatureSearchService
-  participant MapInfo as MapInfoService
+  participant Schema as FeatureSearchSchemaService
+  participant Worker as search worker
   participant TileStream as MapTileStreamService
   participant Render as MapRenderService
-  participant Backend as mapget /tiles
+  participant Backend as mapget /tiles WebSocket
   participant Core as TileLayerParser and search-result renderer
 
   UI->>Search: run query
-  Search->>MapInfo: infer auto scope from schema<br>when requested
-  Search->>TileStream: set active search request<br>query, scope, style fields
-  TileStream->>Backend: stream /tiles request<br>with search data plane
+  Search->>Schema: request scope analysis<br>when needed
+  Schema->>Worker: schema metadata query<br>completion/analysis lane
+  Worker->>Core: TileLayerParser helper
+  Core-->>Schema: concrete scope,<br>attribute contexts, candidates
+  Schema-->>Search: schema result
+  Search->>TileStream: set active search definitions<br>backendQuery, scope, result fields
+  TileStream->>Backend: update /tiles WebSocket request
 
   loop for each tile
     Backend-->>TileStream: TileSearchResultLayer<br>and search status
@@ -730,17 +741,19 @@ sequenceDiagram
   Search-->>UI: progress, diagnostics,<br>result list and low-fi pins
 
   UI->>Search: request completions<br>for prefix at caret
-  Search->>Core: completeSearchQuery<br>from LayerInfo schema
-  Core-->>Search: completion candidates<br>or empty list without schema
+  Search->>Schema: request completion
+  Schema->>Worker: completeSearchQuery<br>from LayerInfo schema
+  Worker-->>Search: streamed candidates<br>or fallback result
   Search-->>UI: candidate list<br>for autocompletion popup
 ```
 
 A few implementation details matter for contributors:
 
-- `FeatureSearchService` aggregates session state, result lists, diagnostics, server progress, and low-fidelity pin clusters. It no longer parses or searches tile blobs in the browser.
-- `MapTileStreamService` composes active searches into the `/tiles` request, tracks refresh ids to ignore stale result frames, and owns the streamed `TileSearchResultLayer` cache used for high-fidelity rendering.
-- `TileLayerParser.completeSearchQuery()` builds lightweight schema-backed SIMFIL roots from `LayerInfo.featureModelSchema`. Datasources without schema metadata intentionally produce no completion candidates.
-- `TileLayerParser.isAttributeScopeSearchQuery()` is conservative. Unknown or ambiguous top-level identifiers remain feature-scope; only unambiguous attribute-context fields or overlay variables select attribute scope automatically.
+- `FeatureSearchService` aggregates session state, result lists, diagnostics, server progress, low-fidelity pin clusters, and resolved backend request definitions. It no longer parses or searches feature tile blobs in the browser.
+- `FeatureSearchSchemaService` runs completion and analysis through isolated workers when available, with main-thread parser fallback for supported operations.
+- `MapTileStreamService` composes resolved searches into the `/tiles` WebSocket request, tracks refresh ids to ignore stale result frames, batches large result-entry extraction, and owns the streamed `TileSearchResultLayer` cache used for high-fidelity rendering.
+- `TileLayerParser.completeSearchQuery()`, `getAttributeScopeForQuery()`, `searchQueryAstDiagnostics()`, and `searchStyleFieldsForQuery()` build lightweight schema-backed SIMFIL roots from `LayerInfo.featureModelSchema`. Datasources without schema metadata intentionally provide no schema candidates.
+- SIMFIL schema-aware compilation uses `RewriteMode::Schema` and a root schema id to rewrite shorthand and prune wildcard traversal. Mapget's actual search predicate path differs from Erdblick's metadata-only diagnostics path; see the architecture doc before changing either side.
 - High-fidelity result geometry uses `DeckTileSearchVisualization` / `DeckTileSearchResultLayerVisualization` and the same deck render queue as normal map tiles. Low-fidelity pins remain in the search service cluster overlay.
 
 ## Feature and SourceData Layer Selection
