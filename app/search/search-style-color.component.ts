@@ -238,8 +238,8 @@ export class SearchStyleColorComponent implements OnChanges {
     protected readonly fieldInputId: string;
     protected readonly customFieldCompletionOwnerId: string;
     private readonly modeOptions: Array<{label: string; value: SearchStyleColorMode}> = [
-        {label: "Gradient", value: "gradient"},
         {label: "Solid", value: "solid"},
+        {label: "Gradient", value: "gradient"},
         {label: "Categories", value: "categories"}
     ];
     private nextStopId = 1;

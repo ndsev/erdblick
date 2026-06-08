@@ -1347,7 +1347,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             filters: [],
             visualization: 'any',
             lineWidth: 5,
-            opacity: 40,
+            opacity: 60,
             labelExpression: fieldOption?.value ?? this.defaultStyleField(),
             labelCustomExpression: false,
             labelBackgroundColor: DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR,
