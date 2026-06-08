@@ -2548,13 +2548,55 @@ inspection-tree {
   }
 }
 
-.inspection-container {
-  display: flex;
+.inspection-container,
+.feature-search-dock-container {
+  display: flex !important;
   flex-direction: column;
   gap: 0.25em;
+  height: 100%;
+  min-height: 0;
   overflow-x: clip;
-  height: 100vh;
   width: 100%;
+}
+
+.inspection-container.single-panel,
+.feature-search-dock-container.single-panel {
+  overflow-y: hidden;
+}
+
+.inspection-container.multi-panel,
+.feature-search-dock-container.multi-panel {
+  overflow-y: auto;
+}
+
+.inspection-container.reordering,
+.feature-search-dock-container.reordering {
+  p-accordion-content {
+    visibility: collapse;
+  }
+}
+
+.inspection-container inspection-panel.dragging,
+.feature-search-dock-container feature-search.dragging {
+  opacity: 0.6;
+}
+
+.inspection-container inspection-panel.dragging .inspector-title,
+.feature-search-dock-container feature-search.dragging .app-surface-header {
+  cursor: grabbing;
+}
+
+.inspection-container inspection-panel.drop-before,
+.feature-search-dock-container feature-search.drop-before {
+  border-top: 2px solid var(--p-primary-500);
+}
+
+.inspection-container inspection-panel.drop-after,
+.feature-search-dock-container feature-search.drop-after {
+  border-bottom: 2px solid var(--p-primary-500);
+}
+
+.inspection-container {
 
   &.hidden {
     visibility: collapse;
@@ -2657,8 +2699,6 @@ inspection-tree {
   }
 
   &.single-panel {
-    overflow-y: hidden;
-
     inspection-panel {
       display: flex;
       flex: 1 1 auto;
@@ -2721,36 +2761,12 @@ inspection-tree {
   }
 
   &.multi-panel {
-    overflow-y: auto;
-
     .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
       min-height: 15em;
       resize: vertical;
       overflow: auto;
       border-bottom: solid 0.1em var(--p-form-field-border-color);
     }
-  }
-
-  &.reordering {
-    p-accordion-content {
-      visibility: collapse;
-    }
-  }
-
-  inspection-panel.dragging {
-    opacity: 0.6;
-  }
-
-  inspection-panel.dragging .inspector-title {
-    cursor: grabbing;
-  }
-
-  inspection-panel.drop-before {
-    border-top: 2px solid var(--p-primary-500);
-  }
-
-  inspection-panel.drop-after {
-    border-bottom: 2px solid var(--p-primary-500);
   }
 
   .inspect-panel {
@@ -3311,6 +3327,8 @@ inspection-tree {
 
 .feature-search-dialog {
   .p-dialog.p-component {
+    display: flex;
+    flex-direction: column;
     width: 42em;
     min-width: min(38em, calc(100vw - 2em));
     min-height: min(42em, calc(100vh - 5em));
@@ -3358,6 +3376,45 @@ inspection-tree {
     overflow: visible;
   }
 
+  .app-panel-accordion,
+  .p-accordionpanel,
+  .p-accordioncontent,
+  .p-accordioncontent > .p-motion,
+  .p-accordioncontent-wrapper,
+  .app-panel-content {
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  &.app-panel-single,
+  &.app-panel-resize-fill {
+    overflow: hidden;
+
+    .app-panel-accordion {
+      height: 100%;
+    }
+
+    .p-accordionpanel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: 100%;
+    }
+
+    .p-accordioncontent,
+    .p-accordioncontent > .p-motion,
+    .p-accordioncontent-wrapper,
+    .p-accordioncontent-content,
+    .app-panel-content {
+      max-height: 100%;
+    }
+
+    .p-accordioncontent-content {
+      height: 100%;
+    }
+  }
+
   .p-accordioncontent-content {
     display: flex;
     flex: 1 1 auto;
@@ -3365,12 +3422,16 @@ inspection-tree {
     min-height: 0;
     min-width: 0;
     max-width: 100%;
+    overflow: hidden;
     padding: 0 0.5em 0.5em 0.5em;
   }
 
   &.app-panel-stack.app-panel-resize-vertical .p-accordioncontent-content {
     direction: rtl;
-    overflow-x: hidden;
+    height: min(34em, calc(100vh - 10em));
+    max-height: calc(100vh - 10em);
+    overflow: hidden;
+    resize: vertical;
 
     > * {
       direction: ltr;
@@ -3382,7 +3443,7 @@ inspection-tree {
     max-height: calc(100vh - 10em);
     direction: rtl;
     resize: vertical;
-    overflow: auto;
+    overflow: hidden;
 
     > * {
       direction: ltr;
@@ -3391,25 +3452,11 @@ inspection-tree {
 }
 
 .feature-search-dock-container {
-  display: flex !important;
-  flex-direction: column;
-  gap: 0.25em;
-  overflow-x: clip;
-  width: 100%;
-
   feature-search {
     min-width: 0;
   }
 
-  &.reordering {
-    p-accordion-content {
-      visibility: collapse;
-    }
-  }
-
   &.single-panel {
-    overflow-y: hidden;
-
     feature-search,
     .feature-search-panel {
       display: flex;
@@ -3420,8 +3467,6 @@ inspection-tree {
   }
 
   &.multi-panel {
-    overflow-y: auto;
-
     feature-search,
     .feature-search-panel {
       display: block;
@@ -3435,21 +3480,6 @@ inspection-tree {
     }
   }
 
-  feature-search.dragging {
-    opacity: 0.6;
-  }
-
-  feature-search.dragging .app-surface-header {
-    cursor: grabbing;
-  }
-
-  feature-search.drop-before {
-    border-top: 2px solid var(--p-primary-500);
-  }
-
-  feature-search.drop-after {
-    border-bottom: 2px solid var(--p-primary-500);
-  }
 }
 
 .app-dock-drag-preview {
@@ -4456,6 +4486,16 @@ inspection-tree {
   opacity: 0.52;
 }
 
+.feature-search-content {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 simfil-expression-input,
 search-style-color {
   display: block;
@@ -4595,9 +4635,9 @@ simfil-expression-input {
 }
 
 .feature-search-tabs {
-  display: flex;
+  display: grid;
   flex: 1 1 auto;
-  flex-direction: column;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 
@@ -4614,6 +4654,7 @@ simfil-expression-input {
   .p-tabpanels {
     display: flex;
     flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     overflow: hidden;
     padding: 0.5em 0 0 0;
@@ -4626,6 +4667,7 @@ simfil-expression-input {
 
   .p-tabpanel {
     flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     overflow: hidden;
   }
@@ -4633,10 +4675,20 @@ simfil-expression-input {
   .p-tabpanel:not([hidden]) {
     display: flex;
     flex-direction: column;
+    max-height: 100%;
   }
 
   .feature-search-results-panel,
   .feature-search-tree-host {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .feature-search-tree-host p-tree,
+  .feature-search-tree-host .p-tree {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
@@ -4659,44 +4711,152 @@ simfil-expression-input {
   }
 
   .feature-search-style-rules {
-    display: flex;
+    --feature-search-style-control-height: 1.75em;
+    --feature-search-style-control-font-size: 0.82rem;
+    --feature-search-style-icon-size: var(--feature-search-style-control-height);
+    --feature-search-style-control-gap: 0.45em;
+    --feature-search-style-text-action-width: 13em;
+
+    display: grid;
     flex: 1 1 auto;
-    flex-direction: column;
     font-size: 0.9em;
     gap: 0.35em;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100%;
+    max-height: 100%;
     min-height: 0;
     overflow: hidden;
 
+    p-button,
+    p-select,
+    p-inputnumber,
+    p-colorpicker {
+      align-items: center;
+      display: inline-flex;
+      min-height: var(--feature-search-style-control-height);
+    }
+
+    .p-button,
     .p-select,
     .p-inputnumber-input,
-    .p-inputtext {
-      min-height: 1.75em;
+    .p-inputtext,
+    .feature-search-style-value-input,
+    .feature-search-style-rule-name,
+    .search-style-color-value-input {
+      box-sizing: border-box;
+      font-size: var(--feature-search-style-control-font-size);
+      height: var(--feature-search-style-control-height);
+      min-height: var(--feature-search-style-control-height);
+    }
+
+    .p-select,
+    .p-inputnumber-input {
+      max-height: var(--feature-search-style-control-height);
+    }
+
+    .p-inputnumber,
+    .p-colorpicker,
+    .p-colorpicker input,
+    .p-colorpicker-preview {
+      box-sizing: border-box;
+      height: var(--feature-search-style-control-height);
+      min-height: var(--feature-search-style-control-height);
+      max-height: var(--feature-search-style-control-height);
     }
 
     .p-select-label {
-      padding-block: 0.18em;
+      align-items: center;
+      display: flex;
+      font-size: var(--feature-search-style-control-font-size);
+      min-height: 0;
+      padding-block: 0;
+      padding-inline: 0.45em;
+    }
+
+    .p-select-dropdown {
+      width: var(--feature-search-style-icon-size);
+    }
+
+    .p-inputnumber-input,
+    .feature-search-style-value-input,
+    .search-style-color-value-input {
+      font-size: var(--feature-search-style-control-font-size);
+      line-height: 1.1;
+      padding-block: 0;
+      padding-inline: 0.4em;
+    }
+
+    .p-button-label,
+    .p-select-label,
+    .p-inputnumber-input,
+    .feature-search-style-value-input,
+    .feature-search-style-rule-name,
+    .search-style-color-value-input {
+      font-size: var(--feature-search-style-control-font-size);
+    }
+
+    .p-button-label {
+      white-space: nowrap;
+    }
+
+    .p-colorpicker,
+    .p-colorpicker input,
+    .p-colorpicker-preview {
+      width: var(--feature-search-style-control-height);
+    }
+
+    .p-colorpicker-preview {
+      display: block;
+    }
+
+    simfil-expression-input,
+    simfil-expression-input .simfil-expression-input,
+    simfil-expression-input .simfil-expression-editor-host,
+    simfil-expression-input .cm-editor,
+    simfil-expression-input .cm-scroller {
+      box-sizing: border-box;
+      height: var(--feature-search-style-control-height);
+      min-height: var(--feature-search-style-control-height);
+      max-height: var(--feature-search-style-control-height);
+    }
+
+    simfil-expression-input .cm-content {
+      font-size: var(--feature-search-style-control-font-size);
+      padding-block: 0;
+    }
+
+    simfil-expression-input .cm-line {
+      line-height: calc(var(--feature-search-style-control-height) - 2px);
+      padding-inline: 0.4em;
     }
 
     .feature-search-add-rule-button .p-button,
     .feature-search-add-condition-button .p-button,
     .search-style-color-actions .p-button {
-      font-size: 0.86em;
+      height: var(--feature-search-style-control-height);
+      font-size: var(--feature-search-style-control-font-size);
+      justify-content: center;
       line-height: 1.1;
-      min-height: 1.75em;
-      padding: 0.18em 0.45em;
+      min-height: var(--feature-search-style-control-height);
+      padding: 0 0.55em;
 
       .p-button-icon {
         font-size: 0.9em;
       }
     }
 
+    .feature-search-add-condition-button .p-button,
+    .search-style-color-actions .p-button {
+      width: var(--feature-search-style-text-action-width);
+    }
+
     .feature-search-style-rule-action .p-button,
     .feature-search-style-condition-delete .p-button,
     .search-style-color-delete .p-button {
-      height: 1.75em;
-      min-height: 1.75em;
+      height: var(--feature-search-style-icon-size);
+      min-height: var(--feature-search-style-icon-size);
       padding: 0;
-      width: 1.75em;
+      width: var(--feature-search-style-icon-size);
 
       .p-button-icon {
         font-size: 0.88em;
@@ -4709,7 +4869,8 @@ simfil-expression-input {
     flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .feature-search-style-panel {
@@ -4794,7 +4955,7 @@ simfil-expression-input {
     flex: 1 1 auto;
     font-weight: 700;
     min-width: 7em;
-    padding: 0.12em 0.28em;
+    padding: 0 0.35em;
   }
 
   .feature-search-style-rule-name:focus {
@@ -4874,7 +5035,7 @@ simfil-expression-input {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
-    gap: 0.55em;
+    gap: var(--feature-search-style-control-gap);
     min-width: 0;
     padding: 0.5em 0.55em;
   }
@@ -4885,7 +5046,7 @@ simfil-expression-input {
   .feature-search-style-opacity {
     display: flex;
     align-items: center;
-    gap: 0.55em;
+    gap: var(--feature-search-style-control-gap);
   }
 
   .feature-search-style-filter-row,
@@ -4897,7 +5058,7 @@ simfil-expression-input {
   .feature-search-style-condition-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5em;
+    gap: var(--feature-search-style-control-gap);
   }
 
   .feature-search-style-filter-row {
@@ -4954,8 +5115,6 @@ simfil-expression-input {
     border: 1px solid var(--p-inputtext-border-color);
     border-radius: 4px;
     color: var(--p-inputtext-color);
-    min-height: 2em;
-    padding: 0.3em 0.45em;
     width: 9em;
   }
 
@@ -4988,7 +5147,7 @@ simfil-expression-input {
   .search-style-color {
     display: flex;
     flex-direction: column;
-    gap: 0.55em;
+    gap: var(--feature-search-style-control-gap);
   }
 
   .search-style-color-mode-row,
@@ -4998,28 +5157,47 @@ simfil-expression-input {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.45em;
+    gap: var(--feature-search-style-control-gap);
   }
 
   .search-style-color-mode-row {
+    min-width: 0;
+
     label {
       color: var(--p-text-muted-color);
+      flex: 0 0 auto;
       font-weight: 600;
     }
 
-    .search-style-color-mode,
-    .search-style-color-field {
-      flex: 0 1 10em;
+    .search-style-color-mode {
+      flex: 0 0 9.5em;
       min-width: 8em;
     }
 
+    .search-style-color-field {
+      flex: 100 1 18em;
+      max-width: 100%;
+      min-width: 12em;
+    }
+
+    .search-style-color-field .p-select {
+      max-width: 100%;
+      min-width: 0;
+      width: 100%;
+    }
+
     .search-style-color-field-input {
-      flex: 1 1 22em;
+      flex: 100 1 22em;
       min-width: 14em;
     }
 
     .search-style-color-field-mode {
       flex: 0 0 auto;
+    }
+
+    .feature-search-style-opacity {
+      flex: 1 1 14em;
+      min-width: 13em;
     }
   }
 
@@ -5032,10 +5210,13 @@ simfil-expression-input {
     cursor: pointer;
     display: inline-flex;
     font-weight: 800;
-    height: 1.75em;
+    height: var(--feature-search-style-icon-size);
     justify-content: center;
-    min-width: 1.75em;
-    padding: 0 0.35em;
+    line-height: 1;
+    min-height: var(--feature-search-style-icon-size);
+    min-width: var(--feature-search-style-icon-size);
+    padding: 0;
+    width: var(--feature-search-style-icon-size);
   }
 
   .search-style-expression-toggle-active {
@@ -5097,13 +5278,7 @@ simfil-expression-input {
   .search-style-color-stop-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5em;
-  }
-
-  .search-style-color .p-colorpicker input,
-  .search-style-color .p-colorpicker-preview {
-    height: 1.75em;
-    width: 1.75em;
+    gap: var(--feature-search-style-control-gap);
   }
 
   .search-style-color-value-input {
@@ -5112,8 +5287,6 @@ simfil-expression-input {
     border-radius: 4px;
     color: var(--p-inputtext-color);
     flex: 0 0 auto;
-    min-height: 1.75em;
-    padding: 0.22em 0.4em;
     width: 8em;
   }
 
@@ -5263,17 +5436,23 @@ simfil-expression-input {
 
   .p-tree {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
 
     .p-scroller {
+      flex: 1 1 auto;
       min-height: 0;
       overflow: auto;
     }
   }
 
   #searchDiagnosticsPanel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+
     & > * {
       padding-top: 0.5em;
     }
