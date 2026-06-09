@@ -30,6 +30,10 @@ declare global {
         ebDebug?: {
             /** Renders a synthetic debug tile into the primary map view. */
             showTestTile: () => void;
+            /** Builds the canonical feature-layer tile key for a map/layer/tile tuple. */
+            mapTileKey: (mapId: string, layerId: string, tileId: string | number | bigint) => string;
+            /** Loads a feature tile into the client-side tile registry for test setup. */
+            ensureTileLoaded: (mapTileKey: string) => Promise<unknown>;
             /**
              * Serialised camera setter used for synchronising camera positions
              * across views in tests.

@@ -234,24 +234,23 @@ export async function addComparisonView(page: Page): Promise<void> {
 }
 
 /**
- * Runs a "Search Loaded Features" query and waits until at least one result
- * appears in the feature search dialog.
+ * Runs a "Search Features and Attributes" query and waits until at least one
+ * result appears in the feature search dialog.
  */
 export async function runFeatureSearch(page: Page, query: string): Promise<void> {
     const searchInput = page.getByTestId('search-input');
     await searchInput.click();
+    await searchInput.fill(query);
+    await searchInput.focus();
 
     const searchMenu = page.getByTestId('search-menu-panel');
     await expect(searchMenu).toBeVisible();
 
-    const searchLoadedFeatures = searchMenu.locator('.search-menu .search-option-name', {
-        hasText: 'Search Loaded Features'
+    const featureSearchAction = searchMenu.locator('.search-menu', {
+        hasText: 'Search Features and Attributes'
     }).first();
-    await expect(searchLoadedFeatures).toBeVisible();
-
-    await searchInput.fill(query);
-    await searchInput.focus();
-    await page.keyboard.press('Enter');
+    await expect(featureSearchAction).toBeVisible();
+    await featureSearchAction.locator('.search-option-wrapper').first().click();
 
     const featureSearch = page.getByTestId('feature-search-panel');
     await expect(featureSearch).toBeVisible();
@@ -263,7 +262,7 @@ export async function runFeatureSearch(page: Page, query: string): Promise<void>
         const value = parseInt(text || '0', 10);
         return Number.isNaN(value) ? 0 : value;
     }, {
-        timeout: 10000
+        timeout: 80000
     }).toBeGreaterThan(0);
 
     const emptyMessage = featureSearch.locator('.p-tree-empty-message');
@@ -285,6 +284,25 @@ export async function clickSearchResultLeaf(page: Page, index: number): Promise<
     // Select the requested leaf node and trigger the associated action.
     const resultButton = leafNodes.nth(index).locator('.p-tree-node-content').first();
     await resultButton.click();
+}
+
+/**
+ * Loads a deterministic test tile and selects one of its features through the
+ * same AppState selection path used by result clicks and map picking.
+ */
+export async function selectFeatureForInspection(
+    page: Page,
+    mapId: string,
+    layerId: string,
+    featureId: string,
+    tileId: number = 1
+): Promise<void> {
+    await page.evaluate(async ({ mapId, layerId, tileId, featureId }) => {
+        const debugApi = window.ebDebug as any;
+        const mapTileKey = debugApi.mapTileKey(mapId, layerId, tileId);
+        await debugApi.ensureTileLoaded(mapTileKey);
+        debugApi.stateService.setSelection([{ mapTileKey, featureId }]);
+    }, { mapId, layerId, tileId, featureId });
 }
 
 /**

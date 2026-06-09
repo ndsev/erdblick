@@ -1,3 +1,4 @@
+import "@angular/compiler";
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 import {Subject} from 'rxjs';
 import {coreLib, initializeLibrary} from '../integrations/wasm';

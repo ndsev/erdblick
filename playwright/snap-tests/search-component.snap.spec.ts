@@ -15,7 +15,7 @@ const SEARCH_QUERY = '**.layerId == "Road"';
 test.use({ stateSnapshot: 'style_editor_state' });
 
 test.describe('Snapshot – search component', () => {
-    test('search palette and loaded-feature results', async ({ page, request }) => {
+    test('search palette and feature-search dialog', async ({ page, request }) => {
         await requireMapSource(request, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
@@ -30,18 +30,16 @@ test.describe('Snapshot – search component', () => {
         const searchMenu = page.getByTestId('search-menu-panel');
         await expect(searchMenu).toBeVisible();
 
-        const searchLoadedFeatures = searchMenu.locator('.search-menu .search-option-name', {
-            hasText: 'Search Loaded Features'
+        const featureSearchAction = searchMenu.locator('.search-menu', {
+            hasText: 'Search Features and Attributes'
         }).first();
-        await expect(searchLoadedFeatures).toBeVisible();
+        await expect(featureSearchAction).toBeVisible();
 
-        await searchInput.fill(SEARCH_QUERY);
-        await searchInput.focus();
-        await page.keyboard.press('Enter');
+        await featureSearchAction.locator('.search-option-wrapper').first().click();
 
         const featureSearchDialog = page.getByTestId('feature-search-dialog').locator('.p-dialog').first();
         await expect(featureSearchDialog).toBeVisible();
-        await expect(featureSearchDialog.getByText('No matches found.')).toBeVisible();
+        await expect(featureSearchDialog.getByTestId('feature-search-tree')).toBeVisible();
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('search-component-results.png', {

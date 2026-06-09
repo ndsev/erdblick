@@ -71,7 +71,22 @@ jobs:
       - name: Set up mapget
         run: |
           python3 -m venv venv
-          ./venv/bin/pip install mapget
+          MAPGET_SOURCE="$GITHUB_WORKSPACE/build/_deps/mapget-src"
+          if [[ ! -d "$MAPGET_SOURCE" ]]; then
+            echo "Expected CMake-fetched mapget source at $MAPGET_SOURCE" >&2
+            exit 1
+          fi
+
+          cmake -S "$MAPGET_SOURCE" -B "$GITHUB_WORKSPACE/build/mapget-wheel" -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMAPGET_WITH_WHEEL=ON \
+            -DMAPGET_WITH_SERVICE=ON \
+            -DMAPGET_WITH_HTTPLIB=ON \
+            -DMAPGET_ENABLE_TESTING=OFF \
+            -DMAPGET_BUILD_EXAMPLES=OFF
+          cmake --build "$GITHUB_WORKSPACE/build/mapget-wheel" --target wheel -- -j"$(nproc)"
+          ./venv/bin/pip install "$GITHUB_WORKSPACE"/build/mapget-wheel/bin/wheel/mapget-*.whl
+          ./venv/bin/pip show mapget
 
       - name: Run Playwright integration tests (with coverage)
         timeout-minutes: 35
