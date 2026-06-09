@@ -25,7 +25,7 @@ jobs:
       - name: Install build dependencies (ninja, git-lfs, mesa software rendering, xvfb)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build git-lfs libgl1-mesa-dri mesa-vulkan-drivers xvfb
+          sudo apt-get install -y ninja-build git-lfs libgl1-mesa-dri mesa-vulkan-drivers uuid-dev xvfb
 
       - name: Initialize Git LFS
         run: git lfs install
