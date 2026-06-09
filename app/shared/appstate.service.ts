@@ -14,7 +14,8 @@ import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostic
 import {
     BackgroundLayerConfig,
     clampBackgroundOpacity,
-    DEFAULT_BACKGROUND_LAYER_ID
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY
 } from "./app-config.service";
 import {
     historyEntryDedupeKey,
@@ -28,6 +29,15 @@ import {
     SearchHistoryStateEntrySchema,
     serializeSearchStateValue
 } from "./search-history";
+import {
+    createFeatureSearchStateEntry,
+    FeatureSearchStateEntry,
+    FeatureSearchStatePatch,
+    FeatureSearchStateSchema,
+    normalizeFeatureSearchState,
+    serializeFeatureSearchState
+} from "./feature-search-state";
+import {stripFeatureInspectionTarget} from "./tile-feature-id";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -37,6 +47,8 @@ const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 512;
+export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
+export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 export const MIN_MAP_ZOOM_STEP = 0.001;
 export const MAX_MAP_ZOOM_STEP = 1.0;
@@ -61,7 +73,10 @@ export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
 export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
 export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
 export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
+export const FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID = 'feature-search-export';
 export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
+export const INSPECTION_DOCK_TAB_ID = 'inspection';
+export const SEARCH_DOCK_TAB_ID = 'search';
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -92,6 +107,15 @@ function normalizeFeatureSearchGrouping(value: unknown): number[] {
     return result;
 }
 
+/** Clamps location-search hit limits from persisted state and preferences UI. */
+function clampLocationSearchResultLimit(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
+    }
+    return Math.min(MAX_LOCATION_SEARCH_RESULT_LIMIT, Math.max(1, Math.trunc(numeric)));
+}
+
 /** Version information shown in diagnostics and about dialogs. */
 export interface Versions {
     name: string;
@@ -116,6 +140,7 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
     locked: boolean;
+    focused?: boolean;
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
@@ -139,6 +164,12 @@ export interface AppDialogLayout {
     position: AppDialogPosition;
     size: AppDialogSize;
     open?: boolean;
+    docked?: boolean;
+    dockTab?: string;
+    dockOrder?: number;
+    panelSize?: AppDialogSize;
+    panelCollapsed?: boolean;
+    panelExpanded?: boolean;
 }
 
 /** Persisted layout for floating inspection dialogs, including dock preference. */
@@ -328,6 +359,7 @@ export class AppStateService implements OnDestroy {
     private lastMergedUrlSyncAt = 0;
     // One-shot guard used to keep inbound v1 links stable during passive startup.
     private skipNextUrlSync = false;
+    private initialSearchStateReplayConsumed = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -367,6 +399,14 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
+    readonly locationSearchResultLimitState = this.createState<number>({
+        name: 'locationSearchResultLimit',
+        defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
+        schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
+        toStorage: (value: number) => clampLocationSearchResultLimit(value),
+        fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
+    });
+
     readonly markerState = this.createState<boolean>({
         name: 'marker',
         defaultValue: false,
@@ -385,7 +425,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    // 2~0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
+    // 2~0f~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 1~0~sourcedata:map:layer:tile~address~...features...~size
     // 0~1~...
     readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
@@ -394,7 +434,7 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
-                let s = `${state.id}~${state.locked ? 1 : 0}~`;
+                let s = `${state.id}~${state.locked ? 1 : 0}${state.focused ? 'f' : ''}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
@@ -416,7 +456,9 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
                 const id = Number(parts.shift()!);
-                const lockState = parts.shift() === "1";
+                const panelFlags = parts.shift()!;
+                const lockState = panelFlags.startsWith("1");
+                const focused = panelFlags.includes("f");
                 const undocked = parts.pop()! === "1";
                 const colorToken = parts.pop()!;
                 const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
@@ -428,6 +470,7 @@ export class AppStateService implements OnDestroy {
                     id: id,
                     features: [],
                     locked: lockState || !undocked,
+                    focused: focused || undefined,
                     size: size as [number, number],
                     color: color,
                     undocked: undocked
@@ -574,7 +617,7 @@ export class AppStateService implements OnDestroy {
         name: 'background',
         defaultValue: {
             layerId: DEFAULT_BACKGROUND_LAYER_ID,
-            opacity: 100,
+            opacity: DEFAULT_BACKGROUND_OPACITY,
         },
         schema: z.string(),
         toStorage: (value: BackgroundLayerViewState) => `${encodeURIComponent(value.layerId ?? '')}~${clampBackgroundOpacity(value.opacity)}`,
@@ -697,6 +740,15 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
+    readonly featureSearchState = this.createState<FeatureSearchStateEntry[]>({
+        name: 'featureSearchState',
+        defaultValue: [],
+        schema: FeatureSearchStateSchema,
+        toStorage: (value: FeatureSearchStateEntry[]) => serializeFeatureSearchState(value),
+        fromStorage: (payload: any): FeatureSearchStateEntry[] => normalizeFeatureSearchState(payload),
+        snapshotPersist: false
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -728,6 +780,12 @@ export class AppStateService implements OnDestroy {
         name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly dockActiveTabState = this.createState<string>({
+        name: 'dockActiveTabState',
+        defaultValue: INSPECTION_DOCK_TAB_ID,
+        schema: z.string()
     });
 
     readonly dockAutoCollapse = this.createState<boolean>({
@@ -796,7 +854,16 @@ export class AppStateService implements OnDestroy {
             }),
             open: Boolish.optional(),
             panelId: z.coerce.number().optional(),
-            slot: z.coerce.number().optional()
+            slot: z.coerce.number().optional(),
+            docked: Boolish.optional(),
+            dockTab: z.string().optional(),
+            dockOrder: z.coerce.number().optional(),
+            panelSize: z.object({
+                width: z.coerce.number().positive(),
+                height: z.coerce.number().positive()
+            }).optional(),
+            panelCollapsed: Boolish.optional(),
+            panelExpanded: Boolish.optional()
         }))
     });
 
@@ -815,19 +882,7 @@ export class AppStateService implements OnDestroy {
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
-            this.setupStateSubscriptions();
-            this.hydrateFromStorage();
-            this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
-            this.migrateLegacyOsmState(this.router.routerState.snapshot.root?.queryParams ?? {});
-            this.isHydrating = false;
-            // Keep inbound links stable during passive startup hydration.
-            this.skipNextUrlSync = true;
-
-            // Ensure that the merged app state after hydration is reflected in local storage and URL.
-            this.syncAllStates();
-
-            this.isReady = true;
-            this.ready.next(true);
+            this.initializePersistence();
         });
 
         // Subsequently, Navigation events may come from usage of the browser back/forward-buttons.
@@ -848,14 +903,36 @@ export class AppStateService implements OnDestroy {
                 }
                 this.cancelPendingStateSync();
                 this.withHydration(() => {
-                    this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+                    this.hydrateFromUrl(this.currentBrowserQueryParams());
                 });
             }
         });
 
         this.selectionState.subscribe(panels => {
             this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+            this.sanitizeFocusedInspectionPanel(panels);
         });
+    }
+
+    /** Hydrates persisted state once config defaults are known and marks the service ready. */
+    initializePersistence(): void {
+        if (this.isReady) {
+            return;
+        }
+        this.setupStateSubscriptions();
+        const queryParams = this.currentBrowserQueryParams();
+        this.hydrateFromStorage();
+        this.hydrateFromUrl(queryParams);
+        this.migrateLegacyOsmState(queryParams);
+        this.isHydrating = false;
+        // Keep inbound links stable during passive startup hydration.
+        this.skipNextUrlSync = true;
+
+        // Ensure that the merged app state after hydration is reflected in local storage and URL.
+        this.syncAllStates();
+
+        this.isReady = true;
+        this.ready.next(true);
     }
 
     /** Flushes all state slots to storage and URL after a batch update. */
@@ -1017,6 +1094,9 @@ export class AppStateService implements OnDestroy {
                     this.clearStyleOptionStorageEntries();
                 }
                 for (const [k, v] of Object.entries(serialized)) {
+                    if (v === null) {
+                        continue;
+                    }
                     localStorage.setItem(k, v);
                 }
 
@@ -1111,7 +1191,7 @@ export class AppStateService implements OnDestroy {
     /** Serializes URL-backed state and updates router query params accordingly. */
     private syncUrl(): 'replace' | 'merge' {
         // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
-        const params: Record<string, string> = {};
+        const params: Record<string, string | string[] | null> = {};
         for (const state of this.pendingUrlSyncStates) {
             const serialized = state.serialize(true);
             if (serialized === undefined) {
@@ -1128,6 +1208,13 @@ export class AppStateService implements OnDestroy {
         const queryParamsHandling = this.pendingUrlSyncStates.size === [...this.statePool.values().filter(
             state => state.isUrlState())].length ? "replace" : "merge";
         this.pendingUrlSyncStates.clear();
+        if (queryParamsHandling === "merge") {
+            for (const [key, value] of Object.entries(this.currentBrowserQueryParams())) {
+                if (params[key] === undefined) {
+                    params[key] = value as string | string[];
+                }
+            }
+        }
         this.router.navigate([], {
             queryParams: params,
             queryParamsHandling: queryParamsHandling,
@@ -1201,6 +1288,28 @@ export class AppStateService implements OnDestroy {
                 state.deserialize(params);
             }
         });
+    }
+
+    /**
+     * Reads query parameters from the browser URL before Angular Router can normalize unknown app-state keys away.
+     */
+    private currentBrowserQueryParams(): Params {
+        const params: Params = {};
+        const search = typeof window !== "undefined" ? window.location.search : "";
+        if (!search) {
+            return this.router.routerState.snapshot.root?.queryParams ?? {};
+        }
+        const urlParams = new URLSearchParams(search);
+        for (const [key, value] of urlParams.entries()) {
+            if (params[key] === undefined) {
+                params[key] = value;
+            } else if (Array.isArray(params[key])) {
+                params[key].push(value);
+            } else {
+                params[key] = [params[key], value];
+            }
+        }
+        return params;
     }
 
     /** Runs a callback while suppressing persistence side effects during hydration. */
@@ -1657,8 +1766,17 @@ export class AppStateService implements OnDestroy {
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
+    get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
+    set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
     get search() {return this.searchState.getValue();}
     set search(val: SearchStateValue) {this.searchState.next(val);};
+    consumeInitialSearchStateReplay(): boolean {
+        if (this.initialSearchStateReplayConsumed) {
+            return false;
+        }
+        this.initialSearchStateReplayConsumed = true;
+        return true;
+    }
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
@@ -1667,6 +1785,12 @@ export class AppStateService implements OnDestroy {
     set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
     set focusedView(val: number) {this.focusedViewState.next(val);};
+    get focusedInspectionPanelId() {
+        return this.selectionState.getValue().find(panel => panel.focused)?.id;
+    }
+    set focusedInspectionPanelId(val: number | undefined) {
+        this.setFocusedInspectionPanel(val);
+    };
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
@@ -1687,6 +1811,8 @@ export class AppStateService implements OnDestroy {
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
+    get dockActiveTab() {return this.dockActiveTabState.getValue();}
+    set dockActiveTab(val: string) {this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID);};
     get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
     set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
@@ -1706,6 +1832,8 @@ export class AppStateService implements OnDestroy {
     };
     get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
+    get featureSearches() {return this.featureSearchState.getValue();}
+    set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -1762,10 +1890,13 @@ export class AppStateService implements OnDestroy {
             return rawState;
         }
 
-        if (defaultBackgroundLayerId && availableLayerIds.has(defaultBackgroundLayerId)) {
+        const defaultLayer = defaultBackgroundLayerId
+            ? availableLayers.find(layer => layer.id === defaultBackgroundLayerId)
+            : undefined;
+        if (defaultLayer) {
             return {
-                layerId: defaultBackgroundLayerId,
-                opacity: rawState.opacity
+                layerId: defaultLayer.id,
+                opacity: defaultLayer.defaultOpacity
             };
         }
 
@@ -1880,31 +2011,23 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
-    /*
-    ## Current State
-
-      View Click Event -> MapDataService -> InspectionService -> InspectionPanel
-                                                              -> AppStateService
-
-      (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-                                                                         -> AppStateService
-
-    ## New Goal State
-
-    // View Click Event -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //         (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-    //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
-
-     */
     /** Updates the current selection, reusing or creating inspection panels as needed. */
-    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
+    setSelection(
+        newSelection: TileFeatureId[] | SelectedSourceData,
+        id?: number,
+        forceNewPanel: boolean = false,
+        createUndockedFeaturePanel: boolean = false
+    ) {
         this._replaceUrl = false;
         let allPanels = this.selectionState.getValue();
         const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
-        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0) {
+        const duplicateFeaturePanelId = !isSourceDataSelection && featureSelection.length
+            ? this.findPanelIdContainingFeatureSelection(allPanels, featureSelection)
+            : undefined;
+        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0 && !createUndockedFeaturePanel) {
             this.isDockOpen = true;
         }
         const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
@@ -1916,13 +2039,19 @@ export class AppStateService implements OnDestroy {
 
         // Filter out features which are already selected. If there are none left, we don't need to do anything
         // unless we are explicitly clearing a source data selection.
-        if (featureSelection.length) {
+        if (featureSelection.length && !forceNewPanel) {
             featureSelection = featureSelection.filter(feature =>
                 !allPanels.some(panel =>
                     isFeaturePanel(panel) &&
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
             if (!featureSelection.length && !isClearSourceDataRequest) {
+                const duplicatePanel = allPanels.find(panel => panel.id === duplicateFeaturePanelId);
+                if (duplicatePanel && !duplicatePanel.undocked && !createUndockedFeaturePanel) {
+                    this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                    this.isDockOpen = true;
+                }
+                this.setFocusedInspectionPanel(duplicateFeaturePanelId);
                 this._replaceUrl = true;
                 return;
             }
@@ -1949,24 +2078,29 @@ export class AppStateService implements OnDestroy {
 
         // Inspection strategy:
         // Feature selection (default path): reuse the last unlocked feature panel and close all other unlocked feature panels.
+        // Docked search result clicks prefer an unlocked floating feature panel, keeping the Search dock tab visible.
         // Otherwise: reuse unlocked docked panel of the same inspection type, then unlocked undocked dialog, else create new.
         if (!mustCreateNewPanel && targetPanelId === undefined) {
             const isDefaultFeatureSelectionRequest = !isSourceDataSelection && id === undefined;
             if (isDefaultFeatureSelectionRequest) {
+                const requiresUndockedFeaturePanel = createUndockedFeaturePanel;
                 let lastUnlockedFeaturePanelId: number | undefined;
                 for (let index = allPanels.length - 1; index >= 0; index--) {
                     const panel = allPanels[index];
-                    if (isFeaturePanel(panel) && !panel.locked) {
+                    if (isFeaturePanel(panel) && !panel.locked &&
+                        (!requiresUndockedFeaturePanel || panel.undocked)) {
                         lastUnlockedFeaturePanelId = panel.id;
                         break;
                     }
                 }
                 if (lastUnlockedFeaturePanelId !== undefined) {
-                    allPanels = allPanels.filter(panel =>
-                        !isFeaturePanel(panel) ||
-                        panel.locked ||
-                        panel.id === lastUnlockedFeaturePanelId
-                    );
+                    if (!requiresUndockedFeaturePanel) {
+                        allPanels = allPanels.filter(panel =>
+                            !isFeaturePanel(panel) ||
+                            panel.locked ||
+                            panel.id === lastUnlockedFeaturePanelId
+                        );
+                    }
                     targetPanelId = lastUnlockedFeaturePanelId;
                 } else {
                     mustCreateNewPanel = true;
@@ -2002,16 +2136,22 @@ export class AppStateService implements OnDestroy {
                 return;
             }
             const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
+            const newPanelUndocked = isSourceDataSelection || createUndockedFeaturePanel;
             allPanels.push({
                 id: newId,
                 features: isSourceDataSelection ? [] : featureSelection,
                 sourceData: sourceDataSelection,
                 locked: false,
-                size: [DEFAULT_EM_WIDTH, isSourceDataSelection ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
+                size: [DEFAULT_EM_WIDTH, newPanelUndocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
-                undocked: isSourceDataSelection
+                undocked: newPanelUndocked
             });
             this.selectionState.next(allPanels);
+            if (!newPanelUndocked) {
+                this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                this.isDockOpen = true;
+            }
+            this.setFocusedInspectionPanel(newId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return newId;
         }
@@ -2032,11 +2172,56 @@ export class AppStateService implements OnDestroy {
                 allPanels[panelIndex].sourceData = undefined;
             }
             this.selectionState.next(allPanels);
+            if (!allPanels[panelIndex].undocked && !isSourceDataSelection) {
+                this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                this.isDockOpen = true;
+            }
+            this.setFocusedInspectionPanel(targetPanelId);
             this.sanitizeInspectionComparisonForSelection(allPanels);
             return targetPanelId;
         }
 
         return;
+    }
+
+    /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
+    toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
+        const allPanels = this.selectionState.getValue();
+        const panelIndex = allPanels.findIndex(panel => panel.id === panelId && panel.sourceData === undefined);
+        if (panelIndex === -1) {
+            return;
+        }
+
+        const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
+        const panel = allPanels[panelIndex];
+        let changed = false;
+        const nextFeatures = panel.features.map(feature => {
+            if (feature.mapTileKey !== mapTileKey ||
+                stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId) {
+                return feature;
+            }
+            changed = true;
+            return {
+                ...feature,
+                featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
+            };
+        });
+        if (!changed) {
+            return;
+        }
+
+        const nextPanels = allPanels.slice();
+        nextPanels[panelIndex] = {
+            ...panel,
+            features: nextFeatures
+        };
+        this.selectionState.next(nextPanels);
+        if (!panel.undocked) {
+            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+            this.isDockOpen = true;
+        }
+        this.setFocusedInspectionPanel(panelId);
+        this.sanitizeInspectionComparisonForSelection(nextPanels);
     }
 
     /** Persists the size of one inspection panel. */
@@ -2075,8 +2260,41 @@ export class AppStateService implements OnDestroy {
         ];
         if (!undocked) {
             allPanels[index].locked = true;
+            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+            this.isDockOpen = true;
         }
         this.selectionState.next(allPanels);
+        this.setFocusedInspectionPanel(id);
+    }
+
+    /** Marks one inspection panel as the active target for inspection-level shortcuts. */
+    setFocusedInspectionPanel(id: number | undefined): void {
+        const allPanels = this.selectionState.getValue();
+        const fallbackId = allPanels.length ? allPanels[allPanels.length - 1].id : undefined;
+        const nextId = id !== undefined && allPanels.some(panel => panel.id === id)
+            ? id
+            : fallbackId;
+        let changed = false;
+        for (const panel of allPanels) {
+            const nextFocused = panel.id === nextId;
+            if ((panel.focused ?? false) === nextFocused) {
+                continue;
+            }
+            changed = true;
+            if (nextFocused) {
+                panel.focused = true;
+            } else {
+                delete panel.focused;
+            }
+        }
+        if (changed) {
+            this.selectionState.next(allPanels);
+        }
+    }
+
+    /** Returns whether the supplied inspection panel is the active shortcut target. */
+    isInspectionPanelFocused(id: number): boolean {
+        return this.focusedInspectionPanelId === id;
     }
 
     /** Returns the persisted layout for a dialog if one exists. */
@@ -2121,6 +2339,124 @@ export class AppStateService implements OnDestroy {
     /** Convenience helper that closes one persisted dialog. */
     closeDialog(id: string): void {
         this.setDialogOpen(id, false);
+    }
+
+    /** Returns whether a persisted surface is currently represented in the dock. */
+    isSurfaceDocked(id: string): boolean {
+        return this.getDialogLayout(id)?.docked ?? false;
+    }
+
+    /** Switches a generic surface between docked and floating representations. */
+    setSurfaceDocked(id: string, docked: boolean, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
+        const current = this.getDialogLayout(id);
+        const fallbackSize = {
+            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+        };
+        const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
+        this.upsertDialogLayout(id, {
+            position: current?.position ?? {left: 0, top: 0},
+            size: current?.size ?? fallbackSize,
+            open: current?.open ?? false,
+            docked,
+            dockTab,
+            ...(nextDockOrder !== undefined ? {dockOrder: nextDockOrder} : {})
+        });
+        if (docked) {
+            this.dockActiveTab = dockTab;
+            this.isDockOpen = true;
+        }
+    }
+
+    /** Toggles the docked representation for a generic surface. */
+    toggleSurfaceDocked(id: string, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
+        this.setSurfaceDocked(id, !this.isSurfaceDocked(id), dockTab);
+    }
+
+    /** Persists generic docked-panel metadata without changing floating dialog geometry. */
+    setPanelLayout(id: string, layout: Partial<Pick<AppDialogLayout, 'panelSize' | 'panelCollapsed' | 'panelExpanded' | 'dockOrder'>>): void {
+        const current = this.getDialogLayout(id);
+        if (!current) {
+            this.upsertDialogLayout(id, {
+                position: {left: 0, top: 0},
+                size: {
+                    width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+                    height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+                },
+                ...layout
+            });
+            return;
+        }
+        this.upsertDialogLayout(id, {
+            ...current,
+            ...layout
+        });
+    }
+
+    /** Returns whether any generic surface is docked, optionally filtered by tab id. */
+    hasDockedSurface(tabId?: string): boolean {
+        return Object.values(this.dialogLayoutsState.getValue()).some(layout =>
+            (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
+        );
+    }
+
+    /** Reorders generic docked surfaces within one dock tab. */
+    reorderDockedSurfaces(tabId: string, displayOrder: string[]): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        const dockedIds = Object.entries(currentLayouts)
+            .filter(([, layout]) => (layout.docked ?? false) && layout.dockTab === tabId)
+            .map(([id]) => id);
+        if (dockedIds.length < 2) {
+            return;
+        }
+        const dockedIdSet = new Set(dockedIds);
+        const normalizedOrder = displayOrder.filter(id => dockedIdSet.has(id));
+        for (const id of dockedIds) {
+            if (!normalizedOrder.includes(id)) {
+                normalizedOrder.push(id);
+            }
+        }
+        let changed = false;
+        const nextLayouts = {...currentLayouts};
+        normalizedOrder.forEach((id, index) => {
+            const layout = currentLayouts[id];
+            if (!layout || layout.dockOrder === index) {
+                return;
+            }
+            nextLayouts[id] = {
+                ...layout,
+                dockOrder: index
+            };
+            changed = true;
+        });
+        if (changed) {
+            this.dialogLayoutsState.next(nextLayouts);
+        }
+    }
+
+    /** Stores the next floating position for a generic surface. */
+    setDialogPosition(id: string, position: AppDialogPosition): void {
+        const current = this.getDialogLayout(id);
+        const fallbackSize = {
+            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+        };
+        this.upsertDialogLayout(id, {
+            position,
+            size: current?.size ?? fallbackSize,
+            open: current?.open ?? false,
+            docked: current?.docked,
+            dockTab: current?.dockTab,
+            ...(current?.dockOrder !== undefined ? {dockOrder: current.dockOrder} : {})
+        });
+    }
+
+    private nextSurfaceDockOrder(dockTab: string): number {
+        const orders = Object.values(this.dialogLayoutsState.getValue())
+            .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)
+            .map(layout => layout.dockOrder)
+            .filter((order): order is number => typeof order === 'number' && Number.isFinite(order));
+        return orders.length ? Math.max(...orders) + 1 : 0;
     }
 
     /** Returns or creates the persisted layout record for a dialog. */
@@ -2174,6 +2510,19 @@ export class AppStateService implements OnDestroy {
             ...current,
             open
         });
+    }
+
+    /** Removes one persisted generic dialog layout and any pending open marker for it. */
+    removeDialogLayout(id: string): void {
+        const currentLayouts = this.dialogLayoutsState.getValue();
+        if (!(id in currentLayouts)) {
+            this.pendingOpenDialogs.delete(id);
+            return;
+        }
+        const nextLayouts = {...currentLayouts};
+        delete nextLayouts[id];
+        this.dialogLayoutsState.next(nextLayouts);
+        this.pendingOpenDialogs.delete(id);
     }
 
     /** Returns the floating layout record for one inspection panel, if present. */
@@ -2326,6 +2675,43 @@ export class AppStateService implements OnDestroy {
         allPanels.splice(index, 1);
         this.selectionState.next(allPanels);
         this.sanitizeInspectionComparisonForSelection(allPanels);
+    }
+
+    /** Finds the first regular inspection panel containing any of the requested feature identities. */
+    private findPanelIdContainingFeatureSelection(
+        panels: InspectionPanelModel<TileFeatureId>[],
+        features: TileFeatureId[]
+    ): number | undefined {
+        return panels.find(panel =>
+            panel.sourceData === undefined &&
+            panel.features.some(existing =>
+                features.some(feature =>
+                    feature.featureId === existing.featureId &&
+                    feature.mapTileKey === existing.mapTileKey
+                )
+            )
+        )?.id;
+    }
+
+    /** Keeps the focused inspection panel id aligned with the current selection set. */
+    private sanitizeFocusedInspectionPanel(panels: InspectionPanelModel<TileFeatureId>[]): void {
+        let focusedSeen = false;
+        const fallbackId = panels.length ? panels[panels.length - 1].id : undefined;
+        for (const panel of panels) {
+            if (panel.focused && !focusedSeen) {
+                focusedSeen = true;
+                continue;
+            }
+            if (panel.focused) {
+                delete panel.focused;
+            }
+        }
+        if (!focusedSeen && fallbackId !== undefined) {
+            const fallbackPanel = panels.find(panel => panel.id === fallbackId);
+            if (fallbackPanel) {
+                fallbackPanel.focused = true;
+            }
+        }
     }
 
     /** Returns whether two inspection-panel orderings are identical by panel id. */
@@ -2518,6 +2904,42 @@ export class AppStateService implements OnDestroy {
         this.lastSearchHistoryEntryState.next(trimmed);
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
+    }
+
+    /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
+    addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
+        const entry = createFeatureSearchStateEntry(value);
+        this.featureSearchState.next([...this.featureSearches, entry]);
+        return entry;
+    }
+
+    /** Patches one persisted feature-search definition. */
+    patchFeatureSearch(id: string, patch: FeatureSearchStatePatch): FeatureSearchStateEntry | undefined {
+        let updated: FeatureSearchStateEntry | undefined;
+        const next = this.featureSearches.map(entry => {
+            if (entry.id !== id) {
+                return entry;
+            }
+            updated = createFeatureSearchStateEntry({
+                ...entry,
+                ...patch,
+                id: entry.id,
+                query: patch.query ?? entry.query
+            });
+            return updated;
+        });
+        if (updated) {
+            this.featureSearchState.next(next);
+        }
+        return updated;
+    }
+
+    /** Removes one persisted feature-search definition. */
+    removeFeatureSearch(id: string): void {
+        const next = this.featureSearches.filter(entry => entry.id !== id);
+        if (next.length !== this.featureSearches.length) {
+            this.featureSearchState.next(next);
+        }
     }
 
     /** Rewrites search state during legacy migration without saving another history row. */

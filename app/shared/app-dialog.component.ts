@@ -1,5 +1,17 @@
 import {NgTemplateOutlet} from '@angular/common';
-import {Component, ContentChild, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, TemplateRef, ViewChild} from '@angular/core';
+import {
+    Component,
+    ContentChild,
+    EventEmitter,
+    Input,
+    OnChanges,
+    OnDestroy,
+    Output,
+    Renderer2,
+    SimpleChanges,
+    TemplateRef,
+    ViewChild
+} from '@angular/core';
 import {Dialog, DialogModule} from 'primeng/dialog';
 import {AppDialogLayout, AppStateService} from './appstate.service';
 
@@ -85,6 +97,9 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     @Input() contentStyleClass = '';
     @Input() styleClass = '';
     @Input() maskStyleClass = '';
+    @Input() dockDropCue = false;
+    @Input() dockDropTargetSelector = '.collapsible-dock';
+    @Input() dockDropThresholdEm = 2;
 
     @Input() layoutId?: string;
     @Input() persistLayout = false;
@@ -99,8 +114,14 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     @ViewChild('dialog') private dialog?: Dialog;
     protected effectiveStyle: {[key: string]: any} = {};
     private revealPersistedLayoutFrame?: number;
+    private detachDockCueHeaderDown?: () => void;
+    private detachDockCueMove?: () => void;
+    private detachDockCuePointerMove?: () => void;
+    private detachDockCueUp?: () => void;
+    private detachDockCuePointerUp?: () => void;
 
-    constructor(private readonly stateService: AppStateService) {
+    constructor(private readonly stateService: AppStateService,
+                private readonly renderer: Renderer2) {
         this.refreshEffectiveStyle();
     }
 
@@ -115,6 +136,8 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     /** Cancels pending layout reveal work when the wrapper is destroyed. */
     ngOnDestroy(): void {
         this.cancelRevealPersistedLayout();
+        this.detachDockDropCueTracking();
+        this.clearDockDropCue();
     }
 
     /** Returns the underlying PrimeNG dialog container element. */
@@ -125,6 +148,12 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     /** Closes the wrapped PrimeNG dialog. */
     close(event?: Event): void {
         this.dialog?.close(event ?? new Event('close'));
+    }
+
+    /** Starts PrimeNG's built-in dialog dragging from a projected header drag handle. */
+    startDrag(event: MouseEvent | PointerEvent): void {
+        this.startDockDropCueTracking();
+        this.dialog?.initDrag(event);
     }
 
     /** Returns the underlying PrimeNG dialog wrapper element. */
@@ -149,6 +178,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     protected handleOnShow(event: any): void {
         this.syncPersistedOpenState(true);
         this.applyOrCapturePersistedLayout();
+        this.bindDockDropCue();
         this.onShow.emit(event);
     }
 
@@ -157,12 +187,16 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.cancelRevealPersistedLayout();
         this.syncPersistedOpenState(false);
         this.refreshEffectiveStyle(false);
+        this.detachDockDropCueTracking();
+        this.clearDockDropCue();
         this.onHide.emit(event);
     }
 
     /** Persists layout after a dialog drag finishes. */
     protected handleOnDragEnd(event: any): void {
         this.persistCurrentLayout();
+        this.detachDockDropCueTracking();
+        this.clearDockDropCue();
         this.onDragEnd.emit(event);
     }
 
@@ -341,5 +375,98 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             return;
         }
         this.stateService.setDialogLayoutOpen(this.layoutId, open);
+    }
+
+    /** Returns whether this floating dialog overlaps the configured dock target enough to dock. */
+    overlapsDockDropTarget(): boolean {
+        const container = this.container();
+        const target = this.dockDropTarget();
+        if (!container || !target) {
+            return false;
+        }
+        const dialogRect = container.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const overlapWidth = Math.max(
+            0,
+            Math.min(dialogRect.right, targetRect.right) - Math.max(dialogRect.left, targetRect.left)
+        );
+        const overlapHeight = Math.max(
+            0,
+            Math.min(dialogRect.bottom, targetRect.bottom) - Math.max(dialogRect.top, targetRect.top)
+        );
+        return overlapWidth >= this.stateService.baseFontSize * this.dockDropThresholdEm && overlapHeight > 0;
+    }
+
+    private bindDockDropCue(): void {
+        this.detachDockCueHeaderDown?.();
+        this.detachDockCueHeaderDown = undefined;
+        if (!this.dockDropCue) {
+            return;
+        }
+        const header = this.container()?.querySelector<HTMLElement>('.p-dialog-header');
+        if (!header) {
+            return;
+        }
+        this.detachDockCueHeaderDown = this.renderer.listen(header, 'mousedown', () => this.startDockDropCueTracking());
+    }
+
+    private startDockDropCueTracking(): void {
+        if (!this.dockDropCue) {
+            return;
+        }
+        this.detachDockDropCueTracking(false);
+        this.detachDockCueMove = this.renderer.listen('window', 'mousemove', () => this.updateDockDropCue());
+        this.detachDockCuePointerMove = this.renderer.listen('window', 'pointermove', () => this.updateDockDropCue());
+        this.detachDockCueUp = this.renderer.listen('window', 'mouseup', () => {
+            this.detachDockDropCueTracking(false);
+            this.clearDockDropCue();
+        });
+        this.detachDockCuePointerUp = this.renderer.listen('window', 'pointerup', () => {
+            this.detachDockDropCueTracking(false);
+            this.clearDockDropCue();
+        });
+    }
+
+    private updateDockDropCue(): void {
+        if (!this.dragging || !this.dockDropCue) {
+            this.clearDockDropCue();
+            return;
+        }
+        this.setDockDropCue(this.overlapsDockDropTarget());
+    }
+
+    private setDockDropCue(active: boolean): void {
+        const target = this.dockDropTarget();
+        if (!target) {
+            return;
+        }
+        if (active) {
+            this.renderer.addClass(target, 'dock-drop-active');
+        } else {
+            this.renderer.removeClass(target, 'dock-drop-active');
+        }
+    }
+
+    private clearDockDropCue(): void {
+        this.setDockDropCue(false);
+    }
+
+    private dockDropTarget(): HTMLElement | null {
+        return document.querySelector(this.dockDropTargetSelector) as HTMLElement | null;
+    }
+
+    private detachDockDropCueTracking(clearHeader = true): void {
+        if (clearHeader) {
+            this.detachDockCueHeaderDown?.();
+            this.detachDockCueHeaderDown = undefined;
+        }
+        this.detachDockCueMove?.();
+        this.detachDockCuePointerMove?.();
+        this.detachDockCueUp?.();
+        this.detachDockCuePointerUp?.();
+        this.detachDockCueMove = undefined;
+        this.detachDockCuePointerMove = undefined;
+        this.detachDockCueUp = undefined;
+        this.detachDockCuePointerUp = undefined;
     }
 }

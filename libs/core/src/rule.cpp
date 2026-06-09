@@ -64,7 +64,8 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
     if (resetNonInheritableAttrs) {
         type_.reset();
         filter_.clear();
-        firstOfRules_.clear();
+        branchMode_ = BranchMode::None;
+        subRules_.clear();
     }
 }
 
@@ -209,6 +210,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["vertical-offset"].IsDefined()) {
         // Convenience alias for the "up" component of the local offset.
         offset_.z = yaml["vertical-offset"].as<double>();
+    }
+    if (yaml["lateral-offset"].IsDefined()) {
+        // Convenience alias for the lateral/local-X component of the offset.
+        offset_.x = yaml["lateral-offset"].as<double>();
     }
     if (yaml["offset"].IsDefined() && yaml["offset"].size() >= 1) {
         offset_.x = yaml["offset"][0].as<double>();
@@ -397,21 +402,44 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     /// Sub-Rule Fields
     /////////////////////////////////////
 
-    if (yaml["first-of"].IsDefined()) {
-        for (auto yamlSubRule : yaml["first-of"]) {
-            // The sub-rule adopts all attributes except type and filter
-            auto& subRule = firstOfRules_.emplace_back(*this, true);
+    auto parseBranch = [this, &yaml](char const* key, BranchMode mode)
+    {
+        if (!yaml[key].IsDefined() || !yaml[key].IsSequence() || branchMode_ != BranchMode::None) {
+            return;
+        }
+        branchMode_ = mode;
+        subRules_.clear();
+        for (auto yamlSubRule : yaml[key]) {
+            // The sub-rule adopts all attributes except gates and branch state.
+            auto& subRule = subRules_.emplace_back(*this, true);
             subRule.parse(yamlSubRule);
         }
-    }
+    };
+
+    parseBranch("first-of", BranchMode::FirstOf);
+    parseBranch("all-of", BranchMode::AllOf);
 }
 
 FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundEvalFun const& evalFun) const
 {
+    FeatureStyleRule const* result = nullptr;
+    forEachMatchingRule(feature, evalFun, [&](FeatureStyleRule const& matchingRule) {
+        if (!result) {
+            result = &matchingRule;
+        }
+    });
+    return result;
+}
+
+bool FeatureStyleRule::forEachMatchingRule(
+    mapget::Feature& feature,
+    BoundEvalFun const& evalFun,
+    std::function<void(FeatureStyleRule const&)> const& callback) const
+{
     if (lod_) {
         auto const featureLod = static_cast<uint8_t>(feature.lod());
         if (featureLod != *lod_) {
-            return nullptr;
+            return false;
         }
     }
 
@@ -419,7 +447,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
     if (type_) {
         auto typeId = feature.typeId();
         if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
-            return nullptr;
+            return false;
         }
     }
 
@@ -434,24 +462,54 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
                     "Filter expression did not evaluate to a boolean: " + filterValue.toString(),
                     index_);
             }
-            return nullptr;
+            return false;
         }
         if (!filterValue.as<simfil::ValueType::Bool>()) {
-            return nullptr;
+            return false;
         }
     }
 
-    // Return matching sub-rule or this.
-    if (!firstOfRules_.empty()) {
-        for (auto const& rule : firstOfRules_) {
-            if (auto matchingRule = rule.match(feature, evalFun)) {
-                return matchingRule;
+    if (branchMode_ == BranchMode::None) {
+        callback(*this);
+        return true;
+    }
+
+    if (branchMode_ == BranchMode::FirstOf) {
+        for (auto const& rule : subRules_) {
+            if (rule.forEachMatchingRule(feature, evalFun, callback)) {
+                return true;
             }
         }
-        return nullptr;
+        return false;
     }
 
-    return this;
+    bool matched = false;
+    for (auto const& rule : subRules_) {
+        matched = rule.forEachMatchingRule(feature, evalFun, callback) || matched;
+    }
+    return matched;
+}
+
+void FeatureStyleRule::forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const
+{
+    if (branchMode_ == BranchMode::None) {
+        callback(*this);
+        return;
+    }
+    for (auto const& rule : subRules_) {
+        rule.forEachConcreteRule(callback);
+    }
+}
+
+void FeatureStyleRule::assignRenderRuleIndices(uint32_t& nextRenderRuleIndex)
+{
+    if (branchMode_ == BranchMode::None) {
+        renderIndex_ = nextRenderRuleIndex++;
+        return;
+    }
+    for (auto& rule : subRules_) {
+        rule.assignRenderRuleIndices(nextRenderRuleIndex);
+    }
 }
 
 bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
@@ -462,8 +520,8 @@ bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
         }
     }
 
-    if (!firstOfRules_.empty()) {
-        for (auto const& rule : firstOfRules_) {
+    if (branchMode_ != BranchMode::None) {
+        for (auto const& rule : subRules_) {
             if (rule.maybeMatchesType(typeId)) {
                 return true;
             }
@@ -474,9 +532,31 @@ bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
     return true;
 }
 
+FeatureStyleRule::BranchMode FeatureStyleRule::branchMode() const
+{
+    return branchMode_;
+}
+
+std::vector<FeatureStyleRule> const& FeatureStyleRule::subRules() const
+{
+    return subRules_;
+}
+
 uint32_t FeatureStyleRule::geometryTypesMask() const
 {
     return geometryTypes_;
+}
+
+uint32_t FeatureStyleRule::effectiveGeometryTypesMask() const
+{
+    if (branchMode_ == BranchMode::None) {
+        return geometryTypes_;
+    }
+    uint32_t result = 0;
+    for (auto const& rule : subRules_) {
+        result |= rule.effectiveGeometryTypesMask();
+    }
+    return result;
 }
 
 bool FeatureStyleRule::supports(
@@ -835,6 +915,11 @@ std::optional<bool> const& FeatureStyleRule::attributeValidityGeometry() const
 uint32_t const& FeatureStyleRule::index() const
 {
     return index_;
+}
+
+uint32_t FeatureStyleRule::renderIndex() const
+{
+    return renderIndex_;
 }
 
 }

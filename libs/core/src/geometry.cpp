@@ -59,7 +59,7 @@ std::optional<glm::dvec3> sidewaysFor(
 /** Fallback sideways direction for degenerate cases with too little line context. */
 glm::dvec3 fallbackSideways(Point const& point)
 {
-    auto const eastInWgs = erdblick::localWgs84UnitCoordinateSystem({{point, point}, GeomType::Points})[0];
+    auto const eastInWgs = erdblick::localWgs84UnitCoordinateSystem({{point, point}, {}, GeomType::Points})[0];
     auto const cart = erdblick::wgsToCartesian<glm::dvec3>(point);
     auto const shifted = erdblick::wgsToCartesian<glm::dvec3>({
         point.x + eastInWgs.x,

@@ -2,6 +2,7 @@ import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/was
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
+import type {RenderableTileLayer} from "../mapview/render-view.model";
 
 /**
  * Normalizes feature ids for lookup against the base feature record.
@@ -25,7 +26,7 @@ function normalizeFeatureIdForLookup(featureId: string): string {
  * to keep the memory usage within reasonable limits. To use the wrapped
  * WASM TileFeatureLayer, use the peek()-function.
  */
-export class FeatureTile {
+export class FeatureTile implements RenderableTileLayer {
     static readonly DEFAULT_RENDER_ORDER = Number.MAX_SAFE_INTEGER;
     mapTileKey: string = "undefined";
     nodeId: string = "undefined";
@@ -37,7 +38,7 @@ export class FeatureTile {
     error?: string;
     private parser: TileLayerParser;
     private fieldDictBlobCache: Uint8Array | null = null;
-    private dataSourceInfoBlobCache: Uint8Array | null = null;
+    private static dataSourceInfoBlobCacheByMapName: Map<string, Uint8Array> = new Map<string, Uint8Array>();
     private featureIdByAddressCache: Map<number, string> = new Map<number, string>();
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
     private vertexCountCache: number | null = null;
@@ -60,6 +61,11 @@ export class FeatureTile {
     static statParseTimePrefix = "Rendering/Feature-Model-Parsing";
     static statTileSize = "Size/Feature-Model#kb";
     static statParseTime = "Rendering/Feature-Model-Parsing#ms";
+
+    /** Clears map-level datasource metadata when `/sources` is reloaded into the shared parser. */
+    static clearDataSourceInfoBlobCache(): void {
+        FeatureTile.dataSourceInfoBlobCacheByMapName.clear();
+    }
 
     /**
      * Construct a FeatureTile object.
@@ -121,7 +127,6 @@ export class FeatureTile {
         this.tileFeatureLayerBlobsByStage.set(stage, tileFeatureLayerBlob);
         this.tileFeatureLayerBlob = this.highestStageBlob();
         this.fieldDictBlobCache = null;
-        this.dataSourceInfoBlobCache = null;
         this.featureIdByAddressCache.clear();
         this.glbAttachmentCacheVersion = -1;
         this.glbAttachmentCache = undefined;
@@ -297,11 +302,12 @@ export class FeatureTile {
 
     /** Returns cached datasource metadata for the tile's map, loading it from WASM on demand. */
     getDataSourceInfoBlob(): Uint8Array | null {
-        if (this.dataSourceInfoBlobCache) {
-            return this.dataSourceInfoBlobCache;
-        }
         if (!this.mapName.length) {
             return null;
+        }
+        const cached = FeatureTile.dataSourceInfoBlobCacheByMapName.get(this.mapName);
+        if (cached) {
+            return cached;
         }
         const encoded = uint8ArrayFromWasm((buf) => {
             this.parser.getDataSourceInfo(buf, this.mapName);
@@ -310,7 +316,7 @@ export class FeatureTile {
         if (!encoded) {
             return null;
         }
-        this.dataSourceInfoBlobCache = encoded;
+        FeatureTile.dataSourceInfoBlobCacheByMapName.set(this.mapName, encoded);
         return encoded;
     }
 

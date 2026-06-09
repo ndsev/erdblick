@@ -1,6 +1,6 @@
 import {Component, Input} from '@angular/core';
 import {LoadingStatBubbles, ProgressCounter, TilePipelineProgress} from './diagnostics.model';
-import {MapDataService} from '../mapdata/map.service';
+import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 
 interface ProgressBar {
     key: string;
@@ -70,7 +70,7 @@ export class DiagnosticsProgressComponent {
     @Input({required: true}) progress!: TilePipelineProgress;
     readonly paused$ = this.mapService.tilePipelinePaused$;
 
-    constructor(private readonly mapService: MapDataService) {}
+    constructor(private readonly mapService: MapTileStreamService) {}
 
     /** Returns the ordered list of progress bars shown in the widget. */
     get progressBars(): ProgressBar[] {

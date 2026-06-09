@@ -1,6 +1,6 @@
 import {Component} from "@angular/core";
 import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
 import {Color} from "../integrations/geo";
 import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 
@@ -98,7 +98,7 @@ export class SourceDataLayerSelectionDialogComponent {
     customMapId: string = "";
     showCustomTileIdInput: boolean = false;
 
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: MapInfoService,
                 public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
             this.tileIds = data;

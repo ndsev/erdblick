@@ -17,16 +17,22 @@ import {DividerModule} from "primeng/divider";
 import {PanelMenuModule} from "primeng/panelmenu";
 import {TreeTableModule} from "primeng/treetable";
 import {ToastModule} from "primeng/toast";
-import {MessageService} from "primeng/api";
+import {ConfirmationService, MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
-import {MapDataService} from "./mapdata/map.service";
+import {MapInfoService} from "./mapdata/map-info.service";
+import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
+import {MapRenderService} from "./mapdata/map-render.service";
+import {InspectionSelectionService} from "./inspection/inspection-selection.service";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
+import {SearchStyleColorComponent} from "./search/search-style-color.component";
+import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
+import {FeatureSearchExportDialogComponent} from "./search/feature-search-export.dialog.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
@@ -47,6 +53,7 @@ import {ListboxModule} from "primeng/listbox";
 import {FeatureSearchService} from "./search/feature.search.service";
 import {ClipboardService} from "./shared/clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
+import {TreeSelectModule} from "primeng/treeselect";
 import {ButtonGroupModule} from "primeng/buttongroup";
 import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
@@ -55,6 +62,7 @@ import {HighlightRegion} from "./inspection/highlight.region.pipe";
 import {TreeTableFilterPatchDirective} from "./inspection/treetablefilter-patch.directive";
 import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
+import {IftaLabelModule} from "primeng/iftalabel";
 import {TabsModule} from "primeng/tabs";
 import {OnEnterClickDirective} from "./shared/keyboard.service";
 import {SelectModule} from 'primeng/select';
@@ -64,10 +72,12 @@ import {EditorService} from "./shared/editor.service";
 import {ReactiveFormsModule} from '@angular/forms';
 import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {ProgressBarModule} from "primeng/progressbar";
+import {MeterGroupModule} from "primeng/metergroup";
 import {ButtonModule} from "primeng/button";
 import {TooltipModule} from "primeng/tooltip";
 import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
+import {ConfirmPopupModule} from "primeng/confirmpopup";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
 import {AboutComponent} from "./auxiliaries/about.component";
@@ -98,6 +108,7 @@ import {Menubar} from "primeng/menubar";
 import {DynamicDialogModule} from "primeng/dynamicdialog";
 import {DialogService} from "primeng/dynamicdialog";
 import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
+import {InspectionDialogsComponent} from "./inspection/inspection.dialogs.component";
 import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
 import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
@@ -107,9 +118,13 @@ import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.compo
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 import {Tag} from "primeng/tag";
 import {AppDialogComponent} from "./shared/app-dialog.component";
+import {AppPanelComponent} from "./shared/app-panel.component";
+import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
+import {AppConfirmPopupComponent} from "./shared/app-confirm-popup.component";
+import {SearchCompletionPopupComponent} from "./search/search-completion-popup.component";
+import {SimfilExpressionInputComponent} from "./search/simfil-expression-input.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
-import {Panel} from "primeng/panel";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -145,14 +160,16 @@ const updateGlobalSpinner = (message: string) => {
     }
 };
 
-/** App initializer that loads config and then brings up the WASM core, styles, map data, and search workers in order. */
+/** App initializer that loads config and then brings up the WASM core, styles, map data, and search state in order. */
 export const initializeServices = () => {
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
-    const mapService = inject(MapDataService);
+    const tileStream = inject(MapTileStreamService);
+    const inspectionSelection = inject(InspectionSelectionService);
+    const mapRender = inject(MapRenderService);
     const coordService = inject(CoordinatesService);
-    const searchService = inject(FeatureSearchService);
+    inject(FeatureSearchService);
 
     return (async () => {
         updateGlobalSpinner('Loading app config');
@@ -161,6 +178,7 @@ export const initializeServices = () => {
             configService.snapshot.state,
             configService.snapshot.configStateHash
         );
+        stateService.initializePersistence();
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
         updateGlobalSpinner('Initializing coordinates');
@@ -168,9 +186,9 @@ export const initializeServices = () => {
         updateGlobalSpinner('Loading styles');
         await styleService.initializeStyles();
         updateGlobalSpinner('Initializing map data');
-        await mapService.initialize();
-        updateGlobalSpinner('Starting search workers');
-        await searchService.initializeWorkers();
+        await tileStream.initialize();
+        inspectionSelection.initialize();
+        mapRender.initialize();
     })();
 }
 
@@ -186,6 +204,9 @@ export const initializeServices = () => {
         EditorComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
+        SearchStyleColorComponent,
+        FeatureSearchDialogsComponent,
+        FeatureSearchExportDialogComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
         HighlightSearch,
@@ -204,6 +225,7 @@ export const initializeServices = () => {
         InspectionTreeComponent,
         DockableLayoutComponent,
         InspectionPanelDialogComponent,
+        InspectionDialogsComponent,
         InspectionComparisonDialogComponent,
         SurveyComponent,
         DiagnosticsIndicatorComponent,
@@ -222,6 +244,11 @@ export const initializeServices = () => {
         AnimateOnScroll,
         AppRoutingModule,
         AppDialogComponent,
+        AppPanelComponent,
+        AppSurfaceHeaderComponent,
+        AppConfirmPopupComponent,
+        SearchCompletionPopupComponent,
+        SimfilExpressionInputComponent,
         SpeedDialModule,
         DialogModule,
         DynamicDialogModule,
@@ -246,7 +273,9 @@ export const initializeServices = () => {
         ColorPickerModule,
         ListboxModule,
         MultiSelectModule,
+        TreeSelectModule,
         FloatLabelModule,
+        IftaLabelModule,
         MessageModule,
         Textarea,
         ButtonGroupModule,
@@ -256,10 +285,12 @@ export const initializeServices = () => {
         AutoCompleteModule,
         ReactiveFormsModule,
         ProgressBarModule,
+        MeterGroupModule,
         ButtonModule,
         TooltipModule,
         ProgressSpinnerModule,
         ContextMenuModule,
+        ConfirmPopupModule,
         IconFieldModule,
         InputIconModule,
         PopoverModule,
@@ -271,13 +302,16 @@ export const initializeServices = () => {
         ToggleButton,
         Menubar,
         Ripple,
-        Tag,
-        Panel
+        Tag
     ],
     providers: [
         provideAppInitializer(initializeServices),
-        MapDataService,
+        MapInfoService,
+        MapTileStreamService,
+        InspectionSelectionService,
+        MapRenderService,
         MessageService,
+        ConfirmationService,
         InfoMessageService,
         JumpTargetService,
         AppStateService,

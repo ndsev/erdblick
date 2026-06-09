@@ -53,6 +53,7 @@ describe('AppStateService', () => {
     });
 
     afterEach(() => {
+        window.history.pushState({}, '', '/');
         vi.useRealTimers();
         vi.restoreAllMocks();
     });
@@ -105,6 +106,156 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('hydrates the focused inspection panel from selection URL state', async () => {
+        const routerStub = createRouterStub({ sel: '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0' });
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.focusedInspectionPanelId).toBe(5);
+        expect(service.selection[0].focused).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates selection from the browser URL before router query params can drop suffixed ids', async () => {
+        const encodedSelection =
+            '0~0f~Features:Very-Large-Map:Road:220e0770000d:0~Road.545554686.6:attribute%231:validity%230~30:20~fff314~0';
+        window.history.pushState({}, '', `/?f=0&sel=${encodedSelection}`);
+        const routerStub = createRouterStub({ f: '0' });
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features[0]).toEqual({
+            mapTileKey: 'Features:Very-Large-Map:Road:220e0770000d:0',
+            featureId: 'Road.545554686.6:attribute#1:validity#0'
+        });
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps stored inspections and search state when stale empty URL params exist', async () => {
+        localStorage.setItem('selected', JSON.stringify([
+            '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
+        ]));
+        localStorage.setItem('search', JSON.stringify(['features', '**.speed > 80']));
+        localStorage.setItem('featureSearchState', JSON.stringify([
+            {id: 'feature-search-1', query: '**.speed > 80'}
+        ]));
+        const routerStub = createRouterStub({sel: '', s: '[]'});
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
+        expect(service.search).toEqual({
+            version: 2,
+            actionId: 'features',
+            input: '**.speed > 80'
+        });
+        expect(service.featureSearches).toHaveLength(1);
+        expect(service.featureSearches[0].query).toBe('**.speed > 80');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('explicitly restores persisted dialogs and panels without waiting for NavigationEnd', async () => {
+        localStorage.setItem('dialogLayouts', JSON.stringify({
+            'preferences-dialog': {
+                position: {left: 10, top: 20},
+                size: {width: 400, height: 300},
+                open: true
+            }
+        }));
+        localStorage.setItem('dockOpenState', '1');
+        localStorage.setItem('dockActiveTabState', JSON.stringify('search'));
+        localStorage.setItem('selected', JSON.stringify([
+            '7~1f~Features:map:layer:tile~feature-7~30:20~abcdef~0'
+        ]));
+        localStorage.setItem('featureSearchState', JSON.stringify([
+            {id: 'feature-search-7', query: '**.speed > 80'}
+        ]));
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.initializePersistence();
+        await flushMicrotasks();
+
+        expect(service.ready.getValue()).toBe(true);
+        expect(service.isDialogOpen('preferences-dialog')).toBe(true);
+        expect(service.isDockOpen).toBe(true);
+        expect(service.dockActiveTab).toBe('search');
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].id).toBe(7);
+        expect(service.featureSearches).toHaveLength(1);
+        expect(service.featureSearches[0].id).toBe('feature-search-7');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('always persists feature-search map-layer selection explicitly', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.initializePersistence();
+        service.addFeatureSearch({query: '**.speed > 80'});
+        await flushMicrotasks();
+
+        const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
+        expect(stored[0].selectedMapLayers).toEqual([]);
+        expect(stored[0].selectedTileLevels).toEqual([]);
+        expect(stored[0].selectedViewIndices).toEqual([0, 1]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('serializes active search state URLs as compact action tuples', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
@@ -126,7 +277,7 @@ describe('AppStateService', () => {
             version: 2,
             actionId: 'features',
             input: '**.speed > 80',
-            actionName: 'Search Loaded Features',
+            actionName: 'Search Features and Attributes',
             savedAt: 42,
         });
         await flushMicrotasks();
@@ -274,6 +425,37 @@ describe('AppStateService', () => {
 
         expect(service.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
         expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 30 });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('uses the configured default background opacity when a persisted layer no longer exists', async () => {
+        const routerStub = createRouterStub({ bg: 'world-overview~100' });
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        const resolvedState = service.resolveBackgroundState(
+            0,
+            [{
+                id: 'osm',
+                name: 'OpenStreetMap',
+                type: 'xyz',
+                urlTemplate: 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                headers: {},
+                defaultOpacity: 6,
+                minZoom: 0,
+                maxZoom: 19,
+                tileSize: 256
+            }],
+            'osm'
+        );
+
+        expect(resolvedState).toEqual({ layerId: 'osm', opacity: 6 });
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -689,6 +871,142 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('activates the inspection dock tab when adding a docked feature selection', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.dockActiveTab = 'search';
+        service.isDockOpen = false;
+        const panelId = service.setSelection([feature('new-feature', 'map/layer/new-tile')]);
+        const panel = service.selection.find(item => item.id === panelId);
+
+        expect(panel?.undocked).toBe(false);
+        expect(service.isDockOpen).toBe(true);
+        expect(service.dockActiveTab).toBe('inspection');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('can create an undocked feature selection without stealing the dock search tab', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.dockActiveTab = 'search';
+        service.isDockOpen = true;
+        const panelId = service.setSelection(
+            [feature('new-feature', 'map/layer/new-tile')],
+            undefined,
+            true,
+            true);
+        const panel = service.selection.find(item => item.id === panelId);
+
+        expect(panel?.undocked).toBe(true);
+        expect(service.isDockOpen).toBe(true);
+        expect(service.dockActiveTab).toBe('search');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('reuses an unlocked floating feature inspection even when it focuses an attribute target', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            {
+                id: 1,
+                features: [feature('Road.1:attribute#2:validity#0', 'map/layer/tile')],
+                locked: false,
+                size: [30, 40],
+                color: '#111111',
+                undocked: true
+            },
+            {
+                id: 2,
+                features: [feature('Road.3', 'map/layer/tile')],
+                locked: false,
+                size: [30, 20],
+                color: '#222222',
+                undocked: false
+            }
+        ];
+        service.dockActiveTab = 'search';
+        service.isDockOpen = true;
+
+        const panelId = service.setSelection(
+            [feature('Road.2', 'map/layer/tile')],
+            undefined,
+            false,
+            true);
+
+        expect(panelId).toBe(1);
+        expect(service.selection.find(panel => panel.id === 1)?.features).toEqual([feature('Road.2', 'map/layer/tile')]);
+        expect(service.selection.find(panel => panel.id === 2)).toBeDefined();
+        expect(service.dockActiveTab).toBe('search');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('toggles an inspection panel between base feature and attribute-validity target', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            {
+                id: 7,
+                features: [feature('Road.1', 'map/layer/tile')],
+                locked: true,
+                size: [30, 20],
+                color: '#111111',
+                undocked: false
+            }
+        ];
+
+        service.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
+        expect(service.selection[0].features[0].featureId).toBe('Road.1:attribute#2:validity#0');
+        expect(service.selection[0].locked).toBe(true);
+
+        service.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
+        expect(service.selection[0].features[0].featureId).toBe('Road.1');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('focuses inspection panels when selections create, reuse, or target an existing panel', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const selected = feature('new-feature', 'map/layer/new-tile');
+        expect(service.setSelection([selected])).toBe(2);
+        expect(service.focusedInspectionPanelId).toBe(2);
+        expect(service.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+
+        service.focusedInspectionPanelId = 1;
+        expect(service.setSelection([selected])).toBeUndefined();
+        expect(service.focusedInspectionPanelId).toBe(2);
+        expect(service.selection.find(panel => panel.id === 1)?.focused).toBeUndefined();
+        expect(service.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+
+        const serializedSelection = service.selectionState.serialize(false)?.['selected'] ?? '';
+        expect(serializedSelection).toContain('2~0f~');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('reopens the dock for default feature selections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -769,6 +1087,26 @@ describe('AppStateService', () => {
         expect(newPanel?.undocked).toBe(true);
         expect(newPanel?.locked).toBe(false);
         expect(newPanel?.features).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('falls back to a remaining inspection panel when the focused panel is removed', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('remove-me')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('fallback')], locked: true, size: [30, 20], color: '#222222', undocked: false },
+        ];
+        service.focusedInspectionPanelId = 1;
+
+        service.unsetPanel(1);
+
+        expect(service.focusedInspectionPanelId).toBe(2);
+        expect(service.selection.find(panel => panel.id === 2)?.focused).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();

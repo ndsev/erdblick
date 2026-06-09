@@ -70,7 +70,7 @@ function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean):
 
 /**
  * Ordered per-view queue for pending visualizations.
- * Membership and sort invalidation live here so `MapDataService` cannot accidentally desynchronize them.
+ * Membership and sort invalidation live here so render scheduling cannot accidentally desynchronize them.
  */
 export class VisualizationQueue {
     private readonly queue: ITileVisualization[] = [];
@@ -200,12 +200,15 @@ export class VisualizationQueue {
 
 /**
  * Per-view cache of visible tiles, tile render policies, and active visualizations.
- * This is the local working set that `MapDataService` mutates during every viewport refresh.
+ * This is the local working set owned by `MapViewStateService` and mutated by `MapRenderService`.
  */
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     visibleTileIds: Set<bigint> = new Set();
     visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
+    visibleTileIdSetsPerLevel = new Map<number, Set<bigint>>();
+    searchVisibleTileIdsPerLevel = new Map<number, Array<bigint>>();
+    searchVisibleTileIdSetsPerLevel = new Map<number, Set<bigint>>();
     tileRenderPolicy = new Map<bigint, TileRenderPolicy>();
     tileOrder = new Map<bigint, number>();
     readonly visualizationQueue = new VisualizationQueue();
@@ -342,17 +345,21 @@ export class ViewVisualizationState {
         this.visibleTileIds.clear();
         this.tileRenderPolicy.clear();
         this.visibleTileIdsPerLevel.clear();
+        this.visibleTileIdSetsPerLevel.clear();
+        this.searchVisibleTileIdsPerLevel.clear();
+        this.searchVisibleTileIdSetsPerLevel.clear();
         this.tileOrder.clear();
         for (let level of levels) {
             if (this.visibleTileIdsPerLevel.has(level)) {
                 continue;
             }
             const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, tileLimit) as bigint[];
+            const visibleTileIdSetForLevel = new Set<bigint>(visibleTileIdsForLevel);
             this.visibleTileIdsPerLevel.set(level, visibleTileIdsForLevel);
-            this.visibleTileIds = new Set([
-                ...this.visibleTileIds,
-                ...new Set<bigint>(visibleTileIdsForLevel)
-            ]);
+            this.visibleTileIdSetsPerLevel.set(level, visibleTileIdSetForLevel);
+            for (const tileId of visibleTileIdSetForLevel) {
+                this.visibleTileIds.add(tileId);
+            }
 
             const canonicalTileCount = coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level);
             const levelPolicy = tileRenderPolicyForCount(canonicalTileCount, pinLowFiToMaxLod);

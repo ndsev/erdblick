@@ -1,8 +1,15 @@
+import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {HttpResponse} from "@angular/common/http";
 import {of, throwError} from "rxjs";
 
-import {AppConfigService, ServerConfigResponse} from "./app-config.service";
+import {
+    AppConfigService,
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY,
+    DEFAULT_XYZ_BACKGROUND_MAX_ZOOM,
+    ServerConfigResponse
+} from "./app-config.service";
 
 class HttpClientStub {
     get = vi.fn();
@@ -263,5 +270,255 @@ describe("AppConfigService", () => {
         const config = await service.load();
         expect(config.surveys.length).toBe(1);
         expect(config.surveys[0].id).toBe("tooling-days-2026");
+    });
+
+    it("uses the built-in offline location provider by default", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({});
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.locationSearch.providers).toEqual([
+            {
+                id: "mapget-offline",
+                name: "Place",
+                url: "/location",
+                headers: {},
+                enabled: true
+            }
+        ]);
+        expect(config.locationSearch.minCharacters).toBe(2);
+        expect(config.locationSearch.debounceMs).toBe(150);
+    });
+
+    it("uses OSM as the built-in fallback background without requiring Blue Marble", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({});
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.defaultBackgroundLayerId).toBe(DEFAULT_BACKGROUND_LAYER_ID);
+        expect(config.backgroundLayers).toEqual([
+            expect.objectContaining({
+                id: "osm",
+                defaultOpacity: DEFAULT_BACKGROUND_OPACITY,
+                maxZoom: 19
+            })
+        ]);
+        expect(config.backgroundLayers.some(layer => layer.id === "world-overview")).toBe(false);
+    });
+
+    it("falls back to the first configured background when Blue Marble is removed", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    backgroundLayers: [
+                        {
+                            id: "osm",
+                            name: "OpenStreetMap",
+                            type: "xyz",
+                            urlTemplate: "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                            defaultOpacity: 6,
+                            maxZoom: 19
+                        }
+                    ],
+                    defaultBackgroundLayerId: "world-overview"
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.defaultBackgroundLayerId).toBe("osm");
+        expect(config.backgroundLayers.map(layer => layer.id)).toEqual(["osm"]);
+    });
+
+    it("allows custom XYZ satellite layers to omit maxZoom while still reaching high levels", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    backgroundLayers: [
+                        {
+                            id: "satellite",
+                            name: "Satellite",
+                            type: "xyz",
+                            urlTemplate: "https://tiles.example.com/{z}/{x}/{y}.jpg"
+                        }
+                    ],
+                    defaultBackgroundLayerId: "satellite"
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.backgroundLayers[0]).toEqual(expect.objectContaining({
+            id: "satellite",
+            maxZoom: DEFAULT_XYZ_BACKGROUND_MAX_ZOOM
+        }));
+    });
+
+    it("accepts location provider adapters from static config.json", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    locationSearch: {
+                        providers: [
+                            {
+                                id: "static-external",
+                                name: "Static external",
+                                url: "https://geocoder.example/search",
+                                params: {
+                                    format: "jsonv2",
+                                    addressdetails: 1
+                                },
+                                queryParam: "q",
+                                limitParam: "limit",
+                                adapter: {
+                                    itemsPath: "features",
+                                    fields: {
+                                        id: "id",
+                                        name: {template: "{properties.name}, {properties.country}"},
+                                        lonLat: "geometry.coordinates",
+                                        population: "properties.population",
+                                        source: {value: "static-geocoder"}
+                                    },
+                                    bbox: {
+                                        path: "bbox",
+                                        format: "westSouthEastNorth"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.locationSearch.providers[0]).toEqual({
+            id: "static-external",
+            name: "Static external",
+            url: "https://geocoder.example/search",
+            headers: {},
+            params: {
+                format: "jsonv2",
+                addressdetails: 1
+            },
+            queryParam: "q",
+            limitParam: "limit",
+            adapter: {
+                itemsPath: "features",
+                fields: {
+                    id: "id",
+                    name: {template: "{properties.name}, {properties.country}"},
+                    lonLat: "geometry.coordinates",
+                    population: "properties.population",
+                    source: {value: "static-geocoder"}
+                },
+                bbox: {
+                    path: "bbox",
+                    format: "westSouthEastNorth"
+                }
+            },
+            enabled: true
+        });
+    });
+
+    it("replaces location providers from non-empty server config", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    locationSearch: {
+                        providers: [
+                            {id: "static", name: "Static", url: "/static-location"}
+                        ],
+                        minCharacters: 3,
+                        debounceMs: 400
+                    }
+                });
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    datasourceConfigUnavailable: false,
+                    erdblick: {
+                        locationSearch: {
+                            providers: [
+                                {
+                                    id: "customer",
+                                    name: "Customer",
+                                    url: "https://geocoder.example/location",
+                                    headers: {"X-Project": "mapviewer"},
+                                    params: {
+                                        format: "jsonv2"
+                                    },
+                                    queryParam: "q",
+                                    adapter: {
+                                        itemsPath: "results",
+                                        fields: {
+                                            id: "place.id",
+                                            name: "place.label",
+                                            longitude: "position.lon",
+                                            latitude: "position.lat"
+                                        },
+                                        lonLatOrder: "lonLat"
+                                    },
+                                    enabled: false
+                                }
+                            ],
+                            minCharacters: 2,
+                            debounceMs: 200
+                        }
+                    }
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.locationSearch.providers).toEqual([
+            {
+                id: "customer",
+                name: "Customer",
+                url: "https://geocoder.example/location",
+                headers: {"X-Project": "mapviewer"},
+                params: {
+                    format: "jsonv2"
+                },
+                queryParam: "q",
+                adapter: {
+                    itemsPath: "results",
+                    fields: {
+                        id: "place.id",
+                        name: "place.label",
+                        longitude: "position.lon",
+                        latitude: "position.lat"
+                    },
+                    lonLatOrder: "lonLat"
+                },
+                enabled: false
+            }
+        ]);
+        expect(config.locationSearch.minCharacters).toBe(2);
+        expect(config.locationSearch.debounceMs).toBe(200);
     });
 });

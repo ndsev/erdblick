@@ -1,6 +1,6 @@
 import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
 import {Subscription} from 'rxjs';
-import {MapDataService} from './mapdata/map.service';
+import {MapInfoService} from './mapdata/map-info.service';
 import {
     ABOUT_DIALOG_LAYOUT_ID,
     DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
@@ -44,61 +44,32 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
                 <span class="material-symbols-outlined">stacks</span>
             </p-button>
         }
-        @if (isMobileMenubar) {
-            <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="forcedMobileMenubarBreakpoint">
-                <ng-template #start>
-                    @if (!environment.visualizationOnly) {
-                        <search-panel></search-panel>
+        <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="menubarBreakpoint">
+            <ng-template #start>
+                @if (!environment.visualizationOnly) {
+                    <search-panel></search-panel>
+                }
+            </ng-template>
+            <ng-template #item let-item let-root="root">
+                <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
+                    <span class="material-symbols-outlined">{{ item.icon }}</span>
+                    <span>{{ item.name }}</span>
+                    @if (!root && item.items?.length) {
+                        <span class="pi submenu-indicator pi-angle-right"></span>
                     }
-                </ng-template>
-                <ng-template #item let-item let-root="root">
-                    <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
-                        <span class="material-symbols-outlined">{{ item.icon }}</span>
-                        <span>{{ item.name }}</span>
-                        @if (!root && item.items?.length) {
-                            <span class="pi submenu-indicator pi-angle-right"></span>
-                        }
-                    </a>
-                </ng-template>
-                <ng-template #end>
-                    <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
-                        <diagnostics-indicator></diagnostics-indicator>
-                        @if (copyright.length) {
-                            <div class="copyright-info" (click)="openLegalInfo()">
-                                {{ copyright }}
-                            </div>
-                        }
-                    </div>
-                </ng-template>
-            </p-menubar>
-        } @else {
-            <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="desktopMenubarBreakpoint">
-                <ng-template #start>
-                    @if (!environment.visualizationOnly) {
-                        <search-panel></search-panel>
+                </a>
+            </ng-template>
+            <ng-template #end>
+                <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
+                    <diagnostics-indicator></diagnostics-indicator>
+                    @if (copyright.length) {
+                        <div class="copyright-info" (click)="openLegalInfo()">
+                            {{ copyright }}
+                        </div>
                     }
-                </ng-template>
-                <ng-template #item let-item let-root="root">
-                    <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
-                        <span class="material-symbols-outlined">{{ item.icon }}</span>
-                        <span>{{ item.name }}</span>
-                        @if (!root && item.items?.length) {
-                            <span class="pi submenu-indicator pi-angle-right"></span>
-                        }
-                    </a>
-                </ng-template>
-                <ng-template #end>
-                    <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
-                        <diagnostics-indicator></diagnostics-indicator>
-                        @if (copyright.length) {
-                            <div class="copyright-info" (click)="openLegalInfo()">
-                                {{ copyright }}
-                            </div>
-                        }
-                    </div>
-                </ng-template>
-            </p-menubar>
-        }
+                </div>
+            </ng-template>
+        </p-menubar>
     `,
     styles: [``],
     standalone: false
@@ -128,11 +99,17 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     copyright: string = '';
 
+    protected get menubarBreakpoint(): string {
+        return this.isMobileMenubar
+            ? this.forcedMobileMenubarBreakpoint
+            : this.desktopMenubarBreakpoint;
+    }
+
     get mapsPanelOpen(): boolean {
         return this.stateService.mapsOpenState.getValue();
     }
 
-    constructor(public mapService: MapDataService,
+    constructor(public mapService: MapInfoService,
                 public stateService: AppStateService,
                 private diagnostics: DiagnosticsFacadeService,
                 private elementRef: ElementRef<HTMLElement>,

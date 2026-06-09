@@ -15,12 +15,15 @@ import {toObservable} from "@angular/core/rxjs-interop";
 import {Subscription} from "rxjs";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "../shared/info.service";
-import {MapDataService} from "../mapdata/map.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
+import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {FeatureSearchService} from "../search/feature.search.service";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -260,10 +263,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     constructor(private cdr: ChangeDetectorRef,
                 private clipboardService: ClipboardService,
-                public mapService: MapDataService,
+                public mapService: InspectionSelectionService,
                 private jumpService: JumpTargetService,
                 private stateService: AppStateService,
-                private messageService: InfoMessageService) {
+                private messageService: InfoMessageService,
+                private featureSearchService: FeatureSearchService) {
         effect(() => {
             this.data = this.treeData();
             if (this.isFeatureInspectionTree(this.data)) {
@@ -271,6 +275,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             }
 
             this.refreshLayout();
+            this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
             this.cdr.markForCheck();
         });
         effect(() => {
@@ -286,7 +291,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.cdr.markForCheck();
         });
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
-            setTimeout(() => this.table?.scrollToVirtualIndex(index ?? 0), 5);
+            this.scrollToHighlightedIndex(index);
         }));
     }
 
@@ -518,7 +523,159 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                     }
                 }
             });
+            const keyValueSearch = this.keyValueSearchRequestForRow(rowData);
+            if (keyValueSearch) {
+                this.inspectionMenuItems.push({
+                    label: 'Search for key/value',
+                    icon: 'pi pi-search',
+                    command: () => {
+                        this.featureSearchService.run(keyValueSearch.query, {
+                            scope: 'auto',
+                            selectedMapLayers: keyValueSearch.selectedMapLayers
+                        });
+                    }
+                });
+            }
         }
+        const inspectionTarget = this.inspectionTargetForRow(rowData);
+        const mapTileKey = typeof rowData?.["mapTileKey"] === "string" ? rowData["mapTileKey"] : "";
+        if (inspectionTarget && mapTileKey) {
+            this.inspectionMenuItems.push({
+                label: this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
+                    ? 'Unhighlight Attr/Validity'
+                    : 'Highlight Attr/Validity',
+                icon: 'pi pi-bullseye',
+                command: () => {
+                    this.stateService.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
+                }
+            });
+        }
+    }
+
+    /** Returns the attribute or validity pseudo-feature id represented by a row, preferring exact validities. */
+    private inspectionTargetForRow(rowData: any): string | undefined {
+        const candidates = [
+            rowData?.["strongHoverGroupId"],
+            rowData?.["hoverId"],
+            rowData?.["softHoverGroupId"]
+        ];
+        return candidates.find((value): value is string =>
+            typeof value === "string" && value.includes(":attribute#"));
+    }
+
+    /** Checks whether this panel already highlights the requested attribute/validity target. */
+    private isInspectionTargetHighlighted(mapTileKey: string, targetFeatureId: string): boolean {
+        const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
+        const panel = this.stateService.selection.find(item => item.id === this.panelId());
+        return panel?.features.some(feature =>
+            feature.mapTileKey === mapTileKey &&
+            stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
+            feature.featureId === targetFeatureId
+        ) ?? false;
+    }
+
+    /** Builds a feature-root equality search from one scalar inspection row. */
+    private keyValueSearchRequestForRow(
+        rowData: any
+    ): {query: string; selectedMapLayers: FeatureSearchMapLayerRef[]} | undefined {
+        const path = typeof rowData?.["geoJsonPath"] === "string" ? rowData["geoJsonPath"].trim() : "";
+        if (!path) {
+            return undefined;
+        }
+        const literal = this.searchLiteralForInspectionValue(rowData);
+        if (literal === undefined) {
+            return undefined;
+        }
+        const selectedMapLayer = this.searchMapLayerForInspectionRow(rowData);
+        if (!selectedMapLayer) {
+            return undefined;
+        }
+        return {
+            query: `(${path}) == (${literal})`,
+            selectedMapLayers: [selectedMapLayer]
+        };
+    }
+
+    /** Converts the typed inspection cell value into a Simfil literal for equality searches. */
+    private searchLiteralForInspectionValue(rowData: any): string | undefined {
+        const type = Number(rowData?.["type"] ?? coreLib.ValueType.NULL.value);
+        if ((type & coreLib.ValueType.ARRAY.value) === coreLib.ValueType.ARRAY.value ||
+            type === coreLib.ValueType.SECTION.value) {
+            return undefined;
+        }
+
+        const value = rowData?.["value"];
+        switch (type) {
+            case coreLib.ValueType.NULL.value:
+                return value === "NULL" ? "null" : this.searchLiteralForUntypedInspectionValue(value);
+            case coreLib.ValueType.NUMBER.value:
+                return this.searchNumberLiteral(value);
+            case coreLib.ValueType.BOOLEAN.value:
+                return this.searchBooleanLiteral(value);
+            case coreLib.ValueType.STRING.value:
+            case coreLib.ValueType.FEATUREID.value:
+                return JSON.stringify(String(value ?? ""));
+            default:
+                return this.searchLiteralForUntypedInspectionValue(value);
+        }
+    }
+
+    /** Falls back to the primitive JS value when nested inspection rows lack precise type metadata. */
+    private searchLiteralForUntypedInspectionValue(value: unknown): string | undefined {
+        if (typeof value === "number") {
+            return this.searchNumberLiteral(value);
+        }
+        if (typeof value === "boolean") {
+            return this.searchBooleanLiteral(value);
+        }
+        if (typeof value !== "string") {
+            return undefined;
+        }
+        return value.length > 0 ? JSON.stringify(value) : undefined;
+    }
+
+    /** Converts a rendered numeric inspection value without accepting malformed partial numbers. */
+    private searchNumberLiteral(value: unknown): string | undefined {
+        if (typeof value === "number" && Number.isFinite(value)) {
+            return String(value);
+        }
+        if (typeof value !== "string") {
+            return undefined;
+        }
+        const trimmed = value.trim();
+        return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed) &&
+            Number.isFinite(Number(trimmed))
+            ? trimmed
+            : undefined;
+    }
+
+    /** Converts boolean inspection values regardless of whether Angular received a boolean or rendered string. */
+    private searchBooleanLiteral(value: unknown): string | undefined {
+        if (typeof value === "boolean") {
+            return value ? "true" : "false";
+        }
+        if (typeof value !== "string") {
+            return undefined;
+        }
+        const normalized = value.trim().toLowerCase();
+        return normalized === "true" || normalized === "false" ? normalized : undefined;
+    }
+
+    /** Extracts the feature-search map/layer scope from the inspected feature tile key. */
+    private searchMapLayerForInspectionRow(rowData: any): FeatureSearchMapLayerRef | undefined {
+        const mapTileKey = typeof rowData?.["mapTileKey"] === "string" ? rowData["mapTileKey"] : "";
+        if (!mapTileKey) {
+            return undefined;
+        }
+        try {
+            const [mapId, layerId] = coreLib.parseMapTileKey(mapTileKey);
+            if (mapId && layerId) {
+                return {mapId, layerId};
+            }
+        } catch (_error) {
+            return undefined;
+        }
+        return undefined;
     }
 
     /** Jumps or highlights the feature referenced by a FeatureId cell. */
@@ -648,6 +805,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             : undefined;
         return {
             [rowData?.styleClass ?? ""]: !!rowData?.styleClass,
+            "inspection-selection-soft": rowData?.["selectionHighlight"] === "soft",
+            "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
             "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
                 softHoverGroupId === this.activeSoftHoverGroupId,
             "inspection-hover-strong": !!this.activeStrongHoverGroupId &&
@@ -780,18 +939,33 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.emitFilterChange(nextValue);
     }
 
-    /** Expands the inspection branches that are usually most useful on first render. */
+    /** Expands the inspection branches that are usually most useful on first render, preserving explicit row state. */
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
             const isRelationTypeNode = parent && parent.data["key"] === "Relations";
             const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || isRelationTypeNode || isSection || hasSingleChild;
+            if (node.expanded === undefined) {
+                node.expanded = isTopLevelNode || isRelationTypeNode || isSection || hasSingleChild;
+            }
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
             }
+        });
+    }
+
+    /** Scrolls virtual inspection trees to selected attr/validity rows after PrimeNG has applied data changes. */
+    private scrollToHighlightedIndex(index: number | undefined): void {
+        if (index === undefined) {
+            return;
+        }
+        const scroll = () => this.table?.scrollToVirtualIndex(index);
+        setTimeout(scroll, 5);
+        window.requestAnimationFrame(() => {
+            scroll();
+            window.requestAnimationFrame(scroll);
         });
     }
 

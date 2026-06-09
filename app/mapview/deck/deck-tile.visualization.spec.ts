@@ -1186,6 +1186,7 @@ describe("DeckTileVisualization", () => {
             addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
             run: vi.fn(),
             renderResult: () => emptyRenderResult(),
+            runtimeStyleIssues: () => [],
             mergedPointFeatures: () => ({}),
             externalRelationReferences: () => [],
             processResolvedExternalReferences: vi.fn(),
@@ -1255,6 +1256,7 @@ describe("DeckTileVisualization", () => {
             addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
             run: vi.fn(),
             renderResult: () => emptyRenderResult(),
+            runtimeStyleIssues: () => [],
             mergedPointFeatures: () => ({}),
             externalRelationReferences: () => currentRequests,
             processResolvedExternalReferences: vi.fn(() => {

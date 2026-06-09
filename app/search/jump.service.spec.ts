@@ -1,3 +1,4 @@
+import "@angular/compiler";
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 import {Subject} from 'rxjs';
 import {coreLib, initializeLibrary} from '../integrations/wasm';
@@ -7,10 +8,13 @@ beforeAll(async () => {
     await initializeLibrary();
 });
 
-class MapDataServiceStub {
+class MapInfoServiceStub {
     maps = {maps: new Map<string, any>()};
     sourceDataLayerIdForLayerName = vi.fn();
     tileLayerParser: any = {filterFeatureJumpTargets: vi.fn().mockReturnValue([])};
+}
+
+class InspectionSelectionServiceStub {
     setHoveredFeatures = vi.fn();
     focusOnFeature = vi.fn();
 }
@@ -40,7 +44,8 @@ class AppConfigServiceStub {
 }
 
 const createService = (config: any = {}) => {
-    const mapService = new MapDataServiceStub();
+    const mapService = new MapInfoServiceStub();
+    const inspectionSelection = new InspectionSelectionServiceStub();
     const infoService = new InfoMessageServiceStub();
     const menuService = new RightClickMenuServiceStub();
     const stateService = new AppStateServiceStub();
@@ -52,6 +57,7 @@ const createService = (config: any = {}) => {
 
     const service = new JumpTargetService(
         mapService as any,
+        inspectionSelection as any,
         infoService as any,
         menuService as any,
         stateService as any,
@@ -59,7 +65,7 @@ const createService = (config: any = {}) => {
         configService as any,
     );
 
-    return {service, mapService, infoService, menuService, stateService, searchService, configService};
+    return {service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService};
 };
 
 describe('JumpTargetService', () => {

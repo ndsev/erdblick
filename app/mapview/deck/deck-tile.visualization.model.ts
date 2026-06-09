@@ -35,6 +35,7 @@ import {
     DeckVisualizationBufferResult,
     DeckWorkerTimings
 } from "./deck-render.worker.protocol";
+import {isValidSurfaceRingTopology, triangulateSurfaceIndices} from "./surface-triangulation";
 import {StyleSourceRef, StyleValidationIssue} from "../../styledata/style-validation.model";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
@@ -48,13 +49,6 @@ import {
     retainDeckTileGltfAsset,
     releaseDeckTileGltfAsset
 } from "./deck-gltf-node.layer";
-
-/** Style wrapper for wasm styles that expose erdblick-specific lifecycle and fidelity helpers. */
-interface StyleWithIsDeleted extends FeatureLayerStyle {
-    isDeleted(): boolean;
-    hasExplicitLowFidelityRules(): boolean;
-    hasRelationRules(mode: HighlightMode): boolean;
-}
 
 /** Deck-scene subset consumed by tile visualizations when they need the registry or scene mode. */
 interface DeckSceneHandle {
@@ -133,6 +127,7 @@ interface DeckSurfaceLayerData {
     featureAddresses: DeckFeatureAddressBuffer;
     attributes: {
         getPolygon: DeckBinaryAttribute<Float32Array>;
+        indices: DeckBinaryAttribute<Uint32Array>;
         fillColors: DeckBinaryAttribute<Uint8Array>;
     };
 }
@@ -213,6 +208,8 @@ interface DeckSurfaceRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
     startIndices: Uint32Array;
+    holeIndices: Uint32Array;
+    holeIndexStarts: Uint32Array;
     colors: Uint8Array;
     depthTests?: Uint8Array;
     featureAddresses: Uint32Array;
@@ -294,10 +291,6 @@ const DECK_ARROW_ICON_MAPPING = {
 
 type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
 type DeckRuleFidelityEnum = ErdblickCore_["RuleFidelity"];
-type DeckFeatureLayerVisualizationWithRenderResult = DeckFeatureLayerVisualization & {
-    renderResult(): DeckVisualizationBufferResult;
-    runtimeStyleIssues?(): StyleValidationIssue[];
-};
 
 /** Returns the wasm constructor for deck feature visualizations after the core library is initialized. */
 /** Resolves the wasm visualization constructor while keeping the call sites strongly typed. */
@@ -357,7 +350,7 @@ export class DeckTileVisualization implements ITileVisualization {
     public readonly styleId: string;
     public styleOrder: number;
 
-    private readonly style: StyleWithIsDeleted;
+    private readonly style: FeatureLayerStyle;
     private readonly styleSource: string;
     private readonly styleSourceRef: StyleSourceRef;
     private readonly recordStyleIssues: (issues: StyleValidationIssue[]) => void;
@@ -422,7 +415,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 recordStyleIssues: (issues: StyleValidationIssue[]) => void = () => {}) {
         this.tile = tile;
         this.pointMergeService = pointMergeService;
-        this.style = style as StyleWithIsDeleted;
+        this.style = style;
         this.styleSource = styleSource;
         this.styleId = this.style.name();
         this.styleSourceRef = styleSourceRef ?? {
@@ -1946,11 +1939,8 @@ export class DeckTileVisualization implements ITileVisualization {
 
     /** Reads the binary render result from the wasm visualization wrapper. */
     private readRenderResultFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckVisualizationBufferResult {
-        const deckVisuWithResult = deckVisu as DeckFeatureLayerVisualizationWithRenderResult;
-        const renderResult = deckVisuWithResult.renderResult();
-        const styleIssues = typeof deckVisuWithResult.runtimeStyleIssues === "function"
-            ? deckVisuWithResult.runtimeStyleIssues() ?? []
-            : [];
+        const renderResult = deckVisu.renderResult() as DeckVisualizationBufferResult;
+        const styleIssues = (deckVisu.runtimeStyleIssues() as StyleValidationIssue[]) ?? [];
         return {
             ...renderResult,
             styleIssues
@@ -2177,6 +2167,9 @@ export class DeckTileVisualization implements ITileVisualization {
         if (raw.startIndices[0] !== 0) {
             return [];
         }
+        if (!isValidSurfaceRingTopology(raw, vertexCount)) {
+            return [];
+        }
 
         for (let surfaceIndex = 0; surfaceIndex < surfaceCount; surfaceIndex++) {
             const start = raw.startIndices[surfaceIndex];
@@ -2189,6 +2182,8 @@ export class DeckTileVisualization implements ITileVisualization {
         const groups = new Map<boolean, {
             positions: number[];
             startIndices: number[];
+            holeIndices: number[];
+            holeIndexStarts: number[];
             colors: number[];
             depthTests: number[];
             featureAddresses: number[];
@@ -2201,6 +2196,8 @@ export class DeckTileVisualization implements ITileVisualization {
                 group = {
                     positions: [],
                     startIndices: [0],
+                    holeIndices: [],
+                    holeIndexStarts: [0],
                     colors: [],
                     depthTests: [],
                     featureAddresses: []
@@ -2210,6 +2207,7 @@ export class DeckTileVisualization implements ITileVisualization {
 
             const startVertex = raw.startIndices[surfaceIndex];
             const endVertex = raw.startIndices[surfaceIndex + 1];
+            const groupStartVertex = group.positions.length / 3;
             for (let vertexIndex = startVertex; vertexIndex < endVertex; vertexIndex++) {
                 const positionOffset = vertexIndex * 3;
                 group.positions.push(
@@ -2225,6 +2223,14 @@ export class DeckTileVisualization implements ITileVisualization {
                     raw.colors[colorOffset + 3]
                 );
             }
+            if (raw.holeIndexStarts.length) {
+                const holeStart = raw.holeIndexStarts[surfaceIndex];
+                const holeEnd = raw.holeIndexStarts[surfaceIndex + 1];
+                for (let holeIndex = holeStart; holeIndex < holeEnd; holeIndex++) {
+                    group.holeIndices.push(groupStartVertex + raw.holeIndices[holeIndex] - startVertex);
+                }
+            }
+            group.holeIndexStarts.push(group.holeIndices.length);
             group.depthTests.push(depthTest ? 1 : 0);
             group.featureAddresses.push(raw.featureAddresses[surfaceIndex]);
             group.startIndices.push(group.positions.length / 3);
@@ -2243,6 +2249,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 featureAddresses: new Uint32Array(group.featureAddresses),
                 attributes: {
                     getPolygon: {value: new Float32Array(group.positions), size: 3},
+                    indices: {value: triangulateSurfaceIndices(group), size: 1},
                     fillColors: {value: new Uint8Array(group.colors), size: 4}
                 }
             }];

@@ -1,15 +1,18 @@
-import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, HostListener, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
-import {SearchTarget, JumpTargetService} from "./jump.service";
-import {MapDataService} from "../mapdata/map.service";
+import {FEATURE_SEARCH_TARGET_ID, SearchTarget, JumpTargetService} from "./jump.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounceTime, distinctUntilChanged, map, of, skip, startWith, Subject, switchMap, timer} from "rxjs";
+import {debounce, debounceTime, distinctUntilChanged, skip, Subject, switchMap, timer, filter, take, Subscription} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {FeatureSearchService} from "./feature.search.service";
+import {
+    FeatureSearchService,
+    featureSearchActionPayloadFromCompletion
+} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
-import {CompletionCandidate} from "./search.worker";
+import {CompletionCandidate} from "./search.model";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
@@ -20,11 +23,17 @@ import {
     LegacySearchHistoryEntry,
     normalizeResolvedSearchHistoryEntry,
     normalizeSearchHistoryEntry,
+    normalizeSearchHistoryPayload,
     sameSearchHistoryEntry,
     SearchHistoryEntry,
     SearchHistoryStateEntry,
     withSearchHistoryActionName
 } from "../shared/search-history";
+import {
+    isSupportedLocationSearchQuery,
+    LocationSearchService,
+    normalizeLocationSearchPayload
+} from "./location.search.service";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
@@ -49,29 +58,17 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                           placeholder="Search">
                 </textarea>
 
-                @if (completion.visible || completion.pending) {
-                    <div class="completion-popup" (mousedown)="onCompletionPopupDown($event)"
-                         [style.top.px]="completion.top"
-                         [style.left.px]="completion.left" [style.z-index]="completion.zIndex">
-                        @for (item of completionItems; track $index) {
-                            <div [ngClass]="{'selected': $index === completion.selectionIndex}"
-                                 (click)="applyCompletion(item.query)">
-                                <div class="row">
-                                    <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
-                                </div>
-                                @if (item.hint) {
-                                    <div class="row hint">
-                                        {{ item.hint }}
-                                    </div>
-                                }
-                            </div>
-                        }
-                        @if (completion.pending) {
-                            <p-progress-spinner aria-label="Loading completion candidates" 
-                                                [style]="{ height: '1em', width: '1em' }" />
-                        }
-                    </div>
-                }
+                <search-completion-popup
+                    [visible]="completion.visible"
+                    [pending]="completion.pending"
+                    [items]="completionItems"
+                    [selectionIndex]="completion.selectionIndex"
+                    [top]="completion.top"
+                    [left]="completion.left"
+                    [zIndex]="completion.zIndex"
+                    (popupMouseDown)="onCompletionPopupDown($event)"
+                    (candidateSelected)="applyCompletion($event)">
+                </search-completion-popup>
             </div>
 
             <div class="resizable-container" #searchcontrols>
@@ -84,7 +81,11 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                             <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle {{ item.color }}">
-                                    <i class="pi {{ item.icon }}"></i>
+                                    @if (item.iconType === 'material') {
+                                        <span class="material-symbols-outlined">{{ item.icon }}</span>
+                                    } @else {
+                                        <i class="pi {{ item.icon }}"></i>
+                                    }
                                 </span>
                                 <div class="search-option">
                                     <span class="search-option-name">{{ item.name }}</span>
@@ -105,7 +106,7 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                                         <br>
                                         <span [innerHTML]="item.label"></span>
                                     </div>
-                                    <p-button (click)="removeSearchHistoryEntry(item)" icon="pi pi-times" tabindex="-1"></p-button>
+                                    <p-button (click)="removeSearchHistoryEntry(item, $event)" icon="pi pi-times" tabindex="-1"></p-button>
                                 </div>
                             </div>
                         </div>
@@ -113,7 +114,11 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                             <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
                                  [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle grey">
-                                    <i class="pi {{ item.icon }}"></i>
+                                    @if (item.iconType === 'material') {
+                                        <span class="material-symbols-outlined">{{ item.icon }}</span>
+                                    } @else {
+                                        <i class="pi {{ item.icon }}"></i>
+                                    }
                                 </span>
                                 <div class="search-option">
                                     <span class="search-option-name">{{ item.name }}</span>
@@ -146,10 +151,11 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
 /**
  * Implements the omnibox-style search panel used for jumping, searching loaded features, and query completion.
  */
-export class SearchPanelComponent implements AfterViewInit {
+export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
 
     searchItems: Array<SearchTarget> = [];
+    private locationSearchItems: Array<SearchTarget> = [];
     private targetById = new Map<string, SearchTarget>();
     private targetByIdInput = "";
     activeSearchItems: Array<SearchTarget> = [];
@@ -158,9 +164,14 @@ export class SearchPanelComponent implements AfterViewInit {
     searchHistory: Array<SearchHistoryViewEntry> = [];
     visibleSearchHistory: Array<SearchHistoryViewEntry> = [];
     private suppressHistoryExecution = false;
+    private readonly subscriptions = new Subscription();
+    private readonly searchShortcutHandler = (_event: KeyboardEvent) => this.clickOnSearchToStart();
+    private initialSearchReplayFrameFirst?: number;
+    private initialSearchReplayFrameSecond?: number;
 
     /* Autocompletion */
     private searchInputChanged: Subject<void> = new Subject<void>();
+    private locationSearchQueryChanged: Subject<string> = new Subject<string>();
     completionItems: Array<CompletionCandidate> = [];
     completion = {
         // Position of the popup
@@ -170,15 +181,14 @@ export class SearchPanelComponent implements AfterViewInit {
         selectionIndex: 0,
         // True if the popup is visible
         visible: false,
-        // True if we are waiting for candidates
+        // True while the worker is streaming schema completion batches.
         pending: false,
-        // Delay in ms to show the spinner
-        pendingDelay: 600,
         // Delay for requesting completion candidates
         completionDelay: 150,
         // Keep completion above Search Actions dialog without using a hardcoded global z-index.
-        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1,
+        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000,
     };
+    private acceptedCompletionCandidate: CompletionCandidate | null = null;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
@@ -207,7 +217,8 @@ export class SearchPanelComponent implements AfterViewInit {
 
         /////////// Jump to mapget tile id
         let label = "tileId = ?";
-        if (this.jumpService.validateMapgetTileId(value)) {
+        const mapgetTileIdValid = this.jumpService.validateMapgetTileId(value);
+        if (mapgetTileIdValid) {
             label = `tileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -218,14 +229,15 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "Mapget Tile ID",
             label: label,
-            enabled: false,
+            enabled: mapgetTileIdValid,
             jump: (value: string) => { return this.parseMapgetTileId(value) },
             validate: (value: string) => { return this.jumpService.validateMapgetTileId(value) }
         });
 
         /////////// Jump to lon-lat
         label = "lon = ? | lat = ? | (level = ?)"
-        if (this.validateWGS84(value, true)) {
+        const lonLatValid = this.validateWGS84(value, true);
+        if (lonLatValid) {
             label = this.parseWgs84Coordinates(value, true)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -236,14 +248,15 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "WGS84 Lon-Lat Coordinates",
             label: label,
-            enabled: false,
+            enabled: lonLatValid,
             jump: (value: string) => { return this.parseWgs84Coordinates(value, true)?.target },
             validate: (value: string) => { return this.validateWGS84(value, true) }
         });
 
         /////////// Jump to lat-lon
         label = "lat = ? | lon = ? | (level = ?)"
-        if (this.validateWGS84(value, false)) {
+        const latLonValid = this.validateWGS84(value, false);
+        if (latLonValid) {
             label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -254,14 +267,14 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "WGS84 Lat-Lon Coordinates",
             label: label,
-            enabled: false,
+            enabled: latLonValid,
             jump: (value: string) => { return this.parseWgs84Coordinates(value, false)?.target },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
 
         /////////// Jump to Google Maps/OSM
         label = "lat = ? | lon = ?"
-        if (this.validateWGS84(value, false)) {
+        if (latLonValid) {
             label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -272,7 +285,7 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "Open WGS84 Lat-Lon in Google Maps",
             label: label,
-            enabled: false,
+            enabled: latLonValid,
             jump: (value: string) => { return this.openInGM(value) },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
@@ -282,7 +295,7 @@ export class SearchPanelComponent implements AfterViewInit {
             color: "green",
             name: "Open WGS84 Lat-Lon in Open Street Maps",
             label: label,
-            enabled: false,
+            enabled: latLonValid,
             jump: (value: string) => { return this.openInOSM(value) },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
@@ -294,40 +307,56 @@ export class SearchPanelComponent implements AfterViewInit {
      */
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapDataService,
+                public mapService: MapViewStateService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
-                private dialogStack: DialogStackService) {
-        this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
+                private dialogStack: DialogStackService,
+                private locationSearchService: LocationSearchService) {
+        this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
-        this.jumpService.targetValueSubject.subscribe((event: string) => {
+        this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
-        });
+        }));
 
-        this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
-            this.setCurrentSearchItems([
-                ...jumpTargets,
-                ...this.staticTargets
-            ]);
+        this.subscriptions.add(this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
+            this.setCurrentSearchItems(this.currentSearchItems(jumpTargets));
             this.reloadSearchHistory();
             this.refreshSearchMenu();
-        });
+        }));
+
+        this.subscriptions.add(this.locationSearchQueryChanged.pipe(
+            debounce(() => timer(this.locationSearchService.debounceMs)),
+            switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
+        ).subscribe(matches => {
+            if (!this.shouldRequestLocationSearch(this.searchInputValue)) {
+                return;
+            }
+            this.locationSearchItems = matches.map(match => this.locationSearchService.createSearchTarget(match));
+            this.setCurrentSearchItems(this.currentSearchItems());
+            this.reloadSearchHistory();
+            this.refreshSearchMenu();
+        }));
+
+        this.subscriptions.add(this.stateService.locationSearchResultLimitState.subscribe(() => {
+            this.updateLocationSearchQuery(this.searchInputValue);
+            this.refreshSearchMenu();
+        }));
 
         // TODO: Get rid of map selection, as soon as we support
         //  multi-selection from different maps. Then we can
         //  just search all maps simultaneously.
         // NOTE: Currently users must select specific maps to search. Once cross-map
         // multi-selection is implemented, search can operate on all maps at once.
-        jumpService.mapSelectionSubject.subscribe(maps => {
+        this.subscriptions.add(jumpService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
-        });
+        }));
 
-        this.stateService.searchState.subscribe(search => {
+        this.subscriptions.add(this.stateService.searchState.subscribe(search => {
             const entry = this.resolveStateEntry(search);
             if (!entry) {
                 return;
@@ -345,13 +374,10 @@ export class SearchPanelComponent implements AfterViewInit {
             }
 
             this.searchInputValue = entry.input;
-            const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
-            if (!sameSearchHistoryEntry(lastEntry, entry)) {
-                this.stateService.lastSearchHistoryEntry = entry;
-            }
-        });
+            this.mirrorSearchStateToLastEntry(entry, this.shouldSkipRestoredFeatureSearchEntry(entry));
+        }));
 
-        this.stateService.lastSearchHistoryEntryState.pipe(skip(2)).subscribe(entry => {
+        this.subscriptions.add(this.stateService.lastSearchHistoryEntryState.pipe(skip(1)).subscribe(entry => {
             if (!this.stateService.ready.getValue()) {
                 return;
             }
@@ -365,14 +391,16 @@ export class SearchPanelComponent implements AfterViewInit {
                 return;
             }
             if (resolvedEntry && !this.suppressHistoryExecution) {
-                this.searchInputValue = resolvedEntry.input;
-                this.runTarget(resolvedEntry);
-                this.dialog.close(new Event("close-on-execute"));
+                this.executeSearchHistoryEntry(resolvedEntry);
             }
             this.reloadSearchHistory();
-        });
+        }));
+        this.subscriptions.add(this.stateService.ready.pipe(
+            filter((ready): ready is true => ready),
+            take(1)
+        ).subscribe(() => this.executeCurrentSearchStateOnReady()));
 
-        this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
+        this.subscriptions.add(this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
                 const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
                 this.stateService.setSearchHistoryState({
@@ -382,72 +410,122 @@ export class SearchPanelComponent implements AfterViewInit {
                     actionName: "Inspect Tile Layer Source Data"
                 });
             }
-        });
+        }));
 
         this.reloadSearchHistory();
 
-        this.searchService.completionPending.pipe(
-            switchMap(pending => pending ? timer(this.completion.pendingDelay).pipe(map(() => true)) : of(false)),
-            startWith(false),
-            distinctUntilChanged()
-        ).subscribe((pending: boolean) => {
-            this.completion.pending = pending;
-        })
-
-        this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
+        this.subscriptions.add(this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
             this.completionItems = value.filter((item, index, array) => {
                 // Discard any candidate that is equal to the current input
                 // or does not relate to the current input (e.g. delayed results).
                 return item.query !== this.searchInputValue && item.source === this.searchInputValue;
             });
 
-            const length = this.completionItems.length
-            if (length <= this.completion.selectionIndex)
-                this.completion.selectionIndex = length;
+            const length = this.completionItems.length;
+            if (length === 0) {
+                this.completion.selectionIndex = 0;
+            } else if (this.completion.selectionIndex >= length) {
+                this.completion.selectionIndex = length - 1;
+            }
 
             // Only show the pop-up if the pop-up was prev. hidden
             // or the currently focused element is the query input.
             // This is to prevent the pop-up showing if the user quickly
             // tabs out of the query input before the first completion
             // items are ready.
+            const textarea = this.textarea?.nativeElement;
             const focusValid =
                 this.completion.visible ||
-                this.textarea.nativeElement === document.activeElement;
+                this.completion.pending ||
+                textarea === document.activeElement;
 
             if (length > 0 && focusValid) {
                 this.refreshCompletionZIndex();
             }
             this.completion.visible = length > 0 && focusValid;
-        });
+        }));
 
-        this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
+        this.subscriptions.add(this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
+            const textarea = this.textarea?.nativeElement;
+            const focusValid =
+                this.completion.visible ||
+                pending ||
+                textarea === document.activeElement;
+
+            this.completion.pending = pending && focusValid;
+            if (this.completion.pending) {
+                this.refreshCompletionZIndex();
+                this.updateCursor();
+            } else if (this.completionItems.length === 0) {
+                this.completion.visible = false;
+            }
+        }));
+
+        this.subscriptions.add(this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
             this.completeQuery(this.searchInputValue, this.cursorPosition);
-        })
+        }));
     }
 
     /**
      * Hooks dialog lifecycle events once the PrimeNG dialog reference exists.
      */
     ngAfterViewInit() {
-        this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery));
+        this.subscriptions.add(
+            this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery))
+        );
 
-        this.dialog.onShow.subscribe(() => {
+        this.subscriptions.add(this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();
                 this.refreshCompletionZIndex();
             }, 10);
-        });
+        }));
 
-        this.dialog.onHide.subscribe(() => {
+        this.subscriptions.add(this.dialog.onHide.subscribe(() => {
             setTimeout(() => {
                 this.shrinkTextarea();
             }, 10);
-        });
+        }));
+    }
+
+    /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
+    ngOnDestroy() {
+        this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
+        this.cancelScheduledInitialSearchReplay();
+        this.subscriptions.unsubscribe();
+        this.searchInputChanged.complete();
+        this.locationSearchQueryChanged.complete();
     }
 
     /** Normalizes a raw persisted search entry from state. */
     private resolveStateEntry(raw: unknown): SearchHistoryStateEntry | null {
         return normalizeSearchHistoryEntry(raw);
+    }
+
+    /** Returns whether an omnibox entry would create a feature-search session. */
+    private isFeatureSearchEntry(entry: SearchHistoryEntry): boolean {
+        return entry.actionId === FEATURE_SEARCH_TARGET_ID;
+    }
+
+    /** Suppresses restored feature-search actions that are already represented by feature-search state. */
+    private shouldSkipRestoredFeatureSearchEntry(entry: SearchHistoryEntry): boolean {
+        return this.isFeatureSearchEntry(entry) && this.searchService.hasPersistedSearchForQuery(entry.input);
+    }
+
+    /** Mirrors URL/restored search state into the last-entry state without necessarily replaying it. */
+    private mirrorSearchStateToLastEntry(entry: SearchHistoryEntry, suppressExecution: boolean): void {
+        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
+        if (sameSearchHistoryEntry(lastEntry, entry)) {
+            return;
+        }
+        const setLastEntry = () => {
+            this.stateService.lastSearchHistoryEntry = entry;
+        };
+        if (suppressExecution) {
+            this.withSuppressedHistoryExecution(setLastEntry);
+            return;
+        }
+        setLastEntry();
     }
 
     /** Runs an action without triggering search history execution side effects. */
@@ -460,11 +538,99 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    /** Executes the URL/restored search state once startup finished. */
+    private executeCurrentSearchStateOnReady(): void {
+        const entry = this.resolveStateEntry(this.stateService.search);
+        if (!entry || isLegacySearchHistoryEntry(entry)) {
+            return;
+        }
+        const executableEntry = this.restoredEntryWithPayload(entry);
+        if (!this.stateService.consumeInitialSearchStateReplay()) {
+            return;
+        }
+        this.scheduleInitialSearchStateReplay(executableEntry);
+    }
+
+    /** Defers startup replay until map views have finished subscribing to jump/label topics. */
+    private scheduleInitialSearchStateReplay(entry: SearchHistoryEntry): void {
+        const replay = () => this.executeRestoredSearchStateEntry(entry);
+        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+            replay();
+            return;
+        }
+        this.cancelScheduledInitialSearchReplay();
+        this.initialSearchReplayFrameFirst = window.requestAnimationFrame(() => {
+            this.initialSearchReplayFrameFirst = undefined;
+            this.initialSearchReplayFrameSecond = window.requestAnimationFrame(() => {
+                this.initialSearchReplayFrameSecond = undefined;
+                replay();
+            });
+        });
+    }
+
+    /** Cancels any pending startup replay callback. */
+    private cancelScheduledInitialSearchReplay(): void {
+        if (this.initialSearchReplayFrameFirst !== undefined) {
+            window.cancelAnimationFrame(this.initialSearchReplayFrameFirst);
+            this.initialSearchReplayFrameFirst = undefined;
+        }
+        if (this.initialSearchReplayFrameSecond !== undefined) {
+            window.cancelAnimationFrame(this.initialSearchReplayFrameSecond);
+            this.initialSearchReplayFrameSecond = undefined;
+        }
+    }
+
+    /** Executes one restored search-state entry if it is still the current persisted action. */
+    private executeRestoredSearchStateEntry(entry: SearchHistoryEntry): void {
+        const currentEntry = this.resolveStateEntry(this.stateService.search);
+        if (!currentEntry || isLegacySearchHistoryEntry(currentEntry) || !sameSearchHistoryEntry(currentEntry, entry)) {
+            return;
+        }
+        this.mirrorSearchStateToLastEntry(entry, true);
+        if (this.shouldSkipRestoredFeatureSearchEntry(entry)) {
+            this.reloadSearchHistory();
+            return;
+        }
+        this.executeSearchHistoryEntry(entry);
+        this.reloadSearchHistory();
+    }
+
+    /** Prefers the local full history entry over compact URL/search state when both identify the same action. */
+    private restoredEntryWithPayload(entry: SearchHistoryEntry): SearchHistoryEntry {
+        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
+        return lastEntry && sameSearchHistoryEntry(lastEntry, entry)
+            ? lastEntry
+            : entry;
+    }
+
+    /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */
+    private executeSearchHistoryEntry(entry: SearchHistoryEntry): void {
+        this.searchInputValue = entry.input;
+        // Feature searches have their own persisted panel state. Omnibox history
+        // only restores the query text and must not create another search on reload.
+        if (entry.actionId === "features") {
+            return;
+        }
+        this.runTarget(entry);
+        this.dialog?.close(new Event("close-on-execute"));
+    }
+
     /** Returns search targets applicable to an input value. */
     private searchItemsForValue(value: string): Array<SearchTarget> {
+        const locationItems = value === this.searchInputValue ? this.locationSearchItems : [];
         return [
             ...this.jumpService.getJumpTargetsForValue(value),
+            ...locationItems,
             ...this.staticTargetsForValue(value)
+        ];
+    }
+
+    /** Builds the search menu from current jump targets, async location matches, and static local actions. */
+    private currentSearchItems(jumpTargets: Array<SearchTarget> = this.jumpService.jumpTargets.getValue()): Array<SearchTarget> {
+        return [
+            ...jumpTargets,
+            ...this.locationSearchItems,
+            ...this.staticTargets
         ];
     }
 
@@ -492,6 +658,13 @@ export class SearchPanelComponent implements AfterViewInit {
 
     /** Finds the current search target represented by a history entry. */
     private resolveTargetForEntry(entry: SearchHistoryEntry): SearchTarget | undefined {
+        const locationPayload = normalizeLocationSearchPayload(entry.payload);
+        if (locationPayload) {
+            const locationTarget = this.locationSearchService.createSearchTarget(locationPayload);
+            if (locationTarget.id === entry.actionId) {
+                return locationTarget;
+            }
+        }
         if (entry.input === this.targetByIdInput) {
             return this.targetById.get(entry.actionId);
         }
@@ -504,13 +677,27 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!trimmedInput) {
             return null;
         }
+        const payload = normalizeSearchHistoryPayload(
+            target.id === "features"
+                ? this.featureSearchPayloadForInput(trimmedInput) ?? target.payload
+                : target.payload
+        );
         return {
             version: 2,
             actionId: target.id,
             input: trimmedInput,
             actionName: target.name,
+            ...(payload !== undefined ? {payload} : {}),
             savedAt: Date.now()
         };
+    }
+
+    /** Returns completion-derived feature-search payload when the input still matches the accepted candidate. */
+    private featureSearchPayloadForInput(input: string): unknown {
+        const candidate = this.acceptedCompletionCandidate;
+        return candidate?.query.trim() === input.trim()
+            ? featureSearchActionPayloadFromCompletion(candidate)
+            : undefined;
     }
 
     /** Converts a legacy index-based history entry to target-id form. */
@@ -579,6 +766,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 actionId: viewEntry.actionId,
                 input: viewEntry.input,
                 ...(viewEntry.actionName ? {actionName: viewEntry.actionName} : {}),
+                ...(viewEntry.payload !== undefined ? {payload: viewEntry.payload} : {}),
                 ...(viewEntry.savedAt !== undefined ? {savedAt: viewEntry.savedAt} : {})
             };
             const dedupeKey = historyEntryDedupeKey(refreshedEntry);
@@ -607,7 +795,10 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Removes one persisted history entry and mirrors the change back to app state.
      */
-    removeSearchHistoryEntry(entry: SearchHistoryEntry) {
+    removeSearchHistoryEntry(entry: SearchHistoryEntry, event?: Event) {
+        event?.preventDefault();
+        event?.stopPropagation();
+
         const key = historyEntryKey(entry);
         this.searchHistory = this.searchHistory.filter(historyEntry => historyEntryKey(historyEntry) !== key);
         this.writeSearchHistory(this.searchHistory.map(historyEntry => ({
@@ -615,6 +806,7 @@ export class SearchPanelComponent implements AfterViewInit {
             actionId: historyEntry.actionId,
             input: historyEntry.input,
             ...(historyEntry.actionName ? {actionName: historyEntry.actionName} : {}),
+            ...(historyEntry.payload !== undefined ? {payload: historyEntry.payload} : {}),
             ...(historyEntry.savedAt !== undefined ? {savedAt: historyEntry.savedAt} : {})
         })));
         this.reloadSearchHistory();
@@ -732,7 +924,7 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
      */
-    jumpToLocation(coordinates: number[] | undefined | Rectangle) {
+    jumpToLocation(coordinates: number[] | undefined | Rectangle, label?: string | null) {
         if (coordinates === null) {
             return;
         }
@@ -753,6 +945,14 @@ export class SearchPanelComponent implements AfterViewInit {
                 z: alt,
                 targetView: targetViewIndex
             });
+            if (label) {
+                this.mapService.showLocationLabelTopic.next({
+                    targetView: targetViewIndex,
+                    x: lon,
+                    y: lat,
+                    label
+                });
+            }
             this.jumpService.markedPosition.next(coordinates);
         } else {
             this.mapService.moveToRectangleTopic.next({
@@ -839,7 +1039,7 @@ export class SearchPanelComponent implements AfterViewInit {
     private refreshCompletionZIndex() {
         const container = this.dialog?.container();
         if (!container) {
-            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
+            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000;
             return;
         }
 
@@ -850,7 +1050,7 @@ export class SearchPanelComponent implements AfterViewInit {
             : (Number.isFinite(computedZIndex)
                 ? computedZIndex
                 : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
-        this.completion.zIndex = dialogZIndex + 1;
+        this.completion.zIndex = dialogZIndex + 2000;
     }
 
     /**
@@ -858,15 +1058,36 @@ export class SearchPanelComponent implements AfterViewInit {
      */
     setSearchValue(value: string) {
         this.searchInputValue = value;
+        if (this.acceptedCompletionCandidate?.query.trim() !== value.trim()) {
+            this.acceptedCompletionCandidate = null;
+        }
         if (!value) {
             this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
-            this.setCurrentSearchItems([...this.jumpService.jumpTargets.getValue(), ...this.staticTargets]);
+            this.updateLocationSearchQuery(value);
             this.refreshSearchMenu();
             return;
         }
         this.jumpService.targetValueSubject.next(value);
+        this.updateLocationSearchQuery(value);
         this.refreshSearchMenu();
+    }
+
+    /** Requests place completions only for Unicode name-like queries, not numeric ids or ZIP codes. */
+    private updateLocationSearchQuery(value: string): void {
+        if (this.shouldRequestLocationSearch(value)) {
+            this.locationSearchQueryChanged.next(value.trim());
+            return;
+        }
+        if (this.locationSearchItems.length) {
+            this.locationSearchItems = [];
+            this.setCurrentSearchItems(this.currentSearchItems());
+        }
+    }
+
+    /** Returns whether the current input is suitable for the configured place-name providers. */
+    private shouldRequestLocationSearch(value: string): boolean {
+        return isSupportedLocationSearchQuery(value);
     }
 
     /** Refreshes search menu state from the current input value. */
@@ -922,6 +1143,12 @@ export class SearchPanelComponent implements AfterViewInit {
     targetToHistory(target: SearchTarget) {
         const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
         if (entry) {
+            if (target.id === "features") {
+                this.withSuppressedHistoryExecution(() => this.stateService.setSearchHistoryState(entry));
+                this.runTarget(entry);
+                this.dialog?.close(new Event("close-on-execute"));
+                return;
+            }
             this.stateService.setSearchHistoryState(entry);
         }
     }
@@ -932,22 +1159,48 @@ export class SearchPanelComponent implements AfterViewInit {
     runTarget(entry: SearchHistoryEntry) {
         const item = this.resolveTargetForEntry(entry);
         if (!item) {
+            if (this.locationSearchService.isLocationTargetId(entry.actionId)) {
+                this.restoreLocationSearchTarget(entry);
+                return;
+            }
             this.messageService.showError("Search action is no longer available");
             return;
         }
+        this.executeResolvedTarget(item, entry);
+    }
+
+    /** Executes an already resolved target. */
+    private executeResolvedTarget(item: SearchTarget, entry: SearchHistoryEntry) {
         if (!item.validate(entry.input)) {
             this.messageService.showError("Search action is not valid for the stored input");
             return;
         }
         if (item.jump !== undefined) {
-            this.jumpToLocation(item.jump(entry.input));
+            const payload = entry.payload ?? item.payload;
+            this.jumpToLocation(item.jump(entry.input, payload), this.locationSearchService.labelFromPayload(payload));
             return;
         }
 
         if (item.execute !== undefined) {
-            item.execute(entry.input);
+            item.execute(entry.input, entry.payload ?? item.payload);
             return;
         }
+    }
+
+    /** Recreates compact location URL/search-state entries from the built-in mapget /location endpoint. */
+    private restoreLocationSearchTarget(entry: SearchHistoryEntry): void {
+        const subscription = this.locationSearchService.restoreMapgetLocationTarget(entry.actionId, entry.input)
+            .subscribe(result => {
+                if (!result.target) {
+                    this.messageService.showError(result.error ?? "Could not restore location search result.");
+                    return;
+                }
+                this.executeResolvedTarget(result.target, {
+                    ...entry,
+                    payload: result.target.payload
+                });
+            });
+        this.subscriptions.add(subscription);
     }
 
     /**
@@ -989,6 +1242,7 @@ export class SearchPanelComponent implements AfterViewInit {
         
         setTimeout(() => {
             this.completion.visible = false;
+            this.completion.pending = false;
         }, 0);
     }
 
@@ -1049,21 +1303,22 @@ export class SearchPanelComponent implements AfterViewInit {
         if (event.key === 'Enter') {
             event.preventDefault();
 
-            if (this.completion.visible) {
+            if (this.shouldApplyCompletionOnEnter()) {
                 this.applyCompletion();
-                event.stopPropagation();
-            } else {
-                if (this.searchInputValue.trim() && this.activeSearchItems.length) {
-                    this.targetToHistory(this.activeSearchItems[0]);
-                } else {
-                    this.stateService.setSearchHistoryState(null);
-                }
-
-                textarea.blur();
+                return;
             }
+
+            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+                this.targetToHistory(this.activeSearchItems[0]);
+            } else {
+                this.stateService.setSearchHistoryState(null);
+            }
+
+            this.resetCompletion();
+            textarea.blur();
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            if (this.completion.visible || this.completion.pending) {
+            if (this.completion.visible) {
                 this.resetCompletion();
                 return;
             } else if (this.searchInputValue) {
@@ -1092,14 +1347,18 @@ export class SearchPanelComponent implements AfterViewInit {
     /**
      * Applies either an explicit completion string or the currently selected completion candidate.
      */
-    applyCompletion(text: string | undefined = undefined) {
-        if (this.completion.visible || text) {
-            if (text !== undefined) {
-                this.setSearchValue(text);
+    applyCompletion(completion: CompletionCandidate | string | undefined = undefined) {
+        if (this.completion.visible || completion) {
+            if (typeof completion === "string") {
+                this.setSearchValue(completion);
                 this.textarea.nativeElement.focus();
             } else {
-                let item = this.completionItems[this.completion.selectionIndex];
+                const item = completion ?? this.completionItems[this.completion.selectionIndex];
+                if (!item) {
+                    return;
+                }
                 this.setSearchValue(item.query);
+                this.acceptedCompletionCandidate = item;
 
                 let cursor = item.begin + item.text.length
                 setTimeout(() => {
@@ -1110,7 +1369,15 @@ export class SearchPanelComponent implements AfterViewInit {
 
             this.completionItems = [];
             this.completion.visible = false;
+            this.completion.pending = false;
         }
+    }
+
+    /** Returns whether Enter should accept a visible omnibox completion instead of executing the action. */
+    private shouldApplyCompletionOnEnter(): boolean {
+        return this.completion.visible
+            && this.completionItems.length > 0
+            && !this.searchService.hasExactCompletionCandidate(this.searchInputValue);
     }
 
     /**
@@ -1144,6 +1411,7 @@ export class SearchPanelComponent implements AfterViewInit {
             actionId: entry.actionId,
             input: entry.input,
             ...(entry.actionName ? {actionName: entry.actionName} : {}),
+            ...(entry.payload !== undefined ? {payload: entry.payload} : {}),
             ...(entry.savedAt !== undefined ? {savedAt: entry.savedAt} : {})
         });
     }
@@ -1233,6 +1501,7 @@ export class SearchPanelComponent implements AfterViewInit {
     completeQuery(query: string, point: number | undefined) {
         if (!query) {
             this.completion.visible = false;
+            this.completion.pending = false;
             this.completionItems = [];
             this.searchService.clearCurrentCompletion();
             return;
@@ -1250,7 +1519,6 @@ export class SearchPanelComponent implements AfterViewInit {
         this.completion.selectionIndex = 0;
         this.completionItems = [];
         this.completion.visible = false;
-        this.searchService.completionPending.next(false);
-        this.searchService.completionCandidates.next([]);
+        this.completion.pending = false;
     }
 }

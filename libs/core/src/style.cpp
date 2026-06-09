@@ -172,6 +172,7 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
     }
 
     uint32_t ruleIndex = 0;
+    uint32_t renderRuleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
         auto const sourceRuleIndex = ruleIndex++;
         auto const rulePath = "rules[" + std::to_string(sourceRuleIndex) + "]";
@@ -182,6 +183,7 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         try {
             // Preserve the source rule index for diagnostics and rule-scoped runtime state.
             rules_.emplace_back(rule, sourceRuleIndex);
+            rules_.back().assignRenderRuleIndices(renderRuleIndex);
         } catch (std::exception const& e) {
             ++validationReport_.skippedRuleCount;
             auto& issue = validationReport_.addIssue(

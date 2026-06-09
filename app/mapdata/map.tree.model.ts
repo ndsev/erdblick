@@ -1,13 +1,11 @@
 import {
     AppStateService,
-    InspectionPanelModel,
     LayerViewConfig,
     TileGridMode,
     VIEW_SYNC_LAYERS
 } from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
-import {BehaviorSubject, skip, Subscription} from "rxjs";
-import {FeatureWrapper} from "./features.model";
+import {skip, Subscription} from "rxjs";
 import {ErdblickStyle, FeatureStyleOptionWithStringType, StyleService} from "../styledata/style.service";
 
 /** Removes the synthetic group prefix from nested map ids for tree display. */
@@ -213,7 +211,6 @@ export class MapLayerTree {
     /** Builds the tree and keeps it synchronized with app state and the loaded style sheets. */
     constructor(
         mapInfo: MapInfoItem[],
-        private selectionTopic: BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>,
         private stateService: AppStateService,
         private styleService: StyleService) {
         this.initializeMapGroups(mapInfo);
@@ -366,21 +363,6 @@ export class MapLayerTree {
             return layer.viewConfig[viewIndex].visible;
         }
         return false;
-    }
-
-    /**
-     * Remove selected features that belong to the given map/layer combination.
-     * @param mapId Map identifier.
-     * @param layerId Layer identifier within the map.
-     */
-    private clearSelectionForLayer(mapId: string, layerId: string) {
-        const current = this.selectionTopic.getValue();
-        const remaining = current.filter(panel => {
-            return !panel.features.some(fw => fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId);
-        });
-        if (remaining.length !== current.length) {
-            this.selectionTopic.next(remaining);
-        }
     }
 
     /** Updates one layer, one map, or one group subtree and persists the visibility change. */

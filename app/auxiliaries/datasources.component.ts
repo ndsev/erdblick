@@ -5,7 +5,7 @@ import {JSONSchema7} from 'json-schema';
 import {InfoMessageService} from '../shared/info.service';
 import {AppStateService, DATASOURCES_EDITOR_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {EditorService} from '../shared/editor.service';
-import {MapDataService} from '../mapdata/map.service';
+import {MapInfoService} from '../mapdata/map-info.service';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {AppDialogComponent} from '../shared/app-dialog.component';
 
@@ -107,7 +107,7 @@ export class DatasourcesComponent {
                 public readonly stateService: AppStateService,
                 public readonly editorService: EditorService,
                 private readonly http: HttpClient,
-                private readonly mapService: MapDataService,
+                private readonly mapInfo: MapInfoService,
                 private readonly dialogStack: DialogStackService) {}
 
     get dialogVisible(): boolean {
@@ -163,7 +163,7 @@ export class DatasourcesComponent {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {
                     this.loading = false;
-                    this.mapService.reloadDataSources().then(() => this.mapService.scheduleUpdate());
+                    this.mapInfo.reloadDataSources().then();
                 }, 2000);
             },
             error: error => {

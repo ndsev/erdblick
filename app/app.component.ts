@@ -1,11 +1,13 @@
 import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
-import {MapDataService} from "./mapdata/map.service";
+import {MapInfoService} from "./mapdata/map-info.service";
+import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {
     AppStateService,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
     Versions
 } from "./shared/appstate.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
@@ -15,6 +17,7 @@ import {DialogStackService} from "./shared/dialog-stack.service";
 import {Title} from "@angular/platform-browser";
 import {KeyboardService} from "./shared/keyboard.service";
 import {AppConfigService} from "./shared/app-config.service";
+import {StyleService} from "./styledata/style.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -37,7 +40,11 @@ declare let window: DebugWindow;
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
-            <feature-search></feature-search>
+            <inspection-dialogs></inspection-dialogs>
+            <feature-search-dialogs></feature-search-dialogs>
+            @if (stateService.isDialogOpen(featureSearchExportDialogLayoutId)) {
+                <feature-search-export-dialog></feature-search-export-dialog>
+            }
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
             <survey></survey>
@@ -72,6 +79,7 @@ export class AppComponent implements OnDestroy {
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
+    protected readonly featureSearchExportDialogLayoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
 
     title: string = "erdblick";
     private detachDialogFocusListener?: () => void;
@@ -81,7 +89,9 @@ export class AppComponent implements OnDestroy {
 
     constructor(public stateService: AppStateService,
                 private httpClient: HttpClient,
-                private mapService: MapDataService,
+                private mapInfo: MapInfoService,
+                private tileStream: MapTileStreamService,
+                private styleService: StyleService,
                 private keyboardService: KeyboardService,
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
@@ -94,7 +104,9 @@ export class AppComponent implements OnDestroy {
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
         window.ebDebug = new ErdblickDebugApi(
-            this.mapService,
+            this.mapInfo,
+            this.tileStream,
+            this.styleService,
             this.stateService
         );
 

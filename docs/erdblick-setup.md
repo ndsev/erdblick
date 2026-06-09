@@ -2,8 +2,6 @@
 
 Erdblick is a self-contained web application that talks to any mapget-compatible backend. This guide explains how to build the UI bundles, serve them with `mapget`, and adjust the configuration files that ship with the bundle.
 
-_[Screenshot placeholder: Landing screen with the main menu closed to highlight the empty state.]_
-
 ## Build modes
 
 | Mode | When to use it | How to build/select |
@@ -24,8 +22,6 @@ Some container images or products ship a prebuilt erdblick bundle in a directory
    mapget serve -w ~/Downloads/erdblick-dist
    ```
 4. Open the printed URL in your browser. The UI loads `config.json` from the bundle for style declarations and extension modules, then connects to the backend via the `/sources` and `/tiles` endpoints to discover data.
-
-_[Screenshot placeholder: Browser showing `mapget serve` output plus the initial erdblick home view.]_
 
 ## Running from source
 
@@ -75,12 +71,12 @@ The `config/` directory in the erdblick source tree controls UI-side metadata:
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
   - `backgroundLayers`: optional array of raster backgrounds shown in the Maps panel. Supported types are:
-    - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`.
+    - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`. If `maxZoom` is omitted, erdblick now allows XYZ sources up to level 22; cap public providers explicitly when they stop earlier.
     - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, optional HTTP `headers`, optional `vendorParameters`, and `defaultOpacity`.
   - `defaultBackgroundLayerId`: optional id of the background enabled by default for new views.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.
-- `images/backgrounds/*`: optional bundled XYZ raster tiles. The default config ships a coarse Blue Marble overview under `bundle/images/backgrounds/world-overview/...`. The `world-overview` path is kept stable for compatibility even though the user-facing layer name is now `Blue Marble`.
+- `images/backgrounds/*`: optional bundled XYZ raster tiles. The default config includes OpenStreetMap as the active background, an online Esri World Imagery entry for higher zoom satellite imagery, and a coarse bundled Blue Marble overview under `bundle/images/backgrounds/world-overview/...` for offline fallback. The `world-overview` path is kept stable for compatibility even though the user-facing layer name is now `Blue Marble`.
 
 The bundled overview layer is documented in `docs/erdblick-backgrounds.md`.
 
@@ -112,8 +108,6 @@ Background-layer URLs follow normal browser semantics. Relative and root-relativ
 If an XYZ or WMS background needs HTTP authentication, add a `headers` object to that background entry. Erdblick attaches those headers to tile, metadata, and WMS image requests. The remote service must still allow those custom headers via CORS if it is served from another origin.
 
 WMS backgrounds are currently marked experimental in the UI because they rely on deck.gl’s experimental `WMSLayer`. They are intended for 2D use first and may not behave correctly in pitched 3D views.
-
-_[Screenshot placeholder: Styles dialog showing built-in entries and one custom style loaded from config/styles.]_
 
 ## Browser and platform notes
 

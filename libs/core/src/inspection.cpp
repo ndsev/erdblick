@@ -47,6 +47,37 @@ std::string escapedGeoJsonPathField(std::string_view field)
     return escaped;
 }
 
+/** Escape a string literal for use inside a Simfil subquery. */
+std::string simfilStringLiteral(std::string_view value)
+{
+    std::string escaped;
+    escaped.reserve(value.size() + 2);
+    escaped.push_back('"');
+    for (char c : value) {
+        switch (c) {
+        case '\\':
+        case '"':
+            escaped.push_back('\\');
+            escaped.push_back(c);
+            break;
+        case '\n':
+            escaped.append("\\n");
+            break;
+        case '\r':
+            escaped.append("\\r");
+            break;
+        case '\t':
+            escaped.append("\\t");
+            break;
+        default:
+            escaped.push_back(c);
+            break;
+        }
+    }
+    escaped.push_back('"');
+    return escaped;
+}
+
 /** Append one field segment to an existing GeoJSON path using bare or bracket notation. */
 std::string appendGeoJsonPathField(std::string_view base, std::string_view field)
 {
@@ -61,6 +92,15 @@ std::string appendGeoJsonPathField(std::string_view base, std::string_view field
         return fmt::format("[\"{}\"]", escaped);
     }
     return fmt::format("{}.[\"{}\"]", base, escaped);
+}
+
+/** Return the direct-child wildcard selector for an array/object path. */
+std::string directChildGeoJsonPath(std::string_view base)
+{
+    if (base.empty()) {
+        return "*";
+    }
+    return fmt::format("{}.*", base);
 }
 
 /**
@@ -181,8 +221,9 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto layers = featurePtr->attributeLayersOrNull())
     {
         auto scope = push(convertString("Attribute Layers"), RawPath{"properties.layer"}, ValueType::Section);
-        layers->forEachLayer([this](auto&& layerName, auto&& layer) -> bool {
-            convertAttributeLayer(layerName, layer);
+        size_t attributeIndex = 0;
+        layers->forEachLayer([this, &attributeIndex](auto&& layerName, auto&& layer) -> bool {
+            convertAttributeLayer(layerName, layer, attributeIndex);
             return true;
         });
     }
@@ -277,7 +318,8 @@ void InspectionConverter::pop()
 
 void InspectionConverter::convertAttributeLayer(
     const std::string_view& name,
-    const model_ptr<AttributeLayer>& l)
+    const model_ptr<AttributeLayer>& l,
+    size_t& attributeIndex)
 {
     auto layerScope = push(convertString(name), name);
     std::vector<simfil::StringId> attributeFieldIds;
@@ -289,13 +331,14 @@ void InspectionConverter::convertAttributeLayer(
         attributeFieldIds.push_back(fieldId);
     }
 
-    size_t attributeIndex = 0;
-    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex](model_ptr<Attribute> const& attr)
+    size_t layerAttributeIndex = 0;
+    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex, &layerAttributeIndex](model_ptr<Attribute> const& attr)
     {
-        auto fieldId = attributeIndex < attributeFieldIds.size()
-            ? attributeFieldIds[attributeIndex]
+        auto const thisAttributeIndex = attributeIndex++;
+        auto const thisLayerAttributeIndex = layerAttributeIndex++;
+        auto fieldId = thisLayerAttributeIndex < attributeFieldIds.size()
+            ? attributeFieldIds[thisLayerAttributeIndex]
             : simfil::StringId{};
-        ++attributeIndex;
 
         auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
         auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
@@ -313,7 +356,12 @@ void InspectionConverter::convertAttributeLayer(
         });
 
         if (numValues == 1) {
-            std::tie(current_->value_, current_->type_) = *singleValue;
+            if (current_->children_.size() == 1) {
+                inheritFlattenedChild(*current_, current_->children_.front());
+            }
+            else {
+                std::tie(current_->value_, current_->type_) = *singleValue;
+            }
         }
         else if (numValues == 0) {
             current_->value_ = JsValue(true);
@@ -322,7 +370,7 @@ void InspectionConverter::convertAttributeLayer(
 
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
-                              std::to_string(static_cast<uint32_t>(attr->addr().index()));
+                              std::to_string(static_cast<uint32_t>(thisAttributeIndex));
         if (auto validity = attr->validityOrNull()) {
             convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
         }
@@ -334,13 +382,19 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
 {
     auto& relGroup = relationsByType_[r->name()];
     if (!relGroup) {
-        relGroup = push(r->name(), "").node_;
-        relGroup->geoJsonPath_ += fmt::format("{{name='{}'}}", r->name());
+        relGroup = push(r->name(), RawPath{""}).node_;
+        relGroup->geoJsonPath_ = fmt::format(
+            "{}.*{{name = {}}}",
+            relGroup->geoJsonPath_,
+            simfilStringLiteral(r->name()));
     }
     auto relGroupScope = push(relGroup);
-    auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
+    auto const relationIndex = nextRelationIndex_++;
+    auto const relationObjectPath = fmt::format("relations[{}]", relationIndex);
+    auto relScope = push(JsValue(relGroup->children_.size()), relationIndex, ValueType::FeatureId);
+    relScope->geoJsonPath_ = relationObjectPath;
     assignFeatureReference(*relScope, r->target());
-    relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
+    relScope->hoverId_ = featureId_+":relation#"+std::to_string(relationIndex);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (auto const sourceValidity = r->sourceValidityOrNull()) {
         convertValidity(convertString("sourceValidity"), sourceValidity);
@@ -348,7 +402,7 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     if (auto const targetValidity = r->targetValidityOrNull()) {
         convertValidity(convertString("targetValidity"), targetValidity);
     }
-    ++nextRelationIndex_;
+    relScope->geoJsonPath_ = appendGeoJsonPathField(relationObjectPath, "target");
 }
 
 void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Geometry>& g)
@@ -558,7 +612,17 @@ InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
 InspectionConverter::OptionalValueAndType
 InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelNode::Ptr& value)
 {
-    auto fieldScope = push(fieldName, fieldName.toString());
+    auto path = fieldName.toString();
+    return convertField(fieldName, std::string_view(path), value);
+}
+
+InspectionConverter::OptionalValueAndType
+InspectionConverter::convertField(
+    const JsValue& fieldName,
+    FieldOrIndex const& path,
+    const simfil::ModelNode::Ptr& value)
+{
+    auto fieldScope = push(fieldName, path);
     bool isArray = false;
     OptionalValueAndType singleValue;
 
@@ -589,7 +653,11 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
             singleValue = {JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value()))), ValueType::String};
             break;
         case simfil::ValueType::Object: break;
-        case simfil::ValueType::Array: isArray = true; break;
+        case simfil::ValueType::Array:
+            isArray = true;
+            fieldScope->type_ = ValueType::ArrayBit;
+            break;
+        case simfil::ValueType::LAST_: break;
         }
     }
 
@@ -598,15 +666,15 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
         return singleValue;
     }
 
+    auto const containerPath = fieldScope->geoJsonPath_;
     auto numValues = 0;
     auto index = 0;
     for (auto const& [k, v] : value->fields()) {
-        JsValue kk;
-        if (isArray)
-            kk = JsValue(index);
-        else
-            kk = convertString(k);
-        auto singleValueForField = convertField(kk, v);
+        auto kk = isArray ? JsValue(index) : convertString(k);
+        auto keyPath = kk.toString();
+        auto singleValueForField = isArray
+            ? convertField(kk, static_cast<uint32_t>(index), v)
+            : convertField(kk, std::string_view(keyPath), v);
         if (singleValueForField) {
             ++numValues;
             singleValue = singleValueForField;
@@ -615,19 +683,35 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     }
 
     if (numValues == 1) {
-        std::tie(fieldScope->value_, fieldScope->type_) = *singleValue;
-        // Preserve semantic metadata from the flattened child, e.g. FEATUREID mapId/hoverId.
         if (fieldScope->children_.size() == 1) {
-            auto const& child = fieldScope->children_.front();
-            fieldScope->mapId_ = child.mapId_;
-            fieldScope->hoverId_ = child.hoverId_;
-            fieldScope->info_ = child.info_;
-            fieldScope->geoJsonPath_ = child.geoJsonPath_;
-            fieldScope->sourceDataRefs_ = child.sourceDataRefs_;
+            inheritFlattenedChild(*fieldScope, fieldScope->children_.front());
+        }
+        else {
+            std::tie(fieldScope->value_, fieldScope->type_) = *singleValue;
+        }
+        if (isArray) {
+            fieldScope->type_ = fieldScope->type_ | ValueType::ArrayBit;
+            fieldScope->geoJsonPath_ = directChildGeoJsonPath(containerPath);
         }
         return singleValue;
     }
+    if (isArray) {
+        fieldScope->geoJsonPath_ = directChildGeoJsonPath(containerPath);
+    }
     return {};
+}
+
+void InspectionConverter::inheritFlattenedChild(InspectionNode& parent, InspectionNode const& child)
+{
+    parent.value_ = child.value_;
+    parent.type_ = child.type_;
+    parent.mapId_ = child.mapId_;
+    parent.hoverId_ = child.hoverId_;
+    parent.info_ = child.info_;
+    parent.geoJsonPath_ = child.geoJsonPath_;
+    if (!child.sourceDataRefs_.empty()) {
+        parent.sourceDataRefs_ = child.sourceDataRefs_;
+    }
 }
 
 void InspectionConverter::assignFeatureReference(

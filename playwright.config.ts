@@ -74,7 +74,7 @@ export default defineConfig({
     expect: {
         timeout: 80000
     },
-    reporter: process.env["CI"] ? 'dot' : 'list',
+    reporter: process.env["CI"] ? 'line' : 'list',
     use: sharedUse,
     projects: [
         {

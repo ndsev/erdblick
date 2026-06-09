@@ -1,14 +1,20 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
-import {FeatureSearchService} from "./feature.search.service";
+import {
+    FeatureSearchService,
+    featureSearchSelectedMapLayersFromPayload
+} from "./feature.search.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
 import {Cartographic, Rectangle} from "../integrations/geo";
 import {AppConfigService} from "../shared/app-config.service";
+
+export const FEATURE_SEARCH_TARGET_ID = "features";
 
 /**
  * Response shape returned by the backend /locate endpoint for jump-target resolution.
@@ -29,12 +35,14 @@ interface LocateResponse {
 export interface SearchTarget {
     id: string;
     icon: string;
+    iconType?: "prime" | "material";
     color: string;
     name: string;
     label: string;
     enabled: boolean;
-    jump?: (value: string) => number[] | Rectangle | undefined;
-    execute?: (value: string) => void;
+    payload?: unknown;
+    jump?: (value: string, payload?: unknown) => number[] | Rectangle | undefined;
+    execute?: (value: string, payload?: unknown) => void;
     validate: (value: string) => boolean;
 }
 
@@ -74,7 +82,8 @@ export class JumpTargetService {
     /**
      * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
      */
-    constructor(private mapService: MapDataService,
+    constructor(private mapService: MapInfoService,
+                private inspectionSelection: InspectionSelectionService,
                 private messageService: InfoMessageService,
                 private menuService: RightClickMenuService,
                 private stateService: AppStateService,
@@ -148,14 +157,15 @@ export class JumpTargetService {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
         return {
-            id: "features",
+            id: FEATURE_SEARCH_TARGET_ID,
             icon: "pi-bolt",
             color: "blue",
-            name: "Search Loaded Features",
+            name: "Search Features and Attributes",
             label: label,
             enabled: false,
-            execute: (value: string) => {
-                this.searchService.run(value);
+            execute: (value: string, payload?: unknown) => {
+                const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
+                this.searchService.run(value, selectedMapLayers ? {selectedMapLayers} : {});
             },
             validate: (_: string) => {
                 return !simfilError;
@@ -410,7 +420,7 @@ export class JumpTargetService {
                 featureId: featureId
             } as TileFeatureId]);
         } else {
-            await this.mapService.setHoveredFeatures([{
+            await this.inspectionSelection.setHoveredFeatures([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
             }]);
@@ -418,7 +428,7 @@ export class JumpTargetService {
 
         // Center the camera on the feature if a view index was passed.
         if (cameraMoveViewIndex !== undefined) {
-            await this.mapService.focusOnFeature(cameraMoveViewIndex, {
+            await this.inspectionSelection.focusOnFeature(cameraMoveViewIndex, {
                 featureId: featureId,
                 mapTileKey: selectThisFeature.tileId,
             });

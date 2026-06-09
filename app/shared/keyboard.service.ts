@@ -96,8 +96,19 @@ export class KeyboardService {
         }
     }
 
+    /** Removes a registered shortcut, optionally only if the callback still matches. */
+    unregisterShortcut(keys: string, callback?: (event: KeyboardEvent) => void): void {
+        const registeredCallback = this.shortcuts.get(keys);
+        if (callback !== undefined && registeredCallback !== callback) {
+            return;
+        }
+        this.shortcuts.delete(keys);
+        this.preventOnInputShortcuts.delete(keys);
+    }
+
     /** Clears shortcuts when the service is torn down in tests. */
     ngOnDestroy() {
         this.shortcuts.clear();
+        this.preventOnInputShortcuts.clear();
     }
 }

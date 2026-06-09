@@ -1,11 +1,10 @@
 import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {MapDataService} from "../mapdata/map.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
-import {KeyboardService} from "../shared/keyboard.service";
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
 
@@ -33,6 +32,7 @@ interface InspectionModelData {
             }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [geoJson]="geoJson"
+                             [firstHighlightedItemIndex]="firstHighlightedItemIndex"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
                              [enableSourceDataNavigation]="enableSourceDataNavigation()"
@@ -61,18 +61,16 @@ export class FeaturePanelComponent implements OnDestroy {
     geoJson: string = "";
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
+    firstHighlightedItemIndex?: number;
     private readonly tileUpdateSubscription: Subscription;
     private rebuildQueued = false;
     private destroyed = false;
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private mapService: MapDataService,
-                private keyboardService: KeyboardService,
+    constructor(private mapService: MapTileStreamService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone) {
-        // TODO: This shortcut is broken, the panels will race with each other.
-        // this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
         effect(() => {
             this.panel();
             this.scheduleInspectionTreeRebuild();
@@ -129,11 +127,13 @@ export class FeaturePanelComponent implements OnDestroy {
 
     /** Re-reads GeoJSON and inspection trees from the selected features when staged data changes. */
     private rebuildInspectionTree() {
+        const previousExpansionState = this.captureTreeExpansionState(this.treeData);
         this.selectedFeatures = this.panel().features ?? [];
         if (!this.selectedFeatures.length) {
             this.loading = false;
             this.geoJson = `{"type":"FeatureCollection","features":[]}`;
             this.treeData = [];
+            this.firstHighlightedItemIndex = undefined;
             return;
         }
 
@@ -177,9 +177,154 @@ export class FeaturePanelComponent implements OnDestroy {
             return;
         }
 
+        this.restoreTreeExpansionState(nextTreeData, previousExpansionState);
+        this.firstHighlightedItemIndex = this.highlightSelectedInspectionTarget(nextTreeData);
         this.geoJson = nextGeoJson;
         this.treeData = nextTreeData;
         this.inspectionTree?.refreshLayout();
+    }
+
+    /** Captures user-expanded and user-collapsed tree rows before rebuilding equivalent inspection nodes. */
+    private captureTreeExpansionState(nodes: TreeTableNode[]): Map<string, boolean> {
+        const expansionState = new Map<string, boolean>();
+        const visit = (nodeList: TreeTableNode[]) => {
+            for (const node of nodeList) {
+                const nodeId = node.data?.["nodeId"];
+                if (typeof nodeId === "string" && typeof node.expanded === "boolean") {
+                    expansionState.set(nodeId, node.expanded);
+                }
+                visit(node.children ?? []);
+            }
+        };
+        visit(nodes);
+        return expansionState;
+    }
+
+    /** Restores expansion state for stable inspection row ids without blocking target-highlight auto-expansion. */
+    private restoreTreeExpansionState(nodes: TreeTableNode[], expansionState: Map<string, boolean>): void {
+        if (!expansionState.size) {
+            return;
+        }
+        const visit = (nodeList: TreeTableNode[]) => {
+            for (const node of nodeList) {
+                const nodeId = node.data?.["nodeId"];
+                if (typeof nodeId === "string" && expansionState.has(nodeId)) {
+                    node.expanded = expansionState.get(nodeId);
+                }
+                visit(node.children ?? []);
+            }
+        };
+        visit(nodes);
+    }
+
+    /** Marks and expands the inspection row or subtree addressed by a suffixed selected feature id. */
+    private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): number | undefined {
+        const selectedTargetIds = (this.selectedFeatures ?? [])
+            .map(feature => feature.featureId)
+            .filter(featureId => featureId.includes(":attribute#") || featureId.includes(":relation#"));
+        const exactTargetIds = new Set(selectedTargetIds);
+        const parentTargetIds = new Set(selectedTargetIds
+            .map(featureId => featureId.replace(/:validity#\d+$/, ""))
+            .filter(featureId => featureId.includes(":attribute#") || featureId.includes(":relation#")));
+        if (!exactTargetIds.size) {
+            return undefined;
+        }
+
+        let highlightedNode: TreeTableNode | undefined;
+        let highlightedParents: TreeTableNode[] = [];
+        let selectedHighlightTarget: string | undefined;
+        let selectedHighlightMode: "soft" | "strong" = "soft";
+        const rowTargetsForNode = (node: TreeTableNode): string[] => {
+            const data = node.data as Record<string, unknown> | undefined;
+            return [
+                data?.["hoverId"],
+                data?.["strongHoverGroupId"],
+                data?.["softHoverGroupId"]
+            ].filter((value): value is string => typeof value === "string");
+        };
+        const findTarget = (
+            node: TreeTableNode,
+            parents: TreeTableNode[],
+            targetIds: ReadonlySet<string>
+        ): boolean => {
+            const rowTargets = rowTargetsForNode(node);
+            const matchedTarget = rowTargets.find(target => targetIds.has(target));
+            const rowMatches = matchedTarget !== undefined;
+            if (rowMatches && !highlightedNode) {
+                highlightedNode = node;
+                highlightedParents = parents;
+                selectedHighlightTarget = matchedTarget;
+                selectedHighlightMode = matchedTarget?.includes(":validity#") ? "strong" : "soft";
+                for (const parent of parents) {
+                    parent.expanded = true;
+                }
+                node.expanded = true;
+                return true;
+            }
+
+            let childMatches = false;
+            for (const child of node.children ?? []) {
+                childMatches = findTarget(child, [...parents, node], targetIds) || childMatches;
+            }
+            if (childMatches) {
+                node.expanded = true;
+            }
+            return rowMatches || childMatches;
+        };
+
+        const findInTree = (targetIds: ReadonlySet<string>) => {
+            for (const node of nodes) {
+                findTarget(node, [], targetIds);
+            }
+        };
+        findInTree(exactTargetIds);
+        if (!highlightedNode) {
+            findInTree(parentTargetIds);
+        }
+        if (!highlightedNode || !selectedHighlightTarget) {
+            return undefined;
+        }
+        for (const parent of highlightedParents) {
+            parent.expanded = true;
+        }
+        highlightedNode.expanded = true;
+
+        const applySelectionHighlight = (nodeList: TreeTableNode[]) => {
+            for (const node of nodeList) {
+                const data = node.data as Record<string, unknown> | undefined;
+                const rowTargetMatches = selectedHighlightMode === "strong"
+                    ? data?.["hoverId"] === selectedHighlightTarget ||
+                        data?.["strongHoverGroupId"] === selectedHighlightTarget
+                    : data?.["hoverId"] === selectedHighlightTarget ||
+                        data?.["softHoverGroupId"] === selectedHighlightTarget;
+                if (rowTargetMatches) {
+                    node.data = {
+                        ...(node.data ?? {}),
+                        selectionHighlight: selectedHighlightMode
+                    };
+                }
+                applySelectionHighlight(node.children ?? []);
+            }
+        };
+        applySelectionHighlight(nodes);
+
+        let visibleIndex = 0;
+        const visibleIndexOf = (nodeList: TreeTableNode[]): number | undefined => {
+            for (const node of nodeList) {
+                if (node === highlightedNode) {
+                    return visibleIndex;
+                }
+                visibleIndex += 1;
+                if (node.expanded && node.children?.length) {
+                    const childIndex = visibleIndexOf(node.children);
+                    if (childIndex !== undefined) {
+                        return childIndex;
+                    }
+                }
+            }
+            return undefined;
+        };
+        return visibleIndexOf(nodes);
     }
 
     /** Converts the WASM inspection model into PrimeNG tree nodes and annotates hover/highlight groups. */
@@ -344,10 +489,12 @@ export class FeaturePanelComponent implements OnDestroy {
             const mapId = this.selectedFeatures?.[featureIndex]?.featureTile.mapName ?? "";
             for (const section of inspectionModels) {
                 const node: TreeTableNode = {};
+                const sectionNodeId = `feature-${featureIndex}:${section?.key ?? ""}`;
                 node.data = {
                     key: section?.key ?? "",
                     value: section?.value ?? "",
                     type: section?.type ?? coreLib.ValueType.NULL.value,
+                    nodeId: sectionNodeId,
                     mapId
                 };
                 if (section?.hasOwnProperty("info")) {
@@ -361,7 +508,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     {
                         mapTileKey,
                         mapId,
-                        nodePath: `feature-${featureIndex}:${section?.key ?? ""}`
+                        nodePath: sectionNodeId
                     }
                 );
                 treeNodes.push(node);
@@ -377,16 +524,6 @@ export class FeaturePanelComponent implements OnDestroy {
         }
 
         return rowData[colKey];
-    }
-
-    /** Moves the camera to the first selected feature represented by this panel. */
-    zoomToFeature() {
-        // Currently only takes the first element for Jump to Feature functionality.
-        // TODO: Allow to use the whole set for Jump to Feature.
-        if (!this.selectedFeatures) {
-            return;
-        }
-        this.mapService.zoomToFeature(undefined, this.selectedFeatures[0]);
     }
 
     /** Opens the delegated GeoJSON actions menu for the current feature selection. */

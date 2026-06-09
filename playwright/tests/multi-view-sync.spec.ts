@@ -116,13 +116,13 @@ test.describe('Multi-view synchronisation', () => {
         await expect(leftBackgroundEnabled).not.toBeChecked();
         await leftBackgroundEnabled.click();
         await expect(leftBackgroundEnabled).toBeChecked();
-        await expect(leftBackgroundSelect).toContainText('Blue Marble');
+        await expect(leftBackgroundSelect).toContainText('OpenStreetMap');
         await page.keyboard.press('Escape');
 
         // The synced right view should track the same enabled background state.
         await rightBackgroundButton.click();
         await expect(rightBackgroundEnabled).toBeChecked();
-        await expect(rightBackgroundSelect).toContainText('Blue Marble');
+        await expect(rightBackgroundSelect).toContainText('OpenStreetMap');
         await page.keyboard.press('Escape');
 
         await leftBackgroundButton.click();

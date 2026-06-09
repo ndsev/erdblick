@@ -38,6 +38,18 @@ Each view maintains its own layer tree:
 - **Layer sync button** - the circular-arrows button in each section copies visibility, zoom level, and style-option states from that pane to compatible layers, and also syncs that pane's tile-border flag.
 - **Add/remove** - use **Add View** or **View -> Split View** to open the second pane. Close it from the fieldset header or via **View -> Close Right View**. Camera and layer selections are encoded in the URL, so split-view links are shareable.
 
+## Search in Split View
+
+Feature-search panels show a **View** selector when split view is active. This selector controls where the search result layer is visualized:
+
+- **Left view** - use this when only the left pane's visible area and layer setup should drive the result overlay.
+- **Right view** - use this when the right pane is the investigation target or reference map.
+- **All** - use this when both panes should visualize the same search result session.
+
+Auto-update follows the selected view set. If a search is bound to the left view only, panning the right view does not refresh that search area. If it is bound to both views, visible-tile changes in either pane can update the search coverage.
+
+Selecting a search result focuses and inspects the matched feature like any other feature selection. When the matched result exists in both panes, erdblick uses the currently focused pane as the first navigation target and keeps the result overlay visible in the views selected by the search.
+
 ## Typical Workflows
 
 Once split view is active, a few recurring patterns make it easier to compare data or styles across panes:
@@ -45,9 +57,10 @@ Once split view is active, a few recurring patterns make it easier to compare da
 - **Compare data sources** - enable `pos` and `lay`, then point both panes at the same bounding box. Load an NDS.Live map on the left and NDS.Classic or GeoJSON on the right.
 - **Style A/B testing** - keep `pos` on but leave `lay` off. This keeps the camera synchronized while letting each pane render its own style combinations or per-layer options.
 - **Investigations with frozen reference** - lock a reference feature in the right pane, leave the sync toggles off there, and continue exploring in the left pane. The blue outline shows which pane receives keyboard navigation.
+- **Search comparison** - run the same query against different map/layer selections, bind one search to the left view and another to the right view, then group results by map/layer or use result labels/categories to compare distributions.
 - **2D vs 3D** - enable `lay` and `pos`, disable `proj`. Switch only one pane to 2D, leaving the other in 3D to compare interactions.
 
-_[Screenshot placeholder: Two panes showing different styles, sync toggles highlighted.]_
+![Split view search selector](screenshots/split-search-view-selector.png)
 
 ## Tips and Troubleshooting
 

@@ -1,5 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
-import {MapDataService} from "./map.service";
+import {MapInfoService} from "./map-info.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
@@ -414,7 +415,8 @@ export class MapPanelComponent {
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
-    constructor(public mapService: MapDataService,
+    constructor(public mapService: MapInfoService,
+                private readonly viewState: MapViewStateService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
@@ -475,7 +477,7 @@ export class MapPanelComponent {
                 if (this.mapsCollapsed.length > this.viewIndices.length) {
                     this.mapsCollapsed.length = this.viewIndices.length;
                 }
-                this.syncedOptions = this.viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
+                this.syncedOptions = this.viewIndices.map(viewIndex => this.viewState.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
 
@@ -483,7 +485,7 @@ export class MapPanelComponent {
             this.stateService.layerSyncOptionsState.appState.subscribe(_ => {
                 const numViews = this.stateService.numViews;
                 this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
-                    this.mapService.isSyncOptionsForViewEnabled(viewIndex));
+                    this.viewState.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
 
@@ -585,7 +587,7 @@ export class MapPanelComponent {
                 label: 'Toggle All Off But This',
                 command: () => {
                     for (const layer of this.mapService.maps.allFeatureLayers()) {
-                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, layer.mapId.startsWith(mapId) && (!layerId || layer.id === layerId));
+                        this.viewState.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, layer.mapId.startsWith(mapId) && (!layerId || layer.id === layerId));
                     }
                 }
             },
@@ -593,7 +595,7 @@ export class MapPanelComponent {
                 label: 'Toggle All On But This',
                 command: () => {
                     for (const layer of this.mapService.maps.allFeatureLayers()) {
-                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, !layer.mapId.startsWith(mapId) || !!(layerId && layer.id !== layerId));
+                        this.viewState.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, !layer.mapId.startsWith(mapId) || !!(layerId && layer.id !== layerId));
                     }
                 }
             },
@@ -601,7 +603,7 @@ export class MapPanelComponent {
                 label: 'Toggle All Off',
                 command: () => {
                     for (const layer of this.mapService.maps.allFeatureLayers()) {
-                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
+                        this.viewState.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
                     }
                 }
             },
@@ -609,7 +611,7 @@ export class MapPanelComponent {
                 label: 'Toggle All On',
                 command: () => {
                     for (const layer of this.mapService.maps.allFeatureLayers()) {
-                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, true);
+                        this.viewState.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, true);
                     }
                 }
             }
@@ -639,7 +641,7 @@ export class MapPanelComponent {
             }
         }
         this.stateService.focusedView = viewIndex;
-        this.mapService.moveToRectangleTopic.next(
+        this.viewState.moveToRectangleTopic.next(
             {
                 targetView: viewIndex,
                 rectangle: {
@@ -672,7 +674,7 @@ export class MapPanelComponent {
             this.lastEnabledBackgroundLayerIds[viewIndex] = this.backgroundLayerIds[viewIndex];
         }
         this.stateService.setBackgroundState(viewIndex, this.backgroundLayerIds[viewIndex], this.backgroundOpacityValue[viewIndex]);
-        this.mapService.syncBackgroundSettings(viewIndex);
+        this.viewState.syncBackgroundSettings(viewIndex);
     }
 
     /** Returns whether the selected view currently has a background layer enabled. */
@@ -713,7 +715,7 @@ export class MapPanelComponent {
 
     /** Sets the visibility of one map or layer entry for a specific view. */
     toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
-        this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
+        this.viewState.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
     /** Returns the stable test id for one map tab. */
@@ -768,14 +770,14 @@ export class MapPanelComponent {
 
     /** Sets per-view tile-border visualization. */
     setViewTileBorders(viewIndex: number, enabled: boolean) {
-        this.mapService.setViewTileBorderVisibility(viewIndex, enabled);
+        this.viewState.setViewTileBorderVisibility(viewIndex, enabled);
         this.tileBordersEnabled[viewIndex] = this.mapService.maps.getViewTileBorderState(viewIndex);
     }
 
     /** Sets the tile-grid overlay labeling mode. */
     setTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.tileGridModes[viewIndex] = mode;
-        this.mapService.setViewTileGridMode(viewIndex, mode);
+        this.viewState.setViewTileGridMode(viewIndex, mode);
     }
 
     /** Applies a manually chosen layer level and disables auto-level for that layer. */
@@ -783,30 +785,30 @@ export class MapPanelComponent {
         if (level === null || !Number.isFinite(level)) {
             return;
         }
-        if (this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
-            this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, false);
+        if (this.viewState.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
+            this.viewState.setMapLayerAutoLevel(viewIndex, mapName, layerName, false);
         }
-        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Math.max(0, Math.floor(level)));
+        this.viewState.setMapLayerLevel(viewIndex, mapName, layerName, Math.max(0, Math.floor(level)));
     }
 
     /** Toggles automatic level selection for one layer in one view. */
     toggleLayerAutoLevel(viewIndex: number, mapName: string, layerName: string) {
-        const nextState = !this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName);
-        this.mapService.setMapLayerAutoLevel(viewIndex, mapName, layerName, nextState);
+        const nextState = !this.viewState.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName);
+        this.viewState.setMapLayerAutoLevel(viewIndex, mapName, layerName, nextState);
     }
 
     /** Returns the effective display level, substituting the auto-level result when needed. */
     displayMapLayerLevel(viewIndex: number, mapName: string, layerName: string, fallbackLevel: number) {
-        if (!this.mapService.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
+        if (!this.viewState.isMapLayerAutoLevelEnabled(viewIndex, mapName, layerName)) {
             return fallbackLevel;
         }
-        return this.mapService.getEffectiveMapLayerLevel(viewIndex, mapName, layerName);
+        return this.viewState.getEffectiveMapLayerLevel(viewIndex, mapName, layerName);
     }
 
     /** Persists a style option change and triggers visualization refresh for the affected view. */
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {
         this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
-        this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
+        this.mapService.applyStyleOptionChange(node, viewIndex);
     }
 
     /** Adds another synchronized map view up to the current supported limit. */
@@ -831,11 +833,11 @@ export class MapPanelComponent {
     /** Toggles option synchronization for the selected view. */
     syncOptionsForView(event: Event, viewIndex: number) {
         event.stopPropagation();
-        const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
-        this.mapService.setSyncOptionsForView(viewIndex, nextState);
+        const nextState = !this.viewState.isSyncOptionsForViewEnabled(viewIndex);
+        this.viewState.setSyncOptionsForView(viewIndex, nextState);
         const numViews = this.stateService.numViews;
         this.syncedOptions = Array.from({length: numViews}, (_, index) =>
-            this.mapService.isSyncOptionsForViewEnabled(index));
+            this.viewState.isSyncOptionsForViewEnabled(index));
     }
 
     /** Closes the maps panel through shared app state. */

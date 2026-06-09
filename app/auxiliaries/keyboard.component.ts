@@ -24,7 +24,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
                             <span class="key highlight">Ctrl</span>
                             <span class="key">J</span>
                         </div>
-                        <div class="control-desc">Zoom to Target Feature</div>
+                        <div class="control-desc">Zoom to Focused Inspection</div>
                     </li>
                     <li>
                         <span class="key">M</span>

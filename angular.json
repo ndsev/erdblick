@@ -77,7 +77,10 @@
               "app/styles.scss"
             ],
             "scripts": [],
-            "webWorkerTsConfig": "tsconfig.worker.json"
+            "webWorkerTsConfig": "tsconfig.worker.json",
+            "allowedCommonJsDependencies": [
+              "earcut"
+            ]
           },
           "configurations": {
             "production": {

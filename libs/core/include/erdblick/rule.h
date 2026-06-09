@@ -7,6 +7,7 @@
 
 #include "color.h"
 
+#include <functional>
 #include <regex>
 
 namespace erdblick
@@ -70,10 +71,30 @@ public:
         DoubleArrow
     };
 
+    /** Describes how nested rule fragments are evaluated. */
+    enum class BranchMode {
+        None,
+        FirstOf,
+        AllOf
+    };
+
     /** Return this rule when it matches the feature and current evaluation context. */
     FeatureStyleRule const* match(mapget::Feature& feature, BoundEvalFun const& evalFun) const;
+    /** Visit every concrete matching leaf rule. Returns true if at least one leaf matched. */
+    bool forEachMatchingRule(
+        mapget::Feature& feature,
+        BoundEvalFun const& evalFun,
+        std::function<void(FeatureStyleRule const&)> const& callback) const;
+    /** Visit all concrete renderable leaf rules without evaluating feature gates. */
+    void forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const;
+    /** Assign stable render identities to concrete leaf rules in source order. */
+    void assignRenderRuleIndices(uint32_t& nextRenderRuleIndex);
     /** Cheap type prefilter used before building a full evaluation context. */
     [[nodiscard]] bool maybeMatchesType(std::string_view typeId) const;
+    /** Return this node's branch evaluation mode. */
+    [[nodiscard]] BranchMode branchMode() const;
+    /** Return nested branch rules. */
+    [[nodiscard]] std::vector<FeatureStyleRule> const& subRules() const;
     /** Return the rule's target aspect. */
     [[nodiscard]] Aspect aspect() const;
     /** Return the highlight pass this rule belongs to. */
@@ -92,6 +113,8 @@ public:
         std::optional<uint32_t> geometryStage={}) const;
     /** Return the raw geometry-type bit mask used by `supports()`. */
     [[nodiscard]] uint32_t geometryTypesMask() const;
+    /** Return this node's own mask or the union of descendant concrete masks. */
+    [[nodiscard]] uint32_t effectiveGeometryTypesMask() const;
 
     /** Resolve the effective RGBA color, including optional color expressions. */
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
@@ -193,6 +216,8 @@ public:
 
     /** Return the stable index of this rule inside its style sheet. */
     [[nodiscard]] uint32_t const& index() const;
+    /** Return the stable renderer identity for this concrete rule. */
+    [[nodiscard]] uint32_t renderIndex() const;
 
 private:
     /** Parse all supported YAML keys into cached rule fields. */
@@ -265,10 +290,13 @@ private:
     std::optional<std::string> attributeFilter_;
     std::optional<std::regex> attributeLayerType_;
     std::optional<bool> attributeValidityGeometry_;
-    std::vector<FeatureStyleRule> firstOfRules_;
+    BranchMode branchMode_ = BranchMode::None;
+    std::vector<FeatureStyleRule> subRules_;
 
-    // Index of the rule within the style sheet
+    // Source index of the top-level rule within the style sheet.
     uint32_t index_ = 0;
+    // Renderer identity of this concrete leaf rule.
+    uint32_t renderIndex_ = 0;
 };
 
 }

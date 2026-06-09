@@ -1,8 +1,20 @@
 {
+  "surveys": [],
   "styles": [
-    {"id":  "Default Style", "url": "default-style.yaml"}
+    {"id": "Default Style", "url": "default-style.yaml"}
   ],
   "backgroundLayers": [
+    {
+      "id": "osm",
+      "name": "OpenStreetMap",
+      "type": "xyz",
+      "urlTemplate": "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "attribution": "© OpenStreetMap contributors",
+      "defaultOpacity": 6,
+      "minZoom": 0,
+      "maxZoom": 19,
+      "tileSize": 256
+    },
     {
       "id": "world-overview",
       "name": "Blue Marble",
@@ -15,16 +27,16 @@
       "tileSize": 256
     },
     {
-      "id": "osm",
-      "name": "OpenStreetMap",
+      "id": "esri-world-imagery",
+      "name": "Esri World Imagery",
       "type": "xyz",
-      "urlTemplate": "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "attribution": "© OpenStreetMap contributors",
-      "defaultOpacity": 6,
+      "urlTemplate": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      "attribution": "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+      "defaultOpacity": 60,
       "minZoom": 0,
-      "maxZoom": 19,
+      "maxZoom": 22,
       "tileSize": 256
     }
   ],
-  "defaultBackgroundLayerId": "world-overview"
+  "defaultBackgroundLayerId": "osm"
 }

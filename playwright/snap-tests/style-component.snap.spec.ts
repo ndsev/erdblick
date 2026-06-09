@@ -8,31 +8,24 @@ import {
     openStylesDialog
 } from '../utils/ui-helpers';
 
-const STYLE_ID = 'DefaultStyle';
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
 test.use({ stateSnapshot: 'style_editor_state' });
 
-function styleIdToTestIdSuffix(styleId: string): string {
-    return styleId
-        .trim()
-        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') || 'unknown';
-}
-
 test.describe('Snapshot – style component', () => {
     test('style dialog and editor', async ({ page, request }) => {
-        const styleTestIdSuffix = styleIdToTestIdSuffix(STYLE_ID);
-
         await requireMapSource(request, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
         const stylesDialog = await openStylesDialog(page);
-        const editButton = stylesDialog.getByTestId(`style-edit-button-${styleTestIdSuffix}`);
+        const editButton = stylesDialog.locator('[data-testid^="style-edit-button-"]').first();
         await expect(editButton).toBeVisible();
+        const editButtonTestId = await editButton.getAttribute('data-testid');
+        if (!editButtonTestId?.startsWith('style-edit-button-')) {
+            throw new Error(`Expected a style edit button data-testid, got ${editButtonTestId}`);
+        }
+        const styleTestIdSuffix = editButtonTestId.slice('style-edit-button-'.length);
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-dialog.png', {

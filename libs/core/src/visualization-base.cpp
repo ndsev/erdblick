@@ -35,7 +35,7 @@ mapget::Point offsetAabbOriginLocally(
     glm::dvec3 const& localOffsetMeters)
 {
     auto const shiftedOrigin = offsetGeometryLocally(
-        SelfContainedGeometry{{originWgs}, GeomType::Points},
+        SelfContainedGeometry{{originWgs}, {}, GeomType::Points},
         localOffsetMeters);
     if (shiftedOrigin.points_.empty()) {
         return originWgs;
@@ -43,8 +43,8 @@ mapget::Point offsetAabbOriginLocally(
     return shiftedOrigin.points_.front();
 }
 
-/** Parsed hover id broken down into the base feature and optional attribute/validity indices. */
-struct ParsedHoverAttributeId {
+/** Parsed highlight id broken down into the base feature and optional attribute/validity indices. */
+struct ParsedHighlightAttributeId {
     std::string_view baseFeatureId_;
     uint32_t attributeIndex_ = 0;
     std::optional<uint32_t> validityIndex_;
@@ -62,7 +62,7 @@ std::optional<uint32_t> parseTrailingUint(std::string_view value) {
     return parsed;
 }
 
-/** Strip attribute/relation hover suffixes so subset lookups can fall back to the base feature id. */
+/** Strip attribute/relation highlight suffixes so subset lookups can fall back to the base feature id. */
 std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     constexpr std::string_view attributeSuffix = ":attribute#";
     constexpr std::string_view relationSuffix = ":relation#";
@@ -79,8 +79,8 @@ std::string_view stripFeatureIdSuffix(std::string_view featureId) {
     return featureId.substr(0, cut);
 }
 
-/** Decode hover ids emitted by inspection/highlight code back into attribute subset selectors. */
-std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view featureId) {
+/** Decode suffixed highlight ids emitted by inspection/search code back into attribute subset selectors. */
+std::optional<ParsedHighlightAttributeId> parseHighlightAttributeId(std::string_view featureId) {
     constexpr std::string_view attributeSuffix = ":attribute#";
     constexpr std::string_view validitySuffix = ":validity#";
     auto const attributePos = featureId.find(attributeSuffix);
@@ -98,7 +98,7 @@ std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view fea
         return std::nullopt;
     }
 
-    ParsedHoverAttributeId result{
+    ParsedHighlightAttributeId result{
         .baseFeatureId_ = featureId.substr(0, attributePos),
         .attributeIndex_ = *attributeIndex
     };
@@ -112,12 +112,11 @@ std::optional<ParsedHoverAttributeId> parseHoverAttributeId(std::string_view fea
     return result;
 }
 
-/** Build a cache key that keeps any-mode and wildcard-mode ASTs separate. */
-std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
+/** Build a cache key that keeps plain and any-wrapped ASTs separate. */
+std::string makeExpressionCacheKey(std::string_view expression, bool anyMode) {
     std::string key;
-    key.reserve(expression.size() + 3);
+    key.reserve(expression.size() + 2);
     key.push_back(anyMode ? '1' : '0');
-    key.push_back(autoWildcard ? '1' : '0');
     key.push_back(':');
     key.append(expression);
     return key;
@@ -387,7 +386,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
         relationContext,
         [this, &relationContext](auto&& expression)
         {
-            return visualization_.evaluateExpression(expression, *relationContext, false, false);
+            return visualization_.evaluateExpression(expression, *relationContext, false);
         },
         [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
         {
@@ -534,16 +533,16 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
         auto featureId = featureIdSubset.at(i).as<std::string>();
         featureIdSubset_.insert(featureId);
         featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
-        if (auto parsedHoverAttributeId = parseHoverAttributeId(featureId)) {
-            auto& hoveredAttributeSubset =
-                hoveredAttributeSubsetsByFeatureId_[std::string(parsedHoverAttributeId->baseFeatureId_)];
-            if (parsedHoverAttributeId->validityIndex_) {
-                hoveredAttributeSubset
-                    .hoveredValidityIndicesByAttribute_[parsedHoverAttributeId->attributeIndex_]
-                    .insert(*parsedHoverAttributeId->validityIndex_);
+        if (auto parsedHighlightAttributeId = parseHighlightAttributeId(featureId)) {
+            auto& highlightedAttributeSubset =
+                highlightedAttributeSubsetsByFeatureId_[std::string(parsedHighlightAttributeId->baseFeatureId_)];
+            if (parsedHighlightAttributeId->validityIndex_) {
+                highlightedAttributeSubset
+                    .validityIndicesByAttribute_[parsedHighlightAttributeId->attributeIndex_]
+                    .insert(*parsedHighlightAttributeId->validityIndex_);
             }
             else {
-                hoveredAttributeSubset.hoveredAttributeIndices_.insert(parsedHoverAttributeId->attributeIndex_);
+                highlightedAttributeSubset.attributeIndices_.insert(parsedHighlightAttributeId->attributeIndex_);
             }
         }
     }
@@ -666,11 +665,13 @@ bool FeatureLayerVisualizationBase::bypassLowFiMaxLodFilter() const
 
 void FeatureLayerVisualizationBase::emitPolygon(
     std::vector<mapget::Point> const& vertsCartesian,
+    std::vector<uint32_t> const& ringStarts,
     FeatureStyleRule const& rule,
     uint32_t tileFeatureId,
     BoundEvalFun& evalFun)
 {
     (void) vertsCartesian;
+    (void) ringStarts;
     (void) rule;
     (void) tileFeatureId;
     (void) evalFun;
@@ -934,12 +935,12 @@ void FeatureLayerVisualizationBase::run()
         };
         boundEvalFun.eval_ = [this, &ensureEvaluationContext, &boundEvalFun](auto&& str)
         {
-            if (auto constantValue = evaluateConstantExpression(str, false, false)) {
+            if (auto constantValue = evaluateConstantExpression(str, false)) {
                 return std::move(*constantValue);
             }
             auto& context = ensureEvaluationContext();
             boundEvalFun.context_ = context;
-            return evaluateExpression(str, *context, false, false);
+            return evaluateExpression(str, *context, false);
         };
 
         auto const& candidateRuleIndices =
@@ -963,18 +964,18 @@ void FeatureLayerVisualizationBase::run()
         for (auto ruleIndex : candidateRuleIndices) {
             auto const& rule = style_.rules()[ruleIndex];
             if (rule.aspect() == FeatureStyleRule::Feature) {
-                if ((featureGeomMask & rule.geometryTypesMask()) == 0) {
+                if ((featureGeomMask & rule.effectiveGeometryTypesMask()) == 0) {
                     continue;
                 }
             }
-            auto mapLayerStyleRuleId = makeMapLayerStyleRuleId(rule.index());
-            if (auto* matchingSubRule = rule.match(*feature, boundEvalFun)) {
-                if (matchingSubRule->pointMergeGridCellSize()) {
+            rule.forEachMatchingRule(*feature, boundEvalFun, [&](FeatureStyleRule const& matchingRule) {
+                auto const mapLayerStyleRuleId = makeMapLayerStyleRuleId(matchingRule.renderIndex());
+                if (matchingRule.pointMergeGridCellSize()) {
                     boundEvalFun.context_ = ensureEvaluationContext();
                 }
-                addFeature(feature, boundEvalFun, *matchingSubRule, mapLayerStyleRuleId);
+                addFeature(feature, boundEvalFun, matchingRule, mapLayerStyleRuleId);
                 featuresAdded_ = true;
-            }
+            });
         }
     };
 
@@ -1012,16 +1013,16 @@ void FeatureLayerVisualizationBase::addFeature(
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
-        // Attribute/relation/validity hover ids should not also trigger the
-        // whole-feature hover highlight. Only emit feature highlights when the
+        // Attribute/relation/validity ids should not also trigger the
+        // whole-feature highlight. Only emit feature highlights when the
         // bare feature id itself is part of the highlighted subset.
-        if (highlightMode_ == FeatureStyleRule::HoverHighlight
+        if (highlightMode_ != FeatureStyleRule::NoHighlight
             && !featureIdSubset_.empty()
             && !featureIdSubset_.contains(resolveFeatureId())) {
             break;
         }
         if (auto geomCollection = feature->geomOrNull()) {
-            auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.index()];
+            auto const currentOffsetSlot = featureOffsetSlotsByRuleIndex_[rule.renderIndex()];
             auto const effectiveOffset = effectiveOffsetForSlot(rule, currentOffsetSlot);
             bool emittedFeatureGeometry = false;
             auto addFeatureGeometry =
@@ -1044,7 +1045,7 @@ void FeatureLayerVisualizationBase::addFeature(
                 geomCollection->forEachGeometry(addFeatureGeometry);
             }
             if (emittedFeatureGeometry) {
-                ++featureOffsetSlotsByRuleIndex_[rule.index()];
+                ++featureOffsetSlotsByRuleIndex_[rule.renderIndex()];
             }
         }
         break;
@@ -1059,40 +1060,42 @@ void FeatureLayerVisualizationBase::addFeature(
             break;
         }
 
-        auto const hoverAttributeSubsetActive =
-            !featureIdBaseSubset_.empty() &&
-            highlightMode_ == FeatureStyleRule::HoverHighlight;
         std::string featureIdForAttributes;
-        if (hoverAttributeSubsetActive) {
+        HighlightedAttributeSubset const* highlightedAttributeSubset = nullptr;
+        if (highlightMode_ != FeatureStyleRule::NoHighlight && !featureIdBaseSubset_.empty()) {
             featureIdForAttributes = resolveFeatureId();
+            if (auto highlightedAttributeSubsetIt =
+                    highlightedAttributeSubsetsByFeatureId_.find(featureIdForAttributes);
+                highlightedAttributeSubsetIt != highlightedAttributeSubsetsByFeatureId_.end()) {
+                highlightedAttributeSubset = &highlightedAttributeSubsetIt->second;
+            }
+            else {
+                break;
+            }
         }
 
+        uint32_t attributeIndex = 0;
         uint32_t offsetSlot = 0;
         attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
-            if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
-                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
-                    return true;
-                }
-            }
             layer->forEachAttribute([&, this](auto&& attr){
-                auto const attributeIndex = static_cast<uint32_t>(attr->addr().index());
-                std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr;
-                if (hoverAttributeSubsetActive) {
-                    auto const hoveredAttributeSubset =
-                        hoveredAttributeSubsetsByFeatureId_.find(featureIdForAttributes);
-                    if (hoveredAttributeSubset == hoveredAttributeSubsetsByFeatureId_.end()) {
+                auto const thisAttributeIndex = attributeIndex++;
+                if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
+                    if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
                         return true;
                     }
-                    auto const fullAttributeHovered =
-                        hoveredAttributeSubset->second.hoveredAttributeIndices_.contains(attributeIndex);
-                    auto const hoveredValiditySet =
-                        hoveredAttributeSubset->second.hoveredValidityIndicesByAttribute_.find(attributeIndex);
-                    if (!fullAttributeHovered) {
-                        if (hoveredValiditySet ==
-                            hoveredAttributeSubset->second.hoveredValidityIndicesByAttribute_.end()) {
+                }
+                std::unordered_set<uint32_t> const* highlightedValidityIndices = nullptr;
+                if (highlightedAttributeSubset) {
+                    auto const fullAttributeHighlighted =
+                        highlightedAttributeSubset->attributeIndices_.contains(thisAttributeIndex);
+                    auto const highlightedValiditySet =
+                        highlightedAttributeSubset->validityIndicesByAttribute_.find(thisAttributeIndex);
+                    if (!fullAttributeHighlighted) {
+                        if (highlightedValiditySet ==
+                            highlightedAttributeSubset->validityIndicesByAttribute_.end()) {
                             return true;
                         }
-                        hoveredValidityIndices = &hoveredValiditySet->second;
+                        highlightedValidityIndices = &highlightedValiditySet->second;
                     }
                 }
                 addAttribute(
@@ -1103,7 +1106,7 @@ void FeatureLayerVisualizationBase::addFeature(
                     rule,
                     mapLayerStyleRuleId,
                     offsetSlot,
-                    hoveredValidityIndices);
+                    highlightedValidityIndices);
                 return true;
             });
             return true;
@@ -1232,7 +1235,7 @@ bool FeatureLayerVisualizationBase::addGeometry(
     switch (geometryForRendering.geomType_) {
     case GeomType::Polygon:
         if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
-            emitPolygon(vertsProjected, rule, renderFeatureId, evalFun);
+            emitPolygon(vertsProjected, geometryForRendering.polygonRingStarts_, rule, renderFeatureId, evalFun);
             emittedAnyGeometry = true;
         }
         break;
@@ -1430,7 +1433,7 @@ void FeatureLayerVisualizationBase::addLine(
     if (!includesNonPointGeometry()) {
         return;
     }
-    auto lineGeometry = SelfContainedGeometry{{wgsA, wgsB}, GeomType::Line};
+    auto lineGeometry = SelfContainedGeometry{{wgsA, wgsB}, {}, GeomType::Line};
     if (hasLocalOffset(offset)) {
         lineGeometry = offsetGeometryLocally(lineGeometry, offset);
     }
@@ -1508,21 +1511,22 @@ void FeatureLayerVisualizationBase::ensureEvaluationEnvironment()
 FeatureLayerVisualizationBase::CachedExpression*
 FeatureLayerVisualizationBase::getOrCompileExpression(
     std::string const& expression,
-    bool anyMode,
-    bool autoWildcard)
+    bool anyMode)
 {
     ensureEvaluationEnvironment();
     if (!evalEnvironment_) {
         return nullptr;
     }
 
-    auto cacheKey = makeExpressionCacheKey(expression, anyMode, autoWildcard);
+    auto cacheKey = makeExpressionCacheKey(expression, anyMode);
     auto [iter, inserted] = expressionCache_.try_emplace(std::move(cacheKey));
     if (!inserted) {
         return &iter->second;
     }
 
-    auto ast = simfil::compile(*evalEnvironment_, expression, anyMode, autoWildcard);
+    auto ast = simfil::compile(*evalEnvironment_, expression, simfil::CompileOptions{
+        .any = anyMode,
+        .rewriteMode = simfil::RewriteMode::None});
     if (!ast) {
         std::cout << "Error compiling " << expression << ": " << ast.error().message
                   << std::endl;
@@ -1610,10 +1614,9 @@ void FeatureLayerVisualizationBase::recordRuntimeStyleIssue(
 
 std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpression(
     std::string const& expression,
-    bool anyMode,
-    bool autoWildcard)
+    bool anyMode)
 {
-    auto* cached = getOrCompileExpression(expression, anyMode, autoWildcard);
+    auto* cached = getOrCompileExpression(expression, anyMode);
     if (!cached) {
         return std::nullopt;
     }
@@ -1627,10 +1630,9 @@ std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpr
 simfil::Value FeatureLayerVisualizationBase::evaluateExpression(
     std::string const& expression,
     simfil::ModelNode const& ctx,
-    bool anyMode,
-    bool autoWildcard)
+    bool anyMode)
 {
-    auto* cached = getOrCompileExpression(expression, anyMode, autoWildcard);
+    auto* cached = getOrCompileExpression(expression, anyMode);
     if (!cached || !cached->ast_ || !evalEnvironment_) {
         return simfil::Value::null();
     }
@@ -1687,7 +1689,7 @@ void FeatureLayerVisualizationBase::addAttribute(
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId,
     uint32_t& offsetSlot,
-    std::unordered_set<uint32_t> const* hoveredValidityIndices)
+    std::unordered_set<uint32_t> const* highlightedValidityIndices)
 {
     // Check if the attribute type name is accepted for the rule.
     if (auto const& attrTypeRegex = rule.attributeType()) {
@@ -1729,7 +1731,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         attrEvaluationContext,
         [this, &attrEvaluationContext](auto&& str)
         {
-            return evaluateExpression(str, *attrEvaluationContext, false, false);
+            return evaluateExpression(str, *attrEvaluationContext, false);
         },
         [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)
         {
@@ -1761,7 +1763,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         multiValidity->forEach([&](auto&& validity)
         {
             (void) validity;
-            if (!hoveredValidityIndices || hoveredValidityIndices->contains(validityIndex)) {
+            if (!highlightedValidityIndices || highlightedValidityIndices->contains(validityIndex)) {
                 ++renderedValidityCount;
             }
             ++validityIndex;
@@ -1775,7 +1777,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         validityIndex = 0;
         multiValidity->forEach([&, this](auto&& validity)
         {
-            if (hoveredValidityIndices && !hoveredValidityIndices->contains(validityIndex)) {
+            if (highlightedValidityIndices && !highlightedValidityIndices->contains(validityIndex)) {
                 ++validityIndex;
                 return true;
             }
@@ -1814,7 +1816,7 @@ void FeatureLayerVisualizationBase::addAttribute(
         offsetSlot = currentOffsetSlot + 1U;
     }
     else {
-        if (hoveredValidityIndices && !hoveredValidityIndices->contains(0U)) {
+        if (highlightedValidityIndices && !highlightedValidityIndices->contains(0U)) {
             return;
         }
         attrEvaluationContext = makeAttrEvaluationContext();

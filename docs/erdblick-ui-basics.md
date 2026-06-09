@@ -1,6 +1,6 @@
 # UI Basics
 
-Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock that can host inspection or SourceData panels. This guide explains the controls most users touch first.
+Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock that can host Search, inspection, or SourceData panels. This guide explains the controls most users touch first.
 
 !!! note "Focus on the layout before advanced features"
     If you are new to the viewer, get comfortable with the shell, map navigation, and Maps & Layers first. Search, inspection, SourceData, and diagnostics all build on those basics.
@@ -13,7 +13,7 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 2. **Main bar** – the top menu bar contains the search panel plus the main entry points for editing, view management, tools, and help.
 3. **Map view** – one or two active views, depending on whether split view is enabled.
 4. **Maps & Layers panel** – shows maps, feature layers, metadata actions, per-layer style options, and per-view layer controls.
-5. **Inspection dock** – hosts feature panels and SourceData panels. Panels can stay docked or be undocked into separate dialogs.
+5. **Dock** – hosts Search panels, feature panels, and SourceData panels. Panels can stay docked or be undocked into separate dialogs.
 6. **Diagnostics indicator** – summarizes tile progress, backend connectivity, and error presence.
 7. **Coordinate readout** – shows cursor coordinates and tile IDs and lets you place a shared marker.
 
@@ -22,7 +22,7 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
 
 - **Mouse**: left drag pans, right drag tilts, scroll zooms.
-- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses search, `Ctrl+J` zooms to the selected feature, and `M` toggles the Maps & Layers panel.
+- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses search, `Ctrl+J` zooms to the focused inspection panel, and `M` toggles the Maps & Layers panel.
 - **Compass widget**: click to reset heading or drag to rotate.
 - **Camera control buttons**: use the arrow and plus/minus buttons near the compass for simple pan/zoom actions.
 - **2D / 3D toggle**: switch between flat Web Mercator-style rendering and the full 3D view.
@@ -112,9 +112,10 @@ For the feature workflow, continue with the [Feature Inspection Guide](erdblick-
 
 - jump actions for coordinates, tiles, feature IDs, and SourceData
 - feature search using Simfil expressions
+- persistent Search panels for results, visualization, and diagnostics
 - search history and inline validation
 
-The dedicated [Search Guide](erdblick-search.md) covers the available targets and query language in detail.
+The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets, persistent feature-search panels, result visualization, diagnostics, and the query language.
 
 ## Preferences and Resets
 
@@ -122,6 +123,7 @@ Open **Edit -> Settings** to access the main viewer preferences:
 
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
+- **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
 - **Tile pull compression** toggles compressed tile downloads
 - **Threaded tile rendering** and **Render worker count override** control deck.gl-side rendering parallelism
 - **Pin low-fi rendering to max LOD** changes the low-fidelity culling policy

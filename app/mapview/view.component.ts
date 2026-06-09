@@ -13,7 +13,11 @@ import {
     input,
     InputSignal
 } from "@angular/core";
-import {MapDataService} from "../mapdata/map.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {MapViewStateService, ViewRecalculationReason} from "./map-view-state.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {MapRenderService} from "../mapdata/map-render.service";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {JumpTargetService} from "../search/jump.service";
@@ -129,7 +133,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Constructs the host component for one deck-backed view, wiring in the shared
      * map, search, config, and input services the renderer depends on.
      */
-    constructor(public mapService: MapDataService,
+    constructor(public mapService: MapInfoService,
+                public mapViewState: MapViewStateService,
+                public tileStream: MapTileStreamService,
+                public mapRender: MapRenderService,
+                public inspectionSelection: InspectionSelectionService,
                 public featureSearchService: FeatureSearchService,
                 public stateService: AppStateService,
                 public jumpService: JumpTargetService,
@@ -237,11 +245,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
-                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
+                this.mapRender, this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService
             )
             : new DeckMapView3D(
-                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
+                this.mapRender, this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
@@ -331,7 +341,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 }
 
             });
-            this.mapService.scheduleUpdate();
+            this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
             this.cdr.markForCheck();
         });
     }
@@ -560,7 +570,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Falls back to the deepest source-data tile whose level matches currently visible feature data. */
     private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): bigint | null {
-        const visibleLevels = this.mapService.visibleFeatureLevelsInView(this.viewIndex());
+        const visibleLevels = this.mapViewState.visibleFeatureLevelsInView(this.viewIndex());
         const preferredTile = [...tileIds]
             .reverse()
             .find(tileId => !tileId.disabled && visibleLevels.has(tileId.tileLevel ?? -1));

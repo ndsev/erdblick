@@ -1,6 +1,8 @@
-import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
+import {Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
-import {AppStateService} from "./shared/appstate.service";
+import {AppStateService, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
+import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
+import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-panel-drag.controller";
 
 @Component({
     selector: 'dockable-layout',
@@ -30,7 +32,72 @@ import {AppStateService} from "./shared/appstate.service";
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
                     <div class="drop-hint"></div>
-                    <inspection-container [ngClass]="{'hidden': !stateService.isDockOpen}"></inspection-container>
+                    @if (hasVisibleDockTabs()) {
+                        <p-tabs class="app-dock-tabs"
+                                [value]="stateService.dockActiveTab"
+                                (valueChange)="onDockTabChange($event)"
+                                scrollable>
+                            <p-tablist>
+                                @if (hasDockedInspections()) {
+                                    <p-tab [value]="inspectionDockTabId">
+                                        <span>Inspection</span>
+                                        <p-badge [value]="dockedInspectionCount()"/>
+                                    </p-tab>
+                                }
+                                @if (isFeatureSearchDocked()) {
+                                    <p-tab [value]="searchDockTabId">
+                                        <span>Search</span>
+                                        <p-badge [value]="dockedFeatureSearchCount()"/>
+                                    </p-tab>
+                                }
+                            </p-tablist>
+                            <p-button class="dock-tabbar-close-button"
+                                      icon="pi pi-times"
+                                      severity="secondary"
+                                      ariaLabel="Close dock"
+                                      pTooltip="Close dock"
+                                      tooltipPosition="bottom"
+                                      (click)="closeDock()"
+                                      (mousedown)="$event.stopPropagation()"/>
+                            <p-tabpanels>
+                                @if (hasDockedInspections()) {
+                                    <p-tabpanel [value]="inspectionDockTabId">
+                                        <inspection-container [ngClass]="{'hidden': !stateService.isDockOpen}"></inspection-container>
+                                    </p-tabpanel>
+                                }
+                                @if (isFeatureSearchDocked()) {
+                                    <p-tabpanel [value]="searchDockTabId">
+                                        <div class="feature-search-dock-container"
+                                             [ngClass]="{
+                                                 'reordering': searchDockDrag.state.isReordering,
+                                                 'single-panel': dockedFeatureSearchCount() === 1,
+                                                 'multi-panel': dockedFeatureSearchCount() > 1
+                                            }">
+                                            @for (session of dockedFeatureSearchSessions(); track session.id) {
+                                                <feature-search [searchId]="session.id"
+                                                                [dockedPanelCount]="dockedFeatureSearchCount()"
+                                                                [ngClass]="{'dragging': searchDockDrag.state.draggedId === session.id,
+                                                                            'drop-before': searchDockDrag.state.dropBeforeId === session.id,
+                                                                            'drop-after': searchDockDrag.state.dropAfterId === session.id}"
+                                                                [attr.data-surface-id]="session.id"
+                                                                (panelDragRequest)="onFeatureSearchPanelDragRequest($event)"></feature-search>
+                                            }
+                                        </div>
+                                    </p-tabpanel>
+                                }
+                            </p-tabpanels>
+                        </p-tabs>
+                    } @else {
+                        <div class="dock-empty">
+                            <p-button class="close-dock-button" icon="pi pi-times" severity="secondary" (click)="closeDock()"
+                                      (mousedown)="$event.stopPropagation()"/>
+                            <span class="material-symbols-outlined dock-empty-icon" aria-hidden="true">subtitles_off</span>
+                            <div class="dock-empty-title">No docked panels</div>
+                            <div class="dock-empty-text">
+                                Select a feature, or drag a floating dockable dialogue here.
+                            </div>
+                        </div>
+                    }
                 </div>
             }
         </div>
@@ -44,7 +111,7 @@ import {AppStateService} from "./shared/appstate.service";
  * It owns dock open/close state, user-resizing of the dock, and the temporary
  * pause events used to suppress layout-sensitive work during dock transitions.
  */
-export class DockableLayoutComponent implements OnDestroy {
+export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
 
@@ -57,10 +124,31 @@ export class DockableLayoutComponent implements OnDestroy {
     private dockPauseEndRafFirst?: number;
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
+    protected readonly searchDockDrag: DockedPanelDragController<string>;
 
-    constructor(public stateService: AppStateService, private renderer: Renderer2) {}
+    constructor(public stateService: AppStateService,
+                private renderer: Renderer2,
+                private featureSearchService: FeatureSearchService) {
+        this.searchDockDrag = new DockedPanelDragController<string>({
+            renderer: this.renderer,
+            baseFontSize: () => this.stateService.baseFontSize,
+            container: () => this.searchDockContainer(),
+            itemSelector: 'feature-search',
+            readId: element => element.dataset['surfaceId'],
+            previewClass: 'app-dock-drag-preview',
+            previewHeaderClass: 'app-dock-drag-preview-header',
+            previewFillClass: 'app-dock-drag-preview-fill',
+            applyReorder: nextDisplayOrder => {
+                const layoutOrder = nextDisplayOrder.map(id => FeatureSearchService.layoutIdForSearch(id));
+                this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, layoutOrder);
+            },
+            undock: (searchId, event, offset) => this.undockSearchAt(searchId, event, offset)
+        });
+    }
 
     protected readonly environment = environment;
+    protected readonly inspectionDockTabId = INSPECTION_DOCK_TAB_ID;
+    protected readonly searchDockTabId = SEARCH_DOCK_TAB_ID;
 
     /** Toggles dock visibility and emits resize-pause events around the transition. */
     protected toggleDock() {
@@ -69,13 +157,81 @@ export class DockableLayoutComponent implements OnDestroy {
         this.scheduleDockResizePauseEnd();
     }
 
+    protected dockedInspectionCount(): number {
+        return this.stateService.selection.filter(panel => !panel.undocked).length;
+    }
+
+    protected hasDockedInspections(): boolean {
+        return this.dockedInspectionCount() > 0;
+    }
+
+    protected isFeatureSearchDocked(): boolean {
+        return this.dockedFeatureSearchCount() > 0;
+    }
+
+    protected dockedFeatureSearchCount(): number {
+        return this.dockedFeatureSearchSessions().length;
+    }
+
+    protected dockedFeatureSearchSessions() {
+        return this.featureSearchService.getDockedSessions();
+    }
+
+    protected hasVisibleDockTabs(): boolean {
+        return this.visibleDockTabs().length > 0;
+    }
+
+    protected onDockTabChange(value: string | number | undefined): void {
+        const nextTab = value?.toString();
+        if (!nextTab || !this.visibleDockTabs().includes(nextTab)) {
+            return;
+        }
+        this.stateService.dockActiveTab = nextTab;
+    }
+
+    /** Keeps the selected tab aligned with tabs that are currently visible. */
+    ngDoCheck(): void {
+        const tabs = this.visibleDockTabs();
+        if (tabs.length === 0 || tabs.includes(this.stateService.dockActiveTab)) {
+            return;
+        }
+        this.stateService.dockActiveTab = tabs[0];
+    }
+
     /** Clears listeners and ensures the resize-pause state is reset on teardown. */
     ngOnDestroy(): void {
         this.detachMove?.();
         this.detachUp?.();
         this.detachCancel?.();
+        this.searchDockDrag.destroy();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();
+    }
+
+    /** Closes the right-hand dock without changing any surface dock state. */
+    protected closeDock() {
+        this.stateService.isDockOpen = false;
+    }
+
+    /** Starts drag tracking for a docked Feature Search panel. */
+    protected onFeatureSearchPanelDragRequest(payload: {session: FeatureSearchSession, event: PointerEvent}): void {
+        this.searchDockDrag.start(payload.session.id, payload.event);
+    }
+
+    private undockSearchAt(searchId: string, event: PointerEvent, offset: DockedPanelDragOffset): void {
+        const session = this.featureSearchService.getSession(searchId);
+        if (!session) {
+            return;
+        }
+        this.stateService.setDialogPosition(session.layoutId, {
+            left: Math.max(0, Math.round(event.clientX - offset.x)),
+            top: Math.max(0, Math.round(event.clientY - offset.y))
+        });
+        this.featureSearchService.setSessionDocked(searchId, false);
+    }
+
+    private searchDockContainer(): HTMLElement | null {
+        return this.dockRef?.nativeElement.querySelector('.feature-search-dock-container') ?? null;
     }
     
     /** Starts a manual dock resize interaction from the resize handle. */
@@ -163,5 +319,16 @@ export class DockableLayoutComponent implements OnDestroy {
             window.cancelAnimationFrame(this.dockPauseEndRafSecond);
             this.dockPauseEndRafSecond = undefined;
         }
+    }
+
+    private visibleDockTabs(): string[] {
+        const tabs: string[] = [];
+        if (this.dockedInspectionCount() > 0) {
+            tabs.push(INSPECTION_DOCK_TAB_ID);
+        }
+        if (this.isFeatureSearchDocked()) {
+            tabs.push(SEARCH_DOCK_TAB_ID);
+        }
+        return tabs;
     }
 }

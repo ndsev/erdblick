@@ -3,7 +3,7 @@ import {Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {TreeTableNode} from 'primeng/api';
-import {MapDataService} from '../mapdata/map.service';
+import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 import {FeatureTile} from '../mapdata/features.model';
 import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {PerfStat} from './diagnostics.model';
@@ -220,7 +220,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
                 public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService,
-                private readonly mapService: MapDataService) {
+                private readonly mapService: MapTileStreamService) {
         this.subscriptions.push(
             this.diagnostics.perfStats$.subscribe(() => {
                 this.refreshAvailableMapLayers();

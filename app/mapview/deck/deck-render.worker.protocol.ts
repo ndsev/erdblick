@@ -21,7 +21,6 @@ export interface DeckTileRenderTask {
     tileKey: string;
     tileStageBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
-    dataSourceInfoBlob: Uint8Array;
     nodeId: string;
     mapName: string;
     layerName: string;
@@ -35,6 +34,26 @@ export interface DeckTileRenderTask {
     outputMode: DeckGeometryOutputMode;
     featureIdSubset: string[];
     mergeCountSnapshot: Record<string, number>;
+}
+
+/** Inbound worker task for one streamed server-side search-result tile. */
+export interface DeckSearchTileRenderTask {
+    type: "DeckSearchTileRenderTask";
+    taskId: string;
+    viewIndex: number;
+    tileKey: string;
+    searchResultLayerBlob: Uint8Array;
+    fieldDictBlob: Uint8Array;
+    nodeId: string;
+    mapName: string;
+    styleSpecJson: string;
+}
+
+/** Supplies datasource metadata to a render worker once per map before tile tasks reference it. */
+export interface DeckWorkerDataSourceInfoMessage {
+    type: "DeckWorkerDataSourceInfo";
+    mapName: string;
+    dataSourceInfoBlob: Uint8Array;
 }
 
 /** Handshake message sent from the main thread to bootstrap the render worker. */
@@ -68,6 +87,8 @@ export interface DeckPointBucketBuffers {
 export interface DeckSurfaceBucketBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
+    holeIndices: Uint32Array;
+    holeIndexStarts: Uint32Array;
     colors: Uint8Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
@@ -106,6 +127,7 @@ export interface DeckLabelDatum {
     position: {x: number, y: number, z: number};
     text: string;
     fillColor: [number, number, number, number];
+    backgroundColor?: [number, number, number, number];
     outlineColor: [number, number, number, number];
     outlineWidth: number;
     scale: number;
@@ -139,6 +161,7 @@ export interface DeckVisualizationBufferResult extends DeckGeometryBucketBuffers
     coordinateOrigin: Float64Array;
     lowFiBundles: DeckLowFiBundleBuffers[];
     mergedPointFeatures: Record<string, any[]>;
+    resultFeatureIds?: string[];
     styleIssues?: StyleValidationIssue[];
 }
 
@@ -159,6 +182,10 @@ export interface DeckTileRenderResult extends DeckVisualizationBufferResult {
 }
 
 /** All messages accepted by the worker. */
-export type DeckWorkerInboundMessage = DeckTileRenderTask | DeckWorkerInitMessage;
+export type DeckWorkerInboundMessage =
+    DeckTileRenderTask |
+    DeckSearchTileRenderTask |
+    DeckWorkerDataSourceInfoMessage |
+    DeckWorkerInitMessage;
 /** All messages emitted by the worker. */
 export type DeckWorkerOutboundMessage = DeckTileRenderResult | DeckWorkerReadyMessage;

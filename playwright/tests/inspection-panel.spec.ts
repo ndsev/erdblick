@@ -2,24 +2,23 @@ import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS } from '../utils/test-params';
 import {
-    clickSearchResultLeaf,
     enableMapLayer,
     navigateToArea,
     navigateToRoot,
-    runFeatureSearch
+    selectFeatureForInspection
 } from '../utils/ui-helpers';
 
 /**
- * Behavioural tests for inspection panels driven by feature search.
+ * Behavioural tests for inspection panels driven by deterministic test-tile selections.
  *
- * The main scenario loads `TestMap/WayLayer`, jumps to a known area, runs a
- * feature search and verifies that selecting results opens inspection panels
+ * The main scenario loads `TestMap/WayLayer`, jumps to a known area, selects
+ * deterministic synthetic features and verifies that selection opens inspection panels
  * with the expected map / layer identifiers and supports pinning multiple
  * panels.
  */
 
 test.describe('Inspection panels over TestMap/WayLayer', () => {
-    test('selecting a feature from search opens an inspection panel with TestMap attributes and opens the second panel', async ({ page, request }) => {
+    test('selecting a feature opens an inspection panel with TestMap attributes and opens the second panel', async ({ page, request }) => {
         // Ensure the synthetic TestMap datasource is available.
         await requireTestMapSource(request);
 
@@ -27,9 +26,7 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
         await navigateToArea(page, ...TEST_VIEW_POSITIONS[0]);
 
-        // Run a feature search and select the first result.
-        await runFeatureSearch(page, '**.name');
-        await clickSearchResultLeaf(page, 0);
+        await selectFeatureForInspection(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], 'Way.0');
 
         // An inspection panel should appear for the selected feature.
         const panel = page.getByTestId('inspection-container').getByTestId('inspection-panel').first();
@@ -48,15 +45,13 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         }).first();
         await expect(layerIdRow).toHaveCount(1);
 
-        const lockToggle = panel.locator('.title .material-symbols-outlined', {
-            hasText: 'lock_open_right'
-        }).first();
+        const lockToggle = panel.locator('.app-surface-header-title').first();
         // Lock the first panel so the next selection opens a second panel.
         await expect(lockToggle).toBeVisible();
         await lockToggle.click();
 
-        // Selecting another result should open a second inspection panel.
-        await clickSearchResultLeaf(page, 1);
+        // Selecting another feature should open a second inspection panel.
+        await selectFeatureForInspection(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], 'Way.1');
         const panels = page.getByTestId('inspection-container').getByTestId('inspection-panel');
         await expect(panels).toHaveCount(2);
     });
@@ -68,8 +63,7 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await enableMapLayer(page, 'TestMap', 'WayLayer');
         await navigateToArea(page, 42.5, 11.615, 13);
 
-        await runFeatureSearch(page, '**.name');
-        await clickSearchResultLeaf(page, 0);
+        await selectFeatureForInspection(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], 'Way.0');
 
         const panel = page.getByTestId('inspection-container').getByTestId('inspection-panel').first();
         await expect(panel).toBeVisible();

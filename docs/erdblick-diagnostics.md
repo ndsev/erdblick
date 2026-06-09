@@ -51,6 +51,12 @@ Use it when:
 
 Combine it with tile borders and the per-view grid toggle when you need to correlate slow areas with concrete tile IDs.
 
+## Search Diagnostics
+
+Feature-search panels have their own **Diagnostics** tab for query/result diagnostics. Use that tab for Simfil messages, query scope, result counts, value summaries, and `trace()` output.
+
+The global diagnostics indicator can still show backend or rendering progress while searches are running. Exported diagnostics are useful for Search issues when backend search progress, result chunk ingress, and frontend result-tree construction appear to diverge.
+
 ## Logs and Backend State
 
 Open **Tools -> Logs** to inspect the diagnostics log.

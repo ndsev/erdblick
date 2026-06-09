@@ -16,7 +16,7 @@ Before the editor can accept changes, the backend has to expose a configuration 
 <!-- Note: the link below only works when the erdblick and mapget are bundled via the mapviewer project. -->
 
 This behaviour is controlled through the `mapget` section in the `mapviewer.yaml` configuration file.
-See the [Advanced mapget Configuration](../../docs/mv-config.md#advanced-mapget-configuration) chapter for details: use `allow-post-config` to enable edits and `no-get-config` to hide the current datasource model.
+See the [Advanced mapget Configuration](../../../docs/mv-config.md#advanced-mapget-configuration) chapter for details: use `allow-post-config` to enable edits and `no-get-config` to hide the current datasource model.
 
 ## Editing Sources
 
@@ -26,8 +26,6 @@ Once the editor is available, you can adjust data sources directly from within e
 2. Erdblick loads the current configuration from the `/config` endpoint and shows it in the editor panel.
 3. Update fields such as data source `type`, `uri`, `mapId`, coverage settings, or HTTP scopes according to your backend’s schema.
 4. Click **Apply** to send the edited configuration back to the backend and refresh the list of maps and layers.
-
-_[Screenshot placeholder: Validation error highlighting a missing HTTP scope.]_
 
 ## File-Based vs. UI Edits
 

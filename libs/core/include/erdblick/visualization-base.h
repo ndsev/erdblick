@@ -127,10 +127,10 @@ protected:
         RelationStyleState::RelationToVisualize* relationToRender = nullptr;
     };
 
-    /** Hover filter restricting attribute rendering to the subset currently under the cursor. */
-    struct HoveredAttributeSubset {
-        std::unordered_set<uint32_t> hoveredAttributeIndices_;
-        std::unordered_map<uint32_t, std::unordered_set<uint32_t>> hoveredValidityIndicesByAttribute_;
+    /** Highlight filter restricting attribute rendering to a selected or hovered sub-target. */
+    struct HighlightedAttributeSubset {
+        std::unordered_set<uint32_t> attributeIndices_;
+        std::unordered_map<uint32_t, std::unordered_set<uint32_t>> validityIndicesByAttribute_;
     };
 
     static constexpr uint32_t kUnselectableFeatureId = std::numeric_limits<uint32_t>::max();
@@ -155,6 +155,7 @@ protected:
     /** Emit one polygon in renderer-specific form. */
     virtual void emitPolygon(
         std::vector<mapget::Point> const& vertsCartesian,
+        std::vector<uint32_t> const& ringStarts,
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun);
@@ -251,7 +252,7 @@ protected:
         const FeatureStyleRule& rule,
         std::string const& mapLayerStyleRuleId,
         uint32_t& offsetSlot,
-        std::unordered_set<uint32_t> const* hoveredValidityIndices = nullptr);
+        std::unordered_set<uint32_t> const* highlightedValidityIndices = nullptr);
     /** Emit an already materialized geometry if it passes all render filters. */
     bool addGeometry(
         mapget::SelfContainedGeometry const& geom,
@@ -325,13 +326,11 @@ protected:
     simfil::Value evaluateExpression(
         std::string const& expression,
         simfil::ModelNode const& ctx,
-        bool anyMode,
-        bool autoWildcard);
+        bool anyMode);
     /** Evaluate an expression once and cache the result if it is constant. */
     std::optional<simfil::Value> evaluateConstantExpression(
         std::string const& expression,
-        bool anyMode,
-        bool autoWildcard);
+        bool anyMode);
     /** Cached parsed simfil expression and its optional constant-folded result. */
     struct CachedExpression {
         simfil::ASTPtr ast_;
@@ -343,8 +342,7 @@ protected:
     /** Look up or compile an expression in the per-visualization cache. */
     CachedExpression* getOrCompileExpression(
         std::string const& expression,
-        bool anyMode,
-        bool autoWildcard);
+        bool anyMode);
     /** Resolve and memoize the constant value of a cached expression, if any. */
     void resolveCachedConstant(CachedExpression& cached);
     /** Record one bounded runtime style evaluation issue. */
@@ -385,7 +383,7 @@ protected:
     FeatureLayerStyle const& style_;
     std::set<std::string> featureIdSubset_;
     std::set<std::string> featureIdBaseSubset_;
-    std::unordered_map<std::string, HoveredAttributeSubset> hoveredAttributeSubsetsByFeatureId_;
+    std::unordered_map<std::string, HighlightedAttributeSubset> highlightedAttributeSubsetsByFeatureId_;
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;
     FeatureStyleRule::Fidelity fidelity_;

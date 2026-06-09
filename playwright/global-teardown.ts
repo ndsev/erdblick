@@ -671,12 +671,15 @@ async function writeV8CoverageSummary(): Promise<void> {
 }
 
 async function globalTeardown(config: FullConfig): Promise<void> {
+    console.log('[playwright] Global teardown started');
     try {
         // Coverage summary generation is best-effort; ignore failures so tests
         // do not fail purely due to coverage post-processing.
+        console.log('[playwright] Writing Playwright coverage summary');
         await writeV8CoverageSummary();
+        console.log('[playwright] Playwright coverage summary complete');
     } catch {
-        // ignore coverage summary failures
+        console.warn('[playwright] Playwright coverage summary failed');
     }
 
     const configDir = process.cwd();
@@ -689,6 +692,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
 
     // If there is no state file, there is no `mapget` process to terminate.
     if (!fs.existsSync(statePath)) {
+        console.log('[playwright] No mapget state file found; nothing to stop');
         return;
     }
 
@@ -703,11 +707,18 @@ async function globalTeardown(config: FullConfig): Promise<void> {
     if (state && state.mapgetPid) {
         try {
             // Best-effort termination of the `mapget` process started in setup.
-            process.kill(state.mapgetPid);
+            const targetPid = process.platform === 'win32' ? state.mapgetPid : -state.mapgetPid;
+            console.log(`[playwright] Stopping mapget backend pid ${state.mapgetPid}`);
+            process.kill(targetPid, 'SIGTERM');
         } catch {
-            // ignore if already exited
+            try {
+                process.kill(state.mapgetPid, 'SIGTERM');
+            } catch {
+                // ignore if already exited
+            }
         }
     }
+    console.log('[playwright] Global teardown complete');
 }
 
 export default globalTeardown;
