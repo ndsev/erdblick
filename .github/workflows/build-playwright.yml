@@ -74,6 +74,7 @@ jobs:
           ./venv/bin/pip install mapget
 
       - name: Run Playwright integration tests (with coverage)
+        timeout-minutes: 35
         run: |
           source ./venv/bin/activate
           EB_FIREFOX_HEADED=1 xvfb-run -a $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh

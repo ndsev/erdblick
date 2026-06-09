@@ -120,10 +120,13 @@ async function globalSetup(config: FullConfig): Promise<void> {
         '/:static/browser'
     ];
 
+    console.log(`[playwright] Starting mapget backend: ${mapgetExecutable} ${args.join(' ')}`);
+
     // Start `mapget serve` in the repository root.
     const child = spawn(mapgetExecutable, args, {
         stdio: 'inherit',
         cwd: projectRoot,
+        detached: process.platform !== 'win32',
         env: {
             ...process.env,
             HTTP_SETTINGS_FILE: process.env["HTTP_SETTINGS_FILE"] || mapgetConfigPath
@@ -138,6 +141,8 @@ async function globalSetup(config: FullConfig): Promise<void> {
         mapgetPid: child.pid,
         baseURL
     };
+    child.unref();
+    console.log(`[playwright] mapget backend pid: ${child.pid}`);
 
     // Persist pid / URL so `global-teardown` can cleanly shut down the process.
     const stateDir = path.join(projectRoot, 'playwright', '.cache');
@@ -145,7 +150,9 @@ async function globalSetup(config: FullConfig): Promise<void> {
     const statePath = path.join(stateDir, 'global-state.json');
     fs.writeFileSync(statePath, JSON.stringify(state), { encoding: 'utf-8' });
 
+    console.log(`[playwright] Waiting for mapget /sources at ${baseURL}`);
     await waitForSources(baseURL, 60000);
+    console.log('[playwright] mapget /sources is ready');
 }
 
 export default globalSetup;
