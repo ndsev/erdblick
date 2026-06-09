@@ -28,10 +28,12 @@ export interface FeatureSearchDiagnosticMessage {
 export interface FeatureSearchScopeAnalysis {
     signature: string;
     concreteScope: "feature" | "attribute";
+    normalizedQuery: string;
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
     inferredMapLayers: FeatureSearchMapLayerRef[];
     matchedFieldNames: string[];
     matchedEnumValues: string[];
+    matchedFeatureTypes: string[];
     error?: string;
 }
 
@@ -214,10 +216,12 @@ export class FeatureSearchSchemaService {
         return {
             signature,
             concreteScope: scope === "attribute" ? "attribute" : "feature",
+            normalizedQuery: "",
             attributeScopes: [],
             inferredMapLayers: [],
             matchedFieldNames: [],
             matchedEnumValues: [],
+            matchedFeatureTypes: [],
             error
         };
     }
@@ -338,10 +342,12 @@ export class FeatureSearchSchemaService {
         pending.resolve({
             signature: pending.signature,
             concreteScope: message.concreteScope,
+            normalizedQuery: message.normalizedQuery,
             attributeScopes: message.attributeScopes,
             inferredMapLayers: message.inferredMapLayers,
             matchedFieldNames: message.matchedFieldNames,
             matchedEnumValues: message.matchedEnumValues,
+            matchedFeatureTypes: message.matchedFeatureTypes,
             ...(message.error ? {error: message.error} : {})
         });
     }
@@ -418,10 +424,12 @@ export class FeatureSearchSchemaService {
             pending.resolve({
                 signature: pending.signature,
                 concreteScope: "feature",
+                normalizedQuery: "",
                 attributeScopes: [],
                 inferredMapLayers: [],
                 matchedFieldNames: [],
                 matchedEnumValues: [],
+                matchedFeatureTypes: [],
                 error: message
             });
         }

@@ -358,6 +358,7 @@ struct SearchStyleFieldInfo
     std::string mapId;
     std::string layerId;
     std::string attrName;
+    std::string attrLayerName;
     std::string featureType;
     std::string valueKind = "unknown";
     std::vector<std::string> enumValues;
@@ -1404,13 +1405,15 @@ void addSearchStyleField(
     std::string const& mapId,
     std::string const& layerId,
     std::string const& attrName,
+    std::string const& attrLayerName,
     std::string const& featureType,
     SearchStyleSchemaMetadata metadata = {})
 {
     if (path.empty()) {
         return;
     }
-    auto const key = mapId + "\n" + layerId + "\n" + attrName + "\n" + featureType + "\n" + path;
+    auto const key = mapId + "\n" + layerId + "\n" + attrName + "\n"
+        + attrLayerName + "\n" + featureType + "\n" + path;
     if (!seen.insert(key).second) {
         return;
     }
@@ -1419,6 +1422,7 @@ void addSearchStyleField(
         mapId,
         layerId,
         attrName,
+        attrLayerName,
         featureType,
         metadata.valueKind,
         metadata.enumValues,
@@ -1472,6 +1476,68 @@ NativeJsValue mapLayerInferenceToJs(SearchQueryMapLayerInference const& inferenc
     return *result;
 }
 
+/** Convert UI scope string into the mapget normalizer scope enum. */
+mapget::SchemaRegistry::SearchQueryRequestedScope requestedSearchScopeFromString(std::string const& scope)
+{
+    if (scope == "attribute") {
+        return mapget::SchemaRegistry::SearchQueryRequestedScope::Attribute;
+    }
+    if (scope == "auto") {
+        return mapget::SchemaRegistry::SearchQueryRequestedScope::Auto;
+    }
+    return mapget::SchemaRegistry::SearchQueryRequestedScope::Feature;
+}
+
+/** Parenthesize generated normalized query branches before joining with OR. */
+std::string normalizedQueryBranch(std::string value)
+{
+    return "(" + std::move(value) + ")";
+}
+
+/** Merge unique normalized attribute predicates into one query string. */
+std::string mergeNormalizedAttributeQueries(std::vector<std::string> queries)
+{
+    std::vector<std::string> uniqueQueries;
+    std::set<std::string> seen;
+    for (auto& query : queries) {
+        if (!query.empty() && seen.insert(query).second) {
+            uniqueQueries.push_back(std::move(query));
+        }
+    }
+    if (uniqueQueries.empty()) {
+        return {};
+    }
+    auto result = std::move(uniqueQueries.front());
+    for (size_t i = 1; i < uniqueQueries.size(); ++i) {
+        result = normalizedQueryBranch(std::move(result)) + " or " + normalizedQueryBranch(std::move(uniqueQueries[i]));
+    }
+    return result;
+}
+
+/** Convert mapget layer-local attribute owners into erdblick's JS scope-candidate shape. */
+void appendNormalizedAttributeScopes(
+    JsValue& result,
+    std::vector<mapget::SchemaRegistry::AttributePathOwner> const& scopes,
+    std::string const& mapId,
+    std::string const& layerId,
+    std::set<std::string>& seen)
+{
+    for (auto const& scope : scopes) {
+        auto key = mapId + "\n" + layerId + "\n" + scope.featureType_ + "\n"
+            + scope.attributeLayerName_ + "\n" + scope.attributeName_;
+        if (!seen.insert(std::move(key)).second) {
+            continue;
+        }
+        result.push(JsValue::Dict({
+            {"attrName", JsValue(scope.attributeName_)},
+            {"attrLayerName", JsValue(scope.attributeLayerName_)},
+            {"featureType", JsValue(scope.featureType_)},
+            {"mapId", JsValue(mapId)},
+            {"layerId", JsValue(layerId)}
+        }));
+    }
+}
+
 /** Converts native search-style field candidates into the embind JS value shape. */
 NativeJsValue searchStyleFieldsToJs(std::vector<SearchStyleFieldInfo> const& fields)
 {
@@ -1482,6 +1548,7 @@ NativeJsValue searchStyleFieldsToJs(std::vector<SearchStyleFieldInfo> const& fie
             {"mapId", JsValue(field.mapId)},
             {"layerId", JsValue(field.layerId)},
             {"attrName", field.attrName.empty() ? JsValue::Undefined() : JsValue(field.attrName)},
+            {"attrLayerName", field.attrLayerName.empty() ? JsValue::Undefined() : JsValue(field.attrLayerName)},
             {"featureType", field.featureType.empty() ? JsValue::Undefined() : JsValue(field.featureType)},
             {"valueKind", JsValue(field.valueKind)}
         });
@@ -1989,6 +2056,100 @@ NativeJsValue TileLayerParser::getMapLayersForQuery(std::string const& query, Na
         selectedLayerFilterFromOptions(JsValue(options_))));
 }
 
+/** Returns concrete scope and backend-safe normalized query for selected map/layers. */
+NativeJsValue TileLayerParser::normalizeSearchQuery(
+    std::string const& query,
+    std::string const& scope,
+    NativeJsValue const& options_) const
+{
+    // Normalization is mapget-owned and layer-local: every selected feature
+    // layer owns one SchemaRegistry, and that registry performs the actual
+    // schema-aware SIMFIL AST analysis/rewrite. Erdblick only merges the
+    // layer-local results into the single backend query currently carried by
+    // the search websocket request.
+    auto const selectedLayers = selectedLayerFilterFromOptions(JsValue(options_));
+    auto const requestedScope = requestedSearchScopeFromString(scope);
+    auto attributeScopes = JsValue::List();
+    std::set<std::string> seenAttributeScopes;
+    std::set<std::string> matchedFeatureTypesSet;
+    std::vector<std::string> normalizedAttributeQueries;
+    bool anyAttributeScope = false;
+    std::optional<std::string> firstError;
+
+    for (auto const& [_, dataSource] : info_) {
+        for (auto const& [__, layerInfo] : dataSource.layers_) {
+            if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
+                continue;
+            }
+            if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
+                continue;
+            }
+            auto registry = layerInfo->schemaRegistry();
+            if (!registry) {
+                continue;
+            }
+
+            // SchemaRegistry::normalizeSearchQuery compiles the query with
+            // SIMFIL RewriteMode::Schema against each feature root, maps the
+            // resulting referencedSchemaPaths to feature/attribute owners, and
+            // rewrites explicit feature-root attribute paths to attribute-root
+            // paths via AST source locations. Generic wildcard/scalar
+            // shorthand stays in the normal SIMFIL compile path used during
+            // final mapget evaluation.
+            auto normalized = registry->normalizeSearchQuery(query, requestedScope);
+            if (!normalized) {
+                if (!firstError) {
+                    firstError = normalized.error().message;
+                }
+                continue;
+            }
+
+            if (normalized->concreteScope_ == mapget::SchemaRegistry::SearchQueryConcreteScope::Attribute) {
+                anyAttributeScope = true;
+                normalizedAttributeQueries.push_back(normalized->normalizedQuery_);
+                appendNormalizedAttributeScopes(
+                    attributeScopes,
+                    normalized->attributeScopes_,
+                    dataSource.mapId_,
+                    layerInfo->layerId_,
+                    seenAttributeScopes);
+                for (auto const& featureType : normalized->matchedFeatureTypes_) {
+                    matchedFeatureTypesSet.insert(featureType);
+                }
+            }
+        }
+    }
+
+    auto normalizedQuery = query;
+    auto concreteScope = std::string("feature");
+    if (requestedScope == mapget::SchemaRegistry::SearchQueryRequestedScope::Attribute || anyAttributeScope) {
+        concreteScope = "attribute";
+        // A single erdblick search request may cover several selected layers.
+        // Each layer-local normalizer already produced guarded attribute-root
+        // predicates, so merging by OR preserves backend correctness when the
+        // same query string is evaluated independently on every selected layer.
+        if (auto merged = mergeNormalizedAttributeQueries(std::move(normalizedAttributeQueries)); !merged.empty()) {
+            normalizedQuery = std::move(merged);
+        }
+    }
+
+    auto matchedFeatureTypes = JsValue::List();
+    for (auto const& featureType : matchedFeatureTypesSet) {
+        matchedFeatureTypes.push(JsValue(featureType));
+    }
+
+    auto result = JsValue::Dict({
+        {"concreteScope", JsValue(concreteScope)},
+        {"normalizedQuery", JsValue(normalizedQuery)},
+        {"attributeScopes", attributeScopes},
+        {"matchedFeatureTypes", matchedFeatureTypes}
+    });
+    if (firstError) {
+        result.set("error", JsValue(*firstError));
+    }
+    return *result;
+}
+
 /** Returns schema-AST diagnostics generated by the same parser passes that infer search scope. */
 NativeJsValue TileLayerParser::searchQueryAstDiagnostics(
     std::string const& query,
@@ -2115,6 +2276,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     attrScope.mapId,
                     attrScope.layerId,
                     attrScope.attrName,
+                    attrScope.attrLayerName,
                     attrScope.featureType,
                     {path.valueKind, path.enumValues, path.numericMinimum, path.numericMaximum});
             }
@@ -2127,6 +2289,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     attrScope.mapId,
                     attrScope.layerId,
                     attrScope.attrName,
+                    attrScope.attrLayerName,
                     attrScope.featureType,
                     overlayFieldMetadata(overlayField));
             }
@@ -2138,6 +2301,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 attrScope.mapId,
                 attrScope.layerId,
                 attrScope.attrName,
+                attrScope.attrLayerName,
                 attrScope.featureType,
                 overlayFieldMetadata("$feature"));
             auto const* featureSchemaJson = attrScope.layerInfo
@@ -2169,6 +2333,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     attrScope.mapId,
                     attrScope.layerId,
                     attrScope.attrName,
+                    attrScope.attrLayerName,
                     attrScope.featureType,
                     std::move(metadata));
             }
@@ -2195,6 +2360,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     "typeId",
                     dataSource.mapId_,
                     layerInfo->layerId_,
+                    "",
                     "",
                     "",
                     layerTypeIdMetadata);
@@ -2226,6 +2392,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                             dataSource.mapId_,
                             layerInfo->layerId_,
                             "",
+                            "",
                             featureType.name_,
                             std::move(metadata));
                     }
@@ -2235,8 +2402,8 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
     }
 
     std::ranges::sort(fields, [](auto const& lhs, auto const& rhs) {
-        return std::tie(lhs.path, lhs.mapId, lhs.layerId, lhs.attrName, lhs.featureType)
-            < std::tie(rhs.path, rhs.mapId, rhs.layerId, rhs.attrName, rhs.featureType);
+        return std::tie(lhs.path, lhs.mapId, lhs.layerId, lhs.attrName, lhs.attrLayerName, lhs.featureType)
+            < std::tie(rhs.path, rhs.mapId, rhs.layerId, rhs.attrName, rhs.attrLayerName, rhs.featureType);
     });
     return searchStyleFieldsToJs(fields);
 }

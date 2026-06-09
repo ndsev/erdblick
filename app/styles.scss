@@ -338,8 +338,25 @@ main-bar {
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      position: relative;
+
+      .dock-tabbar-close-button {
+        display: none;
+        position: absolute;
+        right: 0.35em;
+        top: 0.28em;
+        z-index: 5;
+
+        .p-button {
+          width: 1.75em !important;
+          height: 1.75em !important;
+          margin: 0;
+          padding: 0;
+        }
+      }
 
       .p-tablist {
+        box-sizing: border-box;
         flex: 0 0 auto;
       }
 
@@ -385,6 +402,7 @@ main-bar {
     width: 100%;
 
     .close-dock-button {
+      display: none;
       position: absolute;
       top: 0.5em;
       right: 0.5em;
@@ -2545,16 +2563,6 @@ inspection-tree {
     visibility: collapse;
   }
 
-  .close-dock-button {
-    visibility: collapse;
-
-    .p-button {
-      width: 1.75em !important;
-      height: 1.75em !important;
-      margin: 0;
-    }
-  }
-
   .dock-filter {
     position: sticky;
     top: 0;
@@ -2605,12 +2613,6 @@ inspection-tree {
     text-align: center;
     overflow: hidden;
     user-select: none;
-
-    .close-dock-button {
-      position: absolute;
-      top: 0.5em;
-      right: 0.5em;
-    }
   }
 
   .dock-empty-icon {
@@ -5802,11 +5804,21 @@ simfil-expression-input {
         display: none;
       }
 
-      .inspection-container {
-        .close-dock-button {
-          visibility: visible;
+      .app-dock-tabs {
+        .p-tablist {
+          padding-right: 2.5em;
         }
 
+        .dock-tabbar-close-button {
+          display: inline-flex;
+        }
+      }
+
+      > .dock-empty .close-dock-button {
+        display: inline-flex;
+      }
+
+      .inspection-container {
         .resizable-container {
           width: 100%;
           max-width: 100%;

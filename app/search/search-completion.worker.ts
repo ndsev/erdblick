@@ -34,6 +34,18 @@ interface SchemaOptions {
     selectedMapLayers?: FeatureSearchMapLayerRef[];
 }
 
+interface SearchQueryNormalizationNativeResult {
+    concreteScope?: unknown;
+    normalizedQuery?: unknown;
+    attributeScopes?: unknown;
+    matchedFeatureTypes?: unknown;
+    error?: unknown;
+}
+
+type TileLayerParserWithSearchNormalization = TileLayerParser & {
+    normalizeSearchQuery(query: string, scope: string, options: SchemaOptions): unknown;
+};
+
 /** Returns the feature map/layer refs described by the last `/sources` payload. */
 function featureLayerRefsFromDataSourceInfo(): FeatureSearchMapLayerRef[] {
     if (!dataSourceInfoJson) {
@@ -251,6 +263,34 @@ function normalizeMapLayerInference(value: unknown): Pick<
     };
 }
 
+/** Normalizes the native mapget-backed search-query normalization result. */
+function normalizeSearchQueryNormalization(
+    query: string,
+    scope: string,
+    value: unknown
+): Pick<
+    SearchScopeAnalysisResultMessage,
+    "concreteScope" | "normalizedQuery" | "attributeScopes" | "matchedFeatureTypes" | "error"
+> {
+    const raw = recordFromUnknown(value) as SearchQueryNormalizationNativeResult | null;
+    const concreteScope = raw?.concreteScope === "attribute" || raw?.concreteScope === "feature"
+        ? raw.concreteScope
+        : (scope === "attribute" ? "attribute" : "feature");
+    const normalizedQuery = typeof raw?.normalizedQuery === "string" && raw.normalizedQuery.trim()
+        ? raw.normalizedQuery
+        : query;
+    const error = typeof raw?.error === "string" && raw.error
+        ? raw.error
+        : undefined;
+    return {
+        concreteScope,
+        normalizedQuery,
+        attributeScopes: normalizeAttributeScopeCandidates(raw?.attributeScopes),
+        matchedFeatureTypes: normalizeStringList(raw?.matchedFeatureTypes),
+        ...(error ? {error} : {})
+    };
+}
+
 /** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
 function normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyleFieldCandidate[] {
     if (!Array.isArray(value)) {
@@ -268,6 +308,7 @@ function normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyle
             return [];
         }
         const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
+        const attrLayerName = typeof raw["attrLayerName"] === "string" ? raw["attrLayerName"] : undefined;
         const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
         const enumValues = Array.isArray(raw["enumValues"])
             ? raw["enumValues"].filter((item): item is string => typeof item === "string")
@@ -278,6 +319,7 @@ function normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyle
             mapId,
             layerId,
             attrName,
+            attrLayerName,
             featureType,
             valueKind: normalizeStyleFieldValueKind(raw["valueKind"]),
             enumValues,
@@ -429,31 +471,32 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
             type: "SearchScopeAnalysisResult",
             requestId: message.requestId,
             concreteScope: message.scope === "attribute" ? "attribute" : "feature",
+            normalizedQuery: message.query,
             attributeScopes: [],
             inferredMapLayers: [],
             matchedFieldNames: [],
-            matchedEnumValues: []
+            matchedEnumValues: [],
+            matchedFeatureTypes: []
         } satisfies SearchScopeAnalysisResultMessage);
         return;
     }
 
-    const attributeScopes = message.scope === "feature"
-        ? []
-        : normalizeAttributeScopeCandidates(activeParser.getAttributeScopeForQuery(
+    const normalization = normalizeSearchQueryNormalization(
+        message.query,
+        message.scope,
+        (activeParser as TileLayerParserWithSearchNormalization).normalizeSearchQuery(
             message.query,
+            message.scope,
             schemaOptions(message.selectedMapLayers)
-        ));
+        )
+    );
     const mapLayerInference = normalizeMapLayerInference(
         activeParser.getMapLayersForQuery(message.query, schemaOptions())
     );
-    const concreteScope = message.scope === "attribute" || (message.scope === "auto" && attributeScopes.length > 0)
-        ? "attribute"
-        : "feature";
     postMessage({
         type: "SearchScopeAnalysisResult",
         requestId: message.requestId,
-        concreteScope,
-        attributeScopes,
+        ...normalization,
         ...mapLayerInference
     } satisfies SearchScopeAnalysisResultMessage);
 }
@@ -529,10 +572,12 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
                 type: "SearchScopeAnalysisResult",
                 requestId: message.requestId,
                 concreteScope: message.scope === "attribute" ? "attribute" : "feature",
+                normalizedQuery: message.query,
                 attributeScopes: [],
                 inferredMapLayers: [],
                 matchedFieldNames: [],
                 matchedEnumValues: [],
+                matchedFeatureTypes: [],
                 error: error instanceof Error ? error.message : String(error)
             } satisfies SearchScopeAnalysisResultMessage);
         } else if (message.type === "SearchStyleFieldsRequest") {

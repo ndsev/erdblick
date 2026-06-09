@@ -36,6 +36,7 @@ At the top level, a style sheet is usually split into two sections: a list of re
 ```yaml
 name: Subgroup/DefaultStyle
 layer: Road|Lane
+default: true
 rules:
   - type: LaneGroup
     geometry: [line]
@@ -50,6 +51,7 @@ options:
 
 - `name` – Mandatory. Free to set. May contain slash-separated grouping.
 - `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
+- `default` – Optional boolean that controls whether the style sheet starts enabled.
 - `stage` – Optional minimum loaded tile stage required before the style sheet can render.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
@@ -123,7 +125,7 @@ rules:
 | `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
 | `depth-test` | Whether the rendered geometry participates in depth testing. Set `false` for overlay-style highlights that should render on top. |
 | `offset` / `vertical-offset` / `lateral-offset` | Base local `[x, y, z]` offset in meters, or scalar aliases for `z` and local `x`. For line geometry, local `x` is the lateral side-of-line offset. |
-| `offset-type` | Optional offset algorithm name. Only `miter` is currently supported, and it is the default line-offset behavior. |
+| `offset-type` | Optional offset algorithm name. Only `miter` is supported, and it is the default line-offset behavior. |
 | `offset-increment` | Additional local `[x, y, z]` offset step used for stacked rendering. Effective offset is `offset + offset-increment * slot`, where the slot increments per emitted feature for `aspect: feature` rules and per rendered attribute/transition slot for `aspect: attribute` rules. |
 | `icon-url` / `icon-url-expression` | Static path or Simfil expression for billboard icons. |
 | `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
@@ -191,19 +193,19 @@ rules:
     offset-increment: [0.8, 0, 0]
 ```
 
-Labels are regular style leaves. Use `label-text-expression` to keep text data-driven:
+Labels are additional output from regular geometry rules. Use `label-text-expression` to keep text data-driven:
 
 ```yaml
 rules:
   - type: Road
-    geometry: [label]
+    geometry: [line]
     label-text-expression: "**.speedLimitKmh as string"
     label-scale: 0.8
     label-color: "#ffffff"
-    label-background-color: "#202020"
+    label-pixel-offset: [0, -12]
 ```
 
-For dense point layers, `point-merge-grid-cell` merges coincident points and exposes `$mergeCount` for labels:
+For dense point layers, `point-merge-grid-cell` merges coincident points and exposes `$mergeCount` to the same rule, including its label expression:
 
 ```yaml
 rules:
@@ -212,29 +214,27 @@ rules:
     color: "#f2994a"
     width: 10
     point-merge-grid-cell: [2, 2, 0]
-
-  - type: ValidationIssue
-    geometry: [label]
     label-text-expression: "$mergeCount > 1 and $mergeCount as string or ruleId"
     label-scale: 0.8
+    label-pixel-offset: [0, -16]
 ```
 
 ### GLTF and AABB Geometry
 
-`geometry: ["gltf"]` and `geometry: ["aabb"]` are the two 3D-oriented geometry families currently exposed by erdblick:
+`geometry: ["gltf"]` and `geometry: ["aabb"]` are the two 3D-oriented geometry families exposed by erdblick:
 
 - `gltf` renders feature-owned node subsets from a tile-level GLB attachment.
 - `aabb` renders explicit feature bounding boxes. This is mainly useful for low-fidelity 3D fallbacks, debug views, and coarse interaction proxies.
   For GLTF-backed features, `aabb` rules can also render the exported node bounding box instead of the real model geometry.
 
-For `gltf` rules, the style system currently treats the attached model as fixed geometry and uses the rule mostly as a visibility/highlight/tint contract:
+For `gltf` rules, the style system treats the attached model as fixed geometry and uses the rule mostly as a visibility/highlight/tint contract:
 
 - Supported and meaningful fields:
   - `type`, `filter`, `mode`, `fidelity`, `stage`, `lod`, `selectable`
   - `color` / `color-expression`
   - `opacity`
   - `depth-test`
-- Fields that currently do **not** reshape visible GLTF node rendering:
+- Fields that do **not** reshape visible GLTF node rendering:
   - `width`
   - `outline-color`, `outline-width`
   - `offset`, `vertical-offset`, `offset-increment`
@@ -276,13 +276,15 @@ If you rely on the built-in `Highlights` style for hover/selection, make sure it
 
 ### Labeling
 
+Erdblick emits a label when a matched rule defines `label-text` or a non-empty `label-text-expression`. The label is placed at a representative point of the matched geometry or relation helper geometry.
+
 | Field | Description |
 | --- | --- |
 | `label-text` | Static string used as the label. |
 | `label-text-expression` | Simfil expression returning the label text (e.g., `**.name`). |
-| `label-color`, `label-outline-color`, `label-background-color`, `label-font`, `label-style`, `label-scale` | Standard deck.gl label attributes. |
-| `label-outline-width`, `label-background-padding` | Outline/padding controls. |
-| `label-horizontal-origin`, `label-vertical-origin`, `label-height-reference`, `label-eye-offset`, `label-pixel-offset` | Advanced deck.gl label positioning knobs. |
+| `label-color`, `label-outline-color`, `label-scale` | Text color, outline color, and size scale used by the deck.gl text layer. |
+| `label-pixel-offset` | Optional `[x, y]` screen-space offset in pixels. |
+| `billboard`, `depth-test` | The regular rule fields also apply to emitted labels. Labels are billboarded by default unless `billboard: false` is set. |
 
 ### Relation-Specific Fields (`aspect: relation`)
 
@@ -303,13 +305,13 @@ If you rely on the built-in `Highlights` style for hover/selection, make sure it
 | `attribute-filter` | Simfil expression evaluated against each attribute payload. |
 | `attribute-validity-geom` | `required`, `none`, or `any` (default) to control whether attributes must provide validity geometries. |
 
-### Labels and Expressions
+### Expression Contexts
 
 Simfil expressions evaluate inside context objects:
 
 - **Feature aspect**: `$mergeCount`, `geometry`, `properties`, etc.
 - **Relation aspect**: `$source`, `$target`, `$twoway`, `sourceValidity`, `targetValidity`.
-- **Attribute aspect**: `$name`, `$layer`, `$feature`, `validity`, and nested attribute fields.
+- **Attribute aspect**: `$name`, `$layer`, `$feature`, `validity`, `$validityIndex`, `$validityCount`, and nested attribute fields.
 
 Because expressions run for every candidate feature, keep them as specific as possible—prefer direct field access over broad `**` wildcards unless necessary.
 
@@ -330,9 +332,9 @@ options:
 ```
 
 - `id` becomes the Simfil variable name, accessible as `$options.<id>`.
-- `label` is rendered in the Styles dialog and under individual layers.
-- `type` currently supports `bool`.
-- `default` defines the initial value until the user toggles it.
+- `label` is rendered as option text in the Styles dialog and under individual layers.
+- `type` supports `bool`, `color`, and `string`.
+- `default` defines the initial typed value until the user changes it.
 - `internal` hides the option from the UI when set to `true`.
 - `description` (optional) adds hover text in the Styles dialog.
 
@@ -356,7 +358,7 @@ SourceData panels and the inspection tree mirror the same validity information; 
 When you move beyond basic coloring and start visualizing relations or labels, a few patterns make styles easier to reason about:
 
 - **Relations**: use `aspect: relation` plus `relation-recursive: true` when you want the UI to traverse relation chains (for example lane groups). Recursion stops at tile boundaries and only follows relations within the same layer. Combine this with separate rules for `mode: hover` or `mode: selection` if relation highlighting should only appear on hover or selection.
-- **Labels**: use `label-text-expression` to keep labels concise and data-driven. When stacking multiple labels, adjust `label-eye-offset` to avoid z-fighting.
+- **Labels**: use `label-text-expression` to keep labels concise and data-driven. Use `label-pixel-offset` and `label-scale` when labels need to be separated from dense geometry.
 - **Source references**: rules inherit the same hover/selection colors used in the inspector. If you need a dedicated highlight color, create a `mode: selection` rule with the desired `color`/`opacity`.
 
 ## Performance Considerations

@@ -51,6 +51,14 @@ import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-
                                     </p-tab>
                                 }
                             </p-tablist>
+                            <p-button class="dock-tabbar-close-button"
+                                      icon="pi pi-times"
+                                      severity="secondary"
+                                      ariaLabel="Close dock"
+                                      pTooltip="Close dock"
+                                      tooltipPosition="bottom"
+                                      (click)="closeDock()"
+                                      (mousedown)="$event.stopPropagation()"/>
                             <p-tabpanels>
                                 @if (hasDockedInspections()) {
                                     <p-tabpanel [value]="inspectionDockTabId">

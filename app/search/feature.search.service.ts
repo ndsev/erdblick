@@ -111,7 +111,11 @@ export interface FeatureSearchSessionSchemaAnalysis {
     signature: string;
     status: "pending" | "ready" | "error";
     concreteScope: "feature" | "attribute";
+    normalizedQuery: string;
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    matchedFieldNames: string[];
+    matchedEnumValues: string[];
+    matchedFeatureTypes: string[];
     error?: string;
 }
 
@@ -790,9 +794,10 @@ export class FeatureSearchService {
         session.paused = false;
         session.definition = {
             ...session.definition,
+            autoUpdate: false,
             paused: true
         };
-        if (!this.stateService.patchFeatureSearch(sessionId, {paused: true})) {
+        if (!this.stateService.patchFeatureSearch(sessionId, {autoUpdate: false, paused: true})) {
             this.progress.next(session);
         }
         this.syncSearchRequestsToMapService();
@@ -1200,7 +1205,11 @@ export class FeatureSearchService {
             signature,
             status: "pending",
             concreteScope: definition.scope === "attribute" ? "attribute" : "feature",
-            attributeScopes: []
+            normalizedQuery: definition.query,
+            attributeScopes: [],
+            matchedFieldNames: [],
+            matchedEnumValues: [],
+            matchedFeatureTypes: []
         };
     }
 
@@ -1221,44 +1230,9 @@ export class FeatureSearchService {
         return {
             ...session.definition,
             concreteScope,
-            backendQuery: this.backendSearchQueryForSession(session, concreteScope),
+            backendQuery: session.schemaAnalysis.normalizedQuery || session.definition.query,
             resultFields: featureSearchResultFields(session.definition, concreteScope)
         };
-    }
-
-    /** Converts UI shorthand that only erdblick's synthetic schema understands into a backend-safe predicate. */
-    private backendSearchQueryForSession(
-        session: FeatureSearchSession,
-        concreteScope: "feature" | "attribute"
-    ): string {
-        if (concreteScope !== "attribute") {
-            return session.definition.query;
-        }
-        const identifier = this.exactNameQuery(session.definition.query);
-        if (!identifier) {
-            return session.definition.query;
-        }
-        const matchesAttributeName = session.schemaAnalysis.attributeScopes.some(scope => scope.attrName === identifier);
-        return matchesAttributeName
-            ? `$name == ${JSON.stringify(identifier)}`
-            : session.definition.query;
-    }
-
-    /** Returns the name for a query that consists of exactly one bare identifier or quoted string. */
-    private exactNameQuery(query: string): string | null {
-        const trimmed = query.trim();
-        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
-            return trimmed;
-        }
-        if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-            try {
-                const parsed = JSON.parse(trimmed) as unknown;
-                return typeof parsed === "string" ? parsed : null;
-            } catch {
-                return null;
-            }
-        }
-        return null;
     }
 
     /** Ensures a session has async schema analysis for the current definition. */
@@ -1325,7 +1299,11 @@ export class FeatureSearchService {
             signature: analysis.signature,
             status: "ready",
             concreteScope: analysis.concreteScope,
+            normalizedQuery: analysis.normalizedQuery || session.definition.query,
             attributeScopes: analysis.attributeScopes,
+            matchedFieldNames: analysis.matchedFieldNames,
+            matchedEnumValues: analysis.matchedEnumValues,
+            matchedFeatureTypes: analysis.matchedFeatureTypes,
             ...(analysis.error ? {error: analysis.error} : {})
         };
         this.progress.next(session);

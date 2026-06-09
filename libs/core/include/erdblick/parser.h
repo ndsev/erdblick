@@ -126,6 +126,11 @@ public:
     NativeJsValue getMapLayersForQuery(std::string const& query, NativeJsValue const& options) const;
 
     /**
+     * Return concrete search scope plus the backend-safe normalized query.
+     */
+    NativeJsValue normalizeSearchQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
+
+    /**
      * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
      */
     NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope, NativeJsValue const& options) const;

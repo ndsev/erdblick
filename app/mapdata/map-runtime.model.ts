@@ -176,6 +176,7 @@ export interface FeatureSearchStyleFieldCandidate {
     mapId: string;
     layerId: string;
     attrName?: string;
+    attrLayerName?: string;
     featureType?: string;
     valueKind: FeatureSearchStyleValueKind;
     enumValues: string[];
