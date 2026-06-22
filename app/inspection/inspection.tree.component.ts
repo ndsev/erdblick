@@ -41,6 +41,24 @@ export class FeatureFilterOptions {
     filterGeometryEntries: boolean = false;
 }
 
+/** Converts inspection numeric values to Simfil numeric literals without quoting integer BigInts. */
+export function inspectionSearchNumberLiteral(value: unknown): string | undefined {
+    if (typeof value === "bigint") {
+        return value.toString();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return String(value);
+    }
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed) &&
+        Number.isFinite(Number(trimmed))
+        ? trimmed
+        : undefined;
+}
+
 @Component({
     selector: 'inspection-tree',
     changeDetection: ChangeDetectionStrategy.OnPush,
@@ -622,7 +640,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Falls back to the primitive JS value when nested inspection rows lack precise type metadata. */
     private searchLiteralForUntypedInspectionValue(value: unknown): string | undefined {
-        if (typeof value === "number") {
+        if (typeof value === "number" || typeof value === "bigint") {
             return this.searchNumberLiteral(value);
         }
         if (typeof value === "boolean") {
@@ -636,17 +654,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Converts a rendered numeric inspection value without accepting malformed partial numbers. */
     private searchNumberLiteral(value: unknown): string | undefined {
-        if (typeof value === "number" && Number.isFinite(value)) {
-            return String(value);
-        }
-        if (typeof value !== "string") {
-            return undefined;
-        }
-        const trimmed = value.trim();
-        return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed) &&
-            Number.isFinite(Number(trimmed))
-            ? trimmed
-            : undefined;
+        return inspectionSearchNumberLiteral(value);
     }
 
     /** Converts boolean inspection values regardless of whether Angular received a boolean or rendered string. */
