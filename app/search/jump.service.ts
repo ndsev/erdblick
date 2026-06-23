@@ -6,7 +6,9 @@ import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {
     FeatureSearchService,
-    featureSearchSelectedMapLayersFromPayload
+    featureSearchMapLayersManualFromPayload,
+    featureSearchSelectedMapLayersFromPayload,
+    featureSearchSelectedViewIndicesFromPayload
 } from "./feature.search.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
@@ -165,7 +167,13 @@ export class JumpTargetService {
             enabled: false,
             execute: (value: string, payload?: unknown) => {
                 const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
-                this.searchService.run(value, selectedMapLayers ? {selectedMapLayers} : {});
+                const selectedViewIndices = featureSearchSelectedViewIndicesFromPayload(payload);
+                const selectedMapLayersManual = featureSearchMapLayersManualFromPayload(payload);
+                this.searchService.run(value, {
+                    ...(selectedMapLayers ? {selectedMapLayers} : {}),
+                    ...(selectedViewIndices ? {selectedViewIndices} : {}),
+                    ...(selectedMapLayersManual !== undefined ? {selectedMapLayersManual} : {})
+                });
             },
             validate: (_: string) => {
                 return !simfilError;

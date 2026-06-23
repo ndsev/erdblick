@@ -1977,6 +1977,26 @@ inspection-tree {
       padding: 0;
     }
 
+    .inspection-key-header-content {
+      align-items: center;
+      display: flex;
+      flex-direction: row;
+      gap: 0.35em;
+      min-width: 0;
+    }
+
+    .inspection-header-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .table-header-buttons {
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+
     tr {
       &.inspection-selection-soft > td {
         background: color-mix(in srgb, var(--p-primary-color) 18%, var(--p-content-background));
@@ -2219,7 +2239,8 @@ inspection-tree {
         min-height: 0;
       }
 
-      .source-data-ref-container {
+      .source-data-ref-container,
+      .table-header-buttons {
         .p-buttongroup {
           width: fit-content;
         }
@@ -2239,10 +2260,16 @@ inspection-tree {
           font-weight: 700;
           font-size: 1em;
         }
+      }
 
-        span {
-          font-family: monospace;
-        }
+      .source-data-ref-container span {
+        font-family: monospace;
+      }
+
+      .table-header-buttons .material-symbols-outlined {
+        font-family: 'Material Symbols Outlined';
+        font-size: 1em;
+        line-height: 1;
       }
 
       .p-tree {
@@ -2359,7 +2386,8 @@ inspection-tree {
       height: 100%;
       overflow: auto;
 
-      .source-data-ref-container {
+      .source-data-ref-container,
+      .table-header-buttons {
         .p-buttongroup {
           width: fit-content;
         }
@@ -2379,10 +2407,16 @@ inspection-tree {
           font-weight: 700;
           font-size: 1em;
         }
+      }
 
-        span {
-          font-family: monospace;
-        }
+      .source-data-ref-container span {
+        font-family: monospace;
+      }
+
+      .table-header-buttons .material-symbols-outlined {
+        font-family: 'Material Symbols Outlined';
+        font-size: 1em;
+        line-height: 1;
       }
 
       .p-tree {
@@ -2810,7 +2844,8 @@ inspection-tree {
         direction: ltr;
       }
 
-      .source-data-ref-container {
+      .source-data-ref-container,
+      .table-header-buttons {
         .p-buttongroup {
           width: fit-content;
         }
@@ -2830,10 +2865,16 @@ inspection-tree {
           font-weight: 700;
           font-size: 1em;
         }
+      }
 
-        span {
-          font-family: monospace;
-        }
+      .source-data-ref-container span {
+        font-family: monospace;
+      }
+
+      .table-header-buttons .material-symbols-outlined {
+        font-family: 'Material Symbols Outlined';
+        font-size: 1em;
+        line-height: 1;
       }
 
       .p-tree {

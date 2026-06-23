@@ -50,6 +50,15 @@ import {AppConfigService} from "../shared/app-config.service";
              [attr.data-testid]="canvasId"
              class="mapviewer-renderlayer"
              style="z-index: 0"></div>
+        @if (viewerInitError) {
+            <div class="mapviewer-error-state" role="alert">
+                <span class="material-symbols-outlined">warning</span>
+                <div>
+                    <strong>Map renderer unavailable</strong>
+                    <p>{{ viewerInitError }}</p>
+                </div>
+            </div>
+        }
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
                 @for (option of stateService.syncOptions; track option.code) {
@@ -91,6 +100,25 @@ import {AppConfigService} from "../shared/app-config.service";
                 padding-bottom: 0;
             }
         }
+        .mapviewer-error-state {
+            position: absolute;
+            inset: 1rem;
+            display: flex;
+            align-items: flex-start;
+            gap: .75rem;
+            max-width: 36rem;
+            height: fit-content;
+            padding: .875rem 1rem;
+            border: 1px solid #efb6b6;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, .96);
+            color: #7f1d1d;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, .16);
+            z-index: 2;
+        }
+        .mapviewer-error-state p {
+            margin: .25rem 0 0;
+        }
     `],
     standalone: false
 })
@@ -107,6 +135,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: IRenderView;
+    viewerInitError = "";
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
@@ -117,6 +146,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
+    private deckAntialiasingEnabled = false;
     private contextMenuVisible = false;
     private pendingContextMenuOpenEvent: {clientX: number; clientY: number; pageX: number; pageY: number} | null = null;
     private rightPressStart: {x: number; y: number} | null = null;
@@ -223,11 +253,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
-            this.stateService.mode2dState.pipe(this.viewIndex())
-        ]).subscribe(([_, mode2d]) => {
+            this.stateService.mode2dState.pipe(this.viewIndex()),
+            this.stateService.deckAntialiasingEnabledState
+        ]).subscribe(([_, mode2d, antialiasingEnabled]) => {
             const needsRebuild =
-                this.is2DMode !== mode2d || !this.mapView;
+                this.is2DMode !== mode2d || this.deckAntialiasingEnabled !== antialiasingEnabled || !this.mapView;
             this.is2DMode = mode2d;
+            this.deckAntialiasingEnabled = antialiasingEnabled;
             if (needsRebuild) {
                 this.initializeViewer(mode2d);
             }
@@ -244,6 +276,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             return;
         }
         this.resetPreparedSourceData(false, false);
+        this.menuService.setFeatureSearchScope(null);
         if (!this.menuService.isSourceDataDialogOpen()) {
             this.menuService.tileOutline.next(null);
         }
@@ -262,6 +295,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.hoverSubscription = undefined;
         if (this.mapView) {
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
+            this.mapView = undefined;
         }
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
@@ -277,6 +311,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
         this.mapView = mapView;
+        this.viewerInitError = "";
     }
 
     /**
@@ -305,7 +340,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private initializeViewer(mode2d: boolean) {
         this.createViewerForMode(mode2d).catch((error) => {
             console.error('Failed to initialize viewer:', error);
-            alert('Failed to initialize the map viewer. Please refresh the page.');
+            const detail = error instanceof Error ? error.message : String(error);
+            const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
+            this.viewerInitError = `${summary} Check that WebGL2 and browser hardware acceleration are enabled, then reload the page.`;
         }).finally(() => {
             // Hide the global loading spinner
             const spinner = document.getElementById('global-spinner-container');
@@ -494,6 +531,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             console.error("Failed to prepare source-data context menu.", error);
             this.menuService.tileIdsForSourceData.next([]);
         }
+        try {
+            this.prepareFeatureSearchContextMenu();
+        } catch (error) {
+            console.error("Failed to prepare feature-search context menu.", error);
+            this.menuService.setFeatureSearchScope(null);
+        }
         menu.show(this.contextMenuShowEvent(event) as MouseEvent);
     }
 
@@ -563,6 +606,19 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
+    /** Prepares a view-scoped feature-search action for the right-click menu. */
+    private prepareFeatureSearchContextMenu(): void {
+        if (!this.mapView || this.appModeService.isVisualizationOnly) {
+            this.menuService.setFeatureSearchScope(null);
+            return;
+        }
+        const viewIndex = this.viewIndex();
+        this.menuService.setFeatureSearchScope({
+            viewIndex,
+            selectedMapLayers: this.featureSearchService.featureSearchLayersWithDataForView(viewIndex)
+        });
+    }
+
     /** Chooses the deepest available source-data tile among the features picked under the cursor. */
     private preferredPickedTileId(
         screenPos: {x: number; y: number},
@@ -604,6 +660,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Clears the transient source-data context prepared for the right-click menu. */
     private resetPreparedSourceData(clearTileIds: boolean = false, clearOutline: boolean = true): void {
         this.menuService.preferredTileIdForSourceData = null;
+        this.menuService.setFeatureSearchScope(null);
         if (clearOutline) {
             this.menuService.tileOutline.next(null);
         }

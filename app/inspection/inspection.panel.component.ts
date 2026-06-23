@@ -74,6 +74,8 @@ interface InspectionPanelContentAdapter {
                                       [(ngModel)]="selectedLayerItem"
                                       (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                      appendTo="body"
+                                      [overlayOptions]="sourceLayerDropdownOverlayOptions"
                                       optionLabel="label"
                                       optionDisabled="disabled"/>
                         } @else if (panel().features.length > 0) {
@@ -158,6 +160,7 @@ export class InspectionPanelComponent {
     selectedLayerItem?: SourceLayerMenuItem;
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
+    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     dockedPanelCount = input<number>(0);
@@ -295,7 +298,7 @@ export class InspectionPanelComponent {
         if (!panel.features.length) {
             return;
         }
-        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
+        this.inspectionSelection.zoomToFeature(this.stateService.focusedView, panel.features[0]);
     }
 
     /** UI wrapper around the focus action for toolbar buttons and menus. */

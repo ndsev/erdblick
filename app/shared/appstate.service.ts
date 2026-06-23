@@ -581,6 +581,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly deckAntialiasingEnabledState = this.createState<boolean>({
+        name: 'deckAntialiasingEnabled',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly pinLowFiToMaxLodState = this.createState<boolean>({
         name: 'pinLowFiToMaxLod',
         defaultValue: false,
@@ -810,6 +816,12 @@ export class AppStateService implements OnDestroy {
         name: 'inspectionsLimitState',
         defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
+    });
+
+    readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
+        name: 'inspectionTreeExpandByDefault',
+        defaultValue: false,
+        schema: Boolish
     });
 
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
@@ -1252,7 +1264,7 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
 
-                state.deserialize(raw);
+                this.deserializeStateSafely(state, raw);
             }
 
             const styleOptionEntries = this.collectStyleOptionStorageEntries();
@@ -1271,7 +1283,7 @@ export class AppStateService implements OnDestroy {
             }
 
             if (Object.keys(filteredStyleOptionEntries).length) {
-                this.stylesState.deserialize(filteredStyleOptionEntries);
+                this.deserializeStateSafely(this.stylesState, filteredStyleOptionEntries);
             }
             this.persistConfigDefaultStateMeta();
         });
@@ -1285,9 +1297,21 @@ export class AppStateService implements OnDestroy {
             }
 
             for (const state of this.statePool.values()) {
-                state.deserialize(params);
+                this.deserializeStateSafely(state, params);
             }
         });
+    }
+
+    /** Keeps one malformed persisted state entry from aborting startup hydration. */
+    private deserializeStateSafely(
+        state: {name: string; deserialize(raw: string | Params): void},
+        raw: string | Params
+    ): void {
+        try {
+            state.deserialize(raw);
+        } catch (error) {
+            console.error(`[AppStateService] Failed to hydrate ${state.name}.`, error);
+        }
     }
 
     /**
@@ -1407,7 +1431,7 @@ export class AppStateService implements OnDestroy {
             }
 
             if (Object.keys(styleOptionEntries).length) {
-                this.stylesState.deserialize(styleOptionEntries);
+                this.deserializeStateSafely(this.stylesState, styleOptionEntries);
                 this.stylesState.next(new Map(this.stylesState.getValue()));
             }
         } finally {
@@ -1491,7 +1515,7 @@ export class AppStateService implements OnDestroy {
         }
         const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
         if (Object.keys(styleOptionEntries).length) {
-            this.stylesState.deserialize(styleOptionEntries);
+            this.deserializeStateSafely(this.stylesState, styleOptionEntries);
             this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.pendingOpenDialogs.clear();
@@ -1756,6 +1780,8 @@ export class AppStateService implements OnDestroy {
     };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
+    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
+    set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
     set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
@@ -1809,6 +1835,8 @@ export class AppStateService implements OnDestroy {
     };
     get inspectionComparison() {return this.inspectionComparisonState.getValue();}
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
+    get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
+    set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}

@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <optional>
+#include <string_view>
 #include <unordered_map>
 #include "interop/js-object.h"
 #include "mapget/model/feature.h"
@@ -121,7 +123,10 @@ public:
     /** Convert one relation and attach hover metadata if applicable. */
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     /** Convert one geometry node, including stage/name metadata and points. */
-    void convertGeometry(JsValue const& key, mapget::model_ptr<mapget::Geometry> const& r);
+    void convertGeometry(
+        JsValue const& key,
+        mapget::model_ptr<mapget::Geometry> const& r,
+        std::optional<std::string_view> geometryObjectPath = std::nullopt);
     /** Convert a validity collection and optionally namespace the emitted hover ids. */
     void convertValidity(
         JsValue const& key,

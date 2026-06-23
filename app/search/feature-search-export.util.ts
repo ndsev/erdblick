@@ -1,4 +1,8 @@
-import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
+import {
+    type FeatureSearchMapLayerRef,
+    type FeatureSearchStateEntry,
+    normalizeFeatureSearchStateEntry
+} from "../shared/feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 
 export interface FeatureSearchGroupingExportOption {
@@ -83,6 +87,7 @@ export type FeatureSearchDefinitionExport = Pick<FeatureSearchStateEntry,
     | "showResultsOnMap"
     | "pinColor"
     | "selectedMapLayers"
+    | "selectedMapLayersManual"
     | "selectedTileLevels"
     | "selectedViewIndices"
     | "searchStyleRules"
@@ -98,6 +103,11 @@ export interface FeatureSearchCombinedExport {
     searchId: string;
     configuration: FeatureSearchDefinitionExport;
     results: FeatureSearchResultsExport;
+}
+
+export interface FeatureSearchImportDefinition {
+    definition: FeatureSearchStateEntry;
+    source: "configuration" | "combined";
 }
 
 const GROUPING_ACCESSORS: Record<number, FeatureSearchGroupingAccessor> = {
@@ -119,6 +129,7 @@ export function featureSearchDefinitionExport(definition: FeatureSearchStateEntr
         showResultsOnMap: definition.showResultsOnMap,
         pinColor: definition.pinColor,
         selectedMapLayers: definition.selectedMapLayers.map(ref => ({mapId: ref.mapId, layerId: ref.layerId})),
+        selectedMapLayersManual: definition.selectedMapLayersManual ?? false,
         selectedTileLevels: [...definition.selectedTileLevels],
         selectedViewIndices: [...definition.selectedViewIndices],
         searchStyleRules: definition.searchStyleRules,
@@ -205,6 +216,26 @@ export function featureSearchExportPayload(
     return null;
 }
 
+/** Extracts a live-search configuration from a feature-search JSON import payload. */
+export function featureSearchDefinitionFromImportPayload(payload: unknown): FeatureSearchImportDefinition {
+    const record = isRecord(payload) ? payload : null;
+    if (!record) {
+        throw new Error("Search JSON must contain an object.");
+    }
+
+    const source = "configuration" in record ? "combined" : "configuration";
+    const rawDefinition = source === "combined" ? record["configuration"] : record;
+    const definition = normalizeFeatureSearchStateEntry(rawDefinition);
+    if (definition) {
+        return {definition, source};
+    }
+
+    if ("tree" in record || "mapLayers" in record || "results" in record) {
+        throw new Error("Search JSON contains results but no importable search configuration.");
+    }
+    throw new Error("Search JSON does not contain a valid feature search configuration.");
+}
+
 export function featureSearchExportFilename(searchId: string, selection: FeatureSearchExportSelection): string {
     const safeId = safeFeatureSearchExportId(searchId);
     if (selection.includeConfiguration && selection.includeResults) {
@@ -226,6 +257,11 @@ export function featureSearchMapLayerKey(ref: FeatureSearchMapLayerRef): string 
 
 export function featureSearchMapLayerLabel(ref: FeatureSearchMapLayerRef): string {
     return `${ref.mapId}/${ref.layerId}`;
+}
+
+/** Returns whether a parsed JSON value is a plain object record. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeGrouping(grouping: FeatureSearchGroupingExportOption[]): FeatureSearchGroupingExportOption[] {

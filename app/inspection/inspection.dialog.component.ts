@@ -48,6 +48,8 @@ import {displayFeatureId} from "../shared/tile-feature-id";
                                       [(ngModel)]="selectedLayerItem"
                                       (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                      appendTo="body"
+                                      [overlayOptions]="sourceLayerDropdownOverlayOptions"
                                       optionLabel="label"
                                       optionDisabled="disabled"/>
                         } @else if (panel().features.length > 0) {
@@ -136,6 +138,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     isMetadata: boolean = false;
+    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
 
     @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -257,7 +260,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!panel.features.length) {
             return;
         }
-        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
+        this.inspectionSelection.zoomToFeature(this.stateService.focusedView, panel.features[0]);
     }
 
     /** Menu/header action wrapper for focusing the primary feature. */

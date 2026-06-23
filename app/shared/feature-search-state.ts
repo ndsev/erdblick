@@ -60,6 +60,7 @@ export interface FeatureSearchStateEntry {
     showResultsOnMap: boolean;
     pinColor: string;
     selectedMapLayers: FeatureSearchMapLayerRef[];
+    selectedMapLayersManual?: boolean;
     selectedTileLevels: number[];
     selectedViewIndices: number[];
     searchStyleRules: FeatureSearchStyleRule[];
@@ -429,6 +430,7 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         showResultsOnMap: normalizeBoolean(raw["showResultsOnMap"], true),
         pinColor: normalizeHexColor(raw["pinColor"]),
         selectedMapLayers,
+        selectedMapLayersManual: normalizeBoolean(raw["selectedMapLayersManual"], false),
         selectedTileLevels: normalizeFeatureSearchTileLevels(raw["selectedTileLevels"]),
         selectedViewIndices: normalizeSearchViewIndices(raw["selectedViewIndices"]),
         searchStyleRules: styleRules,
@@ -466,6 +468,36 @@ export function featureSearchVisibleInView(
     return selectedViewIndices.includes(viewIndex);
 }
 
+/**
+ * Derives the default result views for a search from the selected map/layers.
+ * Falls back to every currently supported view when no selected layer is enabled in any view.
+ */
+export function defaultFeatureSearchViewIndicesForMapLayers(
+    selectedMapLayers: FeatureSearchMapLayerRef[],
+    numViews: number,
+    layerVisibleInView: (viewIndex: number, ref: FeatureSearchMapLayerRef) => boolean
+): number[] {
+    const supportedViewCount = Math.max(
+        0,
+        Math.min(MAX_SUPPORTED_FEATURE_SEARCH_VIEWS, Math.floor(numViews))
+    );
+    const fallback = DEFAULT_FEATURE_SEARCH_VIEW_INDICES
+        .filter(viewIndex => viewIndex < supportedViewCount);
+    if (!selectedMapLayers.length) {
+        return fallback;
+    }
+
+    const viewIndices = new Set<number>();
+    for (let viewIndex = 0; viewIndex < supportedViewCount; ++viewIndex) {
+        if (selectedMapLayers.some(ref => layerVisibleInView(viewIndex, ref))) {
+            viewIndices.add(viewIndex);
+        }
+    }
+    return viewIndices.size
+        ? Array.from(viewIndices).sort((lhs, rhs) => lhs - rhs)
+        : fallback;
+}
+
 export function createFeatureSearchStateEntry(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
     return normalizeFeatureSearchStateEntry({
         id: createFeatureSearchId(),
@@ -477,6 +509,7 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
         showResultsOnMap: true,
         pinColor: DEFAULT_PIN_COLOR,
         selectedMapLayers: [],
+        selectedMapLayersManual: false,
         selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
         selectedViewIndices: [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES],
         searchStyleRules: [],

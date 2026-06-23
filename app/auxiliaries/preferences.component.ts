@@ -77,6 +77,11 @@ import {environment} from "../environments/environment";
                 </div>
             </div>
             <p-divider></p-divider>
+            <div class="button-container">
+                <label>Expand inspection trees by default</label>
+                <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
+            </div>
+            <p-divider></p-divider>
             <div class="slider-container">
                 <label [for]="locationSearchResultLimitInput">Location Matches</label>
                 <div class="slider-controls">
@@ -145,6 +150,18 @@ import {environment} from "../environments/environment";
                                 optionLabel="label"
                                 optionValue="value"
                                 (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>WebGL antialiasing
+                    <i class="pi pi-info-circle"
+                       pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
+                       tooltipPosition="top"></i>
+                </label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="deckAntialiasingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
                 <label>Pin low-fi rendering to max LOD</label>
@@ -259,6 +276,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
+    deckAntialiasingEnabledSetting: boolean = false;
     pinLowFiToMaxLodSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
@@ -309,6 +327,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
             this.deckThreadedRenderingEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
+            this.deckAntialiasingEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
             this.pinLowFiToMaxLodSetting = enabled;
@@ -423,6 +444,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.deckThreadedRenderingEnabledSetting = enabled;
         this.stateService.deckThreadedRenderingEnabled = enabled;
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    }
+
+    /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
+    setDeckAntialiasingEnabled(enabled: boolean) {
+        this.deckAntialiasingEnabledSetting = enabled;
+        this.stateService.deckAntialiasingEnabled = enabled;
     }
 
     /** Controls whether low-fidelity rendering stays pinned to the highest requested LOD. */

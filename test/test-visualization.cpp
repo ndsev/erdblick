@@ -6,6 +6,8 @@
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 #include "mapget/model/searchresultlayer.h"
+#include "mapget/model/sourceinfo.h"
+#include "mapget/model/sourcedatareference.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
@@ -530,6 +532,22 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
     return layer;
 }
 
+/** Creates a single source-data reference collection for inspection provenance tests. */
+mapget::model_ptr<mapget::SourceDataReferenceCollection> makeInspectionSourceDataRefs(
+    mapget::TileFeatureLayer& tile,
+    std::string const& layerId,
+    size_t bitOffset)
+{
+    auto const layerIdString = tile.strings()->emplace(layerId).value();
+    auto const qualifierString = tile.strings()->emplace("Value").value();
+    mapget::QualifiedSourceDataReference ref{
+        .address_ = mapget::SourceDataAddress::fromBitPosition(bitOffset, 8),
+        .layerId_ = layerIdString,
+        .qualifier_ = qualifierString,
+    };
+    return tile.newSourceDataReferenceCollection({&ref, 1});
+}
+
 /** Recursively collect rendered FeatureId rows from the inspection tree for focused assertions. */
 void collectFeatureReferenceRows(
     nlohmann::json const& node,
@@ -806,6 +824,47 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     }));
 }
 
+TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto inspection = InspectionConverter().convert(feature);
+
+    auto const* geometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.type");
+    REQUIRE(geometryType);
+    REQUIRE(geometryType->value("value", std::string{}) == "Polyline");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.coordinates[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.coordinates[1]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[0]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[0][0]"));
+}
+
+TEST_CASE("FeatureInspection copies geometry collection search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto const center = tile->tileId().center();
+    feature->addPoint({center.x, center.y + 0.0005, 0.0});
+
+    auto inspection = InspectionConverter().convert(feature);
+
+    auto const* firstGeometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].type");
+    REQUIRE(firstGeometryType);
+    REQUIRE(firstGeometryType->value("value", std::string{}) == "Polyline");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[1]"));
+
+    auto const* secondGeometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].type");
+    REQUIRE(secondGeometryType);
+    REQUIRE(secondGeometryType->value("value", std::string{}) == "Points");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].coordinates[0]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[1]"));
+}
+
 TEST_CASE("FeatureInspection copies propagated attribute value search path", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
@@ -824,6 +883,51 @@ TEST_CASE("FeatureInspection copies propagated attribute value search path", "[e
     REQUIRE(
         attrNode->value("geoJsonPath", std::string{}) ==
         "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
+}
+
+TEST_CASE("FeatureInspection separates same-name attribute layers by source data", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attrLayer = feature->attributeLayers()->newLayer("RoadRulesLayer");
+    auto speed = attrLayer->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(speed->addField("value", int64_t(30)).has_value());
+    speed->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "SourceData-RoadRulesLayer-3", 8));
+
+    auto warning = attrLayer->newAttribute("WARNING_SIGN");
+    REQUIRE(warning->addField("value", "YIELD").has_value());
+    warning->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "SourceData-RoadRulesLayer-9", 24));
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* rulesLayer = findInspectionNodeByKey(*inspection, "RoadRulesLayer");
+    REQUIRE(rulesLayer);
+    REQUIRE(rulesLayer->contains("children"));
+
+    auto const& sourceGroups = rulesLayer->at("children");
+    REQUIRE(sourceGroups.is_array());
+    REQUIRE(sourceGroups.size() == 2);
+    REQUIRE(sourceGroups.at(0).value("key", std::string{}) == "SourceData-RoadRulesLayer-3");
+    REQUIRE(sourceGroups.at(1).value("key", std::string{}) == "SourceData-RoadRulesLayer-9");
+
+    auto const* speedNode = findInspectionNodeByKey(sourceGroups.at(0), "SPEED_LIMIT_METRIC");
+    REQUIRE(speedNode);
+    REQUIRE(
+        speedNode->value("geoJsonPath", std::string{}) ==
+        "properties.layer.RoadRulesLayer.SPEED_LIMIT_METRIC.value");
+    REQUIRE(speedNode->value("hoverId", std::string{}) == "Way.1:attribute#0");
+    REQUIRE(speedNode->contains("sourceDataReferences"));
+    REQUIRE(
+        speedNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
+            .find("SourceData-RoadRulesLayer-3") != std::string::npos);
+
+    auto const* warningNode = findInspectionNodeByKey(sourceGroups.at(1), "WARNING_SIGN");
+    REQUIRE(warningNode);
+    REQUIRE(warningNode->value("hoverId", std::string{}) == "Way.1:attribute#1");
+    REQUIRE(
+        warningNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
+            .find("SourceData-RoadRulesLayer-9") != std::string::npos);
 }
 
 TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspection]")

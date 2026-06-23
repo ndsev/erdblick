@@ -6,6 +6,9 @@
 #include <cctype>
 #include <cstdint>
 #include <iostream>
+#include <optional>
+#include <utility>
+#include <vector>
 
 using namespace erdblick;
 using namespace mapget;
@@ -103,6 +106,48 @@ std::string directChildGeoJsonPath(std::string_view base)
     return fmt::format("{}.*", base);
 }
 
+/** Returns the source-data layer ids referenced by an attribute, preserving first-seen order. */
+std::vector<std::string> sourceDataLayerIds(model_ptr<Attribute> const& attr)
+{
+    std::vector<std::string> result;
+    if (!attr) {
+        return result;
+    }
+    auto refs = attr->sourceDataReferences();
+    if (!refs) {
+        return result;
+    }
+    refs->forEachReference([&result](SourceDataReferenceItem const& item) {
+        std::string layerId{item.layerId()};
+        if (layerId.empty() || std::find(result.begin(), result.end(), layerId) != result.end()) {
+            return;
+        }
+        result.push_back(std::move(layerId));
+    });
+    return result;
+}
+
+/** Builds the inspection-only source provenance key for one attribute. */
+std::string sourceDataLayerGroupKey(model_ptr<Attribute> const& attr)
+{
+    auto layerIds = sourceDataLayerIds(attr);
+    if (layerIds.empty()) {
+        return "Unknown source";
+    }
+    if (layerIds.size() == 1) {
+        return layerIds.front();
+    }
+
+    std::string result;
+    for (auto const& layerId : layerIds) {
+        if (!result.empty()) {
+            result += ", ";
+        }
+        result += layerId;
+    }
+    return result;
+}
+
 /**
  * Converts a collection of qualified source-data references to the internal
  * inspection node model.
@@ -152,6 +197,37 @@ mapget::Point boxCenter(const mapget::Point& origin, const mapget::Point& size)
         origin.y + size.y * 0.5,
         origin.z + size.z * 0.5
     };
+}
+
+/** Return the GeoJSON coordinate path, relative to one geometry object, for a displayed point row. */
+std::string geometryCoordinatePath(const model_ptr<Geometry>& geometry, uint32_t pointIndex)
+{
+    switch (geometry->geomType()) {
+    case GeomType::Polygon: {
+        const auto ringCount = geometry->numPolygonRings();
+        for (auto ringIndex = 0U; ringIndex < ringCount; ++ringIndex) {
+            const auto ringStart = geometry->polygonRingStart(ringIndex);
+            const auto ringEnd = ringIndex + 1U < ringCount
+                ? geometry->polygonRingStart(ringIndex + 1U)
+                : static_cast<uint32_t>(geometry->numPoints());
+            if (pointIndex >= ringStart && pointIndex < ringEnd) {
+                return fmt::format(
+                    "coordinates[{}][{}]",
+                    ringIndex,
+                    pointIndex - ringStart);
+            }
+        }
+        break;
+    }
+    case GeomType::Mesh:
+        return fmt::format(
+            "coordinates[{}][0][{}]",
+            pointIndex / 3U,
+            pointIndex % 3U);
+    default:
+        break;
+    }
+    return fmt::format("coordinates[{}]", pointIndex);
 }
 
 /** Resolve the layer's configured high-fidelity stage with safe fallbacks for legacy metadata. */
@@ -245,13 +321,21 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     {
         auto scope = push(convertString("Geometry"), RawPath{"geometry"}, ValueType::Section);
         const auto highFiStage = highFidelityStage(featurePtr->model());
-        uint32_t geomIndex = 0;
-        geomCollection->forEachGeometry([this, &geomIndex, highFiStage](model_ptr<Geometry> const& geom) -> bool {
+        const auto exportAsGeometryCollection = geomCollection->numGeometries() > 1;
+        uint32_t exportGeometryIndex = 0;
+        uint32_t displayGeometryIndex = 0;
+        geomCollection->forEachGeometry(
+            [this, &exportGeometryIndex, &displayGeometryIndex, highFiStage, exportAsGeometryCollection]
+            (model_ptr<Geometry> const& geom) -> bool {
+            const auto currentExportGeometryIndex = exportGeometryIndex++;
             const auto geometryStage = geom->model().stage().value_or(0U);
             if (geometryStage < highFiStage) {
                 return true;
             }
-            convertGeometry(JsValue(geomIndex++), geom);
+            const auto geometryObjectPath = exportAsGeometryCollection
+                ? fmt::format("geometries[{}]", currentExportGeometryIndex)
+                : std::string{};
+            convertGeometry(JsValue(displayGeometryIndex++), geom, geometryObjectPath);
             return true;
         });
     }
@@ -331,22 +415,45 @@ void InspectionConverter::convertAttributeLayer(
         attributeFieldIds.push_back(fieldId);
     }
 
+    struct AttributeInspectionEntry {
+        model_ptr<Attribute> attr;
+        simfil::StringId fieldId;
+        uint32_t featureAttributeIndex;
+        std::string sourceGroupKey;
+    };
+
+    std::vector<AttributeInspectionEntry> entries;
+    std::vector<std::string> sourceGroupKeys;
     size_t layerAttributeIndex = 0;
-    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex, &layerAttributeIndex](model_ptr<Attribute> const& attr)
-    {
-        auto const thisAttributeIndex = attributeIndex++;
+    l->forEachAttribute([&](model_ptr<Attribute> const& attr) {
+        auto const featureAttributeIndex = static_cast<uint32_t>(attributeIndex++);
         auto const thisLayerAttributeIndex = layerAttributeIndex++;
         auto fieldId = thisLayerAttributeIndex < attributeFieldIds.size()
             ? attributeFieldIds[thisLayerAttributeIndex]
             : simfil::StringId{};
+        auto sourceGroupKey = sourceDataLayerGroupKey(attr);
+        if (std::find(sourceGroupKeys.begin(), sourceGroupKeys.end(), sourceGroupKey) == sourceGroupKeys.end()) {
+            sourceGroupKeys.push_back(sourceGroupKey);
+        }
+        entries.push_back(AttributeInspectionEntry{
+            attr,
+            fieldId,
+            featureAttributeIndex,
+            std::move(sourceGroupKey)
+        });
+        return true;
+    });
 
-        auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
-        auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
-        convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
+    auto convertAttribute = [this](AttributeInspectionEntry const& entry) {
+        auto fieldName = entry.fieldId
+            ? convertString(entry.fieldId).toString()
+            : convertString(entry.attr->name()).toString();
+        auto attrScope = push(convertString(entry.fieldId), fieldName, ValueType::Null);
+        convertSourceDataReferences(entry.attr->sourceDataReferences(), *attrScope);
 
         auto numValues = 0;
         OptionalValueAndType singleValue;
-        attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val){
+        entry.attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val) {
             auto singleValueForField = convertField(fieldName, val);
             if (singleValueForField) {
                 ++numValues;
@@ -370,12 +477,29 @@ void InspectionConverter::convertAttributeLayer(
 
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
-                              std::to_string(static_cast<uint32_t>(thisAttributeIndex));
-        if (auto validity = attr->validityOrNull()) {
+                              std::to_string(entry.featureAttributeIndex);
+        if (auto validity = entry.attr->validityOrNull()) {
             convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
         }
-        return true;
-    });
+    };
+
+    if (sourceGroupKeys.size() <= 1) {
+        for (auto const& entry : entries) {
+            convertAttribute(entry);
+        }
+        return;
+    }
+
+    // The feature model groups attributes by semantic layer name. For inspection only,
+    // split same-name attributes by source-data layer so duplicate side layers remain visible.
+    for (auto const& sourceGroupKey : sourceGroupKeys) {
+        auto sourceScope = push(convertString(sourceGroupKey), RawPath{""}, ValueType::Section);
+        for (auto const& entry : entries) {
+            if (entry.sourceGroupKey == sourceGroupKey) {
+                convertAttribute(entry);
+            }
+        }
+    }
 }
 
 void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
@@ -405,18 +529,35 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     relScope->geoJsonPath_ = appendGeoJsonPathField(relationObjectPath, "target");
 }
 
-void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Geometry>& g)
+void InspectionConverter::convertGeometry(
+    JsValue const& key,
+    const model_ptr<Geometry>& g,
+    std::optional<std::string_view> geometryObjectPath)
 {
-    auto geomScope = push(
-        key,
-        key.type() == JsValue::Type::Number ?
-            FieldOrIndex(key.as<uint32_t>()) :
-            FieldOrIndex(key.as<std::string>()),
-        ValueType::String);
+    std::string keyPath;
+    auto geomScope = [&]() {
+        if (geometryObjectPath) {
+            return push(key, RawPath{*geometryObjectPath}, ValueType::String);
+        }
+        if (key.type() == JsValue::Type::Number) {
+            return push(key, key.as<uint32_t>(), ValueType::String);
+        }
+        keyPath = key.as<std::string>();
+        return push(key, std::string_view(keyPath), ValueType::String);
+    }();
+    const auto geometryObjectGeoJsonPath = geomScope->geoJsonPath_;
     std::string typeString;
-    auto pushPointField = [this](std::string_view const& name, mapget::Point const& point) {
-        auto fieldScope = push(name, std::string(name), ValueType::Number | ValueType::ArrayBit);
+    auto pushPointField = [this](
+        std::string_view const& name,
+        mapget::Point const& point,
+        std::optional<std::string_view> relativePath = std::nullopt) {
+        auto fieldScope = relativePath
+            ? push(name, RawPath{*relativePath}, ValueType::Number | ValueType::ArrayBit)
+            : push(name, name, ValueType::Number | ValueType::ArrayBit);
         fieldScope->value_ = pointArrayValue(point);
+        if (!relativePath) {
+            fieldScope->geoJsonPath_.clear();
+        }
     };
     switch (g->geomType()) {
     case GeomType::Points: typeString = "Points"; break;
@@ -428,7 +569,7 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     }
     geomScope->value_ = convertString(typeString);
     if (auto geometryName = g->name()) {
-        push("name", "name", ValueType::String)->value_ = convertString(*geometryName);
+        push("name", "geometryName", ValueType::String)->value_ = convertString(*geometryName);
     }
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
@@ -436,9 +577,10 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     if (g->geomType() == GeomType::AABB) {
         auto const origin = g->aabbOrigin();
         auto const size = g->aabbSize();
-        pushPointField("origin", origin);
-        pushPointField("size", size);
+        pushPointField("origin", origin, std::string_view("aabb.origin"));
+        pushPointField("size", size, std::string_view("aabb.size"));
         pushPointField("center", boxCenter(origin, size));
+        geomScope->geoJsonPath_ = appendGeoJsonPathField(geometryObjectGeoJsonPath, "type");
         return;
     }
 
@@ -448,20 +590,24 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
         pushPointField("origin", origin);
         pushPointField("size", size);
         pushPointField("center", boxCenter(origin, size));
+        geomScope->geoJsonPath_ = appendGeoJsonPathField(geometryObjectGeoJsonPath, "type");
         return;
     }
 
     uint32_t index = 0;
     g->forEachPoint(
-        [this, &index](auto&& pt)
+        [this, &g, &index](auto&& pt)
         {
+            const auto coordinatePath = geometryCoordinatePath(g, index);
             auto ptScope = push(
                 JsValue(index),
-                index++,
+                RawPath{coordinatePath},
                 ValueType::Number | ValueType::ArrayBit);
             ptScope->value_ = pointArrayValue(pt);
+            ++index;
             return true;
         });
+    geomScope->geoJsonPath_ = appendGeoJsonPathField(geometryObjectGeoJsonPath, "type");
 }
 
 void InspectionConverter::convertValidity(

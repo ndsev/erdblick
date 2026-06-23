@@ -7,6 +7,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
+import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 
 /** Shape emitted by the WASM inspection converter for one inspection subtree. */
 interface InspectionModelData {
@@ -32,6 +33,7 @@ interface InspectionModelData {
             }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [geoJson]="geoJson"
+                             [featureIds]="featureIds"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
@@ -59,6 +61,7 @@ export class FeaturePanelComponent implements OnDestroy {
     ];
     filterOptions = new FeatureFilterOptions();
     geoJson: string = "";
+    featureIds: string[] = [];
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
     firstHighlightedItemIndex?: number;
@@ -132,11 +135,15 @@ export class FeaturePanelComponent implements OnDestroy {
         if (!this.selectedFeatures.length) {
             this.loading = false;
             this.geoJson = `{"type":"FeatureCollection","features":[]}`;
+            this.featureIds = [];
             this.treeData = [];
             this.firstHighlightedItemIndex = undefined;
             return;
         }
 
+        this.featureIds = Array.from(new Set(
+            this.selectedFeatures.map(feature => stripFeatureInspectionTarget(feature.featureId))
+        ));
         this.loading = this.selectedFeatures.some(feature =>
             !this.mapService.isTileInspectionDataComplete(feature.featureTile));
 
@@ -359,6 +366,35 @@ export class FeaturePanelComponent implements OnDestroy {
             return trimmed;
         };
 
+        /** Creates the compact value-column preview for array containers rendered as child rows. */
+        const formatArrayContainerSummary = (children: TreeTableNode[]): string => {
+            const childSummaries = children.map(child => formatContainerElementSummary(child));
+            return `${children.length} [${childSummaries.join(", ")}]`;
+        };
+
+        /** Formats one array element, falling back to a shallow object-like summary for nested children. */
+        const formatContainerElementSummary = (node: TreeTableNode, depth = 0): string => {
+            const value = node.data?.["value"];
+            if (value !== null && value !== undefined && String(value).length > 0) {
+                return String(value);
+            }
+            const key = node.data?.["key"];
+            if (!node.children?.length || depth > 0) {
+                return key !== null && key !== undefined ? String(key) : "";
+            }
+            const entries = node.children
+                .map(child => {
+                    const childKey = child.data?.["key"];
+                    const childValue = formatContainerElementSummary(child, depth + 1);
+                    if (childKey !== null && childKey !== undefined && String(childKey).length > 0) {
+                        return childValue.length > 0 ? `${childKey}: ${childValue}` : String(childKey);
+                    }
+                    return childValue;
+                })
+                .filter(entry => entry.length > 0);
+            return entries.length ? `{${entries.join(", ")}}` : String(key ?? "");
+        };
+
         /** Removes validity suffixes from displayed inspection names. */
         const stripValiditySuffix = (hoverId: string): string => {
             const validityIndex = hoverId.indexOf(":validity#");
@@ -454,7 +490,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     node.data["strongHoverGroupId"] = nextStrongHoverGroupId;
                 }
 
-                let children = convertToTreeTableNodes(
+                const children = convertToTreeTableNodes(
                     Array.isArray(data?.children) ? data.children : [],
                     {
                         mapTileKey: context.mapTileKey,
@@ -469,6 +505,9 @@ export class FeaturePanelComponent implements OnDestroy {
                     if (nameBubble) {
                         node.data["stageLabelBubble"] = nameBubble;
                     }
+                }
+                if ((valueType & coreLib.ValueType.ARRAY.value) && children.length > 0) {
+                    node.data["value"] = formatArrayContainerSummary(children);
                 }
                 node.children = children;
                 treeNodes.push(node);

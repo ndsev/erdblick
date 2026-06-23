@@ -2,6 +2,7 @@ import {describe, expect, it} from "vitest";
 import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 import {
+    featureSearchDefinitionFromImportPayload,
     featureSearchDefinitionExport,
     featureSearchExportFilename,
     featureSearchExportPayload,
@@ -50,12 +51,14 @@ describe("feature search JSON export helpers", () => {
             "showResultsOnMap",
             "pinColor",
             "selectedMapLayers",
+            "selectedMapLayersManual",
             "selectedTileLevels",
             "selectedViewIndices",
             "searchStyleRules",
             "renderStrategy"
         ]);
         expect(exported.selectedMapLayers).toEqual([{mapId: "MapA", layerId: "LayerA"}]);
+        expect(exported.selectedMapLayersManual).toBe(false);
         expect(exported.selectedTileLevels).toEqual([13]);
         expect(exported.selectedViewIndices).toEqual([0, 1]);
     });
@@ -210,6 +213,43 @@ describe("feature search JSON export helpers", () => {
         expect(JSON.stringify({sourceTileId: 42n}, featureSearchJsonReplacer))
             .toBe('{"sourceTileId":"42"}');
         expect(safeFeatureSearchExportId("feature/search:1")).toBe("feature_search_1");
+    });
+
+    it("imports configuration-only search JSON", () => {
+        const imported = featureSearchDefinitionFromImportPayload(featureSearchDefinitionExport(searchDefinition()));
+
+        expect(imported.source).toBe("configuration");
+        expect(imported.definition.query).toBe("**.speed > 80");
+        expect(imported.definition.selectedMapLayers).toEqual([{mapId: "MapA", layerId: "LayerA"}]);
+        expect(imported.definition.selectedMapLayersManual).toBe(false);
+        expect(imported.definition.selectedViewIndices).toEqual([0, 1]);
+    });
+
+    it("imports combined search JSON from the configuration entry", () => {
+        const definition = searchDefinition();
+        const payload = featureSearchExportPayload(
+            definition,
+            [result("Road.1", "MapA", "LayerA", 120n)],
+            [],
+            "",
+            {includeConfiguration: true, includeResults: true},
+            definition.selectedMapLayers,
+            definition.selectedMapLayers,
+            "2026-06-01T00:00:00.000Z"
+        );
+
+        const imported = featureSearchDefinitionFromImportPayload(payload);
+
+        expect(imported.source).toBe("combined");
+        expect(imported.definition.query).toBe(definition.query);
+        expect(imported.definition.searchStyleRules).toEqual(definition.searchStyleRules);
+    });
+
+    it("rejects result-only search JSON imports", () => {
+        const payload = featureSearchResultsExport([result("Road.1", "MapA", "LayerA", 120n)], [], "");
+
+        expect(() => featureSearchDefinitionFromImportPayload(payload))
+            .toThrow("Search JSON contains results but no importable search configuration.");
     });
 });
 

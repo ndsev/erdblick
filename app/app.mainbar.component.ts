@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
+import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {MapInfoService} from './mapdata/map-info.service';
 import {
@@ -17,11 +17,14 @@ import {
 import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 import {MenuItem} from "primeng/api";
+import {FeatureSearchService} from "./search/feature.search.service";
+import {InfoMessageService} from "./shared/info.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
 const MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM = 45;
 const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
+const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 
 @Component({
     selector: 'main-bar',
@@ -70,6 +73,11 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
                 </div>
             </ng-template>
         </p-menubar>
+        <input #searchJsonImportInput
+               type="file"
+               accept=".json,application/json"
+               style="display: none;"
+               (change)="onSearchJsonImportSelected($event)">
     `,
     styles: [``],
     standalone: false
@@ -98,6 +106,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     protected readonly environment = environment;
     menuItems: MenuItem[] = [];
     copyright: string = '';
+    @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
 
     protected get menubarBreakpoint(): string {
         return this.isMobileMenubar
@@ -112,6 +121,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     constructor(public mapService: MapInfoService,
                 public stateService: AppStateService,
                 private diagnostics: DiagnosticsFacadeService,
+                private featureSearchService: FeatureSearchService,
+                private infoMessageService: InfoMessageService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
         this.setupMobileMenuTracking();
@@ -213,6 +224,34 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Opens the styles dialog. */
     private openStylesDialog() {
         this.stateService.openDialog(STYLES_DIALOG_LAYOUT_ID);
+    }
+
+    /** Opens the hidden file input used to import feature-search JSON. */
+    protected triggerSearchJsonImport() {
+        this.searchJsonImportInput?.nativeElement.click();
+    }
+
+    /** Reads a selected feature-search JSON file and imports it as a new search session. */
+    protected async onSearchJsonImportSelected(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) {
+            return;
+        }
+        try {
+            if (file.size > SEARCH_JSON_IMPORT_MAX_BYTES) {
+                this.infoMessageService.showError("Search JSON file is too large.");
+                return;
+            }
+            const payload = JSON.parse(await file.text()) as unknown;
+            this.featureSearchService.importSearchJsonPayload(payload);
+            this.infoMessageService.showSuccess("Search JSON imported");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.infoMessageService.showError(`Could not import Search JSON: ${message}`);
+        } finally {
+            input.value = '';
+        }
     }
 
     /** Opens the maps panel. */
@@ -412,6 +451,17 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: 'Preferences',
                         icon: 'settings',
                         command: () => { this.showPreferencesDialog(); },
+                    }
+                ]
+            },
+            {
+                name: 'Import',
+                icon: 'file_upload',
+                items: [
+                    {
+                        name: 'Search JSON',
+                        icon: 'manage_search',
+                        command: () => { this.triggerSearchJsonImport(); }
                     }
                 ]
             },
