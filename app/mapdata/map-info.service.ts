@@ -3,13 +3,29 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, firstValueFrom, Subject} from "rxjs";
 import {FeatureTile} from "./features.model";
 import {RequestedLayerProgressState} from "./map-runtime.model";
-import {MapInfoItem, MapLayerTree, StyleOptionNode} from "./map.tree.model";
+import {
+    dataSourceCatalogStatus,
+    dataSourceProgressPercent,
+    isDataSourceCatalogEntryReady,
+    MapInfoItem,
+    MapLayerTree,
+    sortDataSourceCatalogEntries,
+    StyleOptionNode
+} from "./map.tree.model";
 import {SearchResultTile} from "./search-result-tile.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {StyleService} from "../styledata/style.service";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
+
+/** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
+interface SourceCatalogEntryUpdate {
+    sourceId: string;
+    status?: string;
+    statusMessage?: string;
+    progress?: number | null;
+}
 
 /**
  * Owns datasource metadata, the map/layer tree, shared parser metadata, legal info, and layer-tree mutations.
@@ -26,6 +42,12 @@ export class MapInfoService {
     private parserInstance: TileLayerParser | null = null;
     /** Raw datasource metadata retained for diagnostics/debug export. */
     private dataSourceInfoJson: string | null = null;
+    /** Latest datasource-catalog revision advertised by `/sources`, if the backend supports it. */
+    private sourceCatalogRevisionValue: number | null = null;
+    /** True while at least one catalog entry is not ready; used to avoid pruning recoverable state. */
+    private catalogHasNonReadyEntries = false;
+    /** Last catalog snapshot, including initializing/failed entries that are not passed to the parser. */
+    private sourceCatalogEntries: MapInfoItem[] = [];
     /** Last requested stage coverage per layer, used to enrich incomplete layer metadata. */
     private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
     /** Highest stage count observed from streamed tile payloads when `/sources` did not declare it. */
@@ -62,15 +84,85 @@ export class MapInfoService {
         return this.dataSourceInfoJson;
     }
 
-    /** Reloads `/sources`, rebuilds the map tree, and refreshes parser datasource metadata. */
-    async reloadDataSources() {
-        try {
-            const result = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources"));
-            const maps = result.filter(m => !m.addOn).map(mapInfo => mapInfo);
-            this.maps$.next(new MapLayerTree(maps, this.stateService, this.styleService));
-            this.reapplySyncOptionsForAllViews();
+    /** Returns the last `/sources` catalog revision observed from response headers. */
+    get sourceCatalogRevision(): number | null {
+        return this.sourceCatalogRevisionValue;
+    }
 
-            const jsonString = JSON.stringify(result);
+    /** Returns true when state pruning can safely remove unavailable maps/layers from persisted state. */
+    canPruneStateForCurrentCatalog(): boolean {
+        return !this.catalogHasNonReadyEntries;
+    }
+
+    /** Returns whether a map catalog entry is ready for tile and search requests. */
+    isMapReady(mapId: string): boolean {
+        const map = this.maps.maps.get(mapId);
+        return !!map && isDataSourceCatalogEntryReady(map.info);
+    }
+
+    /** Returns whether a concrete feature/source-data layer belongs to a ready datasource. */
+    isMapLayerReady(mapId: string, layerId: string): boolean {
+        const map = this.maps.maps.get(mapId);
+        return !!map?.layers.has(layerId) && isDataSourceCatalogEntryReady(map.info);
+    }
+
+    /** Returns whether a map catalog entry is currently initializing. */
+    isMapInitializing(mapId: string): boolean {
+        const map = this.maps.maps.get(mapId);
+        return !!map && dataSourceCatalogStatus(map.info) === "initializing";
+    }
+
+    /** Returns whether a map catalog entry failed during datasource startup. */
+    isMapFailed(mapId: string): boolean {
+        const map = this.maps.maps.get(mapId);
+        return !!map && dataSourceCatalogStatus(map.info) === "failed";
+    }
+
+    /** Formats the current datasource state for map-tree tooltips. */
+    dataSourceStatusText(mapInfo: MapInfoItem): string {
+        const status = dataSourceCatalogStatus(mapInfo);
+        const progress = dataSourceProgressPercent(mapInfo);
+        const progressText = progress === null ? "" : ` (${progress}%)`;
+        const message = typeof mapInfo.statusMessage === "string" && mapInfo.statusMessage.trim().length
+            ? mapInfo.statusMessage.trim()
+            : "";
+        if (status === "ready") {
+            return message || "Datasource ready.";
+        }
+        if (status === "initializing") {
+            return message
+                ? `Datasource is still initializing${progressText}. ${message}`
+                : `Datasource is still initializing${progressText}.`;
+        }
+        return message || "Datasource failed to initialize.";
+    }
+
+    /** Returns normalized datasource progress for compact indicator rendering. */
+    dataSourceProgressPercent(mapInfo: MapInfoItem): number | null {
+        return dataSourceProgressPercent(mapInfo);
+    }
+
+    /** Reloads `/sources`, rebuilds the map tree from the catalog snapshot, and refreshes ready parser metadata. */
+    async reloadDataSources(): Promise<boolean> {
+        try {
+            const response = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources?blocking=false", {
+                observe: "response"
+            }));
+            const result = Array.isArray(response.body) ? response.body : [];
+            const catalog = this.normalizeSourceCatalogEntries(result);
+            this.sourceCatalogRevisionValue = this.parseSourceCatalogRevision(
+                response.headers.get("X-Mapget-Sources-Revision")
+            );
+            const configStatus = response.headers.get("X-Mapget-Sources-Config-Status");
+            const configMessage = response.headers.get("X-Mapget-Sources-Config-Message");
+            if (configStatus === "error") {
+                const message = configMessage || "Datasource configuration contains errors.";
+                console.warn("Datasource config status:", message);
+            }
+
+            this.publishSourceCatalogTree(catalog);
+            const readyEntries = catalog.filter(isDataSourceCatalogEntryReady);
+            const jsonString = JSON.stringify(readyEntries);
             this.dataSourceInfoJson = jsonString;
             uint8ArrayToWasm(wasmBuffer => {
                 this.tileLayerParser.setDataSourceInfo(wasmBuffer);
@@ -78,10 +170,99 @@ export class MapInfoService {
             FeatureTile.clearDataSourceInfoBlobCache();
             SearchResultTile.clearDataSourceInfoBlobCache();
             this.layerStateChanged.next("datasources");
+            return true;
         } catch (err) {
             console.error("Failed to load data source info.", err);
             this.messageService.showError("Failed to load data source info.");
+            return false;
         }
+    }
+
+    /** Applies a lightweight source-status update from the interactive stream without reloading `/sources`. */
+    applySourceCatalogChange(update: SourceCatalogEntryUpdate, revision: number | null = null): boolean {
+        if (!update.sourceId) {
+            return false;
+        }
+        const index = this.sourceCatalogEntries.findIndex(entry => entry.sourceId === update.sourceId);
+        if (index < 0) {
+            return false;
+        }
+        const updatedEntry: MapInfoItem = {
+            ...this.sourceCatalogEntries[index],
+            progress: this.normalizeProgressValue(update.progress)
+        };
+        if (typeof update.status === "string") {
+            updatedEntry.status = update.status;
+        }
+        updatedEntry.statusMessage = typeof update.statusMessage === "string"
+            ? update.statusMessage
+            : "";
+        this.sourceCatalogEntries = [
+            ...this.sourceCatalogEntries.slice(0, index),
+            updatedEntry,
+            ...this.sourceCatalogEntries.slice(index + 1)
+        ];
+        if (revision !== null) {
+            this.sourceCatalogRevisionValue = this.sourceCatalogRevisionValue === null
+                ? revision
+                : Math.max(this.sourceCatalogRevisionValue, revision);
+        }
+        this.publishSourceCatalogTree(this.sourceCatalogEntries);
+        this.layerStateChanged.next("datasources");
+        return true;
+    }
+
+    /** Returns true when a lightweight update announces readiness but the local entry still lacks full metadata. */
+    sourceCatalogChangeNeedsRefresh(update: SourceCatalogEntryUpdate): boolean {
+        const entry = this.sourceCatalogEntries.find(sourceEntry => sourceEntry.sourceId === update.sourceId);
+        if (!entry) {
+            return true;
+        }
+        const nextStatus = typeof update.status === "string"
+            ? dataSourceCatalogStatus({status: update.status})
+            : dataSourceCatalogStatus(entry);
+        const hasLayerMetadata = !!entry.layers && Object.keys(entry.layers).length > 0;
+        return nextStatus === "ready" && (!isDataSourceCatalogEntryReady(entry) || !hasLayerMetadata);
+    }
+
+    /** Normalizes a full catalog snapshot and clears unsupported loading percentages. */
+    private normalizeSourceCatalogEntries(entries: MapInfoItem[]): MapInfoItem[] {
+        return sortDataSourceCatalogEntries(entries).map(entry => ({
+            ...entry,
+            progress: this.normalizeProgressValue(entry.progress)
+        }));
+    }
+
+    /** Stores and publishes the catalog entries that should appear in the map tree. */
+    private publishSourceCatalogTree(catalog: MapInfoItem[]): void {
+        this.sourceCatalogEntries = sortDataSourceCatalogEntries(catalog);
+        this.catalogHasNonReadyEntries = this.sourceCatalogEntries.some(entry => !isDataSourceCatalogEntryReady(entry));
+        const maps = this.sourceCatalogEntries.filter(entry => !entry.addOn || !isDataSourceCatalogEntryReady(entry));
+        this.maps$.next(new MapLayerTree(
+            maps,
+            this.stateService,
+            this.styleService,
+            this.canPruneStateForCurrentCatalog()
+        ));
+        this.reapplySyncOptionsForAllViews();
+    }
+
+    /** Converts absent/null/invalid source progress to the UI's "no percentage available" state. */
+    private normalizeProgressValue(progress: unknown): number | null {
+        return typeof progress === "number" && Number.isFinite(progress)
+            ? progress
+            : null;
+    }
+
+    /** Parses the optional monotonic datasource-catalog revision header. */
+    private parseSourceCatalogRevision(rawRevision: string | null): number | null {
+        if (rawRevision === null || rawRevision.trim() === "") {
+            return null;
+        }
+        const revision = Number(rawRevision);
+        return Number.isFinite(revision) && revision >= 0
+            ? Math.floor(revision)
+            : null;
     }
 
     /** Reapplies persisted tree parameters after style, view, or datasource state changes. */

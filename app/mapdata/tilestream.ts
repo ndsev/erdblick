@@ -16,6 +16,7 @@ export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_SEARCH_RESULTS = 7;
+export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 export const MAP_TILE_STREAM_SEARCH_STATUS_TYPE = "mapget.search.status";
@@ -70,6 +71,7 @@ export interface MapTileStreamRequestContextPayload {
     type: string;
     requestId: number;
     clientId?: number;
+    sourcesRevision?: number;
 }
 
 interface TileRequestChunk {
@@ -96,6 +98,22 @@ export interface MapTileStreamTransportCompressionStats {
     knownCompressedCoveragePct: number;
 }
 
+/** Lightweight datasource status object optionally embedded in a source-catalog change frame. */
+export interface MapTileStreamSourceCatalogChangeSource {
+    sourceId: string;
+    status?: string;
+    statusMessage?: string;
+    progress?: number | null;
+}
+
+/** Control payload emitted by mapget when datasource catalog state or structure changes. */
+export interface MapTileStreamSourceCatalogChangePayload {
+    type: "mapget.sources.changed";
+    revision: number;
+    reason?: string;
+    source?: MapTileStreamSourceCatalogChangeSource;
+}
+
 export interface MapTileStreamDebugState {
     isOpen: boolean;
     awaitingCompletion: boolean;
@@ -103,6 +121,7 @@ export interface MapTileStreamDebugState {
     incomingRequestId: number | null;
     supportsRequestContextFrames: boolean;
     pullClientId: number | null;
+    sourcesRevision: number | null;
     pendingFrameQueueSize: number;
     frameProcessingPaused: boolean;
     pullCompressionEnabled: boolean;
@@ -116,7 +135,7 @@ export interface MapTileStreamDebugState {
 }
 
 /**
- * WebSocket client for `/tiles` plus the optional `/tiles/next` pull loop.
+ * WebSocket client for `/interactive` plus the optional `/interactive/payload` pull loop.
  * It hides frame parsing, request chunking, status tracking, and adaptive pull budgeting
  * behind callback-style hooks that `MapTileStreamService` can consume from outside Angular.
  */
@@ -143,6 +162,7 @@ export class MapTileStreamClient {
     private frameProcessingPaused: boolean = false;
     private readonly frameTimeBudgetMs: number = 10;
     private pullClientId: number | null = null;
+    private sourcesRevision: number | null = null;
     private pullControllers: AbortController[] = [];
     private readonly pullParallelism: number = 2;
     private readonly pullWaitMs: number = 25000;
@@ -168,11 +188,12 @@ export class MapTileStreamClient {
     onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
     onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
+    onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
     /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
-    constructor(private path: string = "tiles", parser?: TileLayerParser) {
+    constructor(private path: string = "/interactive", parser?: TileLayerParser) {
         this.ownsParser = !parser;
         this.parser = parser ?? new coreLib.TileLayerParser();
     }
@@ -201,7 +222,7 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Registers the callback that receives parsed `/tiles` status payloads. */
+    /** Registers the callback that receives parsed interactive-stream status payloads. */
     withStatusCallback(callback: (status: MapTileStreamStatusPayload) => void) {
         this.onStatus = callback;
         return this;
@@ -211,6 +232,35 @@ export class MapTileStreamClient {
     withSearchStatusCallback(callback: (status: MapTileStreamSearchStatusPayload) => void) {
         this.onSearchStatus = callback;
         return this;
+    }
+
+    /** Registers the callback that receives datasource-catalog invalidation control frames. */
+    withSourceCatalogChangedCallback(callback: (change: MapTileStreamSourceCatalogChangePayload) => void) {
+        this.onSourceCatalogChanged = callback;
+        return this;
+    }
+
+    /** Extracts the lightweight datasource-status object from a source-catalog control frame. */
+    private parseSourceCatalogChangeSource(source: unknown): MapTileStreamSourceCatalogChangeSource | undefined {
+        if (typeof source !== "object" || source === null) {
+            return undefined;
+        }
+        const sourceRecord = source as Record<string, unknown>;
+        const sourceId = sourceRecord["sourceId"];
+        const status = sourceRecord["status"];
+        const statusMessage = sourceRecord["statusMessage"];
+        const progress = sourceRecord["progress"];
+        if (typeof sourceId !== "string" || !sourceId.length) {
+            return undefined;
+        }
+        return {
+            sourceId,
+            status: typeof status === "string" ? status : undefined,
+            statusMessage: typeof statusMessage === "string" ? statusMessage : undefined,
+            progress: typeof progress === "number" && Number.isFinite(progress)
+                ? progress
+                : null
+        };
     }
 
     /** Registers a websocket error callback. */
@@ -266,6 +316,7 @@ export class MapTileStreamClient {
         this.incomingRequestId = null;
         this.supportsRequestContextFrames = false;
         this.pullClientId = null;
+        this.sourcesRevision = null;
         this.stopPullLoops();
         this.clearPendingFrames();
         this.resetCompletionPromise();
@@ -288,7 +339,7 @@ export class MapTileStreamClient {
         }
     }
 
-    /** Enables or disables gzip-aware `/tiles/next` pull requests. */
+    /** Enables or disables gzip-aware `/interactive/payload` pull requests. */
     setPullCompressionEnabled(enabled: boolean) {
         this.pullCompressionEnabled = !!enabled;
     }
@@ -308,7 +359,12 @@ export class MapTileStreamClient {
         return this.frameQueue.length;
     }
 
-    /** Returns aggregated compression metrics for `/tiles/next` responses. */
+    /** Returns the latest datasource catalog revision announced by request-context frames. */
+    getSourcesRevision(): number | null {
+        return this.sourcesRevision;
+    }
+
+    /** Returns aggregated compression metrics for `/interactive/payload` responses. */
     getTransportCompressionStats(): MapTileStreamTransportCompressionStats {
         const ratioPct = this.knownCompressedUncompressedBytes > 0
             ? (this.knownCompressedBytes / this.knownCompressedUncompressedBytes) * 100
@@ -339,6 +395,7 @@ export class MapTileStreamClient {
             incomingRequestId: this.incomingRequestId,
             supportsRequestContextFrames: this.supportsRequestContextFrames,
             pullClientId: this.pullClientId,
+            sourcesRevision: this.sourcesRevision,
             pendingFrameQueueSize: this.frameQueue.length,
             frameProcessingPaused: this.frameProcessingPaused,
             pullCompressionEnabled: this.pullCompressionEnabled,
@@ -385,7 +442,7 @@ export class MapTileStreamClient {
     }
 
     /**
-     * Sends the current logical `/tiles` request if it differs from the last one.
+     * Sends the current logical interactive tile request if it differs from the last one.
      * Large requests are chunked across multiple websocket messages but still share one request id.
      */
     async updateRequest(tileLayerRequests: any[]) {
@@ -416,13 +473,13 @@ export class MapTileStreamClient {
         } catch (err) {
             this.lastTilesRequestBody = null;
             this.latestRequestedRequestId = previousRequestId;
-            console.error("Failed to send /tiles request.", err);
+            console.error("Failed to send interactive tile request.", err);
             return false;
         }
     }
 
     /**
-     * Splits oversized `/tiles` requests at request-group boundaries so the backend can process
+     * Splits oversized interactive requests at request-group boundaries so the backend can process
      * each map/layer/level group independently without reassembly.
      */
     private buildRequestPayloads(
@@ -475,7 +532,7 @@ export class MapTileStreamClient {
             if (currentRequests.length === 1
                 && this.byteLength(currentPayload) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
                 throw new Error(
-                    `Single /tiles request group exceeds ${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`);
+                    `Single interactive request group exceeds ${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`);
             }
         }
         finalizeCurrentChunk();
@@ -500,7 +557,7 @@ export class MapTileStreamClient {
         }
     }
 
-    /** Waits for the backend to report completion of the latest logical `/tiles` request. */
+    /** Waits for the backend to report completion of the latest logical interactive request. */
     async waitForCompletion(): Promise<MapTileStreamStatusPayload> {
         if (this.lastRequestPromise) {
             await this.lastRequestPromise;
@@ -589,7 +646,7 @@ export class MapTileStreamClient {
         return this.connecting;
     }
 
-    /** Lazily allocates the promise resolved by the final `/tiles` status frame. */
+    /** Lazily allocates the promise resolved by the final interactive status frame. */
     private ensureCompletionPromise(): Promise<MapTileStreamStatusPayload> {
         if (!this.completionPromise) {
             this.completionPromise = new Promise((resolve, reject) => {
@@ -762,7 +819,7 @@ export class MapTileStreamClient {
                         this.lastStatusPayload = payload;
                     }
                 } catch (err) {
-                    console.error("Failed to parse /tiles status payload:", err);
+                    console.error("Failed to parse interactive status payload:", err);
                 }
                 return;
             }
@@ -775,6 +832,9 @@ export class MapTileStreamClient {
                     if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
                         this.supportsRequestContextFrames = true;
                         this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
+                        if (Number.isFinite(payload.sourcesRevision)) {
+                            this.sourcesRevision = Math.max(0, Math.floor(Number(payload.sourcesRevision)));
+                        }
                         if (Number.isFinite(payload.clientId)) {
                             const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
                             if (this.pullClientId !== nextClientId) {
@@ -786,7 +846,29 @@ export class MapTileStreamClient {
                         }
                     }
                 } catch (err) {
-                    console.error("Failed to parse /tiles request-context payload:", err);
+                    console.error("Failed to parse interactive request-context payload:", err);
+                }
+                return;
+            }
+
+            if (type === MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE) {
+                const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
+                const payloadText = this.decoder.decode(payloadBytes);
+                try {
+                    const payload = JSON.parse(payloadText) as MapTileStreamSourceCatalogChangePayload;
+                    if (payload.type === "mapget.sources.changed" && Number.isFinite(payload.revision)) {
+                        const revision = Math.max(0, Math.floor(Number(payload.revision)));
+                        this.sourcesRevision = revision;
+                        const source = this.parseSourceCatalogChangeSource(payload.source);
+                        this.onSourceCatalogChanged?.({
+                            type: "mapget.sources.changed",
+                            revision,
+                            reason: typeof payload.reason === "string" ? payload.reason : undefined,
+                            ...(source ? {source} : {})
+                        });
+                    }
+                } catch (err) {
+                    console.error("Failed to parse source-catalog change payload:", err);
                 }
                 return;
             }
@@ -858,7 +940,7 @@ export class MapTileStreamClient {
         }
     }
 
-    /** Aborts every active `/tiles/next` pull loop. */
+    /** Aborts every active `/interactive/payload` pull loop. */
     private stopPullLoops() {
         for (const controller of this.pullControllers) {
             controller.abort();
@@ -866,7 +948,7 @@ export class MapTileStreamClient {
         this.pullControllers = [];
     }
 
-    /** Long-polls `/tiles/next` until the server reports the request is gone or the controller aborts. */
+    /** Long-polls `/interactive/payload` until the server reports the request is gone or the controller aborts. */
     private async runPullLoop(controller: AbortController) {
         while (!controller.signal.aborted) {
             const clientId = this.pullClientId;
@@ -919,10 +1001,10 @@ export class MapTileStreamClient {
         }
     }
 
-    /** Builds the `/tiles/next` URL with the current adaptive batch size and compression flags. */
+    /** Builds the `/interactive/payload` URL with the current adaptive batch size and compression flags. */
     private resolvePullUrl(clientId: number): string {
         const normalizedPath = this.path.replace(/\/+$/, "");
-        const pullUrl = new URL(`${normalizedPath}/next`, document.baseURI);
+        const pullUrl = new URL(`${normalizedPath}/payload`, document.baseURI);
         pullUrl.searchParams.set("clientId", String(clientId));
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
         pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));

@@ -18,7 +18,7 @@ export interface SelectionTileRequest {
     reject: null | ((why: unknown) => void);
 }
 
-/** Aggregate backend request progress reported by the `/tiles` websocket. */
+/** Aggregate backend request progress reported by the interactive websocket. */
 export interface BackendRequestProgress {
     done: number;
     total: number;
@@ -138,7 +138,7 @@ export interface SearchLayerTileSet {
     tiles: Map<number, SearchLayerTileEntry>;
 }
 
-/** Concrete server-side search request embedded in the next `/tiles` update. */
+/** Concrete server-side search request embedded in the next interactive update. */
 export interface FeatureSearchTileRequest {
     mapId: string;
     layerId: string;

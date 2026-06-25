@@ -5,6 +5,7 @@ import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapTileRequestStatus, MapTileStreamClient} from "./tilestream";
 import {FeatureSearchResolvedDefinition, FeatureSearchRuntimeState} from "./feature-search-runtime-state.model";
 import type {
+    MapTileStreamSourceCatalogChangePayload,
     MapTileStreamSearchStatusPayload,
     MapTileStreamStatusPayload,
     MapTileStreamTransportCompressionStats
@@ -74,7 +75,7 @@ interface SearchResultEntryExtractionContext {
 }
 
 /**
- * Owns mapget `/tiles` transport, feature/search tile caches, request diffing, and tile-load progress.
+ * Owns mapget interactive transport, feature/search tile caches, request diffing, and tile-load progress.
  */
 @Injectable({providedIn: "root"})
 export class MapTileStreamService {
@@ -115,6 +116,7 @@ export class MapTileStreamService {
     private lastFeatureSearchRequestSignature = "";
     private readonly searchResultEntryBatchSize = 5000;
     private readonly searchResultEntryFrameBudgetMs = 12;
+    private sourceCatalogReloadPromise: Promise<void> | null = null;
 
     constructor(
         private readonly stateService: AppStateService,
@@ -131,7 +133,7 @@ export class MapTileStreamService {
 
     /** Wires the transport callbacks and loads datasource metadata before viewport requests start. */
     async initialize() {
-        this.tileStream = new MapTileStreamClient("/tiles", this.mapInfo.tileLayerParser);
+        this.tileStream = new MapTileStreamClient("/interactive", this.mapInfo.tileLayerParser);
         this.tileStream.setPullCompressionEnabled(this.stateService.tilePullCompressionEnabled);
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onFeatures = (payload) => {
@@ -146,6 +148,9 @@ export class MapTileStreamService {
         this.tileStream.onSearchStatus = (status) => {
             this.ngZone.runOutsideAngular(() => this.handleSearchStatus(status));
         };
+        this.tileStream.onSourceCatalogChanged = (change) => {
+            this.ngZone.runOutsideAngular(() => this.handleSourceCatalogChanged(change));
+        };
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
         };
@@ -158,7 +163,7 @@ export class MapTileStreamService {
         return this.tilePipelinePaused$.getValue();
     }
 
-    /** Replaces the active server-side feature-search definitions used by the next `/tiles` request. */
+    /** Replaces the active server-side feature-search definitions used by the next interactive request. */
     setFeatureSearchDefinitions(
         definitions: FeatureSearchResolvedDefinition[],
         options: FeatureSearchDefinitionUpdateOptions = {}
@@ -239,7 +244,7 @@ export class MapTileStreamService {
         this.scheduleUpdate();
     }
 
-    /** Returns a snapshot of the current logical `/tiles` backend request progress. */
+    /** Returns a snapshot of the current logical interactive backend request progress. */
     getBackendRequestProgress(): BackendRequestProgress {
         return {...this.backendRequestProgress};
     }
@@ -280,7 +285,7 @@ export class MapTileStreamService {
         });
     }
 
-    /** Proxies `/tiles/next` compression stats while tolerating an uninitialized tile stream. */
+    /** Proxies `/interactive/payload` compression stats while tolerating an uninitialized tile stream. */
     getTileStreamTransportCompressionStats(): MapTileStreamTransportCompressionStats {
         return this.tileStream?.getTransportCompressionStats() ?? {
             totalPullResponses: 0,
@@ -295,7 +300,7 @@ export class MapTileStreamService {
         };
     }
 
-    /** Returns whether the `/tiles` websocket is currently connected. */
+    /** Returns whether the interactive websocket is currently connected. */
     isTileStreamConnected(): boolean {
         return this.tileStream?.isOpen() ?? false;
     }
@@ -401,6 +406,46 @@ export class MapTileStreamService {
                 this.scheduleUpdate();
             }
         }
+    }
+
+    /** Applies lightweight source-status messages or refreshes `/sources` after structural catalog changes. */
+    private handleSourceCatalogChanged(change: MapTileStreamSourceCatalogChangePayload): void {
+        const currentRevision = this.mapInfo.sourceCatalogRevision;
+        if (currentRevision !== null && change.revision < currentRevision) {
+            return;
+        }
+        const requiresFullRefresh = this.sourceCatalogChangeRequiresReload(change);
+        if (!requiresFullRefresh && change.source) {
+            const needsRefreshAfterPatch = this.mapInfo.sourceCatalogChangeNeedsRefresh(change.source);
+            if (this.mapInfo.applySourceCatalogChange(change.source, change.revision)) {
+                if (!needsRefreshAfterPatch) {
+                    this.scheduleUpdate();
+                    return;
+                }
+            }
+        }
+        if (!this.sourceCatalogReloadPromise) {
+            this.sourceCatalogReloadPromise = this.mapInfo.reloadDataSources()
+                .then(() => undefined)
+                .finally(() => {
+                    this.sourceCatalogReloadPromise = null;
+                });
+        }
+        this.sourceCatalogReloadPromise
+            .then(() => this.scheduleUpdate())
+            .catch(err => console.error("Failed to refresh datasource catalog.", err));
+    }
+
+    /** Returns true for catalog-change reasons that may add/remove/rebuild datasource entries or layers. */
+    private sourceCatalogChangeRequiresReload(change: MapTileStreamSourceCatalogChangePayload): boolean {
+        const reason = change.reason?.toLowerCase();
+        return !change.source
+            || reason === "reload"
+            || reason === "add"
+            || reason === "added"
+            || reason === "remove"
+            || reason === "removed"
+            || reason === "config-error";
     }
 
     /** Returns the highest stage currently expected for this tile, or null when no request expects it. */
@@ -901,7 +946,7 @@ export class MapTileStreamService {
         }
     }
 
-    /** Recomputes the logical `/tiles` request from visible tiles and pinned selection tiles. */
+    /** Recomputes the logical interactive request from visible tiles and pinned selection tiles. */
     private async updateMapDataRequest() {
         if (this.tilePipelinePaused || !this.tileStream) {
             return;
@@ -944,49 +989,81 @@ export class MapTileStreamService {
             }
         };
 
+        const retainedSelectionRequests: SelectionTileRequest[] = [];
         for (const selectionTileRequest of this.selectionTileRequests) {
+            const selectionMapId = selectionTileRequest.remoteRequest.mapId;
+            const selectionLayerId = selectionTileRequest.remoteRequest.layerId;
             const mapLayerItem = this.mapInfo.maps.maps
-                .get(selectionTileRequest.remoteRequest.mapId)?.layers
-                .get(selectionTileRequest.remoteRequest.layerId);
-            if (mapLayerItem) {
-                for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
-                    this.ensureTilePlaceholder(
-                        selectionTileRequest.remoteRequest.mapId,
-                        selectionTileRequest.remoteRequest.layerId,
-                        BigInt(tileId),
-                        true);
-                    const selectionStageCount = this.mapInfo.getLayerStageCount(
-                        selectionTileRequest.remoteRequest.mapId,
-                        selectionTileRequest.remoteRequest.layerId
-                    );
-                    const selectionRequestedMaxStage = Math.max(0, selectionStageCount - 1);
-                    trackRequestedTile(
-                        selectionTileRequest.remoteRequest.mapId,
-                        selectionTileRequest.remoteRequest.layerId,
-                        tileId,
-                        selectionRequestedMaxStage
-                    );
-                    const nextMissingStage = this.tileMinimumMissingStage(
-                        selectionTileRequest.remoteRequest.mapId,
-                        selectionTileRequest.remoteRequest.layerId,
-                        BigInt(tileId),
-                        selectionRequestedMaxStage);
-                    if (nextMissingStage !== undefined) {
-                        queueTile(
-                            selectionTileRequest.remoteRequest.mapId,
-                            selectionTileRequest.remoteRequest.layerId,
-                            tileId,
-                            nextMissingStage,
-                            true);
-                    }
+                .get(selectionMapId)?.layers
+                .get(selectionLayerId);
+            if (!mapLayerItem) {
+                if (this.mapInfo.isMapInitializing(selectionMapId)) {
+                    retainedSelectionRequests.push(selectionTileRequest);
+                    continue;
                 }
-            } else {
+                if (this.mapInfo.isMapFailed(selectionMapId)) {
+                    selectionTileRequest.reject!(this.mapInfo.dataSourceStatusText(
+                        this.mapInfo.maps.maps.get(selectionMapId)!.info
+                    ));
+                    continue;
+                }
                 selectionTileRequest.reject!("Map layer is not available.");
+                continue;
+            }
+            if (!this.mapInfo.isMapLayerReady(selectionMapId, selectionLayerId)) {
+                if (this.mapInfo.isMapFailed(selectionMapId)) {
+                    selectionTileRequest.reject!(this.mapInfo.dataSourceStatusText(
+                        this.mapInfo.maps.maps.get(selectionMapId)!.info
+                    ));
+                    continue;
+                }
+                retainedSelectionRequests.push(selectionTileRequest);
+                continue;
+            }
+            retainedSelectionRequests.push(selectionTileRequest);
+            for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
+                this.ensureTilePlaceholder(
+                    selectionMapId,
+                    selectionLayerId,
+                    BigInt(tileId),
+                    true);
+                const selectionStageCount = this.mapInfo.getLayerStageCount(
+                    selectionMapId,
+                    selectionLayerId
+                );
+                const selectionRequestedMaxStage = Math.max(0, selectionStageCount - 1);
+                trackRequestedTile(
+                    selectionMapId,
+                    selectionLayerId,
+                    tileId,
+                    selectionRequestedMaxStage
+                );
+                const nextMissingStage = this.tileMinimumMissingStage(
+                    selectionMapId,
+                    selectionLayerId,
+                    BigInt(tileId),
+                    selectionRequestedMaxStage);
+                if (nextMissingStage !== undefined) {
+                    queueTile(
+                        selectionMapId,
+                        selectionLayerId,
+                        tileId,
+                        nextMissingStage,
+                        true);
+                }
             }
         }
+        this.selectionTileRequests.length = 0;
+        this.selectionTileRequests.push(...retainedSelectionRequests);
 
         for (const [mapName, map] of this.mapInfo.maps.maps) {
+            if (!this.mapInfo.isMapReady(mapName)) {
+                continue;
+            }
             for (const layer of map.allFeatureLayers()) {
+                if (!this.mapInfo.isMapLayerReady(mapName, layer.id)) {
+                    continue;
+                }
                 for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapName, layer.id)) {
                         continue;
@@ -1372,18 +1449,19 @@ export class MapTileStreamService {
         return tile.nextMissingStage(clampedMaxStage + 1);
     }
 
-    /** Updates backend progress and surfaces terminal request failures from `/tiles` status payloads. */
+    /** Updates backend progress and surfaces terminal request failures from interactive status payloads. */
     private handleTilesRequestStatus(status: MapTileStreamStatusPayload) {
         if (!status || status.type !== "mapget.tiles.status") {
             return;
         }
         const requests = status.requests || [];
         const statusMessage = status.message || "";
-        if (statusMessage.includes("Replaced by a new /tiles WebSocket request")) {
+        if ((statusMessage.includes("Replaced by a new /tiles WebSocket request")
+            || statusMessage.includes("Replaced by a new /interactive WebSocket request"))) {
             return;
         }
         if (statusMessage) {
-            console.info("/tiles status:", statusMessage);
+            console.info("Interactive tile status:", statusMessage);
         }
         if (!requests.length) {
             if (status.allDone && this.backendRequestProgress.total > 0 && !this.backendRequestProgress.allDone) {
@@ -1476,7 +1554,7 @@ export class MapTileStreamService {
         }
     }
 
-    /** Builds all active server-side search-as-map requests for the next `/tiles` update. */
+    /** Builds all active server-side search-as-map requests for the next interactive update. */
     private buildFeatureSearchTileRequests(): FeatureSearchTileRequest[] {
         const requests: FeatureSearchTileRequest[] = [];
 
@@ -1569,7 +1647,9 @@ export class MapTileStreamService {
         const seen = new Set<string>();
         for (const ref of refs) {
             const key = FeatureSearchRuntimeState.layerKey(ref.mapId, ref.layerId);
-            if (seen.has(key) || !this.hasFeatureLayer(ref.mapId, ref.layerId)) {
+            if (seen.has(key)
+                || !this.mapInfo.isMapLayerReady(ref.mapId, ref.layerId)
+                || !this.hasFeatureLayer(ref.mapId, ref.layerId)) {
                 continue;
             }
             seen.add(key);

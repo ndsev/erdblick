@@ -1581,6 +1581,8 @@ TileLayerParser::TileLayerParser()
 
 void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSourceInfoJson)
 {
+    info_.clear();
+    featureJumpTargets_.clear();
     schemaCompletionRoots_.clear();
 
     // Parse data source info

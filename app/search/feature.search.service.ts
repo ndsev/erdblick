@@ -1092,7 +1092,7 @@ export class FeatureSearchService {
         return session;
     }
 
-    /** Synchronizes the UI/session search state into MapTileStreamService's `/tiles` request data plane. */
+    /** Synchronizes the UI/session search state into MapTileStreamService's interactive request data plane. */
     private syncSearchRequestsToMapService(options: {
         forceGenerationIds?: Iterable<string>;
         updateCoverageIds?: Iterable<string>;

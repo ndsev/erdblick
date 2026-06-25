@@ -8,6 +8,8 @@ import {filter, take} from "rxjs/operators";
 import {skip, Subscription} from "rxjs";
 import {ErdblickStyle, FeatureStyleOptionWithStringType, StyleService} from "../styledata/style.service";
 
+export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
+
 /** Removes the synthetic group prefix from nested map ids for tree display. */
 export function removeGroupPrefix(id: string) {
     if (id.includes('/')) {
@@ -47,6 +49,52 @@ export interface MapInfoItem extends Record<string, any> {
     nodeId: string;
     protocolVersion: { major: number, minor: number, patch: number };
     addOn: boolean;
+    status?: DataSourceCatalogStatus | string;
+    statusMessage?: string;
+    progress?: number | null;
+    sourceId?: string;
+    configIndex?: number;
+    type?: string;
+    configuredMapId?: string;
+}
+
+/** Normalizes legacy and catalog-aware `/sources` entries into a known datasource state. */
+export function dataSourceCatalogStatus(item: Pick<MapInfoItem, "status">): DataSourceCatalogStatus {
+    return item.status === "initializing" || item.status === "failed"
+        ? item.status
+        : "ready";
+}
+
+/** Returns true when a `/sources` catalog entry can be used for tile and search requests. */
+export function isDataSourceCatalogEntryReady(item: Pick<MapInfoItem, "status">): boolean {
+    return dataSourceCatalogStatus(item) === "ready";
+}
+
+/** Normalizes optional datasource startup progress to a display percentage. */
+export function dataSourceProgressPercent(item: Pick<MapInfoItem, "progress">): number | null {
+    if (typeof item.progress !== "number" || !Number.isFinite(item.progress)) {
+        return null;
+    }
+    const percent = item.progress <= 1
+        ? item.progress * 100
+        : item.progress;
+    return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+/** Sorts catalog snapshots in config order while keeping legacy entries stable at the end. */
+export function sortDataSourceCatalogEntries(entries: MapInfoItem[]): MapInfoItem[] {
+    return entries
+        .map((entry, index) => ({entry, index}))
+        .sort((lhs, rhs) => {
+            const lhsIndex = Number.isFinite(lhs.entry.configIndex)
+                ? Number(lhs.entry.configIndex)
+                : Number.MAX_SAFE_INTEGER;
+            const rhsIndex = Number.isFinite(rhs.entry.configIndex)
+                ? Number(rhs.entry.configIndex)
+                : Number.MAX_SAFE_INTEGER;
+            return lhsIndex - rhsIndex || lhs.index - rhs.index;
+        })
+        .map(({entry}) => entry);
 }
 
 /** Tree node that mirrors one style option entry for a concrete map/layer pairing. */
@@ -131,6 +179,7 @@ export class MapTreeNode {
         // based on the view config state of the layers. We must assume
         // that all layers have the same number of view config entries.
         if (!this.children.length) {
+            this.visible = Array.from({length: numViews}, () => false);
             return;
         }
         this.visible = Array.from({length: numViews}, () => false);
@@ -183,6 +232,7 @@ export class GroupTreeNode {
         // based on the view config state of the maps. We must assume
         // that all maps have the same number of view config entries.
         if (!this.children.length) {
+            this.visible = Array.from({length: numViews}, () => false);
             return;
         }
         this.visible = Array.from({length: numViews}, () => false);
@@ -212,12 +262,13 @@ export class MapLayerTree {
     constructor(
         mapInfo: MapInfoItem[],
         private stateService: AppStateService,
-        private styleService: StyleService) {
+        private styleService: StyleService,
+        private readonly pruneUnavailableState = true) {
         this.initializeMapGroups(mapInfo);
         this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
-            if (this.mapsForMapIds.size) {
+            if (this.mapsForMapIds.size && this.pruneUnavailableState) {
                 this.stateService.prune(this.mapsForMapIds, this.styleService.styles);
             }
         });
@@ -246,7 +297,7 @@ export class MapLayerTree {
      */
     private initializeMapGroups(mapInfo: MapInfoItem[]) {
         const groups = new Map<string, GroupTreeNode>();
-        const ungrouped: Array<MapTreeNode> = [];
+        const rootNodes: Array<GroupTreeNode | MapTreeNode> = [];
 
         const getOrCreateGroupByPath = (path: string): GroupTreeNode => {
             const segments = path.split('/');
@@ -258,6 +309,7 @@ export class MapLayerTree {
                 currentGroup = new GroupTreeNode(currentPath);
                 this.sizeOfTree++;
                 groups.set(currentPath, currentGroup);
+                rootNodes.push(currentGroup);
             }
             for (let i = 1; i < segments.length; ++i) {
                 currentPath = `${currentPath}/${segments[i]}`;
@@ -291,11 +343,11 @@ export class MapLayerTree {
                 const mapNode = new MapTreeNode(mapItem);
                 this.sizeOfTree += 1 + mapNode.layers.size;
                 this.maps.set(mapItem.mapId, mapNode);
-                ungrouped.push(mapNode);
+                rootNodes.push(mapNode);
             }
         }
 
-        this.nodes = [...groups.values(), ...ungrouped];
+        this.nodes = rootNodes;
     }
 
     /** Rebuilds the style-option children for every layer from the currently visible style sheets. */

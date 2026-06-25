@@ -102,7 +102,9 @@ export class MapRenderService {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                 }
             });
-            this.stateService.prune(this.mapInfo.maps.maps, this.styleService.styles);
+            if (this.mapInfo.canPruneStateForCurrentCatalog()) {
+                this.stateService.prune(this.mapInfo.maps.maps, this.styleService.styles);
+            }
         });
         this.styleService.styleAddedForId.subscribe(styleId => {
             this.viewStates().forEach((_, viewIndex) => {
@@ -147,7 +149,9 @@ export class MapRenderService {
             this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{features: hoveredFeatureWrappers}]);
         });
         this.stateService.numViewsState.subscribe(_ => {
-            this.stateService.prune(this.mapInfo.maps.maps, this.styleService.styles);
+            if (this.mapInfo.canPruneStateForCurrentCatalog()) {
+                this.stateService.prune(this.mapInfo.maps.maps, this.styleService.styles);
+            }
         });
     }
 

@@ -412,7 +412,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.openDialog(this.advancedPreferencesDialogLayoutId);
     }
 
-    /** Toggles HTTP compression for `/tiles/next` pull responses. */
+    /** Toggles HTTP compression for `/interactive/payload` pull responses. */
     setTilePullCompressionEnabled(enabled: boolean) {
         this.tilePullCompressionEnabledSetting = enabled;
         this.stateService.tilePullCompressionEnabled = enabled;
