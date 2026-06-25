@@ -8,7 +8,13 @@ import {Menu} from "primeng/menu";
 import {Popover} from "primeng/popover";
 import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
+import {
+    CoverageRectItem,
+    dataSourceCatalogStatus,
+    MapInfoItem,
+    removeGroupPrefix,
+    StyleOptionNode
+} from "./map.tree.model";
 import {Subscription} from "rxjs";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
@@ -31,7 +37,9 @@ interface BackgroundLayerOption {
 @Component({
     selector: 'map-panel',
     template: `
-        <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
+        <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header=""
+                  [visible]="layerDialogVisible"
+                  (visibleChange)="setMapsPanelVisible($event)"
                   [position]="'left'" [draggable]="false" [resizable]="false" 
                   (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
@@ -225,21 +233,20 @@ interface BackgroundLayerOption {
                                 <p-tree [value]="mapGroups.nodes">
                                     <!-- Template for Group nodes -->
                                     <ng-template let-node pTemplate="Group">
-                                        <div class="font-bold white-space-nowrap"
-                                             style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
-                                              (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
-                                            more_vert
-                                        </span>
-                                            <span class="checkbox-entry">
-                                            <p-checkbox [ngModel]="node.visible[index]"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
-                                                        [binary]="true"
-                                                        [inputId]="index + '_' + node.id"
-                                                        [name]="index + '_' + node.id" tabindex="0"/>
-                                            <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
-                                        </span>
+                                        <div class="flex-container map-group-row">
+                                            <span class="checkbox-entry map-tree-title">
+                                                <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
+                                                      (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
+                                                    more_vert
+                                                </span>
+                                                <p-checkbox [ngModel]="node.visible[index]"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
+                                                            [binary]="true"
+                                                            [inputId]="index + '_' + node.id"
+                                                            [name]="index + '_' + node.id" tabindex="0"/>
+                                                <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                            </span>
                                         </div>
                                     </ng-template>
                                     <!-- Template for Map nodes -->
@@ -247,8 +254,17 @@ interface BackgroundLayerOption {
                                         <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
                                                 [popup]="true"
                                                 appendTo="body"/>
-                                        <div class="flex-container">
-                                            <span class="checkbox-entry">
+                                        <div class="flex-container map-tree-row"
+                                             [ngClass]="{'has-datasource-status': dataSourceStatus(node.info) !== 'ready'}">
+                                            <span class="checkbox-entry map-tree-title">
+                                                @if (dataSourceStatus(node.info) !== 'ready') {
+                                                    <span class="datasource-status"
+                                                          [ngClass]="dataSourceStatusClass(node.info)"
+                                                          [style.--datasource-progress]="dataSourceProgressIndicator(node.info)"
+                                                          [pTooltip]="dataSourceStatusTooltip(node.info)"
+                                                          tooltipPosition="bottom">
+                                                    </span>
+                                                }
                                                 <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
                                                       (click)="showLayersToggleMenu($event, index, node.id, '')">
                                                         more_vert
@@ -257,9 +273,13 @@ interface BackgroundLayerOption {
                                                             (click)="$event.stopPropagation()"
                                                             (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
                                                             [binary]="true"
+                                                            [disabled]="dataSourceStatus(node.info) !== 'ready'"
                                                             [inputId]="index + '_' + node.id"
                                                             [name]="index + '_' + node.id" tabindex="0"/>
-                                                <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                                <label [for]="index + '_' + node.id"
+                                                       [ngClass]="{'disabled-label': dataSourceStatus(node.info) !== 'ready'}">
+                                                    {{ removeGroupPrefix(node.id) }}
+                                                </label>
                                             </span>
                                             <div class="map-controls">
                                                 <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
@@ -285,9 +305,8 @@ interface BackgroundLayerOption {
                                     </ng-template>
                                     <!-- Template for Feature Layer nodes -->
                                     <ng-template let-node pTemplate="Features">
-                                        <div *ngIf="node.type != 'SourceData'" class="flex-container">
-                                            <div class="font-bold white-space-nowrap"
-                                                 style="display: flex; align-items: center;">
+                                        <div *ngIf="node.type != 'SourceData'" class="flex-container map-layer-row">
+                                            <div class="font-bold white-space-nowrap layer-tree-title">
                                                 <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
                                                       (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
                                                     more_vert
@@ -341,7 +360,7 @@ interface BackgroundLayerOption {
                                     </ng-template>
                                     <!-- Template for boolean style option nodes -->
                                     <ng-template let-node pTemplate="Bool">
-                                        <div style="display: flex; align-items: center;">
+                                        <div class="map-option-row">
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
@@ -378,6 +397,32 @@ interface BackgroundLayerOption {
         .disabled {
             pointer-events: none;
             opacity: 0.5;
+        }
+
+        .datasource-status {
+            width: 1.04rem;
+            height: 1.04rem;
+            margin: 0 0.04rem 0 0;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+        }
+
+        .datasource-status.failed {
+            background: #ef4444;
+            box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.5);
+        }
+
+        .datasource-status.initializing {
+            background:
+                conic-gradient(#60a5fa var(--datasource-progress, 0%), rgba(96, 165, 250, 0.2) 0);
+            box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.45);
+        }
+
+        .disabled-label {
+            opacity: 0.65;
         }
 
     `],
@@ -620,7 +665,7 @@ export class MapPanelComponent {
 
     /** Toggles the visibility of the maps panel dialog. */
     toggleLayerDialog() {
-        this.layerDialogVisible = !this.layerDialogVisible;
+        this.setMapsPanelVisible(!this.layerDialogVisible);
     }
 
     /** Moves the target view camera to the coverage bounds represented by one tree node. */
@@ -805,6 +850,27 @@ export class MapPanelComponent {
         return this.viewState.getEffectiveMapLayerLevel(viewIndex, mapName, layerName);
     }
 
+    /** Returns the catalog startup status for a map tree entry. */
+    dataSourceStatus(mapInfo: MapInfoItem) {
+        return dataSourceCatalogStatus(mapInfo);
+    }
+
+    /** Maps datasource startup status to the small connectivity indicator class. */
+    dataSourceStatusClass(mapInfo: MapInfoItem): string {
+        return dataSourceCatalogStatus(mapInfo);
+    }
+
+    /** Returns a concise datasource status tooltip for ready, initializing, and failed entries. */
+    dataSourceStatusTooltip(mapInfo: MapInfoItem): string {
+        return this.mapService.dataSourceStatusText(mapInfo);
+    }
+
+    /** Returns the CSS percentage used by the datasource loading pie indicator. */
+    dataSourceProgressIndicator(mapInfo: MapInfoItem): string {
+        const progress = this.mapService.dataSourceProgressPercent(mapInfo);
+        return progress === null ? "0%" : `${progress}%`;
+    }
+
     /** Persists a style option change and triggers visualization refresh for the affected view. */
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {
         this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
@@ -842,7 +908,15 @@ export class MapPanelComponent {
 
     /** Closes the maps panel through shared app state. */
     protected closeMapsPanel() {
-        this.stateService.mapsOpenState.next(false);
+        this.setMapsPanelVisible(false);
+    }
+
+    /** Keeps direct PrimeNG dialog closes, Escape, shortcuts, and the main-bar button in one state path. */
+    protected setMapsPanelVisible(isVisible: boolean) {
+        this.layerDialogVisible = isVisible;
+        if (this.stateService.mapsOpenState.getValue() !== isVisible) {
+            this.stateService.mapsOpenState.next(isVisible);
+        }
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

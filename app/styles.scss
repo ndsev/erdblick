@@ -3409,8 +3409,8 @@ inspection-tree {
 
 .map-layer-dialog {
   .close-maps-button {
+    display: none;
     margin: 0 0 0 auto;
-    visibility: collapse;
 
     .p-button {
       width: 1.75em !important;
@@ -3899,17 +3899,91 @@ inspection-tree {
     }
   }
 
+  .p-tree-node-content:has(.map-tree-row.has-datasource-status) > .p-tree-node-toggle-button {
+    display: none;
+  }
+
+  .p-tree-node-content,
+  .p-tree-node-label {
+    min-width: 0;
+  }
+
+  .p-tree-node-content {
+    align-items: center;
+    min-height: 1.82em;
+    padding-bottom: 0;
+    padding-top: 0;
+  }
+
+  .p-tree-root,
+  .p-tree-root-children,
+  .p-tree-node-children {
+    gap: 2px;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .map-option-row) {
+    gap: 0;
+  }
+
+  .p-tree-node:has(> .p-tree-node-children > p-treenode > .p-tree-node > .p-tree-node-content .flex-container) > .p-tree-node-content {
+    margin-bottom: 2px;
+  }
+
+  .p-tree-node-label {
+    box-sizing: border-box;
+    display: flex;
+    overflow: hidden;
+    padding-right: 0.75em;
+  }
+
+  .p-tree-node-label > span {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .p-tree-node-label > span > .flex-container {
+    flex: 1 1 auto;
+  }
+
+  .p-tree .p-tree-node-leaf {
+    padding-left: 0 !important;
+  }
+
+  .p-tree-node-content:not(:has(.flex-container)):not(:has(.oblique)) .p-tree-node-label > span > div {
+    gap: 0.25em;
+    min-width: 0;
+    overflow: hidden;
+
+    label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
   .flex-container {
     padding: 0;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
     align-items: center;
+    gap: 0.25em;
+    width: 100%;
+    min-width: 0;
+    min-height: 1.82em;
 
     &:hover {
+      &.map-layer-row {
+        grid-template-columns: minmax(0, 1fr) max-content;
+      }
+
       .tree-node-controls {
-        visibility: visible;
+        display: flex;
         opacity: 1;
-        transition: opacity 0.25s, visibility 0.25s;
+        transition: opacity 0.25s;
       }
 
       .level-indicator {
@@ -3917,29 +3991,74 @@ inspection-tree {
       }
     }
 
+    .map-tree-title,
+    .layer-tree-title {
+      display: flex;
+      align-items: center;
+      flex: 1 1 auto;
+      grid-column: 1;
+      grid-row: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .menu-toggler {
+      flex: 0 0 auto;
+    }
+
+    .checkbox-entry {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+
+      p-checkbox {
+        flex: 0 0 auto;
+      }
+
+      label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
     .level-indicator {
       display: block;
+      grid-column: 2;
+      grid-row: 1;
+      justify-self: end;
       margin: 0;
       order: 2;
       width: 2em;
+      flex: 0 0 2em;
       text-align: center;
-      height: 1.75em;
+      height: 1.55em;
       padding: 0;
     }
 
     .tree-node-controls {
-      display: flex;
+      display: none;
+      align-items: center;
       gap: 0.25em;
-      width: 12em;
+      grid-column: 2;
+      grid-row: 1;
+      justify-self: end;
+      width: max-content;
+      flex: 0 0 auto;
       justify-content: flex-end;
-      visibility: hidden;
+      min-width: 0;
       opacity: 0;
-      transition: opacity 0s, visibility 0s;
+      transition: opacity 0s;
 
       button {
-        width: 1.75em;
-        height: 1.75em;
+        width: 1.45rem;
+        height: 1.45rem;
         box-shadow: none;
+      }
+
+      p-button {
+        line-height: 0;
       }
 
       input {
@@ -3947,14 +4066,14 @@ inspection-tree {
         border-radius: 0;
         width: 2em;
         text-align: center;
-        height: 1.69em;
+        height: 1.45rem;
         padding: 0;
       }
 
       .p-inputnumber-button {
-        width: 2em;
+        width: 1.45rem;
         text-align: center;
-        height: 2.2em;
+        height: 1.45rem;
         font-size: 0.9em;
         padding: 0;
       }
@@ -3971,14 +4090,52 @@ inspection-tree {
     .map-controls {
       display: flex;
       gap: 0.25em;
+      grid-column: 2;
+      grid-row: 1;
+      justify-self: end;
       width: 4em;
+      flex: 0 0 4em;
       justify-content: flex-end;
 
       button {
-        width: 1.75em;
-        height: 1.75em;
+        width: 1.55em;
+        height: 1.55em;
         box-shadow: none;
       }
+    }
+  }
+
+  .map-tree-row {
+    grid-template-columns: minmax(0, 1fr) 4em;
+  }
+
+  .map-layer-row {
+    grid-template-columns: minmax(0, 1fr) 2em;
+  }
+
+  .map-group-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .map-option-row {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    min-height: 1.82em;
+  }
+
+  .p-tree-node-label > span .checkbox-entry.oblique {
+    align-items: center;
+    padding-left: 0.33em;
+    min-width: 0;
+    min-height: 1.82em;
+    overflow: hidden;
+
+    label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   }
 }
@@ -5918,6 +6075,7 @@ simfil-expression-input {
 
   .map-layer-dialog {
     .close-maps-button {
+      display: block;
       visibility: visible;
     }
 
