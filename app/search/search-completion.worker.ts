@@ -491,7 +491,7 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
         )
     );
     const mapLayerInference = normalizeMapLayerInference(
-        activeParser.getMapLayersForQuery(message.query, schemaOptions())
+        activeParser.getMapLayersForQuery(message.query, schemaOptions(message.selectedMapLayers))
     );
     postMessage({
         type: "SearchScopeAnalysisResult",

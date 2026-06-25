@@ -67,24 +67,23 @@ import {
     normalizeHexColor,
     SearchStyleCategoryStopDraft,
     SearchStyleColorDraft,
-    SearchStyleFieldOption,
     serializableCategoryStops,
     serializableGradientStops
 } from "./search-style-color.util";
 import {SimfilExpressionInputComponent} from "./simfil-expression-input.component";
+import {
+    defaultSearchStyleFieldOptionsForAnalysis,
+    preferredSearchAutoStyleField,
+    searchAutoStyleFieldOptions
+} from "./feature-search-auto-style.util";
+import type {FeatureSearchAutoStyleOption} from "./feature-search-auto-style.util";
 
 interface FeatureSearchGroupingOption {
     name: string;
     value: number;
 }
 
-interface FeatureSearchStyleOption extends SearchStyleFieldOption {
-    mapId?: string;
-    layerId?: string;
-    attrName?: string;
-    attrLayerName?: string;
-    featureType?: string;
-}
+type FeatureSearchStyleOption = FeatureSearchAutoStyleOption;
 
 interface FeatureSearchScopeOption {
     label: string;
@@ -1367,7 +1366,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Returns the preferred schema field for initial style rules and new filter conditions. */
     private defaultStyleFieldOption(session = this.session): FeatureSearchStyleOption | undefined {
         const options = this.defaultStyleFieldOptionsForSession(session);
-        return this.preferredAutoStyleField(options, session)
+        return preferredSearchAutoStyleField(options, session?.schemaAnalysis)
             ?? options[0]
             ?? this.styleScalarAttributeOptions[0];
     }
@@ -1401,63 +1400,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return "solid";
     }
 
-    /** Prefers feature type in feature scope and native attribute fields in attribute scope. */
-    private preferredAutoStyleField(
-        options: FeatureSearchStyleOption[],
-        session: FeatureSearchSession | undefined
-    ): FeatureSearchStyleOption | undefined {
-        const nativeScalarOptions = options.filter(option => !option.value.startsWith("$"));
-        const matchedFieldNames = new Set(session?.schemaAnalysis.matchedFieldNames ?? []);
-        const matchedEnumValues = new Set(session?.schemaAnalysis.matchedEnumValues ?? []);
-        const mentionedOptions = nativeScalarOptions.filter(option =>
-            this.optionMatchesAnalyzedFieldNames(option, matchedFieldNames)
-            || this.optionMatchesAnalyzedEnumValues(option, matchedEnumValues));
-        const mentionedAttributeOption = mentionedOptions.find(option => !!option.attrName);
-        if (mentionedAttributeOption) {
-            return mentionedAttributeOption;
-        }
-        if (mentionedOptions.length > 0) {
-            return mentionedOptions[0];
-        }
-        const typeIdOption = nativeScalarOptions.find(option => option.value === "typeId");
-        if (typeIdOption && session?.schemaAnalysis.concreteScope !== "attribute") {
-            return typeIdOption;
-        }
-        return nativeScalarOptions.find(option => !!option.attrName)
-            ?? typeIdOption
-            ?? nativeScalarOptions[0];
-    }
-
     /** Limits automatic defaults to fields that belong to the resolved query scope. */
     private defaultStyleFieldOptionsForSession(session: FeatureSearchSession | undefined): FeatureSearchStyleOption[] {
-        const nativeOptions = this.styleScalarAttributeOptions.filter(option => !option.value.startsWith("$"));
-        if (session?.schemaAnalysis.status !== "ready") {
-            return nativeOptions;
-        }
-        if (session.schemaAnalysis.concreteScope === "feature") {
-            return nativeOptions.filter(option => !option.attrName);
-        }
-        return nativeOptions.filter(option => !!option.attrName);
-    }
-
-    /** Matches an option's leaf field against schema-analysis terms such as `length`. */
-    private optionMatchesAnalyzedFieldNames(option: FeatureSearchStyleOption, fieldNames: Set<string>): boolean {
-        if (fieldNames.size === 0) {
-            return false;
-        }
-        return this.styleFieldLeafName(option.value)
-            .some(leafName => fieldNames.has(leafName));
-    }
-
-    /** Matches enum queries such as `SPEED_LIMIT_END` to their concrete enum field. */
-    private optionMatchesAnalyzedEnumValues(option: FeatureSearchStyleOption, enumValues: Set<string>): boolean {
-        return enumValues.size > 0 && (option.enumValues ?? []).some(value => enumValues.has(value));
-    }
-
-    /** Returns candidate terminal identifiers for a style field expression. */
-    private styleFieldLeafName(field: string): string[] {
-        const leafName = field.match(/([A-Za-z_][A-Za-z0-9_]*)$/)?.[1];
-        return leafName ? [leafName] : [];
+        return defaultSearchStyleFieldOptionsForAnalysis(
+            this.styleScalarAttributeOptions,
+            session?.schemaAnalysis);
     }
 
     /** Returns a non-destructive default filter value for the selected field type. */
@@ -2324,69 +2271,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Selects all schema fields that should get an automatically generated style rule. */
     private autoStyleFieldOptions(session: FeatureSearchSession): FeatureSearchStyleOption[] {
-        if (session.schemaAnalysis.status !== "ready") {
-            return [];
-        }
-        if (session.schemaAnalysis.concreteScope !== "attribute") {
-            const fieldOption = this.defaultStyleFieldOption(session);
-            return fieldOption ? [fieldOption] : [];
-        }
-
-        const uniqueScopes = this.uniqueAutoStyleAttributeScopes(session.schemaAnalysis.attributeScopes);
-        if (uniqueScopes.length <= 1) {
-            const fieldOption = this.defaultStyleFieldOption(session);
-            return fieldOption ? [fieldOption] : [];
-        }
-
-        const result: FeatureSearchStyleOption[] = [];
-        const seen = new Set<string>();
-        for (const scope of uniqueScopes) {
-            const scopeOptions = this.defaultStyleFieldOptionsForSession(session)
-                .filter(option => this.styleOptionMatchesAttributeScope(option, scope));
-            const fieldOption = this.preferredAutoStyleField(scopeOptions, session)
-                ?? scopeOptions[0];
-            if (!fieldOption) {
-                continue;
-            }
-            const key = this.autoStyleFieldOptionKey(fieldOption);
-            if (!seen.has(key)) {
-                seen.add(key);
-                result.push(fieldOption);
-            }
-        }
-        return result;
-    }
-
-    /** Dedupe attribute scopes across maps/layers while preserving distinct attributes. */
-    private uniqueAutoStyleAttributeScopes(
-        scopes: FeatureSearchAttributeScopeCandidate[]
-    ): FeatureSearchAttributeScopeCandidate[] {
-        const result: FeatureSearchAttributeScopeCandidate[] = [];
-        const seen = new Set<string>();
-        for (const scope of scopes) {
-            const key = scope.attrName;
-            if (!seen.has(key)) {
-                seen.add(key);
-                result.push(scope);
-            }
-        }
-        return result;
-    }
-
-    /** Matches a schema field option to an inferred attribute scope, ignoring map/layer duplicates. */
-    private styleOptionMatchesAttributeScope(
-        option: FeatureSearchStyleOption,
-        scope: FeatureSearchAttributeScopeCandidate
-    ): boolean {
-        return option.attrName === scope.attrName;
-    }
-
-    /** Stable dedupe key for auto-generated style fields. */
-    private autoStyleFieldOptionKey(option: FeatureSearchStyleOption): string {
-        return [
-            option.attrName ?? "",
-            option.value
-        ].join("\n");
+        return searchAutoStyleFieldOptions(this.styleScalarAttributeOptions, session.schemaAnalysis);
     }
 
     /** Defers expensive WASM-backed field enumeration until the browser can paint the style tab. */
