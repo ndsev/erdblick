@@ -67,9 +67,7 @@ interface StyleSheetExportMenuNode {
             <ng-template #item let-item let-root="root">
                 <a pRipple class="p-menubar-item-link"
                    [ngClass]="{'sync-option-active': isSyncViewOptionActive(item), 'p-disabled': item.disabled}"
-                   [attr.aria-disabled]="item.disabled ? 'true' : null"
-                   [pTooltip]="item.tooltip ?? null"
-                   tooltipPosition="right">
+                   [attr.aria-disabled]="item.disabled ? 'true' : null">
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
                     <span>{{ item.name ?? item.label }}</span>
                     @if (!root && item.items?.length) {
@@ -665,7 +663,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return sessions.map(session => ({
             name: this.ellipsizeMenuLabel(session.definition.query, session.id),
             icon: 'manage_search',
-            tooltip: session.definition.query || session.id,
             command: () => { this.featureSearchService.openExportDialog(session.id); }
         }));
     }
@@ -680,7 +677,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             name: this.ellipsizeMenuLabel(item.label, item.featureId),
             icon: item.disabled ? 'hourglass_empty' : 'polyline',
             disabled: item.disabled,
-            tooltip: item.tooltip,
             command: () => { this.exportInspectedFeatureGeoJson(item); }
         }));
     }
