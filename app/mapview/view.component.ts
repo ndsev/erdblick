@@ -28,7 +28,10 @@ import {RightClickMenuService, SourceDataDropdownOption} from "./rightclickmenu.
 import {AppModeService} from "../shared/app-mode.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
-import {IRenderView} from "./render-view.model";
+import {
+    IRenderView,
+    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT
+} from "./render-view.model";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
@@ -123,6 +126,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private viewerPointerUpCapture?: (_event: PointerEvent) => void;
     private viewerPointerCancelCapture?: (_event: PointerEvent) => void;
     private viewerContextMenuCapture?: (event: MouseEvent) => void;
+    private layoutResizePrepareListener?: (event: Event) => void;
 
     @ViewChild('popover') featureIdsPopover!: Popover;
     @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
@@ -196,6 +200,22 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.cdr.markForCheck();
         };
         this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
+        this.layoutResizePrepareListener = () => {
+            if (!this.mapView) {
+                return;
+            }
+            const rect = this.viewerElement?.nativeElement.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) {
+                return;
+            }
+            this.ngZone.runOutsideAngular(() => {
+                this.mapView?.prepareForLayoutResize({
+                    width: rect.width,
+                    height: rect.height
+                });
+            });
+        };
+        window.addEventListener(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, this.layoutResizePrepareListener);
     }
 
     /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
@@ -266,6 +286,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.teardownViewerContextMenuHandling();
         if (this.mediaQueryList && this.mediaQueryChangeListener) {
             this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
+        }
+        if (this.layoutResizePrepareListener) {
+            window.removeEventListener(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, this.layoutResizePrepareListener);
+            this.layoutResizePrepareListener = undefined;
         }
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();
