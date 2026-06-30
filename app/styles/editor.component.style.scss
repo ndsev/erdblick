@@ -1,0 +1,27 @@
+.editor-container {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  overflow: hidden;
+  border: 1px solid silver;
+}
+
+.filter-panel {
+  .p-overlaypanel-content {
+    padding: 0.75em;
+  }
+}
+
+.z-index-low {
+  position: absolute;
+  top: 4em;
+  left: 0.5em;
+  z-index: 149 !important;
+}
+

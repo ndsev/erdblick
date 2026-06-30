@@ -1,0 +1,173 @@
+.feature-search-dialog {
+  .p-dialog.p-component {
+    width: 42em;
+    min-width: min(38em, calc(100vw - 2em));
+    min-height: min(42em, calc(100vh - 5em));
+    max-width: calc(100vw - 2em);
+    max-height: calc(100vh - 5em);
+    margin: 0 !important;
+    overflow: hidden;
+  }
+
+  .p-dialog-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    padding: 0.25em;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .p-dialog-header {
+    flex: 0 0 auto;
+    padding: 0.25em 0.25em 0 0.25em;
+    overflow: visible;
+
+    .p-dialog-title {
+      font-size: medium;
+    }
+  }
+
+  .p-multiselect {
+    width: 100%;
+  }
+}
+
+.feature-search-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+
+  .p-accordioncontent-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0;
+  }
+}
+
+.feature-search-dock-container {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.25em;
+  height: 100%;
+  min-height: 0;
+  overflow-x: clip;
+  overflow-y: auto;
+  width: 100%;
+
+  feature-search {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  feature-search:only-child {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  &.reordering {
+    p-accordion-content {
+      visibility: collapse;
+    }
+  }
+
+  &.single-panel {
+    overflow-y: hidden;
+
+    feature-search,
+    .feature-search-panel {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      height: 100%;
+    }
+  }
+
+  &.multi-panel {
+    overflow-y: auto;
+
+    feature-search,
+    .feature-search-panel {
+      display: block;
+      flex: 0 0 auto;
+      min-height: 0;
+      min-width: 0;
+      height: fit-content;
+      max-width: 100%;
+      overflow: hidden;
+      width: 100%;
+    }
+  }
+
+  feature-search.dragging {
+    opacity: 0.6;
+  }
+
+  feature-search.dragging .app-surface-header {
+    cursor: grabbing;
+  }
+
+  feature-search.drop-before {
+    border-top: 2px solid var(--p-primary-500);
+  }
+
+  feature-search.drop-after {
+    border-bottom: 2px solid var(--p-primary-500);
+  }
+}
+
+.app-dock-drag-preview {
+  position: fixed;
+  z-index: 120000;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--p-primary-500) 75%, black);
+  border-radius: 6px;
+  overflow: hidden;
+  opacity: 0.8;
+  box-shadow: 0 0.5em 1.2em rgba(0, 0, 0, 0.2);
+  background: color-mix(in srgb, var(--p-content-background) 70%, transparent);
+}
+
+.app-dock-drag-preview-header {
+  padding: 0.25em 0.25em 0.25em 0.5em;
+  overflow: visible;
+
+  .app-surface-header {
+    cursor: grabbing;
+  }
+
+  .p-colorpicker-panel {
+    z-index: 9500;
+  }
+
+  .p-colorpicker input {
+    height: 1.5em;
+    width: 1.5em;
+  }
+}
+
+.app-dock-drag-preview-fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+                  135deg,
+                  rgba(0, 0, 0, 0.05) 0,
+                  rgba(0, 0, 0, 0.05) 0.5em,
+                  rgba(255, 255, 255, 0.05) 0.5em,
+                  rgba(255, 255, 255, 0.05) 1em
+  );
+}
+
+.feature-search-surface-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
