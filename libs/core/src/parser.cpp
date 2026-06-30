@@ -14,7 +14,7 @@
 #include <unordered_set>
 #include <nlohmann/json.hpp>
 #include "mapget/model/stringpool.h"
-#include "mapget/model/schemaregistry.h"
+#include "mapget/model/layerschema.h"
 #include "mapget/model/simfilutil.h"
 #include "simfil/model/model.h"
 #include "simfil/simfil.h"
@@ -105,7 +105,7 @@ std::string completionTypeHint(std::vector<std::string> typeNames)
 /** Adds schema type metadata to constant completions when available. */
 simfil::CompletionCandidate enrichCompletionCandidate(
     simfil::CompletionCandidate candidate,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     simfil::SchemaId rootSchema)
 {
     if (!registry || !candidate.hint.empty() || candidate.type != simfil::CompletionCandidate::Type::CONSTANT) {
@@ -140,7 +140,7 @@ void mergeCompletionHint(std::string& target, std::string const& hint)
 
 simfil::ModelNode::Ptr makeSchemaCompletionNode(
     std::shared_ptr<simfil::ModelPool> const& model,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     simfil::SchemaId schemaId,
     int depth,
     std::function<bool()> const& budgetExhausted = kNoCompletionBudget)
@@ -180,7 +180,7 @@ simfil::ModelNode::Ptr makeSchemaCompletionNode(
 void addAttributeOverlayFields(
     simfil::model_ptr<simfil::Object>& attributeRoot,
     std::shared_ptr<simfil::ModelPool> const& model,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     std::string const& featureType,
     std::function<bool()> const& budgetExhausted = kNoCompletionBudget)
 {
@@ -198,7 +198,7 @@ void addAttributeOverlayFields(
 
 void addCompletionCandidates(
     std::set<simfil::CompletionCandidate>& merged,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     std::shared_ptr<simfil::StringPool> const& strings,
     std::string const& query,
     int point,
@@ -206,7 +206,7 @@ void addCompletionCandidates(
     simfil::CompletionOptions const& options)
 {
     auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionSchemaRegistry(*env, registry, strings);
+    mapget::installCompletionLayerSchema(*env, registry, strings);
 
     auto result = simfil::complete(*env, query, point, root, options);
     if (!result) {
@@ -281,7 +281,13 @@ NativeJsValue completionCandidatesToJs(
 
 bool hasFeatureModelSchema(mapget::LayerInfo const& layerInfo)
 {
-    return !layerInfo.featureModelSchema_.is_null();
+    return static_cast<bool>(layerInfo.featureModelSchema_);
+}
+
+/** Return the JSON Schema transport view still needed for search-style metadata. */
+nlohmann::json featureModelSchemaJson(mapget::LayerInfo const& layerInfo)
+{
+    return layerInfo.featureModelSchema_ ? layerInfo.featureModelSchema_->toJsonSchema() : nlohmann::json::object();
 }
 
 struct SelectedLayerFilter
@@ -337,7 +343,7 @@ struct AttributeScopeInfo
     std::string mapId;
     std::string layerId;
     std::shared_ptr<mapget::LayerInfo const> layerInfo;
-    std::shared_ptr<mapget::SchemaRegistry const> registry;
+    std::shared_ptr<mapget::LayerSchema const> registry;
     simfil::SchemaId attributeSchema = simfil::NoSchemaId;
     simfil::SchemaId featureSchema = simfil::NoSchemaId;
 };
@@ -348,7 +354,7 @@ struct FeatureSchemaInfo
     std::string mapId;
     std::string layerId;
     std::shared_ptr<mapget::LayerInfo const> layerInfo;
-    std::shared_ptr<mapget::SchemaRegistry const> registry;
+    std::shared_ptr<mapget::LayerSchema const> registry;
     simfil::SchemaId featureSchema = simfil::NoSchemaId;
 };
 
@@ -484,7 +490,7 @@ std::vector<AttributeScopeInfo> collectAttributeScopes(
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
-            auto registry = layerInfo->schemaRegistry();
+            auto registry = layerInfo->layerSchema();
             if (!registry) {
                 continue;
             }
@@ -543,7 +549,7 @@ std::vector<FeatureSchemaInfo> collectFeatureSchemaScopes(
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
-            auto registry = layerInfo->schemaRegistry();
+            auto registry = layerInfo->layerSchema();
             if (!registry) {
                 continue;
             }
@@ -604,7 +610,7 @@ std::optional<std::vector<std::string>> schemaPathFieldNames(
 /** Convert a mapget registry path into the compile-local SIMFIL string pool. */
 std::optional<simfil::SchemaPath> schemaPathFromNamedPath(
     std::shared_ptr<simfil::StringPool> const& strings,
-    mapget::SchemaRegistry::NamedSchemaPath const& namedPath)
+    mapget::LayerSchema::NamedSchemaPath const& namedPath)
 {
     simfil::SchemaPath path;
     path.reserve(namedPath.size());
@@ -670,7 +676,7 @@ private:
 };
 
 std::shared_ptr<simfil::ObjectSchema> makeAttributeSearchRootSchema(
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     std::shared_ptr<simfil::StringPool> const& strings,
     std::string const& attributeName,
     simfil::SchemaId attributeSchema,
@@ -749,7 +755,7 @@ tl::expected<FeatureScopeAstDebug, simfil::Error> compileFeatureScopeQueryAstDeb
 {
     auto strings = std::make_shared<mapget::StringPool>("SearchScopeAnalysis");
     auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionSchemaRegistry(*env, featureScope.registry, strings);
+    mapget::installCompletionLayerSchema(*env, featureScope.registry, strings);
     auto ast = simfil::compile(*env, query, simfil::CompileOptions{
         .any = false,
         .rewriteMode = simfil::RewriteMode::Schema,
@@ -775,7 +781,7 @@ tl::expected<FeatureScopeAstDebug, simfil::Error> compileFeatureScopeQueryAstDeb
             featureScope.featureType,
             featureScope.featureSchema,
             *fieldNames);
-        if (owner.kind_ != mapget::SchemaRegistry::PathOwnerKind::Attribute) {
+        if (owner.kind_ != mapget::LayerSchema::PathOwnerKind::Attribute) {
             continue;
         }
 
@@ -804,7 +810,7 @@ tl::expected<simfil::ASTPtr, simfil::Error> compileAttributeScopeQueryAst(
 {
     auto strings = std::make_shared<mapget::StringPool>("SearchScopeAnalysis");
     auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionSchemaRegistry(*env, scope.registry, strings);
+    mapget::installCompletionLayerSchema(*env, scope.registry, strings);
     installAttributeSearchRootSchema(
         *env,
         makeAttributeSearchRootSchema(scope.registry, strings, scope.attrName, scope.attributeSchema, scope.featureSchema));
@@ -913,7 +919,7 @@ std::vector<AttributeScopeInfo> filterScopesByAttributeLiterals(
 }
 
 bool schemaMatchesQueryLayerTerms(
-    mapget::SchemaRegistry const& registry,
+    mapget::LayerSchema const& registry,
     simfil::SchemaId schemaId,
     QueryLayerTerms const& terms,
     SearchQueryMapLayerInference* inference = nullptr);
@@ -945,7 +951,7 @@ std::vector<AttributeScopeInfo> resolveAttributeScopesForQuery(
                 featureScope.featureType,
                 featureScope.featureSchema,
                 fieldPath);
-            if (owner.kind_ == mapget::SchemaRegistry::PathOwnerKind::Feature) {
+            if (owner.kind_ == mapget::LayerSchema::PathOwnerKind::Feature) {
                 hasFeatureOwnedTerm = true;
                 break;
             }
@@ -975,7 +981,7 @@ std::vector<AttributeScopeInfo> resolveAttributeScopesForQuery(
 
 /** Return whether a schema can contain a field or enum term collected from the query. */
 bool schemaMatchesQueryLayerTerms(
-    mapget::SchemaRegistry const& registry,
+    mapget::LayerSchema const& registry,
     simfil::SchemaId schemaId,
     QueryLayerTerms const& terms,
     SearchQueryMapLayerInference* inference)
@@ -1207,7 +1213,7 @@ void mergeNumericRange(SearchStyleSchemaMetadata& target, SearchStyleSchemaMetad
 SearchStyleSchemaMetadata schemaMetadata(
     nlohmann::json const& root,
     nlohmann::json const* schema,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     simfil::SchemaId schemaId,
     int depth = 8)
 {
@@ -1335,11 +1341,11 @@ SearchStyleSchemaMetadata overlayFieldMetadata(std::string const& path)
 }
 
 nlohmann::json const* schemaForRegistryKey(
-    mapget::LayerInfo const& layerInfo,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    nlohmann::json const& rootSchema,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     std::string const& key)
 {
-    if (!registry || layerInfo.featureModelSchema_.is_null()) {
+    if (!registry || rootSchema.is_null()) {
         return nullptr;
     }
     auto const* entry = registry->getSchema(key);
@@ -1349,12 +1355,12 @@ nlohmann::json const* schemaForRegistryKey(
     auto const& pointer = entry->jsonPointer_;
     try {
         if (pointer == "#") {
-            return &layerInfo.featureModelSchema_;
+            return &rootSchema;
         }
         if (!pointer.empty() && pointer.front() == '#') {
-            return &layerInfo.featureModelSchema_.at(nlohmann::json::json_pointer(pointer.substr(1)));
+            return &rootSchema.at(nlohmann::json::json_pointer(pointer.substr(1)));
         }
-        return &layerInfo.featureModelSchema_.at(nlohmann::json::json_pointer(pointer));
+        return &rootSchema.at(nlohmann::json::json_pointer(pointer));
     } catch (...) {
         return nullptr;
     }
@@ -1363,7 +1369,7 @@ nlohmann::json const* schemaForRegistryKey(
 /** Recursively enumerates nested schema paths that mapget can return through `withFields`. */
 void collectSchemaFieldPaths(
     std::vector<SearchStyleFieldPath>& paths,
-    std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    std::shared_ptr<mapget::LayerSchema const> const& registry,
     simfil::SchemaId schemaId,
     nlohmann::json const* schemaJson,
     nlohmann::json const& rootSchema,
@@ -1477,15 +1483,15 @@ NativeJsValue mapLayerInferenceToJs(SearchQueryMapLayerInference const& inferenc
 }
 
 /** Convert UI scope string into the mapget normalizer scope enum. */
-mapget::SchemaRegistry::SearchQueryRequestedScope requestedSearchScopeFromString(std::string const& scope)
+mapget::LayerSchema::SearchQueryRequestedScope requestedSearchScopeFromString(std::string const& scope)
 {
     if (scope == "attribute") {
-        return mapget::SchemaRegistry::SearchQueryRequestedScope::Attribute;
+        return mapget::LayerSchema::SearchQueryRequestedScope::Attribute;
     }
     if (scope == "auto") {
-        return mapget::SchemaRegistry::SearchQueryRequestedScope::Auto;
+        return mapget::LayerSchema::SearchQueryRequestedScope::Auto;
     }
-    return mapget::SchemaRegistry::SearchQueryRequestedScope::Feature;
+    return mapget::LayerSchema::SearchQueryRequestedScope::Feature;
 }
 
 /** Parenthesize generated normalized query branches before joining with OR. */
@@ -1517,7 +1523,7 @@ std::string mergeNormalizedAttributeQueries(std::vector<std::string> queries)
 /** Convert mapget layer-local attribute owners into erdblick's JS scope-candidate shape. */
 void appendNormalizedAttributeScopes(
     JsValue& result,
-    std::vector<mapget::SchemaRegistry::AttributePathOwner> const& scopes,
+    std::vector<mapget::LayerSchema::AttributePathOwner> const& scopes,
     std::string const& mapId,
     std::string const& layerId,
     std::set<std::string>& seen)
@@ -1907,7 +1913,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
         auto [inserted, _] = schemaCompletionRoots_.emplace(key, std::move(entry));
         return inserted->second.get();
     };
-    auto completionCacheKey = [](std::shared_ptr<mapget::SchemaRegistry const> const& registry,
+    auto completionCacheKey = [](std::shared_ptr<mapget::LayerSchema const> const& registry,
                                  std::string_view kind,
                                  simfil::SchemaId schema,
                                  simfil::SchemaId overlaySchema = simfil::NoSchemaId,
@@ -1932,7 +1938,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
-            std::shared_ptr<mapget::SchemaRegistry const> registry = layerInfo->schemaRegistry();
+            std::shared_ptr<mapget::LayerSchema const> registry = layerInfo->layerSchema();
             if (!registry) {
                 continue;
             }
@@ -2065,7 +2071,7 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
     NativeJsValue const& options_) const
 {
     // Normalization is mapget-owned and layer-local: every selected feature
-    // layer owns one SchemaRegistry, and that registry performs the actual
+    // layer owns one LayerSchema, and that registry performs the actual
     // schema-aware SIMFIL AST analysis/rewrite. Erdblick only merges the
     // layer-local results into the single backend query currently carried by
     // the search websocket request.
@@ -2086,12 +2092,12 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
             if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                 continue;
             }
-            auto registry = layerInfo->schemaRegistry();
+            auto registry = layerInfo->layerSchema();
             if (!registry) {
                 continue;
             }
 
-            // SchemaRegistry::normalizeSearchQuery compiles the query with
+            // LayerSchema::normalizeSearchQuery compiles the query with
             // SIMFIL RewriteMode::Schema against each feature root, maps the
             // resulting referencedSchemaPaths to feature/attribute owners, and
             // rewrites explicit feature-root attribute paths to attribute-root
@@ -2106,7 +2112,7 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
                 continue;
             }
 
-            if (normalized->concreteScope_ == mapget::SchemaRegistry::SearchQueryConcreteScope::Attribute) {
+            if (normalized->concreteScope_ == mapget::LayerSchema::SearchQueryConcreteScope::Attribute) {
                 anyAttributeScope = true;
                 normalizedAttributeQueries.push_back(normalized->normalizedQuery_);
                 appendNormalizedAttributeScopes(
@@ -2124,7 +2130,7 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
 
     auto normalizedQuery = query;
     auto concreteScope = std::string("feature");
-    if (requestedScope == mapget::SchemaRegistry::SearchQueryRequestedScope::Attribute || anyAttributeScope) {
+    if (requestedScope == mapget::LayerSchema::SearchQueryRequestedScope::Attribute || anyAttributeScope) {
         concreteScope = "attribute";
         // A single erdblick search request may cover several selected layers.
         // Each layer-local normalizer already produced guarded attribute-root
@@ -2240,23 +2246,26 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
         auto const allScopes = collectAttributeScopes(info_, selectedLayers);
         auto const& scopes = discoveredAttributeScopes.empty() ? allScopes : discoveredAttributeScopes;
         for (auto const& attrScope : scopes) {
+            auto const rootSchema = attrScope.layerInfo
+                ? featureModelSchemaJson(*attrScope.layerInfo)
+                : nlohmann::json::object();
             auto const* attributeSchemaJson = attrScope.layerInfo
                 ? schemaForRegistryKey(
-                    *attrScope.layerInfo,
+                    rootSchema,
                     attrScope.registry,
                     "Attribute:" + attrScope.featureType + ":" + attrScope.attrLayerName + ":" + attrScope.attrName)
                 : nullptr;
             if (!attributeSchemaJson && attrScope.layerInfo) {
                 auto const* layerMapJson = schemaForRegistryKey(
-                    *attrScope.layerInfo,
+                    rootSchema,
                     attrScope.registry,
                     "AttributeLayerMap:" + attrScope.featureType);
                 auto const* attrLayerJson = schemaChildForField(
-                    attrScope.layerInfo->featureModelSchema_,
+                    rootSchema,
                     layerMapJson,
                     attrScope.attrLayerName);
                 attributeSchemaJson = schemaChildForField(
-                    attrScope.layerInfo->featureModelSchema_,
+                    rootSchema,
                     attrLayerJson,
                     attrScope.attrName);
             }
@@ -2267,7 +2276,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 attrScope.registry,
                 attrScope.attributeSchema,
                 attributeSchemaJson,
-                attrScope.layerInfo ? attrScope.layerInfo->featureModelSchema_ : nlohmann::json::object(),
+                rootSchema,
                 "",
                 activeSchemas);
             for (auto const& path : paths) {
@@ -2307,7 +2316,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 attrScope.featureType,
                 overlayFieldMetadata("$feature"));
             auto const* featureSchemaJson = attrScope.layerInfo
-                ? schemaForRegistryKey(*attrScope.layerInfo, attrScope.registry, "Feature:" + attrScope.featureType)
+                ? schemaForRegistryKey(rootSchema, attrScope.registry, "Feature:" + attrScope.featureType)
                 : nullptr;
             std::vector<SearchStyleFieldPath> featurePaths;
             std::set<simfil::SchemaId> activeFeatureSchemas;
@@ -2316,7 +2325,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 attrScope.registry,
                 attrScope.featureSchema,
                 featureSchemaJson,
-                attrScope.layerInfo ? attrScope.layerInfo->featureModelSchema_ : nlohmann::json::object(),
+                rootSchema,
                 "$feature",
                 activeFeatureSchemas);
             for (auto const& path : featurePaths) {
@@ -2351,10 +2360,11 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                 if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
                     continue;
                 }
-                auto registry = layerInfo->schemaRegistry();
+                auto registry = layerInfo->layerSchema();
                 if (!registry) {
                     continue;
                 }
+                auto const rootSchema = featureModelSchemaJson(*layerInfo);
                 auto const layerTypeIdMetadata = typeIdSchemaMetadata(featureTypeIdsForLayer(*layerInfo));
                 addSearchStyleField(
                     fields,
@@ -2367,7 +2377,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     "",
                     layerTypeIdMetadata);
                 for (auto const& featureType : layerInfo->featureTypes_) {
-                    auto const* featureSchemaJson = schemaForRegistryKey(*layerInfo, registry, "Feature:" + featureType.name_);
+                    auto const* featureSchemaJson = schemaForRegistryKey(rootSchema, registry, "Feature:" + featureType.name_);
                     std::vector<SearchStyleFieldPath> paths;
                     std::set<simfil::SchemaId> activeSchemas;
                     collectSchemaFieldPaths(
@@ -2375,7 +2385,7 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                         registry,
                         registry->featureSchema(featureType.name_),
                         featureSchemaJson,
-                        layerInfo->featureModelSchema_,
+                        rootSchema,
                         "",
                         activeSchemas);
                     for (auto const& path : paths) {
