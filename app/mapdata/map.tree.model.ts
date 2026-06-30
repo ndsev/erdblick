@@ -47,7 +47,7 @@ export interface MapInfoItem extends Record<string, any> {
     mapId: string;
     maxParallelJobs: number;
     nodeId: string;
-    protocolVersion: { major: number, minor: number, patch: number };
+    protocolVersion?: { major: number, minor: number, patch: number };
     addOn: boolean;
     status?: DataSourceCatalogStatus | string;
     statusMessage?: string;

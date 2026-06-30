@@ -121,6 +121,7 @@ export class MapTileStreamService {
     private readonly searchResultEntryBatchSize = 5000;
     private readonly searchResultEntryFrameBudgetMs = 12;
     private sourceCatalogReloadPromise: Promise<void> | null = null;
+    private backendProtocolMismatchActive = false;
 
     constructor(
         private readonly stateService: AppStateService,
@@ -158,8 +159,32 @@ export class MapTileStreamService {
         this.tileStream.onSourceCatalogChanged = (change) => {
             this.ngZone.runOutsideAngular(() => this.handleSourceCatalogChanged(change));
         };
+        this.tileStream.onOpen = () => {
+            this.ngZone.run(() => {
+                this.backendProtocolMismatchActive = false;
+                this.messageService.clearBackendConnectionError();
+                this.messageService.clearBackendProtocolError();
+            });
+        };
+        this.tileStream.onProtocolMismatch = (mismatch) => {
+            const actual = `${mismatch.actual.major}.${mismatch.actual.minor}.${mismatch.actual.patch}`;
+            const expected = `${mismatch.expected.major}.${mismatch.expected.minor}.x`;
+            this.backendProtocolMismatchActive = true;
+            this.showBackendProtocolErrorMessage(
+                `The map backend uses unsupported tile-stream protocol ${actual}; this erdblick build requires ${expected}.`
+            );
+        };
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
+            if (!this.backendProtocolMismatchActive) {
+                this.showBackendConnectionErrorMessage("Could not connect to the map backend.");
+            }
+        };
+        this.tileStream.onClose = (event) => {
+            if (!this.backendProtocolMismatchActive && event.code !== 1000) {
+                const reason = event.reason ? ` (${event.reason})` : "";
+                this.showBackendConnectionErrorMessage(`The map backend connection was closed${reason}.`);
+            }
         };
         await this.mapInfo.reloadDataSources();
         this.scheduleUpdate();
@@ -1744,5 +1769,15 @@ export class MapTileStreamService {
     /** Proxies an error toast through Angular's zone. */
     private showErrorMessage(message: string) {
         this.ngZone.run(() => this.messageService.showError(message));
+    }
+
+    /** Shows one sticky backend-state toast without spamming repeated transport events. */
+    private showBackendConnectionErrorMessage(message: string) {
+        this.ngZone.run(() => this.messageService.showBackendConnectionError(message));
+    }
+
+    /** Shows one sticky backend protocol toast without spamming repeated frame events. */
+    private showBackendProtocolErrorMessage(message: string) {
+        this.ngZone.run(() => this.messageService.showBackendProtocolError(message));
     }
 }

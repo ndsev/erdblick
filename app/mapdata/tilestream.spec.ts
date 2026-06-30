@@ -1,14 +1,24 @@
 import {describe, expect, it} from 'vitest';
 import {
     MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_PROTOCOL_MAJOR,
+    MAP_TILE_STREAM_PROTOCOL_MINOR,
     MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
     MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
     MapTileStreamClient
 } from './tilestream';
 
-function jsonFrame(type: number, payload: object): Uint8Array {
+function jsonFrame(type: number, payload: object, version = {
+    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
+    minor: MAP_TILE_STREAM_PROTOCOL_MINOR,
+    patch: 0
+}): Uint8Array {
     const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
     const frame = new Uint8Array(MAP_TILE_STREAM_HEADER_SIZE + payloadBytes.length);
+    const header = new DataView(frame.buffer, 0, MAP_TILE_STREAM_HEADER_SIZE);
+    header.setUint16(0, version.major, true);
+    header.setUint16(2, version.minor, true);
+    header.setUint16(4, version.patch, true);
     frame[6] = type;
     new DataView(frame.buffer, 7, 4).setUint32(0, payloadBytes.length, true);
     frame.set(payloadBytes, MAP_TILE_STREAM_HEADER_SIZE);
@@ -158,6 +168,37 @@ describe('MapTileStreamClient', () => {
                     progress: null
                 }
             });
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('reports incompatible VTLV frame versions before dispatching payloads', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        let mismatch: unknown = null;
+        let statusReceived = false;
+        try {
+            client.withProtocolMismatchCallback(payload => {
+                mismatch = payload;
+            });
+            client.withStatusCallback(() => {
+                statusReceived = true;
+            });
+
+            await tileStream.handleMessage(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3
+            }, {major: 1, minor: 9, patch: 0}).buffer);
+
+            expect(mismatch).toEqual({
+                actual: {major: 1, minor: 9, patch: 0},
+                expected: {
+                    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
+                    minor: MAP_TILE_STREAM_PROTOCOL_MINOR
+                }
+            });
+            expect(statusReceived).toBe(false);
         } finally {
             client.destroy();
         }

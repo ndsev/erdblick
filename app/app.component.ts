@@ -50,6 +50,8 @@ declare let window: DebugWindow;
             <preferences></preferences>
             <survey></survey>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
+            <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>
+            <p-toast position="top-center" key="backend-protocol" [baseZIndex]="9700"></p-toast>
         }
         <legal-dialog></legal-dialog>
         <about-dialog></about-dialog>

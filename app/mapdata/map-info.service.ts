@@ -162,6 +162,7 @@ export class MapInfoService {
                 console.warn("Datasource config status:", message);
             }
 
+            this.messageService.clearBackendConnectionError();
             this.publishSourceCatalogTree(catalog);
             const readyEntries = catalog.filter(isDataSourceCatalogEntryReady);
             const jsonString = JSON.stringify(readyEntries);
@@ -176,7 +177,7 @@ export class MapInfoService {
             return true;
         } catch (err) {
             console.error("Failed to load data source info.", err);
-            this.messageService.showError("Failed to load data source info.");
+            this.messageService.showBackendConnectionError("Could not connect to the map backend to load datasource metadata.");
             return false;
         }
     }

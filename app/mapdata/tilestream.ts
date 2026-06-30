@@ -20,6 +20,8 @@ export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 export const MAP_TILE_STREAM_SEARCH_STATUS_TYPE = "mapget.search.status";
+export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 2;
+export const MAP_TILE_STREAM_PROTOCOL_MINOR = 0;
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 
@@ -114,6 +116,12 @@ export interface MapTileStreamSourceCatalogChangePayload {
     source?: MapTileStreamSourceCatalogChangeSource;
 }
 
+/** Details from a VTLV frame header whose major/minor version cannot be decoded safely. */
+export interface MapTileStreamProtocolMismatch {
+    actual: {major: number; minor: number; patch: number};
+    expected: {major: number; minor: number};
+}
+
 export interface MapTileStreamDebugState {
     isOpen: boolean;
     awaitingCompletion: boolean;
@@ -180,6 +188,7 @@ export class MapTileStreamClient {
     private knownCompressedUncompressedBytes: number = 0;
     private responsesWithKnownCompressedBytes: number = 0;
     private readonly ownsParser: boolean;
+    private protocolMismatchReported: boolean = false;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
@@ -189,8 +198,10 @@ export class MapTileStreamClient {
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
     onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
     onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
+    onOpen: (() => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
+    onProtocolMismatch: ((mismatch: MapTileStreamProtocolMismatch) => void) | null = null;
 
     /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
     constructor(private path: string = "/interactive", parser?: TileLayerParser) {
@@ -269,9 +280,21 @@ export class MapTileStreamClient {
         return this;
     }
 
+    /** Registers a websocket open callback. */
+    withOpenCallback(callback: () => void) {
+        this.onOpen = callback;
+        return this;
+    }
+
     /** Registers a websocket close callback. */
     withCloseCallback(callback: (event: CloseEvent) => void) {
         this.onClose = callback;
+        return this;
+    }
+
+    /** Registers a VTLV protocol-mismatch callback. */
+    withProtocolMismatchCallback(callback: (mismatch: MapTileStreamProtocolMismatch) => void) {
+        this.onProtocolMismatch = callback;
         return this;
     }
 
@@ -612,6 +635,8 @@ export class MapTileStreamClient {
 
             socket.onopen = () => {
                 this.connecting = null;
+                this.protocolMismatchReported = false;
+                this.onOpen?.();
                 resolve();
             };
             socket.onerror = (event) => {
@@ -783,11 +808,13 @@ export class MapTileStreamClient {
 
         let offset = 0;
         while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
-            const type = bytes[offset + 6];
-            const payloadLength = new DataView(
-                bytes.buffer,
-                bytes.byteOffset + offset + 7,
-                4).getUint32(0, true);
+            const header = this.readFrameHeader(bytes, offset);
+            if (!this.isCompatibleProtocol(header.version)) {
+                this.reportProtocolMismatch(header.version);
+                return;
+            }
+            const type = header.type;
+            const payloadLength = header.payloadLength;
             const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
             if (frameEnd > bytes.length) {
                 console.warn("Tile stream frame size mismatch.");
@@ -802,6 +829,45 @@ export class MapTileStreamClient {
         if (offset !== bytes.length) {
             console.warn("Tile stream frame alignment mismatch.");
         }
+    }
+
+    /** Reads the fixed-size VTLV header emitted by mapget's TileLayerStream writer. */
+    private readFrameHeader(bytes: Uint8Array, offset: number) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset + offset, MAP_TILE_STREAM_HEADER_SIZE);
+        return {
+            version: {
+                major: view.getUint16(0, true),
+                minor: view.getUint16(2, true),
+                patch: view.getUint16(4, true)
+            },
+            type: view.getUint8(6),
+            payloadLength: view.getUint32(7, true)
+        };
+    }
+
+    /** Returns whether a VTLV frame can be parsed by this frontend build. */
+    private isCompatibleProtocol(version: {major: number; minor: number}): boolean {
+        return version.major === MAP_TILE_STREAM_PROTOCOL_MAJOR
+            && version.minor === MAP_TILE_STREAM_PROTOCOL_MINOR;
+    }
+
+    /** Reports one protocol mismatch and stops the active transport because following frame parsing is unsafe. */
+    private reportProtocolMismatch(version: {major: number; minor: number; patch: number}): void {
+        if (!this.protocolMismatchReported) {
+            this.protocolMismatchReported = true;
+            this.onProtocolMismatch?.({
+                actual: version,
+                expected: {
+                    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
+                    minor: MAP_TILE_STREAM_PROTOCOL_MINOR
+                }
+            });
+        }
+        this.stopPullLoops();
+        this.rejectCompletion(new Error(
+            `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
+            + `expected ${MAP_TILE_STREAM_PROTOCOL_MAJOR}.${MAP_TILE_STREAM_PROTOCOL_MINOR}.x.`));
+        this.close(1002, "unsupported mapget tile-stream protocol");
     }
 
     /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
