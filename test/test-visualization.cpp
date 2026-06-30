@@ -1286,6 +1286,36 @@ rules:
     REQUIRE(reportHasProperty(nlohmann::json(badLateralOffset.validationReport()), "lateral-offset"));
 }
 
+TEST_CASE("FeatureLayerStyleSkipsUnsafeOptionIdentifiers", "[erdblick.style]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "OptionIdentifierValidation"
+options:
+  - label: Valid
+    id: showValid
+    type: bool
+    default: true
+  - label: Unsafe
+    id: "show~unsafe"
+    type: bool
+    default: true
+  - label: Duplicate
+    id: showValid
+    type: bool
+    default: false
+rules:
+  - type: Way
+    geometry: [line]
+)yaml"));
+
+    REQUIRE(style.isValid());
+    REQUIRE(style.options().size() == 1);
+    REQUIRE(style.options().front().id_ == "showValid");
+    auto report = nlohmann::json(style.validationReport());
+    REQUIRE(reportHasProperty(report, "id"));
+    REQUIRE(report["issues"].size() == 2);
+}
+
 TEST_CASE("DeckFeatureLayerVisualization renders all-of line leaves", "[erdblick.renderer]")
 {
     auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
