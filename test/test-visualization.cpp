@@ -458,7 +458,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeRelationTestTile(
         "RelationTestNode",
         "RelationTestMap",
         relationTestLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
     auto const center = tileId.center();
@@ -497,7 +497,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapge
         "RelationTestNode",
         "RelationTestMap",
         relationTestLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
     auto const center = tileId.center();
