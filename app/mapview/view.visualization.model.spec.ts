@@ -138,4 +138,37 @@ describe("ViewVisualizationState", () => {
             maxLowFiLod: LOW_FI_MAX_LOD
         });
     });
+
+    it("applies configured high and low fidelity threshold anchors", () => {
+        const state = new ViewVisualizationState();
+        state.viewport = {
+            south: 0,
+            west: 0,
+            width: 1,
+            height: 1,
+            camPosLon: 0,
+            camPosLat: 0,
+            orientation: 0
+        };
+
+        const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
+            .mockReturnValue([2000n]);
+        const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
+            .mockReturnValue(127);
+
+        try {
+            state.recalculateTileIds(999, [0], 1234, false, {
+                highFidelityTileThreshold: 512,
+                lowFidelityTileThreshold: 512
+            });
+        } finally {
+            getTileIdsSpy.mockRestore();
+            getNumTileIdsForCanonicalCameraSpy.mockRestore();
+        }
+
+        expect(state.getTileRenderPolicy(2000n)).toEqual({
+            targetFidelity: "high",
+            maxLowFiLod: null
+        });
+    });
 });

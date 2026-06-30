@@ -31,6 +31,12 @@ const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
 const MENU_LABEL_MAX_LENGTH = 48;
 const MENU_LABEL_ELLIPSIS = "...";
 
+interface StyleSheetExportMenuNode {
+    name: string;
+    styleId?: string;
+    children: Map<string, StyleSheetExportMenuNode>;
+}
+
 @Component({
     selector: 'main-bar',
     host: {
@@ -494,6 +500,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
+        const exportSearchItems = this.buildExportSearchItems();
+        const exportGeoJsonItems = this.buildExportGeoJsonItems();
+        const exportStyleSheetItems = this.buildExportStyleSheetItems();
         const menuItems: MenuItem[] = [
             {
                 name: 'File',
@@ -517,17 +526,20 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: 'Export Search',
                         icon: 'travel_explore',
-                        items: this.buildExportSearchItems()
+                        disabled: !exportSearchItems.length,
+                        items: exportSearchItems
                     },
                     {
                         name: 'Export GeoJSON',
                         icon: 'polyline',
-                        items: this.buildExportGeoJsonItems()
+                        disabled: !exportGeoJsonItems.length,
+                        items: exportGeoJsonItems
                     },
                     {
                         name: 'Export Style Sheet',
                         icon: 'file_save',
-                        items: this.buildExportStyleSheetItems()
+                        disabled: !exportStyleSheetItems.length,
+                        items: exportStyleSheetItems
                     }
                 ]
             },
@@ -648,7 +660,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private buildExportSearchItems(): MenuItem[] {
         const sessions = this.featureSearchService.getSessions();
         if (!sessions.length) {
-            return [this.disabledMenuItem("No feature searches", "manage_search")];
+            return [];
         }
         return sessions.map(session => ({
             name: this.ellipsizeMenuLabel(session.definition.query, session.id),
@@ -662,7 +674,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private buildExportGeoJsonItems(): MenuItem[] {
         const items = this.inspectionExportService.geoJsonExportItems();
         if (!items.length) {
-            return [this.disabledMenuItem("No inspected features", "polyline")];
+            return [];
         }
         return items.map(item => ({
             name: this.ellipsizeMenuLabel(item.label, item.featureId),
@@ -679,14 +691,57 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             .filter(style => !!style.source)
             .sort((left, right) => left.id.localeCompare(right.id));
         if (!styles.length) {
-            return [this.disabledMenuItem("No style sheets", "palette")];
+            return [];
         }
-        return styles.map(style => ({
-            name: this.ellipsizeMenuLabel(style.id, style.id),
-            icon: 'palette',
-            tooltip: style.id,
-            command: () => { this.exportStyleSheet(style.id); }
-        }));
+        const root: StyleSheetExportMenuNode = {name: "", children: new Map()};
+        for (const style of styles) {
+            let current = root;
+            for (const segment of this.styleSheetMenuSegments(style.id)) {
+                let child = current.children.get(segment);
+                if (!child) {
+                    child = {name: segment, children: new Map()};
+                    current.children.set(segment, child);
+                }
+                current = child;
+            }
+            current.styleId = style.id;
+        }
+        return Array.from(root.children.values())
+            .map(node => this.styleSheetExportMenuItem(node));
+    }
+
+    /** Splits a style id into menu path segments, ignoring empty slash path parts. */
+    private styleSheetMenuSegments(styleId: string): string[] {
+        const segments = styleId.split("/")
+            .map(segment => segment.trim())
+            .filter(segment => !!segment);
+        return segments.length ? segments : [styleId];
+    }
+
+    /** Converts one style-sheet export tree node into a PrimeNG menu item. */
+    private styleSheetExportMenuItem(node: StyleSheetExportMenuNode): MenuItem {
+        const childItems = Array.from(node.children.values())
+            .map(childNode => this.styleSheetExportMenuItem(childNode));
+        const styleId = node.styleId;
+        if (styleId && !childItems.length) {
+            return {
+                name: this.ellipsizeMenuLabel(node.name, styleId),
+                icon: 'palette',
+                command: () => { this.exportStyleSheet(styleId); }
+            };
+        }
+        if (styleId) {
+            childItems.unshift({
+                name: 'Export',
+                icon: 'file_save',
+                command: () => { this.exportStyleSheet(styleId); }
+            });
+        }
+        return {
+            name: this.ellipsizeMenuLabel(node.name, styleId ?? node.name),
+            icon: 'folder_open',
+            items: childItems
+        };
     }
 
     /** Runs one GeoJSON export menu item unless it is still loading. */
@@ -703,15 +758,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (!this.styleService.exportStyleYamlFile(styleId)) {
             this.infoMessageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
-    }
-
-    /** Returns a disabled placeholder menu item for empty dynamic submenus. */
-    private disabledMenuItem(name: string, icon: string): MenuItem {
-        return {
-            name,
-            icon,
-            disabled: true
-        };
     }
 
     /** Shortens a dynamic menu label without losing the full label tooltip. */

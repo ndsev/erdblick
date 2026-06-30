@@ -474,12 +474,10 @@ export class StyleService {
             // In case running outside browser or confirm not available, ignore.
         }
 
-        // Delete the imported style entry and notify listeners.
-        style.featureLayerStyle?.delete();
-        this.styleRemovedForId.next(styleId);
-        this.styles.delete(styleId);
-        this.importedStylesCount--;
+        this.removeActiveStyleEntry(styleId);
+        this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
         this.saveImportedStyles();
+        this.styleGroups.next(this.computeStyleGroups());
 
         // Try to restore corresponding built-in style (same id) using recorded styleHashes (url -> {id,...}).
         for (const url of this.styleUrls) {

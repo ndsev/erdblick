@@ -330,6 +330,7 @@ protected:
     /** Evaluate an expression once and cache the result if it is constant. */
     std::optional<simfil::Value> evaluateConstantExpression(
         std::string const& expression,
+        simfil::SchemaId rootSchema,
         bool anyMode);
     /** Cached parsed simfil expression and its optional constant-folded result. */
     struct CachedExpression {
@@ -342,9 +343,10 @@ protected:
     /** Look up or compile an expression in the per-visualization cache. */
     CachedExpression* getOrCompileExpression(
         std::string const& expression,
+        simfil::SchemaId rootSchema,
         bool anyMode);
     /** Resolve and memoize the constant value of a cached expression, if any. */
-    void resolveCachedConstant(CachedExpression& cached);
+    void resolveCachedConstant(CachedExpression& cached, simfil::SchemaId rootSchema);
     /** Record one bounded runtime style evaluation issue. */
     void recordRuntimeStyleIssue(
         std::string property,

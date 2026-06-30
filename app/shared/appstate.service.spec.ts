@@ -106,6 +106,38 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('normalizes high and low fidelity tile thresholds', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.lowFiTileThresholds).toEqual({
+            highFidelityTileThreshold: 128,
+            lowFidelityTileThreshold: 64
+        });
+
+        service.lowFidelityTileThreshold = 1024;
+        expect(service.lowFiTileThresholds).toEqual({
+            highFidelityTileThreshold: 1024,
+            lowFidelityTileThreshold: 1024
+        });
+
+        service.highFidelityTileThreshold = 2048;
+        expect(service.lowFiTileThresholds).toEqual({
+            highFidelityTileThreshold: 2048,
+            lowFidelityTileThreshold: 1024
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('hydrates the focused inspection panel from selection URL state', async () => {
         const routerStub = createRouterStub({ sel: '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0' });
         const infoServiceStub = {

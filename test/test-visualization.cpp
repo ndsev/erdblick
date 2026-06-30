@@ -405,6 +405,31 @@ nlohmann::json warningSignLayerInfoJson()
     };
 }
 
+/** Build a schema-backed render tile with one warning-sign enum attribute. */
+std::shared_ptr<mapget::TileFeatureLayer> makeWarningSignRenderTile(mapget::TileId tileId)
+{
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        tileId,
+        "WarningSignRenderNode",
+        "WarningSignRenderMap",
+        mapget::LayerInfo::fromJson(warningSignLayerInfoJson()),
+        std::make_shared<simfil::StringPool>());
+
+    auto const center = tileId.center();
+    auto feature = layer->newFeature("Road", {{"id", 1}});
+    feature->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+
+    auto attr = feature->attributeLayers()->newLayer("RoadRulesLayer")->newAttribute("WARNING_SIGN");
+    auto attrValue = layer->newObject();
+    REQUIRE(attrValue->addField("warningSign", "SPEED_LIMIT_END").has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    return layer;
+}
+
 std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId)
 {
     auto layer = std::make_shared<mapget::TileFeatureLayer>(
@@ -1613,6 +1638,55 @@ TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdbli
     visualization.run();
 
     REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+}
+
+TEST_CASE("DeckFeatureLayerVisualization rewrites style enum symbols through layer schema", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "WarningSignEnumStyle"
+rules:
+  - type: Road
+    geometry: [line]
+    filter: properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END
+    color-expression: "(properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END) and '#ff0000' or '#0000ff'"
+    width: 4
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeWarningSignRenderTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
+    DeckFeatureLayerVisualization visualization(0, "WarningSignRenderMap/Road/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
+}
+
+TEST_CASE("DeckFeatureLayerVisualization evaluates relation branches in relation context", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "RelationContextStyle"
+rules:
+  - type: "Diamond"
+    aspect: relation
+    first-of:
+      - relation-type: "doesNotMatch"
+        color: "#ff0000"
+        width: 4
+      - relation-type: "hasPoi"
+        filter: $target.typeId == "PointOfInterest"
+        color-expression: "($target.typeId == 'PointOfInterest') and '#00ff00' or '#ff0000'"
+        width: 4
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13), true, true);
+    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
 }
 
 TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added auxiliary tiles", "[erdblick.renderer]")

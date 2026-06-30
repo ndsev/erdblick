@@ -7,12 +7,12 @@ import {RenderRectangle} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibility";
-
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
     BackgroundSync = "background-sync",
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
+    FidelityThreshold = "fidelity-threshold",
     NumViews = "num-views",
     PinLowFi = "pin-lowfi",
     StyleChange = "style-change",
@@ -56,6 +56,10 @@ export class MapViewStateService {
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
         this.stateService.pinLowFiToMaxLodState.subscribe(() => this.requestViewRecalculation(ViewRecalculationReason.PinLowFi));
+        this.stateService.highFidelityTileThresholdState.subscribe(() =>
+            this.requestViewRecalculation(ViewRecalculationReason.FidelityThreshold));
+        this.stateService.lowFidelityTileThresholdState.subscribe(() =>
+            this.requestViewRecalculation(ViewRecalculationReason.FidelityThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
     }
 
@@ -89,7 +93,8 @@ export class MapViewStateService {
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
                 this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt,
-                this.stateService.pinLowFiToMaxLod
+                this.stateService.pinLowFiToMaxLod,
+                this.stateService.lowFiTileThresholds
             );
         });
     }
