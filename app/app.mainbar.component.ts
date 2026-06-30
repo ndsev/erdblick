@@ -496,6 +496,42 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
         const menuItems: MenuItem[] = [
             {
+                name: 'File',
+                icon: 'folder_open',
+                items: [
+                    {
+                        name: 'Import Search',
+                        icon: 'manage_search',
+                        command: () => { this.triggerSearchJsonImport(); }
+                    },
+                    {
+                        name: 'Import Style Sheet',
+                        icon: 'palette',
+                        command: () => { this.triggerStyleYamlImport(); }
+                    },
+                    {
+                        name: 'Export Diagnostics',
+                        icon: 'download',
+                        command: () => { this.openDiagnosticsExport(); }
+                    },
+                    {
+                        name: 'Export Search',
+                        icon: 'travel_explore',
+                        items: this.buildExportSearchItems()
+                    },
+                    {
+                        name: 'Export GeoJSON',
+                        icon: 'polyline',
+                        items: this.buildExportGeoJsonItems()
+                    },
+                    {
+                        name: 'Export Style Sheet',
+                        icon: 'file_save',
+                        items: this.buildExportStyleSheetItems()
+                    }
+                ]
+            },
+            {
                 name: 'Edit',
                 icon: 'tune',
                 items: [
@@ -513,42 +549,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: 'Preferences',
                         icon: 'settings',
                         command: () => { this.showPreferencesDialog(); },
-                    }
-                ]
-            },
-            {
-                name: 'File',
-                icon: 'folder_open',
-                items: [
-                    {
-                        name: 'Import Search',
-                        icon: 'manage_search',
-                        command: () => { this.triggerSearchJsonImport(); }
-                    },
-                    {
-                        name: 'Import Style Sheet',
-                        icon: 'palette',
-                        command: () => { this.triggerStyleYamlImport(); }
-                    },
-                    {
-                        name: 'Export Search',
-                        icon: 'travel_explore',
-                        items: this.buildExportSearchItems()
-                    },
-                    {
-                        name: 'Export GeoJSON',
-                        icon: 'polyline',
-                        items: this.buildExportGeoJsonItems()
-                    },
-                    {
-                        name: 'Export Style Sheet',
-                        icon: 'file_save',
-                        items: this.buildExportStyleSheetItems()
-                    },
-                    {
-                        name: 'Export Diagnostics',
-                        icon: 'download',
-                        command: () => { this.openDiagnosticsExport(); }
                     }
                 ]
             },
