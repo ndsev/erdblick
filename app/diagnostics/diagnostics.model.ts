@@ -79,6 +79,24 @@ export interface PerfStat {
     peakTileIds?: string[];
 }
 
+/** One feature map layer included in a scoped Performance Diagnostics request. */
+export interface PerformanceDiagnosticsLayerScope {
+    mapId: string;
+    layerId: string;
+}
+
+/** Caller-provided filter scope for Performance Diagnostics. */
+export interface PerformanceDiagnosticsScopeRequest {
+    tileIds: string[];
+    layers: PerformanceDiagnosticsLayerScope[];
+    source?: 'context-menu';
+}
+
+/** Versioned transient scope consumed by the Performance Diagnostics dialog. */
+export interface PerformanceDiagnosticsScope extends PerformanceDiagnosticsScopeRequest {
+    requestId: number;
+}
+
 /** One diagnostics log entry, including optional structured payload data. */
 export interface LogEntry {
     at: number;

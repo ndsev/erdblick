@@ -7,6 +7,8 @@ import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {InfoMessageService} from "../shared/info.service";
+import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
+import {PerformanceDiagnosticsLayerScope} from "../diagnostics/diagnostics.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -35,6 +37,13 @@ export interface FeatureSearchContextMenuScope {
     selectedMapLayers: FeatureSearchMapLayerRef[];
 }
 
+/** One grouped tile-diagnostics action prepared for the current right-click context. */
+export interface TileDiagnosticsMenuOption {
+    tileId: string;
+    level: number;
+    layers: PerformanceDiagnosticsLayerScope[];
+}
+
 @Injectable()
 /**
  * Owns the dynamic right-click menu content for the map view.
@@ -49,6 +58,7 @@ export class RightClickMenuService {
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
+    private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
     private sourceDataShortcut: {tileId: bigint, mapId: string, layerId: string} | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
@@ -56,7 +66,8 @@ export class RightClickMenuService {
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService,
                 private featureSearchService: FeatureSearchService,
-                private infoMessageService: InfoMessageService) {
+                private infoMessageService: InfoMessageService,
+                private diagnostics: DiagnosticsFacadeService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
             this.sourceDataShortcut = null;
@@ -93,6 +104,12 @@ export class RightClickMenuService {
     /** Updates the context-menu action that starts a view-scoped feature search. */
     setFeatureSearchScope(scope: FeatureSearchContextMenuScope | null): void {
         this.featureSearchScope = scope;
+        this.rebuildMenuItems();
+    }
+
+    /** Replaces the tile-scoped Performance Diagnostics entries for the current context. */
+    setTileDiagnosticsOptions(options: TileDiagnosticsMenuOption[]): void {
+        this.tileDiagnosticsOptions = [...options];
         this.rebuildMenuItems();
     }
 
@@ -141,27 +158,45 @@ export class RightClickMenuService {
         });
     }
 
-    /** Rebuilds context-menu items from the latest source-data and search scopes. */
+    /** Rebuilds context-menu items from the latest source-data, diagnostics, and search scopes. */
     private rebuildMenuItems(): void {
-        const items: MenuItem[] = [this.sourceDataMenuItem()];
+        const items: MenuItem[] = this.sourceDataMenuItems();
+        if (this.tileDiagnosticsOptions.length) {
+            items.push({separator: true});
+            for (const option of this.tileDiagnosticsOptions) {
+                items.push(this.tileDiagnosticsMenuItem(option));
+            }
+        }
         if (this.featureSearchScope) {
             items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
         }
         this.menuItems.next(items);
     }
 
-    /** Returns the source-data action for the currently prepared context. */
-    private sourceDataMenuItem(): MenuItem {
+    /** Returns the source-data actions for the currently prepared context. */
+    private sourceDataMenuItems(): MenuItem[] {
         if (!this.sourceDataShortcut) {
-            return {
-                label: 'Inspect Source Data for Tile',
-                icon: 'pi pi-database',
-                command: () => {
-                    this.openTileSourceDataDialog();
-                }
-            };
+            return [this.sourceDataPickerMenuItem()];
         }
-        const sourceDataParams = this.sourceDataShortcut;
+        return [
+            this.buildLastInspectedSourceDataMenuItem(this.sourceDataShortcut),
+            this.sourceDataPickerMenuItem()
+        ];
+    }
+
+    /** Builds the source-data picker action for the currently prepared tile candidates. */
+    private sourceDataPickerMenuItem(): MenuItem {
+        return {
+            label: 'Inspect Source Data for Tile',
+            icon: 'pi pi-database',
+            command: () => {
+                this.openTileSourceDataDialog();
+            }
+        };
+    }
+
+    /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
+    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}): MenuItem {
         return {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
@@ -169,6 +204,21 @@ export class RightClickMenuService {
                 this.stateService.setSelection({
                     mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
                 } as SelectedSourceData);
+            }
+        };
+    }
+
+    /** Builds a tile-scoped Performance Diagnostics action for one grouped tile option. */
+    private tileDiagnosticsMenuItem(option: TileDiagnosticsMenuOption): MenuItem {
+        return {
+            label: `Diagnostics for Tile ${option.tileId}`,
+            icon: 'pi pi-chart-line',
+            command: () => {
+                this.diagnostics.openPerformanceDialog({
+                    tileIds: [option.tileId],
+                    layers: option.layers,
+                    source: 'context-menu'
+                });
             }
         };
     }

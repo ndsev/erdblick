@@ -24,7 +24,7 @@ import {JumpTargetService} from "../search/jump.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {ContextMenu} from "primeng/contextmenu";
-import {RightClickMenuService, SourceDataDropdownOption} from "./rightclickmenu.service";
+import {RightClickMenuService, SourceDataDropdownOption, TileDiagnosticsMenuOption} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
@@ -530,6 +530,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         } catch (error) {
             console.error("Failed to prepare source-data context menu.", error);
             this.menuService.tileIdsForSourceData.next([]);
+            this.menuService.setTileDiagnosticsOptions([]);
         }
         try {
             this.prepareFeatureSearchContextMenu();
@@ -567,6 +568,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private prepareSourceDataContextMenu(event: {clientX: number; clientY: number}): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
             this.resetPreparedSourceData(true);
+            this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
 
@@ -579,6 +581,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         const cartographic = this.mapView.pickCartographic(screenPos);
         if (!cartographic) {
             this.resetPreparedSourceData(true);
+            this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
 
@@ -604,6 +607,47 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         } else {
             this.menuService.tileOutline.next(null);
         }
+        this.prepareTileDiagnosticsContextMenu(cartographic.lon, cartographic.lat);
+    }
+
+    /** Builds grouped tile diagnostics entries for enabled loaded feature layers at the clicked position. */
+    private prepareTileDiagnosticsContextMenu(lon: number, lat: number): void {
+        const viewIndex = this.viewIndex();
+        const groupsByTileId = new Map<string, TileDiagnosticsMenuOption>();
+
+        for (const layer of this.mapService.maps.allFeatureLayers()) {
+            if (!this.mapService.maps.getMapLayerVisibility(viewIndex, layer.mapId, layer.id)) {
+                continue;
+            }
+
+            const level = this.mapViewState.getEffectiveMapLayerLevel(viewIndex, layer.mapId, layer.id);
+            const tileId = BigInt(coreLib.getTileIdFromPosition(lon, lat, level));
+            if (!this.mapViewState.showsFeatureTileInView(viewIndex, layer.mapId, layer.id, tileId)) {
+                continue;
+            }
+
+            const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.id, tileId);
+            const loadedTile = this.tileStream.loadedTileLayers.get(tileKey);
+            if (!loadedTile?.hasData() || loadedTile.numFeatures <= 0) {
+                continue;
+            }
+
+            const tileIdString = tileId.toString();
+            const group = groupsByTileId.get(tileIdString);
+            if (group) {
+                group.layers.push({mapId: layer.mapId, layerId: layer.id});
+                continue;
+            }
+            groupsByTileId.set(tileIdString, {
+                tileId: tileIdString,
+                level,
+                layers: [{mapId: layer.mapId, layerId: layer.id}]
+            });
+        }
+
+        const options = Array.from(groupsByTileId.values())
+            .sort((left, right) => right.level - left.level || left.tileId.localeCompare(right.tileId));
+        this.menuService.setTileDiagnosticsOptions(options);
     }
 
     /** Prepares a view-scoped feature-search action for the right-click menu. */
@@ -666,6 +710,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         if (clearTileIds) {
             this.menuService.tileIdsForSourceData.next([]);
+            this.menuService.setTileDiagnosticsOptions([]);
         }
     }
 

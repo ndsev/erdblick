@@ -6,7 +6,7 @@ import {TreeTableNode} from 'primeng/api';
 import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 import {FeatureTile} from '../mapdata/features.model';
 import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {PerfStat} from './diagnostics.model';
+import {PerformanceDiagnosticsScope, PerfStat} from './diagnostics.model';
 import {buildAggregatedPerfStats} from './diagnostics.datasource';
 import {
     COUNT_KEY_PATTERN,
@@ -17,11 +17,13 @@ import {
     ROOT_BADGE_RENDER_DT,
     UNIT_SUFFIXES
 } from './diagnostics.constants';
-import {KeyboardService} from "../shared/keyboard.service";
 import {AppDialogComponent} from '../shared/app-dialog.component';
 
 interface LayerOption {
     label: string;
+    mapId: string;
+    layerId: string;
+    key: string;
 }
 
 interface TileIdOption {
@@ -88,7 +90,6 @@ interface PerfTileScopeCounts {
                     (ngModelChange)="onLayerSelectionChange()"
                     optionLabel="label"
                     placeholder="Select Map Layers"
-                    [selectionLimit]="20"
                     [maxSelectedLabels]="20"
                     [showHeader]="false"
                     [style]="{'width': '100%'}">
@@ -216,6 +217,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     private perfTileScopeCounts: PerfTileScopeCounts = this.createEmptyTileScopeCounts();
     private readonly expansionStateByPath = new Map<string, boolean>();
     private readonly subscriptions: Subscription[] = [];
+    private appliedPerformanceScopeRequestId: number | null = null;
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
                 public readonly stateService: AppStateService,
@@ -225,6 +227,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             this.diagnostics.perfStats$.subscribe(() => {
                 this.refreshAvailableMapLayers();
                 this.refreshAvailableTileIds();
+                this.applyPerformanceScope(this.diagnostics.performanceScope$.getValue(), false);
+                this.rebuildTreeNodes();
+            }),
+            this.diagnostics.performanceScope$.subscribe(scope => {
+                this.refreshAvailableMapLayers();
+                this.refreshAvailableTileIds();
+                this.applyPerformanceScope(scope, true);
                 this.rebuildTreeNodes();
             })
         );
@@ -248,6 +257,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.diagnostics.refreshPerfStats();
         this.refreshAvailableMapLayers();
         this.refreshAvailableTileIds();
+        this.applyPerformanceScope(this.diagnostics.performanceScope$.getValue(), false);
         this.rebuildTreeNodes();
         this.dialogStack.bringToFront(this.dialog);
     }
@@ -263,12 +273,14 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Rebuilds available tile ids and tree rows after the layer filter changed. */
     onLayerSelectionChange() {
+        this.appliedPerformanceScopeRequestId = this.diagnostics.performanceScope$.getValue()?.requestId ?? null;
         this.refreshAvailableTileIds();
         this.rebuildTreeNodes();
     }
 
     /** Rebuilds the tree after the tile-id filter changed. */
     onTileIdSelectionChange() {
+        this.appliedPerformanceScopeRequestId = this.diagnostics.performanceScope$.getValue()?.requestId ?? null;
         this.rebuildTreeNodes();
     }
 
@@ -344,14 +356,22 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Rebuilds the list of selectable map layers from currently loaded tiles. */
     private refreshAvailableMapLayers() {
-        const mapLayersSet: Set<string> = new Set();
+        const mapLayersByKey = new Map<string, LayerOption>();
         for (const tile of this.mapService.loadedTileLayers.values()) {
-            mapLayersSet.add(`${tile.mapName} - ${tile.layerName}`);
+            const key = JSON.stringify([tile.mapName, tile.layerName]);
+            if (mapLayersByKey.has(key)) {
+                continue;
+            }
+            mapLayersByKey.set(key, {
+                label: `${tile.mapName} - ${tile.layerName}`,
+                mapId: tile.mapName,
+                layerId: tile.layerName,
+                key
+            });
         }
 
-        const nextLayers = Array.from(mapLayersSet)
-            .sort((a, b) => a.localeCompare(b))
-            .map(label => ({label}));
+        const nextLayers = Array.from(mapLayersByKey.values())
+            .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
         if (this.isSameLayerList(nextLayers, this.availableMapLayers)) {
             return;
         }
@@ -363,14 +383,14 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const validSelection = this.selectedMapLayers.filter(selection =>
-            nextLayers.some(layer => layer.label === selection.label));
+            nextLayers.some(layer => layer.key === selection.key));
         this.selectedMapLayers = validSelection;
     }
 
     /** Rebuilds the list of selectable tile ids for the currently selected map layers. */
     private refreshAvailableTileIds() {
-        const selectedLabels = new Set(this.selectedMapLayers.map(selection => selection.label));
-        if (!selectedLabels.size) {
+        const selectedLayerKeys = new Set(this.selectedMapLayers.map(selection => selection.key));
+        if (!selectedLayerKeys.size) {
             this.availableTileIds = [];
             this.selectedTileIds = [];
             return;
@@ -378,7 +398,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         const tileIdSet = new Set<string>();
         for (const tile of this.mapService.loadedTileLayers.values()) {
-            if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
+            if (!selectedLayerKeys.has(JSON.stringify([tile.mapName, tile.layerName]))) {
                 continue;
             }
             if (!tile.hasData()) {
@@ -403,13 +423,37 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
     }
 
+    /** Applies or clears a transient scope supplied by context-menu diagnostics actions. */
+    private applyPerformanceScope(scope: PerformanceDiagnosticsScope | null, force: boolean) {
+        if (!scope) {
+            if (force) {
+                this.appliedPerformanceScopeRequestId = null;
+                this.selectedMapLayers = [...this.availableMapLayers];
+                this.refreshAvailableTileIds();
+                this.selectedTileIds = [];
+            }
+            return;
+        }
+        if (!force && scope.requestId === this.appliedPerformanceScopeRequestId) {
+            return;
+        }
+
+        const scopedLayerKeys = new Set(scope.layers.map(layer => JSON.stringify([layer.mapId, layer.layerId])));
+        this.selectedMapLayers = this.availableMapLayers.filter(layer => scopedLayerKeys.has(layer.key));
+        this.refreshAvailableTileIds();
+
+        const scopedTileIds = new Set(scope.tileIds);
+        this.selectedTileIds = this.availableTileIds.filter(tileId => scopedTileIds.has(tileId.tileId));
+        this.appliedPerformanceScopeRequestId = scope.requestId;
+    }
+
     /** Compares layer-option lists to avoid resetting selection state unnecessarily. */
     private isSameLayerList(left: LayerOption[], right: LayerOption[]): boolean {
         if (left.length !== right.length) {
             return false;
         }
         for (let index = 0; index < left.length; index += 1) {
-            if (left[index].label !== right[index].label) {
+            if (left[index].key !== right[index].key || left[index].label !== right[index].label) {
                 return false;
             }
         }
@@ -456,8 +500,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Filters aggregated perf stats by the active layer and tile-id selections. */
     private computeFilteredPerfStats(): PerfStat[] {
-        const selectedLabels = new Set(this.selectedMapLayers.map(selection => selection.label));
-        if (!selectedLabels.size) {
+        const selectedLayerKeys = new Set(this.selectedMapLayers.map(selection => selection.key));
+        if (!selectedLayerKeys.size) {
             this.perfTileScopeCounts = this.createEmptyTileScopeCounts();
             return [];
         }
@@ -466,7 +510,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const hasTileIdSelection = selectedTileIdSet.size > 0;
 
         const layerScopedTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
-            if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
+            if (!selectedLayerKeys.has(JSON.stringify([tile.mapName, tile.layerName]))) {
                 return false;
             }
             return true;
