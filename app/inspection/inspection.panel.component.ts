@@ -134,20 +134,6 @@ interface InspectionPanelContentAdapter {
             </div>
         </p-popover>
     `,
-    styles: [`
-        .inspection-focus-indicator {
-            align-items: center;
-            border: 2px solid transparent;
-            border-radius: 999px;
-            display: inline-flex;
-            justify-content: center;
-            padding: 2px;
-        }
-
-        .inspection-focus-indicator-active {
-            border-color: var(--p-primary-color, #2196f3);
-        }
-    `],
     standalone: false
 })
 /** Docked accordion variant of an inspection panel. */

@@ -25,14 +25,6 @@ import {environment} from "../environments/environment";
             }
         }
     `,
-    styles: [`
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 3.5em;
-                padding-bottom: 0;
-            }
-        }
-    `],
     standalone: false
 })
 /**

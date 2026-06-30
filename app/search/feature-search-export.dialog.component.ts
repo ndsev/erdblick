@@ -73,7 +73,6 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
             </div>
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /** Dialog that configures and launches feature-search JSON exports. */

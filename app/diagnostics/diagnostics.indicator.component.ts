@@ -52,7 +52,6 @@ import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
             </p-popover>
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /** Compact diagnostics entry point shown in the main UI chrome. */

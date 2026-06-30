@@ -235,31 +235,6 @@ import {environment} from "../environments/environment";
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </app-dialog>
     `,
-    styles: [
-        `
-            .slider-container {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin: 0.5em 0;
-                width: 100%;
-            }
-
-            .tiles-input {
-                font-size: medium;
-                text-align: center;
-                width: 17em;
-                padding: 0.5em;
-            }
-
-            @media only screen and (max-width: 56em) {
-                .elevated {
-                    bottom: 3.5em;
-                    padding-bottom: 0;
-                }
-            }
-        `
-    ],
     standalone: false
 })
 /**

@@ -19,12 +19,17 @@ import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service
 import {MenuItem} from "primeng/api";
 import {FeatureSearchService} from "./search/feature.search.service";
 import {InfoMessageService} from "./shared/info.service";
+import {StyleService} from "./styledata/style.service";
+import {InspectionExportService, InspectionGeoJsonExportItem} from "./inspection/inspection-export.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
 const MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM = 45;
 const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
 const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
+const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
+const MENU_LABEL_MAX_LENGTH = 48;
+const MENU_LABEL_ELLIPSIS = "...";
 
 @Component({
     selector: 'main-bar',
@@ -54,9 +59,13 @@ const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
                 }
             </ng-template>
             <ng-template #item let-item let-root="root">
-                <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
+                <a pRipple class="p-menubar-item-link"
+                   [ngClass]="{'sync-option-active': isSyncViewOptionActive(item), 'p-disabled': item.disabled}"
+                   [attr.aria-disabled]="item.disabled ? 'true' : null"
+                   [pTooltip]="item.tooltip ?? null"
+                   tooltipPosition="right">
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
-                    <span>{{ item.name }}</span>
+                    <span>{{ item.name ?? item.label }}</span>
                     @if (!root && item.items?.length) {
                         <span class="pi submenu-indicator pi-angle-right"></span>
                     }
@@ -76,10 +85,14 @@ const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
         <input #searchJsonImportInput
                type="file"
                accept=".json,application/json"
-               style="display: none;"
+               class="hidden-file-input"
                (change)="onSearchJsonImportSelected($event)">
+        <input #styleYamlImportInput
+               type="file"
+               accept=".yaml,.yml,application/x-yaml,text/yaml,text/plain"
+               class="hidden-file-input"
+               (change)="onStyleYamlImportSelected($event)">
     `,
-    styles: [``],
     standalone: false
 })
 /**
@@ -107,6 +120,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     copyright: string = '';
     @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
+    @ViewChild('styleYamlImportInput') private styleYamlImportInput?: ElementRef<HTMLInputElement>;
 
     protected get menubarBreakpoint(): string {
         return this.isMobileMenubar
@@ -122,6 +136,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 public stateService: AppStateService,
                 private diagnostics: DiagnosticsFacadeService,
                 private featureSearchService: FeatureSearchService,
+                private styleService: StyleService,
+                private inspectionExportService: InspectionExportService,
                 private infoMessageService: InfoMessageService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
@@ -144,6 +160,18 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.rebuildMenuItems(numViews);
         }));
         this.subscriptions.add(this.stateService.viewSyncState.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
+        this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
+        this.subscriptions.add(this.stateService.featureSearchState.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
+        this.subscriptions.add(this.inspectionExportService.exportItemsChanged.subscribe(() => {
             this.rebuildMenuItems();
         }));
     }
@@ -231,6 +259,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.searchJsonImportInput?.nativeElement.click();
     }
 
+    /** Opens the hidden file input used to import YAML style sheets. */
+    protected triggerStyleYamlImport() {
+        this.styleYamlImportInput?.nativeElement.click();
+    }
+
     /** Reads a selected feature-search JSON file and imports it as a new search session. */
     protected async onSearchJsonImportSelected(event: Event) {
         const input = event.target as HTMLInputElement;
@@ -251,6 +284,35 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.infoMessageService.showError(`Could not import Search JSON: ${message}`);
         } finally {
             input.value = '';
+        }
+    }
+
+    /** Reads a selected YAML style sheet, imports it, and opens the Style Sheets dialog. */
+    protected async onStyleYamlImportSelected(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) {
+            return;
+        }
+        try {
+            if (file.size > STYLE_YAML_IMPORT_MAX_BYTES) {
+                this.infoMessageService.showError("Style sheet file is too large.");
+                return;
+            }
+            const imported = await this.styleService.importStyleYamlFile(file);
+            if (imported) {
+                this.infoMessageService.showSuccess("Style sheet imported");
+            } else if (this.styleService.lastValidationReport && !this.styleService.lastValidationReport.valid) {
+                this.infoMessageService.showError("Could not import Style Sheet: validation failed.");
+            } else {
+                this.infoMessageService.showError("Could not import Style Sheet: empty or invalid file.");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.infoMessageService.showError(`Could not import Style Sheet: ${message}`);
+        } finally {
+            input.value = '';
+            this.openStylesDialog();
         }
     }
 
@@ -455,13 +517,38 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 ]
             },
             {
-                name: 'Import',
-                icon: 'file_upload',
+                name: 'File',
+                icon: 'folder_open',
                 items: [
                     {
-                        name: 'Search JSON',
+                        name: 'Import Search',
                         icon: 'manage_search',
                         command: () => { this.triggerSearchJsonImport(); }
+                    },
+                    {
+                        name: 'Import Style Sheet',
+                        icon: 'palette',
+                        command: () => { this.triggerStyleYamlImport(); }
+                    },
+                    {
+                        name: 'Export Search',
+                        icon: 'travel_explore',
+                        items: this.buildExportSearchItems()
+                    },
+                    {
+                        name: 'Export GeoJSON',
+                        icon: 'polyline',
+                        items: this.buildExportGeoJsonItems()
+                    },
+                    {
+                        name: 'Export Style Sheet',
+                        icon: 'file_save',
+                        items: this.buildExportStyleSheetItems()
+                    },
+                    {
+                        name: 'Export Diagnostics',
+                        icon: 'download',
+                        command: () => { this.openDiagnosticsExport(); }
                     }
                 ]
             },
@@ -519,11 +606,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         command: () => { this.openDiagnosticsPerformance(); }
                     },
                     {
-                        name: 'Export Diagnostics',
-                        icon: 'download',
-                        command: () => { this.openDiagnosticsExport(); }
-                    },
-                    {
                         name: 'Logs',
                         icon: 'list_alt',
                         command: () => { this.openDiagnosticsLog(); }
@@ -560,6 +642,87 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             });
         }
         return menuItems;
+    }
+
+    /** Builds the submenu for exporting live feature-search sessions. */
+    private buildExportSearchItems(): MenuItem[] {
+        const sessions = this.featureSearchService.getSessions();
+        if (!sessions.length) {
+            return [this.disabledMenuItem("No feature searches", "manage_search")];
+        }
+        return sessions.map(session => ({
+            name: this.ellipsizeMenuLabel(session.definition.query, session.id),
+            icon: 'manage_search',
+            tooltip: session.definition.query || session.id,
+            command: () => { this.featureSearchService.openExportDialog(session.id); }
+        }));
+    }
+
+    /** Builds the submenu for exporting currently inspected features as GeoJSON. */
+    private buildExportGeoJsonItems(): MenuItem[] {
+        const items = this.inspectionExportService.geoJsonExportItems();
+        if (!items.length) {
+            return [this.disabledMenuItem("No inspected features", "polyline")];
+        }
+        return items.map(item => ({
+            name: this.ellipsizeMenuLabel(item.label, item.featureId),
+            icon: item.disabled ? 'hourglass_empty' : 'polyline',
+            disabled: item.disabled,
+            tooltip: item.tooltip,
+            command: () => { this.exportInspectedFeatureGeoJson(item); }
+        }));
+    }
+
+    /** Builds the submenu for exporting currently loaded style sheets. */
+    private buildExportStyleSheetItems(): MenuItem[] {
+        const styles = Array.from(this.styleService.styles.values())
+            .filter(style => !!style.source)
+            .sort((left, right) => left.id.localeCompare(right.id));
+        if (!styles.length) {
+            return [this.disabledMenuItem("No style sheets", "palette")];
+        }
+        return styles.map(style => ({
+            name: this.ellipsizeMenuLabel(style.id, style.id),
+            icon: 'palette',
+            tooltip: style.id,
+            command: () => { this.exportStyleSheet(style.id); }
+        }));
+    }
+
+    /** Runs one GeoJSON export menu item unless it is still loading. */
+    private exportInspectedFeatureGeoJson(item: InspectionGeoJsonExportItem): void {
+        if (item.disabled) {
+            this.infoMessageService.showWarning("Inspection data is still loading for this feature.");
+            return;
+        }
+        this.inspectionExportService.downloadFeatureGeoJson(item);
+    }
+
+    /** Exports one loaded style sheet and reports errors to the user. */
+    private exportStyleSheet(styleId: string): void {
+        if (!this.styleService.exportStyleYamlFile(styleId)) {
+            this.infoMessageService.showError(`Error occurred while trying to export style: ${styleId}`);
+        }
+    }
+
+    /** Returns a disabled placeholder menu item for empty dynamic submenus. */
+    private disabledMenuItem(name: string, icon: string): MenuItem {
+        return {
+            name,
+            icon,
+            disabled: true
+        };
+    }
+
+    /** Shortens a dynamic menu label without losing the full label tooltip. */
+    private ellipsizeMenuLabel(value: string, fallback: string): string {
+        const normalized = value.trim().replace(/\s+/g, " ");
+        const label = normalized || fallback;
+        if (label.length <= MENU_LABEL_MAX_LENGTH) {
+            return label;
+        }
+        const contentLength = MENU_LABEL_MAX_LENGTH - MENU_LABEL_ELLIPSIS.length;
+        return `${label.slice(0, contentLength).trimEnd()}${MENU_LABEL_ELLIPSIS}`;
     }
 
     /** Toggles one synchronized-view option and mirrors the change into state. */

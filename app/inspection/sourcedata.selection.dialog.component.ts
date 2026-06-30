@@ -75,7 +75,6 @@ import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service
             }
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /** Dialog for choosing which source-data layer should be inspected for a clicked tile. */

@@ -192,7 +192,6 @@ interface PerfTileScopeCounts {
             </div>
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /**

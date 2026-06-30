@@ -31,7 +31,6 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
             </inspection-tree>
         }
     `,
-    styles: [``],
     standalone: false
 })
 /** Loads one source-data tile on demand and renders it through the shared inspection tree. */

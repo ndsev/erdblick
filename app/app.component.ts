@@ -55,18 +55,6 @@ declare let window: DebugWindow;
         <about-dialog></about-dialog>
         <router-outlet></router-outlet>
     `,
-    styles: [`
-        .dialog-content {
-            margin-bottom: 0.5em;
-        }
-
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 3.5em;
-                padding-bottom: 0;
-            }
-        }
-    `],
     standalone: false
 })
 /**

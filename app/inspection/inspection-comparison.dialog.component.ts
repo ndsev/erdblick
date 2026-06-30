@@ -116,7 +116,6 @@ interface ComparisonColumn {
         <p-contextMenu #columnMenu [model]="columnMenuItems" [baseZIndex]="30000" appendTo="body"
                        [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
-    styles: [``],
     standalone: false
 })
 /** Floating dialog that renders multiple inspection panels side by side for manual comparison. */

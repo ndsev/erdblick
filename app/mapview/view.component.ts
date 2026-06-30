@@ -93,33 +93,6 @@ import {AppConfigService} from "../shared/app-config.service";
             </ng-template>
         </p-popover>
     `,
-    styles: [`
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 3.5em;
-                padding-bottom: 0;
-            }
-        }
-        .mapviewer-error-state {
-            position: absolute;
-            inset: 1rem;
-            display: flex;
-            align-items: flex-start;
-            gap: .75rem;
-            max-width: 36rem;
-            height: fit-content;
-            padding: .875rem 1rem;
-            border: 1px solid #efb6b6;
-            border-radius: 6px;
-            background: rgba(255, 255, 255, .96);
-            color: #7f1d1d;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, .16);
-            z-index: 2;
-        }
-        .mapviewer-error-state p {
-            margin: .25rem 0 0;
-        }
-    `],
     standalone: false
 })
 /**

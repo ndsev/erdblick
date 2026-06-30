@@ -140,12 +140,6 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </app-dialog>
     `,
-    styles: [`
-        .item-disabled {
-            color: darkgrey;
-            pointer-events: none;
-        }
-    `],
     standalone: false
 })
 /**

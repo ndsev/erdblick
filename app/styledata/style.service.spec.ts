@@ -293,7 +293,7 @@ describe('StyleService', () => {
         const saveImportedSpy = vi.spyOn(service, 'saveImportedStyles');
         const reapplySpy = vi.spyOn(service, 'reapplyStyle');
 
-        const result = await service.importStyleYamlFile({} as any, file, undefined);
+        const result = await service.importStyleYamlFile(file);
 
         (globalThis as any).FileReader = originalFileReader;
 

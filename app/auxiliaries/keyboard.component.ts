@@ -91,66 +91,6 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
             <p-button (click)="close()" label="Close" icon="pi pi-times"></p-button>
         </app-dialog>
     `,
-    styles: [
-        `
-            .keyboard-dialog {
-                width: 25em;
-                text-align: center;
-                background-color: var(--p-content-background);
-            }
-
-            .keyboard-list {
-                list-style-type: none;
-                padding: 0;
-            }
-
-            .keyboard-list li {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 1em;
-            }
-
-            .keyboard-list li span {
-                display: inline-block;
-                background-color: var(--p-highlight-background);
-                padding: 0.5em 0.75em;
-                border-radius: 0.5em;
-                color: var(--p-content-color);
-                font-weight: bold;
-                min-width: 4em;
-                text-align: center;
-            }
-
-            .control-desc {
-                color: var(--p-surface-500);
-                font-size: 0.9em;
-            }
-
-            .key {
-                border-radius: 0.5em;
-                background-color: #ffcc00;
-                font-size: 1em;
-                padding: 0.5em 0.75em;
-                color: #333;
-            }
-
-            .key-multi {
-                display: flex;
-                gap: 0.25em;
-            }
-
-            .key-multi .key {
-                background-color: #00bcd4;
-                padding: 0.3em 0.6em;
-            }
-
-            .highlight {
-                background-color: #ff5722;
-                color: white;
-            }
-        `
-    ],
     standalone: false
 })
 /** Static keyboard shortcut reference dialog. */

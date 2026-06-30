@@ -924,7 +924,6 @@ interface FeatureSearchStyleRuleDraft {
         </app-confirm-popup>
         <div #alert></div>
     `,
-    styles: [``],
     standalone: false
 })
 /**

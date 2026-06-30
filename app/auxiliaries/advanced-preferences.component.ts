@@ -60,26 +60,6 @@ import {DialogStackService} from '../shared/dialog-stack.service';
             </div>
         </app-dialog>
     `,
-    styles: [`
-        .advanced-preferences-validation-error {
-            color: #d32f2f;
-            margin-bottom: 0.5em;
-        }
-
-        .advanced-preferences-actions {
-            margin-top: 0.5em;
-            display: flex;
-            flex-direction: row;
-            justify-content: space-between;
-            gap: 0.5em;
-        }
-
-        .advanced-preferences-actions-left {
-            display: flex;
-            flex-direction: row;
-            gap: 0.5em;
-        }
-    `],
     standalone: false
 })
 /** Provides the advanced preferences JSON editor dialog. */

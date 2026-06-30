@@ -97,7 +97,6 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
             </div>
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /** Dialog that filters, sorts, and exports captured diagnostics log entries. */

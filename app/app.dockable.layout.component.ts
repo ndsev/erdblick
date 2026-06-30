@@ -104,7 +104,6 @@ import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model"
             }
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /**

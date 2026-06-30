@@ -42,7 +42,6 @@ interface InspectionModelData {
             </inspection-tree>
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /** Renders feature inspection data and keeps it in sync while staged tiles continue loading. */
