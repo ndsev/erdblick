@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {inspectionSearchNumberLiteral} from "./inspection.tree.component";
+import {inspectionSearchNumberLiteral} from "./inspection-search.util";
 
 describe("inspectionSearchNumberLiteral", () => {
     it("keeps BigInt inspection integers as unquoted Simfil numeric literals", () => {

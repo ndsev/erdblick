@@ -50,13 +50,6 @@ import {
     firstParamValue,
     sourceDataSelectionMapIds
 } from "./url-state-codec";
-import {
-    clampLowFiTileThreshold,
-    DEFAULT_HIGH_FIDELITY_TILE_THRESHOLD,
-    DEFAULT_LOW_FIDELITY_TILE_THRESHOLD,
-    LowFiTileThresholds,
-    normalizeLowFiTileThresholds
-} from "./low-fi-tile-thresholds";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -610,20 +603,6 @@ export class AppStateService implements OnDestroy {
         name: 'pinLowFiToMaxLod',
         defaultValue: false,
         schema: Boolish
-    });
-
-    readonly highFidelityTileThresholdState = this.createState<number>({
-        name: 'highFidelityTileThreshold',
-        defaultValue: DEFAULT_HIGH_FIDELITY_TILE_THRESHOLD,
-        schema: z.coerce.number().int(),
-        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_HIGH_FIDELITY_TILE_THRESHOLD)
-    });
-
-    readonly lowFidelityTileThresholdState = this.createState<number>({
-        name: 'lowFidelityTileThreshold',
-        defaultValue: DEFAULT_LOW_FIDELITY_TILE_THRESHOLD,
-        schema: z.coerce.number().int(),
-        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FIDELITY_TILE_THRESHOLD)
     });
 
     readonly deckStyleWorkersCountState = this.createState<number>({
@@ -1938,28 +1917,6 @@ export class AppStateService implements OnDestroy {
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
     set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
-    get lowFiTileThresholds(): LowFiTileThresholds {
-        return normalizeLowFiTileThresholds(
-            this.highFidelityTileThresholdState.getValue(),
-            this.lowFidelityTileThresholdState.getValue());
-    }
-    get highFidelityTileThreshold() {return this.lowFiTileThresholds.highFidelityTileThreshold;}
-    set highFidelityTileThreshold(val: number) {
-        const normalized = normalizeLowFiTileThresholds(val, this.lowFidelityTileThresholdState.getValue());
-        if (normalized.lowFidelityTileThreshold !== this.lowFidelityTileThresholdState.getValue()) {
-            this.lowFidelityTileThresholdState.next(normalized.lowFidelityTileThreshold);
-        }
-        this.highFidelityTileThresholdState.next(normalized.highFidelityTileThreshold);
-    }
-    get lowFidelityTileThreshold() {return this.lowFiTileThresholds.lowFidelityTileThreshold;}
-    set lowFidelityTileThreshold(val: number) {
-        const low = clampLowFiTileThreshold(val, DEFAULT_LOW_FIDELITY_TILE_THRESHOLD);
-        const high = Math.max(this.highFidelityTileThresholdState.getValue(), low);
-        if (high !== this.highFidelityTileThresholdState.getValue()) {
-            this.highFidelityTileThresholdState.next(high);
-        }
-        this.lowFidelityTileThresholdState.next(low);
-    }
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}

@@ -1,12 +1,6 @@
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
 import type {ITileVisualization} from "./render-view.model";
-import {
-    DEFAULT_HIGH_FIDELITY_TILE_THRESHOLD,
-    DEFAULT_LOW_FIDELITY_TILE_THRESHOLD,
-    LowFiTileThresholds,
-    normalizeLowFiTileThresholds
-} from "../shared/low-fi-tile-thresholds";
 
 export const DEFAULT_VIEWPORT: Viewport = {
     south: .0,
@@ -33,67 +27,39 @@ export const LOW_FI_LOD6_TILE_COUNT_THRESHOLD = 32;
 export const LOW_FI_LOD7_TILE_COUNT_THRESHOLD = 16;
 export const LOW_FI_MAX_LOD = 7;
 
-export const DEFAULT_LOW_FI_TILE_THRESHOLDS: LowFiTileThresholds = {
-    highFidelityTileThreshold: DEFAULT_HIGH_FIDELITY_TILE_THRESHOLD,
-    lowFidelityTileThreshold: DEFAULT_LOW_FIDELITY_TILE_THRESHOLD
-};
-
 export interface TileRenderPolicy {
     targetFidelity: "low" | "high";
     maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
 }
 
-/** Derives the eight internal LOD thresholds from the two user-facing anchors. */
-function lowFiThresholdLadder(thresholds: LowFiTileThresholds): readonly number[] {
-    const normalized = normalizeLowFiTileThresholds(
-        thresholds.highFidelityTileThreshold,
-        thresholds.lowFidelityTileThreshold);
-    const high = normalized.highFidelityTileThreshold;
-    const low = normalized.lowFidelityTileThreshold;
-    return [
-        high * 32,
-        high * 8,
-        high * 4,
-        high * 2,
-        high,
-        low,
-        Math.max(1, Math.floor(low / 2)),
-        Math.max(1, Math.floor(low / 4))
-    ];
-}
-
 /** Maps a visible tile count to the low-/high-fidelity policy that should be applied at that density. */
-function tileRenderPolicyForCount(
-    tileCount: number,
-    pinLowFiToMaxLod: boolean,
-    thresholds: LowFiTileThresholds): TileRenderPolicy {
-    const ladder = lowFiThresholdLadder(thresholds);
+function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean): TileRenderPolicy {
     const lowFiPolicy = (maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7): TileRenderPolicy => ({
         targetFidelity: "low",
         maxLowFiLod: pinLowFiToMaxLod ? LOW_FI_MAX_LOD : maxLowFiLod
     });
-    if (tileCount >= ladder[0]) {
+    if (tileCount >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(0);
     }
-    if (tileCount >= ladder[1]) {
+    if (tileCount >= LOW_FI_LOD1_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(1);
     }
-    if (tileCount >= ladder[2]) {
+    if (tileCount >= LOW_FI_LOD2_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(2);
     }
-    if (tileCount >= ladder[3]) {
+    if (tileCount >= LOW_FI_LOD3_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(3);
     }
-    if (tileCount >= ladder[4]) {
+    if (tileCount >= LOW_FI_LOD4_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(4);
     }
-    if (tileCount >= ladder[5]) {
+    if (tileCount >= LOW_FI_LOD5_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(5);
     }
-    if (tileCount >= ladder[6]) {
+    if (tileCount >= LOW_FI_LOD6_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(6);
     }
-    if (tileCount >= ladder[7]) {
+    if (tileCount >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(7);
     }
     return {
@@ -374,8 +340,7 @@ export class ViewVisualizationState {
         tileLimit: number,
         levels: Iterable<number>,
         canonicalCameraAltitudeMeters: number,
-        pinLowFiToMaxLod = false,
-        lowFiTileThresholds: LowFiTileThresholds = DEFAULT_LOW_FI_TILE_THRESHOLDS
+        pinLowFiToMaxLod = false
     ) {
         this.visibleTileIds.clear();
         this.tileRenderPolicy.clear();
@@ -397,10 +362,7 @@ export class ViewVisualizationState {
             }
 
             const canonicalTileCount = coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level);
-            const levelPolicy = tileRenderPolicyForCount(
-                canonicalTileCount,
-                pinLowFiToMaxLod,
-                lowFiTileThresholds);
+            const levelPolicy = tileRenderPolicyForCount(canonicalTileCount, pinLowFiToMaxLod);
 
             for (const tileId of visibleTileIdsForLevel) {
                 this.tileRenderPolicy.set(tileId, levelPolicy);
