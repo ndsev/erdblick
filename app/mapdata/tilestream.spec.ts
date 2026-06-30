@@ -67,6 +67,29 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it('rejects stale payload frames after datasource metadata changes', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            tileStream.latestRequestedRequestId = 3;
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(true);
+
+            tileStream.resetAfterDataSourceInfoChange();
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+        } finally {
+            client.destroy();
+        }
+    });
+
     it('dispatches source catalog change control frames', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;

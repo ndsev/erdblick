@@ -331,6 +331,20 @@ export class MapTileStreamClient {
         this.frameQueue = [];
     }
 
+    /** Invalidates in-flight payloads after datasource dictionaries have been replaced. */
+    resetAfterDataSourceInfoChange() {
+        this.clearPendingFrames();
+        this.awaitingCompletion = false;
+        this.lastRequestPromise = null;
+        this.lastStatusPayload = null;
+        this.lastTilesRequestBody = null;
+        this.incomingRequestId = null;
+        this.latestRequestedRequestId = this.nextRequestId++;
+        this.pullClientId = null;
+        this.stopPullLoops();
+        this.resetCompletionPromise();
+    }
+
     /** Pauses or resumes frame handling so the rest of the app can shed load temporarily. */
     setFrameProcessingPaused(paused: boolean) {
         this.frameProcessingPaused = paused;
@@ -874,6 +888,9 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
+                if (!this.acceptsCurrentPayloadFrame()) {
+                    return;
+                }
                 uint8ArrayToWasm((wasmBuffer: any) => {
                     this.parser.readFieldDictUpdate(wasmBuffer);
                 }, bytes);
@@ -884,6 +901,9 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
+                if (!this.acceptsCurrentPayloadFrame()) {
+                    return;
+                }
                 if (this.onFeatures) {
                     this.onFeatures(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
@@ -891,6 +911,9 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
+                if (!this.acceptsCurrentPayloadFrame()) {
+                    return;
+                }
                 if (this.onSourceData) {
                     this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
@@ -898,6 +921,9 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_SEARCH_RESULTS) {
+                if (!this.acceptsCurrentPayloadFrame()) {
+                    return;
+                }
                 if (this.onSearchResults) {
                     this.onSearchResults(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
@@ -910,6 +936,14 @@ export class MapTileStreamClient {
         } catch (err) {
             console.error("Tile stream message handler failed.", err);
         }
+    }
+
+    /** Returns whether the active request context allows decoding untagged payload frames. */
+    private acceptsCurrentPayloadFrame(): boolean {
+        if (!this.supportsRequestContextFrames || this.latestRequestedRequestId === null) {
+            return true;
+        }
+        return this.incomingRequestId === this.latestRequestedRequestId;
     }
 
     /** Filters stale status/context frames that belong to an older logical request id. */

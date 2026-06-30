@@ -132,6 +132,9 @@ export class MapTileStreamService {
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tileStream?.setPullCompressionEnabled(enabled);
         });
+        this.mapInfo.dataSourceInfoChanged.subscribe(() => {
+            this.ngZone.runOutsideAngular(() => this.invalidateLoadedDataAfterDataSourceInfoChange());
+        });
         this.viewState.viewStateChanged.subscribe(() => this.scheduleUpdate());
     }
 
@@ -302,6 +305,28 @@ export class MapTileStreamService {
             compressionSavingsPct: null,
             knownCompressedCoveragePct: 0,
         };
+    }
+
+    /** Drops tile/search payloads decoded against obsolete datasource string pools. */
+    private invalidateLoadedDataAfterDataSourceInfoChange(): void {
+        this.tileStream?.resetAfterDataSourceInfoChange();
+        for (const tile of this.loadedTileLayers.values()) {
+            const tileKey = tile.mapTileKey;
+            tile.dispose();
+            this.tileDataChanged.next({tileKey, tile, reason: "evicted"});
+        }
+        this.loadedTileLayers.clear();
+        this.stageRequestProgress = [];
+        this.pendingRequestedTileKeysByStage = [];
+        this.requestedLayerProgressByKey.clear();
+        this.mapInfo.setRequestedLayerProgress(this.requestedLayerProgressByKey);
+
+        for (const runtime of this.activeFeatureSearches.values()) {
+            const removedTiles = runtime.applyDefinition(runtime.definition, true);
+            this.disposeSearchResultTiles(removedTiles, true);
+            this.emitSearchCoverageChanged(runtime);
+        }
+        this.scheduleUpdate();
     }
 
     /** Returns whether the interactive websocket is currently connected. */

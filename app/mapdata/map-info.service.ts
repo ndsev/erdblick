@@ -36,6 +36,8 @@ export class MapInfoService {
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionChanged = new Subject<[StyleOptionNode, number]>();
+    /** Emits after ready datasource metadata has been replaced in the shared parser. */
+    public readonly dataSourceInfoChanged = new Subject<void>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
@@ -169,6 +171,7 @@ export class MapInfoService {
             }, new TextEncoder().encode(jsonString));
             FeatureTile.clearDataSourceInfoBlobCache();
             SearchResultTile.clearDataSourceInfoBlobCache();
+            this.dataSourceInfoChanged.next();
             this.layerStateChanged.next("datasources");
             return true;
         } catch (err) {

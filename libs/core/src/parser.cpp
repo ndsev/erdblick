@@ -1590,6 +1590,10 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     info_.clear();
     featureJumpTargets_.clear();
     schemaCompletionRoots_.clear();
+    // Datasource reloads may reuse node ids with a fresh string dictionary.
+    // Drop offsets here so subsequent requests cannot suppress required pool updates.
+    cachedStrings_ = std::make_shared<mapget::TileLayerStream::StringPoolCache>();
+    reset();
 
     // Parse data source info
     auto srcInfoParsed = nlohmann::json::parse(dataSourceInfoJson.toString());

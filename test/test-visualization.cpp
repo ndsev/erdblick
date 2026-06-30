@@ -17,6 +17,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <sstream>
 #include <variant>
 
 using namespace erdblick;
@@ -74,6 +75,17 @@ std::shared_ptr<mapget::LayerInfo> lineTestLayerInfo()
             }
         ]
     })json"));
+}
+
+/** Serializes a minimal datasource string-pool update for parser cache tests. */
+SharedUint8Array serializedStringPool(std::string const& nodeId, std::string const& dynamicEntry)
+{
+    mapget::StringPool pool(nodeId);
+    pool.emplace(dynamicEntry);
+    std::ostringstream stream;
+    auto writeResult = pool.write(stream, 0);
+    REQUIRE(writeResult);
+    return SharedUint8Array(stream.str());
 }
 
 /** Build a schema-backed layer with one range attribute field used by search-scope inference tests. */
@@ -1026,6 +1038,20 @@ TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspectio
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].sourceValidity.direction"));
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].targetValidity.direction"));
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target.sourceValidity.direction"));
+}
+
+TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is replaced", "[erdblick.parser]")
+{
+    TileLayerParser parser;
+    parser.addFieldDict(serializedStringPool("ReloadedNode", "stale-field-name"));
+
+    auto offsetsBeforeReload = parser.getFieldDictOffsets();
+    REQUIRE(offsetsBeforeReload.contains("ReloadedNode"));
+
+    parser.setDataSourceInfo(SharedUint8Array("[]"));
+
+    auto offsetsAfterReload = parser.getFieldDictOffsets();
+    REQUIRE_FALSE(offsetsAfterReload.contains("ReloadedNode"));
 }
 
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
