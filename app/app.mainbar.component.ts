@@ -20,7 +20,6 @@ import {MenuItem} from "primeng/api";
 import {FeatureSearchService} from "./search/feature.search.service";
 import {InfoMessageService} from "./shared/info.service";
 import {StyleService} from "./styledata/style.service";
-import {InspectionExportService, InspectionGeoJsonExportItem} from "./inspection/inspection-export.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
@@ -141,7 +140,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 private diagnostics: DiagnosticsFacadeService,
                 private featureSearchService: FeatureSearchService,
                 private styleService: StyleService,
-                private inspectionExportService: InspectionExportService,
                 private infoMessageService: InfoMessageService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
@@ -173,9 +171,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.rebuildMenuItems();
         }));
         this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
-            this.rebuildMenuItems();
-        }));
-        this.subscriptions.add(this.inspectionExportService.exportItemsChanged.subscribe(() => {
             this.rebuildMenuItems();
         }));
     }
@@ -499,7 +494,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
         const exportSearchItems = this.buildExportSearchItems();
-        const exportGeoJsonItems = this.buildExportGeoJsonItems();
         const exportStyleSheetItems = this.buildExportStyleSheetItems();
         const menuItems: MenuItem[] = [
             {
@@ -526,12 +520,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         icon: 'travel_explore',
                         disabled: !exportSearchItems.length,
                         items: exportSearchItems
-                    },
-                    {
-                        name: 'Export GeoJSON',
-                        icon: 'polyline',
-                        disabled: !exportGeoJsonItems.length,
-                        items: exportGeoJsonItems
                     },
                     {
                         name: 'Export Style Sheet',
@@ -667,20 +655,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }));
     }
 
-    /** Builds the submenu for exporting currently inspected features as GeoJSON. */
-    private buildExportGeoJsonItems(): MenuItem[] {
-        const items = this.inspectionExportService.geoJsonExportItems();
-        if (!items.length) {
-            return [];
-        }
-        return items.map(item => ({
-            name: this.ellipsizeMenuLabel(item.label, item.featureId),
-            icon: item.disabled ? 'hourglass_empty' : 'polyline',
-            disabled: item.disabled,
-            command: () => { this.exportInspectedFeatureGeoJson(item); }
-        }));
-    }
-
     /** Builds the submenu for exporting currently loaded style sheets. */
     private buildExportStyleSheetItems(): MenuItem[] {
         const styles = Array.from(this.styleService.styles.values())
@@ -738,15 +712,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             icon: 'folder_open',
             items: childItems
         };
-    }
-
-    /** Runs one GeoJSON export menu item unless it is still loading. */
-    private exportInspectedFeatureGeoJson(item: InspectionGeoJsonExportItem): void {
-        if (item.disabled) {
-            this.infoMessageService.showWarning("Inspection data is still loading for this feature.");
-            return;
-        }
-        this.inspectionExportService.downloadFeatureGeoJson(item);
     }
 
     /** Exports one loaded style sheet and reports errors to the user. */
