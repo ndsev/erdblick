@@ -18,12 +18,13 @@ import {InfoMessageService} from "../shared/info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData, type InspectionTreeExpansionState} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {inspectionSearchNumberLiteral} from "./inspection-search.util";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -39,24 +40,6 @@ export class FeatureFilterOptions {
     filterByValues: boolean = true;
     filterOnlyFeatureIds: boolean = false;
     filterGeometryEntries: boolean = false;
-}
-
-/** Converts inspection numeric values to Simfil numeric literals without quoting integer BigInts. */
-export function inspectionSearchNumberLiteral(value: unknown): string | undefined {
-    if (typeof value === "bigint") {
-        return value.toString();
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-        return String(value);
-    }
-    if (typeof value !== "string") {
-        return undefined;
-    }
-    const trimmed = value.trim();
-    return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed) &&
-        Number.isFinite(Number(trimmed))
-        ? trimmed
-        : undefined;
 }
 
 @Component({
@@ -105,7 +88,38 @@ export function inspectionSearchNumberLiteral(value: unknown): string | undefine
                 <tr>
                     @for (col of columns(); track col.key) {
                         <th ttResizableColumn>
-                            {{ col.header }}
+                            <div [class.inspection-key-header-content]="col.key === 'key'">
+                                <span class="inspection-header-label">{{ col.header }}</span>
+                                @if (col.key === "key") {
+                                    <p-buttonGroup class="table-header-buttons"
+                                                   (mousedown)="$event.stopPropagation()">
+                                        <p-button class="table-header-button"
+                                                  severity="secondary"
+                                                  (click)="toggleFullExpansion($event)"
+                                                  [disabled]="fullCollapseActive"
+                                                  [pTooltip]="fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="bottom"
+                                                  [attr.aria-label]="fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'">
+                                            <span class="material-symbols-outlined">
+                                                {{ fullExpansionActive ? 'settings_backup_restore' : 'unfold_more' }}
+                                            </span>
+                                        </p-button>
+                                        <p-button class="table-header-button"
+                                                  severity="secondary"
+                                                  (click)="toggleFullCollapse($event)"
+                                                  [disabled]="fullExpansionActive"
+                                                  [pTooltip]="fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="bottom"
+                                            [attr.aria-label]="fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'">
+                                            <span class="material-symbols-outlined">
+                                                {{ fullCollapseActive ? 'settings_backup_restore' : 'unfold_less' }}
+                                            </span>
+                                        </p-button>
+                                    </p-buttonGroup>
+                                }
+                            </div>
                         </th>
                     }
                 </tr>
@@ -127,13 +141,23 @@ export function inspectionSearchNumberLiteral(value: unknown): string | undefine
                                         @if (shouldShowRowActions(rowNode, rowData)) {
                                             <button type="button"
                                                     class="inspection-row-actions"
-                                                    (click)="onRowActionsClick($event, rowData)"
+                                                    (click)="onRowActionsClick($event, rowNode, rowData)"
                                                     pTooltip="Row actions"
                                                     tooltipPosition="top">...</button>
                                         }
                                         <span class="inspection-row-toggle" (click)="$event.stopPropagation()">
                                             <p-treeTableToggler [rowNode]="rowNode"/>
                                         </span>
+                                    }
+                                    @if (shouldShowValueCopyButton(rowNode, rowData, col.key)) {
+                                        <p-button class="inspection-value-copy-button"
+                                                  severity="secondary"
+                                                  (click)="copyNodeValue($event, rowData)"
+                                                  pTooltip="Copy"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="left">
+                                            <span class="material-symbols-outlined">content_copy</span>
+                                        </p-button>
                                     }
                                     @if (col.key === "value" && isFeatureIdValueRow(rowData)) {
                                         <a href=""
@@ -161,6 +185,14 @@ export function inspectionSearchNumberLiteral(value: unknown): string | undefine
                                     }
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
                                         <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    }
+                                    @if (rowData.hasOwnProperty("valueCount") && $index === 0) {
+                                        <p-tag class="inspection-node-count-tag"
+                                               severity="info"
+                                               [rounded]="true"
+                                               [value]="rowData['valueCount']"
+                                               [pTooltip]="'Value count: ' + rowData['valueCount']"
+                                               tooltipPosition="top"/>
                                     }
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
@@ -245,6 +277,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     showFilter = input<boolean>(true);
     geoJson = input<string>();
     enableSourceDataNavigation = input<boolean>(true);
+    featureIds = input<string[]>([]);
 
     filterFields: string[] = [
         "key",
@@ -257,6 +290,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     filterString = "";
     private suppressFilterEmit = false;
     private lastEmittedFilterText = "";
+    protected fullExpansionActive = false;
+    private expansionSnapshotBeforeFullExpand?: Map<string, boolean | undefined>;
+    protected fullCollapseActive = false;
+    private expansionSnapshotBeforeFullCollapse?: Map<string, boolean | undefined>;
     private frozen = false;
     private manualFreezeRequested = false;
     private dockFreezeRequested = false;
@@ -287,10 +324,14 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 private messageService: InfoMessageService,
                 private featureSearchService: FeatureSearchService) {
         effect(() => {
+            this.savePanelExpansionState();
             this.data = this.treeData();
-            if (this.isFeatureInspectionTree(this.data)) {
-                this.expandTreeNodes(this.data);
-            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+            this.applyInitialExpansion(this.data);
+            this.restorePanelExpansionState(this.data);
 
             this.refreshLayout();
             this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
@@ -310,6 +351,24 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         });
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             this.scrollToHighlightedIndex(index);
+        }));
+        this.subscriptions.push(this.stateService.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
+            if (!this.data.length) {
+                return;
+            }
+            if (expandByDefault) {
+                this.setTreeExpansion(this.data, true, true);
+            } else if (this.isFeatureInspectionTree(this.data)) {
+                this.expandTreeNodes(this.data);
+            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+            this.data = [...this.data];
+            this.savePanelExpansionState();
+            this.refreshLayout();
+            this.cdr.markForCheck();
         }));
     }
 
@@ -332,6 +391,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Releases resize listeners, pending frames, and reactive subscriptions. */
     ngOnDestroy() {
+        this.savePanelExpansionState();
         this.unfreeze();
         this.destroyed = true;
         this.resizeObserver?.disconnect();
@@ -475,6 +535,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.filterString = "";
         this.table.filterGlobal("" , 'contains');
         this.data = this.treeData();
+        this.applyInitialExpansion(this.data);
         this.emitFilterChange("");
     }
 
@@ -511,27 +572,53 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
+    protected shouldShowValueCopyButton(rowNode: any, rowData: any, colKey: string): boolean {
+        if (colKey !== "value" || this.hasChildNodes(rowNode?.node) || !rowData?.hasOwnProperty?.("value")) {
+            return false;
+        }
+        const value = rowData["value"];
+        return value !== null && value !== undefined && String(value).length > 0;
+    }
+
+    /** Copies the exact value-cell text without also toggling the row or following FeatureId links. */
+    protected copyNodeValue(event: MouseEvent, rowData: any): void {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = rowData?.["value"];
+        if (value === null || value === undefined || String(value).length === 0) {
+            return;
+        }
+        this.copyToClipboard(String(value));
+    }
+
     /** Opens the row action menu for copy/docs/search-path helpers. */
-    onRowActionsClick(event: MouseEvent, rowData: any) {
+    onRowActionsClick(event: MouseEvent, rowNode: any, rowData: any) {
         this.inspectionMenu.toggle(event);
         event.stopPropagation();
         const key = rowData["key"];
         const value = rowData["value"];
-        this.inspectionMenuItems = [
-            {
-                label: 'Copy Key/Value',
-                command: () => {
-                    this.copyToClipboard(`{${key}: ${value}}`);
+        const node = rowNode?.node as TreeNode | undefined;
+        const hasChildren = this.hasChildNodes(node);
+        const showScalarActions = this.shouldShowScalarRowActions(rowNode, rowData);
+        this.inspectionMenuItems = [];
+        if (showScalarActions) {
+            this.inspectionMenuItems.push(
+                {
+                    label: 'Copy Key/Value',
+                    command: () => {
+                        this.copyToClipboard(`{${key}: ${value}}`);
+                    }
+                },
+                {
+                    label: 'Open NDS.Live Docs',
+                    command: () => {
+                        window.open(`https://doc.nds.live/search?q=${key}`, "_blank");
+                    }
                 }
-            },
-            {
-                label: 'Open NDS.Live Docs',
-                command: () => {
-                    window.open(`https://doc.nds.live/search?q=${key}`, "_blank");
-                }
-            }
-        ];
-        if (rowData.hasOwnProperty("geoJsonPath")) {
+            );
+        }
+        if (showScalarActions && rowData.hasOwnProperty("geoJsonPath")) {
             const path = rowData["geoJsonPath"];
             this.inspectionMenuItems.push({
                 label: 'Copy Search Path',
@@ -555,9 +642,27 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 });
             }
         }
+        if (hasChildren && node) {
+            if (this.inspectionMenuItems.length) {
+                this.inspectionMenuItems.push({separator: true});
+            }
+            this.inspectionMenuItems.push(
+                {
+                    label: 'Expand child nodes',
+                    command: () => this.expandChildNodes(node)
+                },
+                {
+                    label: 'Collapse child nodes',
+                    command: () => this.collapseChildNodes(node)
+                }
+            );
+        }
         const inspectionTarget = this.inspectionTargetForRow(rowData);
         const mapTileKey = typeof rowData?.["mapTileKey"] === "string" ? rowData["mapTileKey"] : "";
         if (inspectionTarget && mapTileKey) {
+            if (this.inspectionMenuItems.length) {
+                this.inspectionMenuItems.push({separator: true});
+            }
             this.inspectionMenuItems.push({
                 label: this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
                     ? 'Unhighlight Attr/Validity'
@@ -798,9 +903,19 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return 0;
     }
 
-    /** Hides row actions for root sections where copy/docs helpers are not useful. */
+    /** Shows row actions when a row has useful scalar actions or subtree controls. */
     shouldShowRowActions(rowNode: any, rowData: any): boolean {
+        return this.shouldShowScalarRowActions(rowNode, rowData) || this.hasChildNodes(rowNode?.node);
+    }
+
+    /** Keeps copy/search/doc actions off root sections where only subtree controls are useful. */
+    private shouldShowScalarRowActions(rowNode: any, rowData: any): boolean {
         return this.rowLevel(rowNode) > 0 && rowData?.["type"] !== this.InspectionValueType.SECTION.value;
+    }
+
+    /** Returns whether a PrimeNG tree wrapper has expandable children. */
+    private hasChildNodes(node: TreeNode | undefined): boolean {
+        return Array.isArray(node?.children) && node.children.length > 0;
     }
 
     /** Builds the CSS class map for stage badges, hover groups, and special inspection rows. */
@@ -856,6 +971,78 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Thin wrapper so menus and template actions share one clipboard helper. */
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
+    }
+
+    /** Toggles between all nodes expanded and the expansion snapshot captured before that action. */
+    protected toggleFullExpansion(event: MouseEvent) {
+        event.stopPropagation();
+        if (this.fullExpansionActive) {
+            if (this.expansionSnapshotBeforeFullExpand) {
+                this.restoreExpansionState(this.data, this.expansionSnapshotBeforeFullExpand);
+            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+        } else {
+            this.expansionSnapshotBeforeFullExpand = this.captureExpansionState(this.data);
+            this.setTreeExpansion(this.data, true);
+            this.fullExpansionActive = true;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+        }
+        this.data = [...this.data];
+        this.savePanelExpansionState();
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Toggles between all nodes collapsed and the expansion snapshot captured before that action. */
+    protected toggleFullCollapse(event: MouseEvent) {
+        event.stopPropagation();
+        if (this.fullCollapseActive) {
+            if (this.expansionSnapshotBeforeFullCollapse) {
+                this.restoreExpansionState(this.data, this.expansionSnapshotBeforeFullCollapse);
+            }
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+        } else {
+            this.expansionSnapshotBeforeFullCollapse = this.captureExpansionState(this.data);
+            this.collapseTreeBelowRootSections(this.data);
+            this.fullCollapseActive = true;
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+        }
+        this.data = [...this.data];
+        this.savePanelExpansionState();
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Expands the selected row and every descendant below it. */
+    private expandChildNodes(node: TreeNode) {
+        node.expanded = true;
+        this.setDescendantExpansion(node, true);
+        this.data = [...this.data];
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Collapses the selected parent and every descendant below it. */
+    private collapseChildNodes(node: TreeNode) {
+        node.expanded = false;
+        this.setDescendantExpansion(node, false);
+        this.data = [...this.data];
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Recursively applies expansion to descendants, excluding the supplied node itself. */
+    private setDescendantExpansion(node: TreeNode, expanded: boolean) {
+        for (const child of node.children ?? []) {
+            if (this.hasChildNodes(child)) {
+                child.expanded = expanded;
+                this.setDescendantExpansion(child, expanded);
+            }
+        }
     }
 
     /** Opens the GeoJSON actions menu for the current inspection payload. */
@@ -931,12 +1118,128 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Applies the global filter and restores default expansion when the filter is cleared. */
     filterTree(filterString: string) {
         if (!filterString) {
+            this.savePanelExpansionState();
             this.data = this.treeData();
-            this.expandTreeNodes(this.data);
+            this.applyInitialExpansion(this.data);
+            this.restorePanelExpansionState(this.data);
         }
 
         const query = filterString.toLowerCase();
         this.table.filterGlobal(query, "contains");
+    }
+
+    /** Applies either the global expand-by-default preference or the legacy feature-tree heuristic. */
+    private applyInitialExpansion(nodes: TreeTableNode[]): void {
+        if (this.stateService.inspectionTreeExpandByDefault) {
+            this.setTreeExpansion(nodes, true, true);
+            return;
+        }
+        if (this.isFeatureInspectionTree(nodes)) {
+            this.expandTreeNodes(nodes);
+        }
+    }
+
+    /** Sets expansion state throughout a tree, optionally preserving explicit user/restored states. */
+    private setTreeExpansion(nodes: TreeNode[], expanded: boolean, onlyUndefined = false): void {
+        nodes.forEach(node => {
+            if (this.hasChildNodes(node) && (!onlyUndefined || node.expanded === undefined)) {
+                node.expanded = expanded;
+            }
+            if (node.children) {
+                this.setTreeExpansion(node.children, expanded, onlyUndefined);
+            }
+        });
+    }
+
+    /** Collapses all expandable rows while keeping top-level inspection section rows open. */
+    private collapseTreeBelowRootSections(nodes: TreeNode[], depth = 0): void {
+        nodes.forEach(node => {
+            const isRootSection = depth === 0 && node.data?.["type"] === this.InspectionValueType.SECTION.value;
+            if (this.hasChildNodes(node)) {
+                node.expanded = isRootSection ? true : false;
+            }
+            if (node.children) {
+                this.collapseTreeBelowRootSections(node.children, depth + 1);
+            }
+        });
+    }
+
+    /** Captures current expansion values using stable node ids when available. */
+    private captureExpansionState(
+        nodes: TreeNode[],
+        result = new Map<string, boolean | undefined>(),
+        path: number[] = []
+    ): Map<string, boolean | undefined> {
+        nodes.forEach((node, index) => {
+            const nodePath = [...path, index];
+            result.set(this.expansionStateKey(node, nodePath), node.expanded);
+            if (node.children) {
+                this.captureExpansionState(node.children, result, nodePath);
+            }
+        });
+        return result;
+    }
+
+    /** Saves expansion state so dock/undock remounts keep the user's current tree shape. */
+    private savePanelExpansionState(): void {
+        if (!this.data.length) {
+            return;
+        }
+        const state: InspectionTreeExpansionState = {
+            expandedNodes: this.captureExpansionState(this.data),
+            fullExpansionActive: this.fullExpansionActive,
+            fullCollapseActive: this.fullCollapseActive
+        };
+        if (this.expansionSnapshotBeforeFullExpand) {
+            state.expansionSnapshotBeforeFullExpand = this.expansionSnapshotBeforeFullExpand;
+        }
+        if (this.expansionSnapshotBeforeFullCollapse) {
+            state.expansionSnapshotBeforeFullCollapse = this.expansionSnapshotBeforeFullCollapse;
+        }
+        this.stateService.setInspectionTreeExpansionState(this.panelId(), state);
+    }
+
+    /** Restores expansion state captured by a previous component instance for the same panel. */
+    private restorePanelExpansionState(nodes: TreeNode[]): void {
+        const state = this.stateService.getInspectionTreeExpansionState(this.panelId());
+        if (!state) {
+            return;
+        }
+        this.restoreExpansionState(nodes, state.expandedNodes, [], false);
+        this.fullExpansionActive = state.fullExpansionActive;
+        this.expansionSnapshotBeforeFullExpand = state.expansionSnapshotBeforeFullExpand;
+        this.fullCollapseActive = state.fullCollapseActive;
+        this.expansionSnapshotBeforeFullCollapse = state.expansionSnapshotBeforeFullCollapse;
+    }
+
+    /** Restores a previously captured expansion map, collapsing new expandable nodes by default. */
+    private restoreExpansionState(
+        nodes: TreeNode[],
+        snapshot: Map<string, boolean | undefined>,
+        path: number[] = [],
+        collapseMissing = true
+    ): void {
+        nodes.forEach((node, index) => {
+            const nodePath = [...path, index];
+            const key = this.expansionStateKey(node, nodePath);
+            if (snapshot.has(key)) {
+                node.expanded = snapshot.get(key);
+            } else if (collapseMissing) {
+                node.expanded = false;
+            }
+            if (node.children) {
+                this.restoreExpansionState(node.children, snapshot, nodePath, collapseMissing);
+            }
+        });
+    }
+
+    /** Returns the most stable available key for expansion snapshots. */
+    private expansionStateKey(node: TreeNode, path: number[]): string {
+        const nodeId = node.data?.["nodeId"];
+        if (typeof nodeId === "string" && nodeId.length > 0) {
+            return `node:${nodeId}`;
+        }
+        return `path:${path.join(".")}`;
     }
 
     /** Synchronizes the input field, tree filter state, and shared filter text binding. */

@@ -4,6 +4,11 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {Color, HeightReference, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {InfoMessageService} from "../shared/info.service";
+import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
+import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -26,6 +31,19 @@ export interface TileOutlinePayload {
     };
 }
 
+/** View-local search scope prepared when the user opens the map context menu. */
+export interface FeatureSearchContextMenuScope {
+    viewIndex: number;
+    selectedMapLayers: FeatureSearchMapLayerRef[];
+}
+
+/** One grouped tile-diagnostics action prepared for the current right-click context. */
+export interface TileDiagnosticsMenuOption {
+    tileId: string;
+    level: number;
+    layers: PerformanceDiagnosticsScope["layers"];
+}
+
 @Injectable()
 /**
  * Owns the dynamic right-click menu content for the map view.
@@ -37,41 +55,41 @@ export class RightClickMenuService {
     preferredTileIdForSourceData: bigint | null = null;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
+    closeContextMenus: Subject<void> = new Subject<void>();
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
+    private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
+    private sourceDataShortcut: {tileId: bigint, mapId: string, layerId: string} | null = null;
+    private featureSearchScope: FeatureSearchContextMenuScope | null = null;
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
-    constructor(private stateService: AppStateService) {
-        this.menuItems.next([{
-            label: 'Inspect Source Data for Tile',
-            icon: 'pi pi-database',
-            command: () => {
-                this.openTileSourceDataDialog();
-            }
-        }]);
-
+    constructor(private stateService: AppStateService,
+                private featureSearchService: FeatureSearchService,
+                private infoMessageService: InfoMessageService,
+                private diagnostics: DiagnosticsFacadeService) {
+        this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
-            const items = this.menuItems.getValue();
+            this.sourceDataShortcut = null;
             const lastOption = this.lastInspectedTileSourceDataOption.getValue();
             if (lastOption) {
                 const tileId = this.preferredSourceDataTile(tileIds);
                 if (tileId) {
-                    this.updateMenuForLastInspectedSourceData({
+                    this.sourceDataShortcut = {
                         tileId: tileId.id as bigint,
                         mapId: lastOption.mapId,
                         layerId: lastOption.layerId
-                    });
-                    return;
+                    };
                 }
             }
-
-            if (items.length > 1) {
-                items.shift();
-                this.menuItems.next(items);
-            }
+            this.rebuildMenuItems();
         });
+    }
+
+    /** Requests every map view to hide its PrimeNG context menu before another one opens. */
+    closeAllContextMenus(): void {
+        this.closeContextMenus.next();
     }
 
     /** Returns whether the source-data picker dialog is currently visible. */
@@ -87,6 +105,18 @@ export class RightClickMenuService {
     /** Closes the source-data picker dialog. */
     closeTileSourceDataDialog(): void {
         this.sourceDataDialogVisible = false;
+    }
+
+    /** Updates the context-menu action that starts a view-scoped feature search. */
+    setFeatureSearchScope(scope: FeatureSearchContextMenuScope | null): void {
+        this.featureSearchScope = scope;
+        this.rebuildMenuItems();
+    }
+
+    /** Replaces the tile-scoped Performance Diagnostics entries for the current context. */
+    setTileDiagnosticsOptions(options: TileDiagnosticsMenuOption[]): void {
+        this.tileDiagnosticsOptions = [...options];
+        this.rebuildMenuItems();
     }
 
     /**
@@ -134,9 +164,46 @@ export class RightClickMenuService {
         });
     }
 
-    /** Replaces the leading menu item with a shortcut that reuses the last inspected source-data layer. */
-    private updateMenuForLastInspectedSourceData(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}) {
-        const menuItem = {
+    /** Rebuilds context-menu items from the latest source-data, diagnostics, and search scopes. */
+    private rebuildMenuItems(): void {
+        const items: MenuItem[] = this.sourceDataMenuItems();
+        if (this.tileDiagnosticsOptions.length) {
+            items.push({separator: true});
+            for (const option of this.tileDiagnosticsOptions) {
+                items.push(this.tileDiagnosticsMenuItem(option));
+            }
+        }
+        if (this.featureSearchScope) {
+            items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
+        }
+        this.menuItems.next(items);
+    }
+
+    /** Returns the source-data actions for the currently prepared context. */
+    private sourceDataMenuItems(): MenuItem[] {
+        if (!this.sourceDataShortcut) {
+            return [this.sourceDataPickerMenuItem()];
+        }
+        return [
+            this.buildLastInspectedSourceDataMenuItem(this.sourceDataShortcut),
+            this.sourceDataPickerMenuItem()
+        ];
+    }
+
+    /** Builds the source-data picker action for the currently prepared tile candidates. */
+    private sourceDataPickerMenuItem(): MenuItem {
+        return {
+            label: 'Inspect Source Data for Tile',
+            icon: 'pi pi-database',
+            command: () => {
+                this.openTileSourceDataDialog();
+            }
+        };
+    }
+
+    /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
+    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}): MenuItem {
+        return {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
@@ -145,12 +212,41 @@ export class RightClickMenuService {
                 } as SelectedSourceData);
             }
         };
-        const items = this.menuItems.getValue();
-        if (items.length > 1) {
-            items[0] = menuItem;
-        } else {
-            items.unshift(menuItem);
-        }
-        this.menuItems.next(items);
+    }
+
+    /** Builds a tile-scoped Performance Diagnostics action for one grouped tile option. */
+    private tileDiagnosticsMenuItem(option: TileDiagnosticsMenuOption): MenuItem {
+        return {
+            label: `Diagnostics for Tile ${option.tileId}`,
+            icon: 'pi pi-chart-line',
+            command: () => {
+                this.diagnostics.openPerformanceDialog({
+                    tileIds: [option.tileId],
+                    layers: option.layers,
+                    source: 'context-menu'
+                });
+            }
+        };
+    }
+
+    /** Returns the feature-search action for the currently prepared view scope. */
+    private featureSearchMenuItem(scope: FeatureSearchContextMenuScope): MenuItem {
+        const disabled = !scope.selectedMapLayers.length;
+        return {
+            label: disabled ? 'No loaded feature data in this view' : 'Search all features in this view',
+            icon: 'pi pi-search',
+            disabled,
+            command: () => {
+                if (!scope.selectedMapLayers.length) {
+                    return;
+                }
+                this.featureSearchService.run("true", {
+                    selectedMapLayers: scope.selectedMapLayers,
+                    selectedViewIndices: [scope.viewIndex],
+                    selectedMapLayersManual: true
+                });
+                this.infoMessageService.showInfo("Started search in this view");
+            }
+        };
     }
 }

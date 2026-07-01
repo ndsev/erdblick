@@ -393,39 +393,6 @@ interface BackgroundLayerOption {
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
     `,
-    styles: [`
-        .disabled {
-            pointer-events: none;
-            opacity: 0.5;
-        }
-
-        .datasource-status {
-            width: 1.04rem;
-            height: 1.04rem;
-            margin: 0 0.04rem 0 0;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            flex: 0 0 auto;
-        }
-
-        .datasource-status.failed {
-            background: #ef4444;
-            box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.5);
-        }
-
-        .datasource-status.initializing {
-            background:
-                conic-gradient(#60a5fa var(--datasource-progress, 0%), rgba(96, 165, 250, 0.2) 0);
-            box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.45);
-        }
-
-        .disabled-label {
-            opacity: 0.65;
-        }
-
-    `],
     standalone: false
 })
 /**

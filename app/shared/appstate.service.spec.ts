@@ -76,8 +76,8 @@ describe('AppStateService', () => {
 
         expect(localStorage.getItem('marker')).toBe('0');
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({ m: '0' }),
-            queryParamsHandling: 'merge',
+            queryParams: expect.objectContaining({ m: '0', v2: '1' }),
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -101,6 +101,46 @@ describe('AppStateService', () => {
 
         expect(service.markerState.getValue()).toBe(true);
         expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('clamps the low-fi tile threshold', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.lowFiTileThreshold).toBe(128);
+
+        service.lowFiTileThreshold = 1024;
+        expect(service.lowFiTileThreshold).toBe(1024);
+
+        service.lowFiTileThreshold = 9999;
+        expect(service.lowFiTileThreshold).toBe(4096);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('enables deck antialiasing by default', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.deckAntialiasingEnabled).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -149,6 +189,76 @@ describe('AppStateService', () => {
             mapTileKey: 'Features:Very-Large-Map:Road:220e0770000d:0',
             featureId: 'Road.545554686.6:attribute#1:validity#0'
         });
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates coordinated v2 layer-indexed URL state', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            n: '2',
+            map: 'MapA~MapB',
+            l: 'Lane:0~Road:1',
+            v: '1,0:0,1',
+            z: '12,13:14,15',
+            az: '1x2:0x2',
+            'T93C~0-1~.CenterLines': '1x2:0x2',
+            sel: [
+                `0~0~F:0:21fa0777000d~${encodeURIComponent('Lane.1:attribute#1')}~30,20~n0`,
+                '1~1~SD:1:LaneGeometryLayer-1:21fa0777000e~783783249845~45,32~n3',
+            ].join(';'),
+        });
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.numViews).toBe(2);
+        expect(service.layerNamesState.getValue()).toEqual(['MapA/Lane', 'MapB/Road']);
+        expect(service.layerVisibilityState.getValue(0)).toEqual([true, false]);
+        expect(service.layerVisibilityState.getValue(1)).toEqual([false, true]);
+        expect(service.layerZoomLevelState.getValue(0)).toEqual([12, 13]);
+        expect(service.layerZoomLevelState.getValue(1)).toEqual([14, 15]);
+        expect(service.layerAutoZoomLevelState.getValue(0)).toEqual([true, true]);
+        expect(service.layerAutoZoomLevelState.getValue(1)).toEqual([false, false]);
+        expect(service.stylesState.getValue().get('MapA/Lane/T93C/showCenterLines')).toEqual(['1', '0']);
+        expect(service.stylesState.getValue().get('MapB/Road/T93C/showCenterLines')).toEqual(['1', '0']);
+        expect(service.selection).toEqual([
+            {
+                id: 0,
+                features: [{
+                    mapTileKey: 'Features:MapA:Lane:21fa0777000d:0',
+                    featureId: 'Lane.1:attribute#1'
+                }],
+                locked: true,
+                size: [30, 20],
+                color: '#fff314',
+                undocked: false
+            },
+            {
+                id: 1,
+                features: [],
+                sourceData: {
+                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:21fa0777000e:0',
+                    address: 783783249845n
+                },
+                locked: true,
+                focused: true,
+                size: [45, 32],
+                color: '#ff1212',
+                undocked: true
+            },
+        ]);
+        expect(service.focusedInspectionPanelId).toBe(1);
         expect(routerStub.navigate).not.toHaveBeenCalled();
 
         service.ngOnDestroy();
@@ -284,9 +394,10 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 s: JSON.stringify(['features', '**.speed > 80']),
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -311,7 +422,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        (service as any).lastMergedUrlSyncAt = Date.now();
+        (service as any).lastUrlSyncAt = Date.now();
         service.markerState.next(true);
         await flushMicrotasks();
         expect((service as any).urlSyncHandle).not.toBeNull();
@@ -364,9 +475,10 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 mp: '11.14198571,48.00237573',
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -405,9 +517,10 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 bg: 'osm~50',
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -637,8 +750,8 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(1);
         expect(routerStub.navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({ m: '1' }),
-            queryParamsHandling: 'merge',
+            queryParams: expect.objectContaining({ m: '1', v2: '1' }),
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -654,8 +767,8 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(2);
         expect(routerStub.navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({ m: '1' }),
-            queryParamsHandling: 'merge',
+            queryParams: expect.objectContaining({ m: '1', v2: '1' }),
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -693,9 +806,10 @@ describe('AppStateService', () => {
         // Expect URL sync to use compact style option encoding
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 'overlay~0~opacity~debug': '0.5~0',
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -974,6 +1088,39 @@ describe('AppStateService', () => {
 
         service.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
         expect(service.selection[0].features[0].featureId).toBe('Road.1');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('preserves transient inspection tree header expansion state defensively', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const expandedNodes = new Map<string, boolean | undefined>([['root', true], ['child', false]]);
+        const restoreSnapshot = new Map<string, boolean | undefined>([['root', false]]);
+
+        service.setInspectionTreeExpansionState(7, {
+            expandedNodes,
+            fullExpansionActive: true,
+            expansionSnapshotBeforeFullExpand: restoreSnapshot,
+            fullCollapseActive: false
+        });
+        expandedNodes.set('root', false);
+        restoreSnapshot.set('root', true);
+
+        const firstRead = service.getInspectionTreeExpansionState(7)!;
+        expect(firstRead.expandedNodes.get('root')).toBe(true);
+        expect(firstRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
+        expect(firstRead.fullExpansionActive).toBe(true);
+        expect(firstRead.fullCollapseActive).toBe(false);
+
+        firstRead.expandedNodes.set('root', false);
+        firstRead.expansionSnapshotBeforeFullExpand?.set('root', true);
+
+        const secondRead = service.getInspectionTreeExpansionState(7)!;
+        expect(secondRead.expandedNodes.get('root')).toBe(true);
+        expect(secondRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();

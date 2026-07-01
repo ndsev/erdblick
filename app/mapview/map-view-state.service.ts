@@ -11,6 +11,7 @@ import {coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibili
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
     BackgroundSync = "background-sync",
+    FidelityThreshold = "fidelity-threshold",
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
     NumViews = "num-views",
@@ -56,6 +57,8 @@ export class MapViewStateService {
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
         this.stateService.pinLowFiToMaxLodState.subscribe(() => this.requestViewRecalculation(ViewRecalculationReason.PinLowFi));
+        this.stateService.lowFiTileThresholdState.subscribe(() =>
+            this.requestViewRecalculation(ViewRecalculationReason.FidelityThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
     }
 
@@ -89,7 +92,8 @@ export class MapViewStateService {
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
                 this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt,
-                this.stateService.pinLowFiToMaxLod
+                this.stateService.pinLowFiToMaxLod,
+                this.stateService.lowFiTileThreshold
             );
         });
     }

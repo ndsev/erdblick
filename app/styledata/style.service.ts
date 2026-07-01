@@ -8,7 +8,6 @@ import {
     BehaviorSubject,
     catchError, Subject
 } from "rxjs";
-import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
@@ -415,9 +414,7 @@ export class StyleService {
     }
 
     /** Imports a YAML file, registers it as an imported style, and reapplies it. */
-    async importStyleYamlFile(event: any, file: File, fileUploader: FileUpload | undefined): Promise<boolean> {
-        // Prevent the default upload behavior Dummy XHR, as we handle the file ourselves
-        event.xhr = new XMLHttpRequest();
+    async importStyleYamlFile(file: File): Promise<boolean> {
         const fileReader = new FileReader();
         const loadFilePromise = new Promise<string|ArrayBuffer|null>((resolve, reject) => {
             fileReader.onload = () => resolve(fileReader.result);
@@ -426,9 +423,6 @@ export class StyleService {
         });
 
         const uploadedContent = await loadFilePromise;
-        if (fileUploader !== undefined) {
-            fileUploader.clear();
-        }
         if (!uploadedContent) {
             return false;
         }
@@ -437,8 +431,10 @@ export class StyleService {
         if (uploadedContent instanceof ArrayBuffer) {
             const decoder = new TextDecoder('utf-8');
             styleData = decoder.decode(uploadedContent);
+        } else if (typeof uploadedContent === "string") {
+            styleData = uploadedContent;
         } else {
-            styleData = uploadedContent as string; // Casting as string since it's either string or ArrayBuffer
+            return false;
         }
 
         const sourceRef = this.createStyleSourceRef(styleData, "", file.name, false, true, false);
@@ -478,12 +474,10 @@ export class StyleService {
             // In case running outside browser or confirm not available, ignore.
         }
 
-        // Delete the imported style entry and notify listeners.
-        style.featureLayerStyle?.delete();
-        this.styleRemovedForId.next(styleId);
-        this.styles.delete(styleId);
-        this.importedStylesCount--;
+        this.removeActiveStyleEntry(styleId);
+        this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
         this.saveImportedStyles();
+        this.styleGroups.next(this.computeStyleGroups());
 
         // Try to restore corresponding built-in style (same id) using recorded styleHashes (url -> {id,...}).
         for (const url of this.styleUrls) {

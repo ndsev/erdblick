@@ -62,7 +62,6 @@ interface ProgressBar {
             </div>
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /** Compact progress widget used in the diagnostics popover and dialogs. */

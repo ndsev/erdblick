@@ -434,7 +434,8 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
 bool FeatureStyleRule::forEachMatchingRule(
     mapget::Feature& feature,
     BoundEvalFun const& evalFun,
-    std::function<void(FeatureStyleRule const&)> const& callback) const
+    std::function<void(FeatureStyleRule const&)> const& callback,
+    std::string_view const* relationName) const
 {
     if (lod_) {
         auto const featureLod = static_cast<uint8_t>(feature.lod());
@@ -447,6 +448,12 @@ bool FeatureStyleRule::forEachMatchingRule(
     if (type_) {
         auto typeId = feature.typeId();
         if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
+            return false;
+        }
+    }
+
+    if (relationName && relationType_) {
+        if (!std::regex_match(relationName->begin(), relationName->end(), *relationType_)) {
             return false;
         }
     }
@@ -476,7 +483,7 @@ bool FeatureStyleRule::forEachMatchingRule(
 
     if (branchMode_ == BranchMode::FirstOf) {
         for (auto const& rule : subRules_) {
-            if (rule.forEachMatchingRule(feature, evalFun, callback)) {
+            if (rule.forEachMatchingRule(feature, evalFun, callback, relationName)) {
                 return true;
             }
         }
@@ -485,9 +492,37 @@ bool FeatureStyleRule::forEachMatchingRule(
 
     bool matched = false;
     for (auto const& rule : subRules_) {
-        matched = rule.forEachMatchingRule(feature, evalFun, callback) || matched;
+        matched = rule.forEachMatchingRule(feature, evalFun, callback, relationName) || matched;
     }
     return matched;
+}
+
+bool FeatureStyleRule::matchesFeatureGates(mapget::Feature& feature) const
+{
+    if (lod_) {
+        auto const featureLod = static_cast<uint8_t>(feature.lod());
+        if (featureLod != *lod_) {
+            return false;
+        }
+    }
+
+    if (type_) {
+        auto typeId = feature.typeId();
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
+            return false;
+        }
+    }
+
+    if (branchMode_ == BranchMode::None) {
+        return true;
+    }
+
+    for (auto const& rule : subRules_) {
+        if (rule.matchesFeatureGates(feature)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void FeatureStyleRule::forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const

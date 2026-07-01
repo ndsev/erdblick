@@ -1,0 +1,58 @@
+keyboard-dialog {
+  .keyboard-dialog {
+    background-color: var(--p-content-background);
+    text-align: center;
+    width: 25em;
+  }
+
+  .keyboard-list {
+    list-style-type: none;
+    padding: 0;
+
+    li {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 1em;
+
+      span {
+        background-color: var(--p-highlight-background);
+        border-radius: 0.5em;
+        color: var(--p-content-color);
+        display: inline-block;
+        font-weight: bold;
+        min-width: 4em;
+        padding: 0.5em 0.75em;
+        text-align: center;
+      }
+    }
+  }
+
+  .control-desc {
+    color: var(--p-surface-500);
+    font-size: 0.9em;
+  }
+
+  .key {
+    background-color: #ffcc00;
+    border-radius: 0.5em;
+    color: #333;
+    font-size: 1em;
+    padding: 0.5em 0.75em;
+  }
+
+  .key-multi {
+    display: flex;
+    gap: 0.25em;
+
+    .key {
+      background-color: #00bcd4;
+      padding: 0.3em 0.6em;
+    }
+  }
+
+  .highlight {
+    background-color: #ff5722;
+    color: white;
+  }
+}

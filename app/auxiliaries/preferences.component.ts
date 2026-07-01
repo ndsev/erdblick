@@ -16,7 +16,11 @@ import {
     PREFERENCES_DIALOG_LAYOUT_ID,
     MIN_MAP_ZOOM_STEP,
     AppStateService,
-    DEFAULT_DECK_STYLE_WORKER_COUNT
+    DEFAULT_DECK_STYLE_WORKER_COUNT,
+    DEFAULT_LOW_FI_TILE_THRESHOLD,
+    MAX_LOW_FI_TILE_THRESHOLD,
+    MIN_LOW_FI_TILE_THRESHOLD,
+    clampLowFiTileThreshold
 } from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.pool";
@@ -32,7 +36,11 @@ import {environment} from "../environments/environment";
                     (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
-                <label [for]="tilesToLoadInput">Max Tiles to Load</label>
+                <label [for]="tilesToLoadInput">Max Tiles to Load
+                    <i class="pi pi-info-circle"
+                       pTooltip="Caps how many visible map tiles may be requested and rendered at once. Lower values reduce load; higher values allow more tiles before throttling."
+                       tooltipPosition="top"></i>
+                </label>
                 <div class="slider-controls">
                     <div style="display: inline-block">
                         <input class="tiles-input w-full"
@@ -75,6 +83,11 @@ import {environment} from "../environments/environment";
                               icon="pi pi-check"
                               [disabled]="!inspectionsLimitChanged"></p-button>
                 </div>
+            </div>
+            <p-divider></p-divider>
+            <div class="button-container">
+                <label>Expand inspection trees by default</label>
+                <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
             </div>
             <p-divider></p-divider>
             <div class="slider-container">
@@ -147,12 +160,51 @@ import {environment} from "../environments/environment";
                                 (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
+                <label>WebGL antialiasing
+                    <i class="pi pi-info-circle"
+                       pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
+                       tooltipPosition="top"></i>
+                </label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="deckAntialiasingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
                 <label>Pin low-fi rendering to max LOD</label>
                 <p-selectButton [options]="toggleOptions"
                                 [(ngModel)]="pinLowFiToMaxLodSetting"
                                 optionLabel="label"
                                 optionValue="value"
                                 (ngModelChange)="setPinLowFiToMaxLod($event)"></p-selectButton>
+            </div>
+            <div class="slider-container">
+                <label for="low-fi-tile-threshold-input">High/Low-Fi Tile Threshold
+                    <i class="pi pi-info-circle"
+                       pTooltip="Visible tile count where the view switches from high-fi to low-fi rendering. Higher values preserve detailed rendering longer but can cost more."
+                       tooltipPosition="top"></i>
+                </label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input id="low-fi-tile-threshold-input"
+                               class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="lowFiTileThresholdInput"
+                               (ngModelChange)="onLowFiTileThresholdInputChange($event)"
+                               (keydown.enter)="applyLowFiTileThreshold()"/>
+                        <p-slider [(ngModel)]="lowFiTileThresholdInput"
+                                  (ngModelChange)="onLowFiTileThresholdSliderChange($event)"
+                                  class="w-full"
+                                  [min]="MIN_LOW_FI_TILE_THRESHOLD"
+                                  [max]="MAX_LOW_FI_TILE_THRESHOLD"></p-slider>
+                    </div>
+                    <p-button (click)="applyLowFiTileThreshold()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!lowFiTileThresholdChanged"></p-button>
+                </div>
             </div>
             <div class="button-container">
                 <label>Render worker count override
@@ -218,31 +270,6 @@ import {environment} from "../environments/environment";
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </app-dialog>
     `,
-    styles: [
-        `
-            .slider-container {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin: 0.5em 0;
-                width: 100%;
-            }
-
-            .tiles-input {
-                font-size: medium;
-                text-align: center;
-                width: 17em;
-                padding: 0.5em;
-            }
-
-            @media only screen and (max-width: 56em) {
-                .elevated {
-                    bottom: 3.5em;
-                    padding-bottom: 0;
-                }
-            }
-        `
-    ],
     standalone: false
 })
 /**
@@ -259,13 +286,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     deckThreadedRenderingEnabledSetting: boolean = true;
+    deckAntialiasingEnabledSetting: boolean = true;
     pinLowFiToMaxLodSetting: boolean = false;
+    lowFiTileThresholdInput: number | string = DEFAULT_LOW_FI_TILE_THRESHOLD;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     locationSearchResultLimitChanged: boolean = false;
+    lowFiTileThresholdChanged: boolean = false;
     deckStyleWorkersCountChanged: boolean = false;
     mapZoomStepChanged: boolean = false;
     toggleOptions = [
@@ -310,8 +340,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
             this.deckThreadedRenderingEnabledSetting = enabled;
         }));
+        this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
+            this.deckAntialiasingEnabledSetting = enabled;
+        }));
         this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
             this.pinLowFiToMaxLodSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.lowFiTileThresholdState.subscribe(threshold => {
+            this.lowFiTileThresholdInput = threshold;
+            this.updateLowFiTileThresholdChangeState();
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -354,9 +391,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
         this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
         this.mapZoomStepInput = this.stateService.mapZoomStep;
+        this.lowFiTileThresholdInput = this.stateService.lowFiTileThreshold;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.locationSearchResultLimitChanged = false;
+        this.lowFiTileThresholdChanged = false;
         this.deckStyleWorkersCountChanged = false;
         this.mapZoomStepChanged = false;
         this.dialogStack.bringToFront(this.preferencesDialog);
@@ -386,10 +425,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Removes all imported custom styles from memory and local storage. */
     clearImportedStyles() {
-        for (let styleId of this.styleService.styles.keys()) {
-            if (this.styleService.styles.get(styleId)!.imported) {
-                this.styleService.deleteStyle(styleId, true);
-            }
+        const importedStyleIds = [...this.styleService.styles.entries()]
+            .filter(([_, style]) => style.imported)
+            .map(([styleId]) => styleId);
+        for (const styleId of importedStyleIds) {
+            this.styleService.deleteStyle(styleId, true);
         }
         this.styleService.clearStorageForImportedStyles();
     }
@@ -425,10 +465,34 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
+    /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
+    setDeckAntialiasingEnabled(enabled: boolean) {
+        this.deckAntialiasingEnabledSetting = enabled;
+        this.stateService.deckAntialiasingEnabled = enabled;
+    }
+
     /** Controls whether low-fidelity rendering stays pinned to the highest requested LOD. */
     setPinLowFiToMaxLod(enabled: boolean) {
         this.pinLowFiToMaxLodSetting = enabled;
         this.stateService.pinLowFiToMaxLod = enabled;
+    }
+
+    /** Applies the pending low-fi tile threshold after validating the input. */
+    applyLowFiTileThreshold() {
+        if (!this.lowFiTileThresholdChanged) {
+            return;
+        }
+        const threshold = Number(this.lowFiTileThresholdInput);
+        if (!Number.isFinite(threshold)
+            || threshold < MIN_LOW_FI_TILE_THRESHOLD || threshold > MAX_LOW_FI_TILE_THRESHOLD) {
+            this.messageService.showError(
+                `Please enter a tile threshold between ${MIN_LOW_FI_TILE_THRESHOLD} and ${MAX_LOW_FI_TILE_THRESHOLD}.`);
+            return;
+        }
+        const normalized = clampLowFiTileThreshold(threshold);
+        this.lowFiTileThresholdInput = normalized;
+        this.stateService.lowFiTileThreshold = normalized;
+        this.lowFiTileThresholdChanged = false;
     }
 
     /** Enables or disables the explicit Deck render-worker count override. */
@@ -574,6 +638,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
     }
 
+    /** Tracks slider edits for the low-fi tile threshold. */
+    protected onLowFiTileThresholdSliderChange(value: number) {
+        this.lowFiTileThresholdInput = value;
+        this.updateLowFiTileThresholdChangeState();
+    }
+
     /** Tracks free-form edits for the tile-load input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
@@ -604,6 +674,24 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
     }
 
+    /** Tracks free-form edits for the low-fi tile threshold. */
+    protected onLowFiTileThresholdInputChange(value: number | string) {
+        this.lowFiTileThresholdInput = value;
+        this.updateLowFiTileThresholdChangeState();
+    }
+
+    /** Updates the dirty flag for the low-fi threshold control. */
+    private updateLowFiTileThresholdChangeState(): void {
+        const threshold = Number(this.lowFiTileThresholdInput);
+        if (!Number.isFinite(threshold)
+            || threshold < MIN_LOW_FI_TILE_THRESHOLD || threshold > MAX_LOW_FI_TILE_THRESHOLD) {
+            this.lowFiTileThresholdChanged = true;
+            return;
+        }
+        this.lowFiTileThresholdChanged =
+            clampLowFiTileThreshold(threshold) !== this.stateService.lowFiTileThreshold;
+    }
+
     /** Determines whether a numeric preference control still has an unapplied change. */
     private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
         if (typeof value === "string" && value.trim().length === 0) {
@@ -632,4 +720,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
+    protected readonly MIN_LOW_FI_TILE_THRESHOLD = MIN_LOW_FI_TILE_THRESHOLD;
+    protected readonly MAX_LOW_FI_TILE_THRESHOLD = MAX_LOW_FI_TILE_THRESHOLD;
 }

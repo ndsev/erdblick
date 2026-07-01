@@ -874,67 +874,76 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
     }
 
     override deserialize(raw: string | Params) {
-        // A raw local storage string must be converted to the Record<string, string>
-        if (typeof raw === 'string') {
-            raw = JSON.parse(raw);
-            z.parse(this.schema, raw);
-        }
-
-        const layerNames = this.layerNamesState.getValue();
-        const numViews = this.numViewsState.getValue();
-
-        for (const [key, value] of Object.entries(raw)) {
-            if (!this.isStyleOptionUrlParamKey(key)) {
-                continue;
-            }
-            const parts = key.split('~');
-            const shortStyleId = parts[0];
-            const layerIndices = parts[1].split('-').map(s => Number(s)).filter(n => Number.isFinite(n));
-            const optionIds = parts.slice(2); // remaining parts are option IDs
-
-            if (!optionIds.length || !layerIndices.length) {
-                continue;
+        try {
+            // A raw local storage string must be converted to the Record<string, string>
+            if (typeof raw === 'string') {
+                raw = JSON.parse(raw);
+                z.parse(this.schema, raw);
             }
 
-            // Split value by '~' per option, same order as in key
-            const optionValueSegments = value.split('~');
-            if (optionValueSegments.length < optionIds.length) {
-                // If fewer bodies than option ids, skip
-                continue;
-            }
+            const layerNames = this.layerNamesState.getValue();
+            const numViews = this.numViewsState.getValue();
 
-            for (let oi = 0; oi < optionIds.length; oi++) {
-                const optionId = this.normalizeStyleOptionId(optionIds[oi]);
-                const optionBody = optionValueSegments[oi] ?? '';
-                const perView = optionBody.split(':'); // per-view strings
-                const effectivePerView = perView.length === 1 && numViews > 1
-                    ? Array.from({length: numViews}, () => perView[0])
-                    : perView;
+            for (const [key, value] of Object.entries(raw)) {
+                if (!this.isStyleOptionUrlParamKey(key)) {
+                    continue;
+                }
+                if (typeof value !== 'string') {
+                    console.warn(`[StyleState.deserialize]: Skipping style option ${key}: expected string payload.`);
+                    continue;
+                }
+                const parts = key.split('~');
+                const shortStyleId = parts[0];
+                const layerPart = parts[1] ?? '';
+                const layerIndices = layerPart.split('-').map(s => Number(s)).filter(n => Number.isFinite(n));
+                const optionIds = parts.slice(2); // remaining parts are option IDs
 
-                for (let view = 0; view < numViews; view++) {
-                    const layerCsv = effectivePerView[view] ?? '';
-                    const perLayer = layerCsv.length
-                        ? this.expandStyleRunLengthTokens(layerCsv.split(','))
-                        : [];
-                    for (let li = 0; li < layerIndices.length; li++) {
-                        const layerIndex = layerIndices[li];
-                        if (layerIndex < 0 || layerIndex >= layerNames.length) {
-                            continue;
+                if (!optionIds.length || !layerIndices.length) {
+                    continue;
+                }
+
+                // Split value by '~' per option, same order as in key
+                const optionValueSegments = value.split('~');
+                if (optionValueSegments.length < optionIds.length) {
+                    // If fewer bodies than option ids, skip
+                    continue;
+                }
+
+                for (let oi = 0; oi < optionIds.length; oi++) {
+                    const optionId = this.normalizeStyleOptionId(optionIds[oi]);
+                    const optionBody = optionValueSegments[oi] ?? '';
+                    const perView = optionBody.split(':'); // per-view strings
+                    const effectivePerView = perView.length === 1 && numViews > 1
+                        ? Array.from({length: numViews}, () => perView[0])
+                        : perView;
+
+                    for (let view = 0; view < numViews; view++) {
+                        const layerCsv = effectivePerView[view] ?? '';
+                        const perLayer = layerCsv.length
+                            ? this.expandStyleRunLengthTokens(layerCsv.split(','))
+                            : [];
+                        for (let li = 0; li < layerIndices.length; li++) {
+                            const layerIndex = layerIndices[li];
+                            if (layerIndex < 0 || layerIndex >= layerNames.length) {
+                                continue;
+                            }
+                            const mapLayerId = layerNames[layerIndex];
+                            const storeKey = this.styleOptionKeyFromMapLayer(mapLayerId, shortStyleId, optionId);
+                            const valuesForStoreKey = this.value.get(storeKey) || [];
+                            const rawVal = perLayer[li] ?? '';
+
+                            // Ensure length up to current view
+                            while (valuesForStoreKey.length <= view) {
+                                valuesForStoreKey.push(false);
+                            }
+                            valuesForStoreKey[view] = rawVal;
+                            this.value.set(storeKey, valuesForStoreKey);
                         }
-                        const mapLayerId = layerNames[layerIndex];
-                        const storeKey = this.styleOptionKeyFromMapLayer(mapLayerId, shortStyleId, optionId);
-                        const valuesForStoreKey = this.value.get(storeKey) || [];
-                        const rawVal = perLayer[li] ?? '';
-
-                        // Ensure length up to current view
-                        while (valuesForStoreKey.length <= view) {
-                            valuesForStoreKey.push(false);
-                        }
-                        valuesForStoreKey[view] = rawVal;
-                        this.value.set(storeKey, valuesForStoreKey);
                     }
                 }
             }
+        } catch (error) {
+            console.error(`[StyleState.deserialize]: Failed to deserialize style options from `, raw, error);
         }
     }
 

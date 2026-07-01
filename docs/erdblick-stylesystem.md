@@ -61,7 +61,7 @@ options:
 Tile stages, render fidelity, and feature LOD are related, but they answer different questions:
 
 - **Tile stage** describes which payload slice of a tile has arrived from the backend. A layer can publish one or more numbered stages (`0`, `1`, `2`, ...). Stage labels are display text; rendering decisions use the numeric stage and the layer metadata.
-- **Render fidelity** is erdblick's current rendering mode for a tile in a view. The frontend chooses `low` or `high` from the visible tile count at the current camera distance. Style sheets can react to that choice with rule-level `fidelity`.
+- **Render fidelity** is erdblick's current rendering mode for a tile in a view. The frontend chooses `low` or `high` from the visible tile count at the current camera distance, using the tile-count threshold configurable in Preferences. Style sheets can react to that choice with rule-level `fidelity`.
 - **Feature LOD** is a per-feature value supplied by the backend (`0..7`). In low-fidelity rendering erdblick can cull features above the active LOD cap. Rules can also match an exact feature LOD with `lod`.
 
 Layer metadata defines the high-fidelity threshold:

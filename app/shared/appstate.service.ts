@@ -38,6 +38,18 @@ import {
     serializeFeatureSearchState
 } from "./feature-search-state";
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
+import {
+    compressUrlCsvRuns,
+    decodeLayerNamesV2,
+    decodeMapNamesV2,
+    decodeSelectionsV2,
+    decodeStyleOptionsV2,
+    encodeLayerNamesV2,
+    encodeSelectionsV2,
+    encodeStyleOptionsV2,
+    firstParamValue,
+    sourceDataSelectionMapIds
+} from "./url-state-codec";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -61,6 +73,9 @@ export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const MAX_DECK_STYLE_WORKERS = 32;
 export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
+export const DEFAULT_LOW_FI_TILE_THRESHOLD = 128;
+export const MIN_LOW_FI_TILE_THRESHOLD = 1;
+export const MAX_LOW_FI_TILE_THRESHOLD = 4096;
 export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
 export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
 export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
@@ -89,6 +104,19 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+/** Clamp one low-fi tile threshold to the supported integer preference range. */
+export function clampLowFiTileThreshold(
+    value: unknown,
+    fallback = DEFAULT_LOW_FI_TILE_THRESHOLD): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+    return Math.min(
+        MAX_LOW_FI_TILE_THRESHOLD,
+        Math.max(MIN_LOW_FI_TILE_THRESHOLD, Math.trunc(numeric)));
+}
 
 /** Normalizes feature search grouping values from persisted state. */
 function normalizeFeatureSearchGrouping(value: unknown): number[] {
@@ -145,6 +173,18 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
+}
+
+/** Transient expansion state for one mounted inspection tree. */
+export type InspectionTreeExpansionSnapshot = Map<string, boolean | undefined>;
+
+/** Transient inspection-tree UI state kept while moving panels between docked and floating hosts. */
+export interface InspectionTreeExpansionState {
+    expandedNodes: InspectionTreeExpansionSnapshot;
+    fullExpansionActive: boolean;
+    expansionSnapshotBeforeFullExpand?: InspectionTreeExpansionSnapshot;
+    fullCollapseActive: boolean;
+    expansionSnapshotBeforeFullCollapse?: InspectionTreeExpansionSnapshot;
 }
 
 /** Persisted top-left dialog position in viewport pixels. */
@@ -339,6 +379,7 @@ export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
+    private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -356,8 +397,8 @@ export class AppStateService implements OnDestroy {
     private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
     private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
-    private lastMergedUrlSyncAt = 0;
-    // One-shot guard used to keep inbound v1 links stable during passive startup.
+    private lastUrlSyncAt = 0;
+    // One-shot guard used to keep inbound links stable during passive startup.
     private skipNextUrlSync = false;
     private initialSearchStateReplayConsumed = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
@@ -581,10 +622,24 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly deckAntialiasingEnabledState = this.createState<boolean>({
+        name: 'deckAntialiasingEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
     readonly pinLowFiToMaxLodState = this.createState<boolean>({
         name: 'pinLowFiToMaxLod',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly lowFiTileThresholdState = this.createState<number>({
+        name: 'lowFiTileThreshold',
+        defaultValue: DEFAULT_LOW_FI_TILE_THRESHOLD,
+        schema: z.coerce.number().int(),
+        toStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD),
+        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD)
     });
 
     readonly deckStyleWorkersCountState = this.createState<number>({
@@ -812,6 +867,12 @@ export class AppStateService implements OnDestroy {
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
     });
 
+    readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
+        name: 'inspectionTreeExpandByDefault',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
         name: 'inspectionComparisonState',
         defaultValue: null,
@@ -909,7 +970,9 @@ export class AppStateService implements OnDestroy {
         });
 
         this.selectionState.subscribe(panels => {
-            this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+            const panelIds = panels.map(panel => panel.id);
+            this.pruneInspectionDialogLayout(panelIds);
+            this.pruneInspectionTreeExpansionStates(panelIds);
             this.sanitizeFocusedInspectionPanel(panels);
         });
     }
@@ -1152,8 +1215,8 @@ export class AppStateService implements OnDestroy {
         if (this.urlSyncHandle !== null) {
             return;
         }
-        // Browsers can reject rapid History API updates; keep merge syncs below that threshold.
-        const elapsed = Date.now() - this.lastMergedUrlSyncAt;
+        // Browsers can reject rapid History API updates; keep URL writes below that threshold.
+        const elapsed = Date.now() - this.lastUrlSyncAt;
         const delay = Math.max(0, AppStateService.URL_SYNC_MIN_INTERVAL_MS - elapsed);
         if (delay === 0) {
             this.flushUrlSync();
@@ -1179,50 +1242,112 @@ export class AppStateService implements OnDestroy {
             this.pendingUrlSyncStates.clear();
             return;
         }
-        const queryParamsHandling = this.syncUrl();
-        if (queryParamsHandling === 'merge') {
-            this.lastMergedUrlSyncAt = Date.now();
-        }
+        this.syncUrl();
+        this.lastUrlSyncAt = Date.now();
         if (this.pendingUrlSyncStates.size) {
             this.scheduleUrlSync();
         }
     }
 
     /** Serializes URL-backed state and updates router query params accordingly. */
-    private syncUrl(): 'replace' | 'merge' {
-        // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
-        const params: Record<string, string | string[] | null> = {};
-        for (const state of this.pendingUrlSyncStates) {
-            const serialized = state.serialize(true);
-            if (serialized === undefined) {
-                continue;
-            }
-            for (const [k, v] of Object.entries(serialized)) {
-                params[k] = v;
-            }
-        }
-        // The first URL sync will update the URL fully, with pruned state removed.
-        // Detect this case with the following collection equality check.
-        // In this case, use the "replace" handling to get rid of style options
-        // for removed styles.
-        const queryParamsHandling = this.pendingUrlSyncStates.size === [...this.statePool.values().filter(
-            state => state.isUrlState())].length ? "replace" : "merge";
+    private syncUrl(): void {
+        const params = this.serializeUrlV2();
         this.pendingUrlSyncStates.clear();
-        if (queryParamsHandling === "merge") {
-            for (const [key, value] of Object.entries(this.currentBrowserQueryParams())) {
-                if (params[key] === undefined) {
-                    params[key] = value as string | string[];
-                }
-            }
-        }
         this.router.navigate([], {
             queryParams: params,
-            queryParamsHandling: queryParamsHandling,
+            queryParamsHandling: "replace",
             replaceUrl: this.replaceUrl
         }).catch(error => {
             console.error('[AppStateService] Failed to sync URL parameters', error);
         });
-        return queryParamsHandling;
+    }
+
+    /** Builds a complete v2 query-param set so all layer-indexed params share one order. */
+    private serializeUrlV2(): Record<string, string | string[]> {
+        const params = this.preservedUnknownUrlParams();
+        params["v2"] = "1";
+
+        for (const state of this.statePool.values()) {
+            if (state === this.layerNamesState || state === this.selectionState || state === this.stylesState) {
+                continue;
+            }
+            if (!state.isUrlState()) {
+                continue;
+            }
+            const serialized = state.serialize(true);
+            if (serialized === undefined) {
+                continue;
+            }
+            for (const [key, value] of Object.entries(serialized)) {
+                if (value !== null) {
+                    params[key] = compressUrlCsvRuns(value);
+                }
+            }
+        }
+
+        const layerEncoding = encodeLayerNamesV2(
+            this.layerNames,
+            sourceDataSelectionMapIds(this.selection)
+        );
+        if (layerEncoding.map) {
+            params["map"] = layerEncoding.map;
+        }
+        if (layerEncoding.l) {
+            params["l"] = layerEncoding.l;
+        }
+
+        const selection = encodeSelectionsV2(
+            this.selection,
+            this.layerNames,
+            layerEncoding.mapNames,
+            DEFAULT_HIGHLIGHT_COLORS
+        );
+        if (selection) {
+            params["sel"] = selection;
+        }
+
+        for (const [key, value] of Object.entries(encodeStyleOptionsV2(
+            this.styles,
+            this.layerNames,
+            this.numViews
+        ))) {
+            params[key] = value;
+        }
+
+        return params;
+    }
+
+    /** Keeps non-Erdblick query params while dropping stale v1 and v2 state params. */
+    private preservedUnknownUrlParams(): Record<string, string | string[]> {
+        const managedKeys = this.managedUrlParamKeys();
+        const params: Record<string, string | string[]> = {};
+        for (const [key, value] of Object.entries(this.currentBrowserQueryParams())) {
+            if (managedKeys.has(key) || this.stylesState.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            params[key] = Array.isArray(value)
+                ? value.map(entry => String(entry))
+                : String(value);
+        }
+        return params;
+    }
+
+    /** Returns query-param keys owned by Erdblick URL state. */
+    private managedUrlParamKeys(): Set<string> {
+        const keys = new Set<string>(["v2", "map", "osm"]);
+        for (const state of this.statePool.values()) {
+            if (state === this.stylesState || !state.isUrlState()) {
+                continue;
+            }
+            const serialized = state.serialize(true);
+            if (serialized === undefined) {
+                continue;
+            }
+            for (const key of Object.keys(serialized)) {
+                keys.add(key);
+            }
+        }
+        return keys;
     }
 
     /** Restores storage-backed state slots from local storage during startup. */
@@ -1252,7 +1377,7 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
 
-                state.deserialize(raw);
+                this.deserializeStateSafely(state, raw);
             }
 
             const styleOptionEntries = this.collectStyleOptionStorageEntries();
@@ -1271,7 +1396,7 @@ export class AppStateService implements OnDestroy {
             }
 
             if (Object.keys(filteredStyleOptionEntries).length) {
-                this.stylesState.deserialize(filteredStyleOptionEntries);
+                this.deserializeStateSafely(this.stylesState, filteredStyleOptionEntries);
             }
             this.persistConfigDefaultStateMeta();
         });
@@ -1284,10 +1409,81 @@ export class AppStateService implements OnDestroy {
                 return;
             }
 
+            if (firstParamValue(params, "v2") === "1") {
+                this.hydrateFromUrlV2(params);
+                return;
+            }
+
             for (const state of this.statePool.values()) {
-                state.deserialize(params);
+                this.deserializeStateSafely(state, params);
             }
         });
+    }
+
+    /** Keeps one malformed persisted state entry from aborting startup hydration. */
+    private deserializeStateSafely(
+        state: {name: string; deserialize(raw: string | Params): void},
+        raw: string | Params
+    ): void {
+        try {
+            state.deserialize(raw);
+        } catch (error) {
+            console.error(`[AppStateService] Failed to hydrate ${state.name}.`, error);
+        }
+    }
+
+    /** Restores v2 URL params through a coordinated layer-indexed decode path. */
+    private hydrateFromUrlV2(params: Params): void {
+        const mapParam = firstParamValue(params, "map");
+        const layerParam = firstParamValue(params, "l");
+        const decodedLayerNames = decodeLayerNamesV2(mapParam, layerParam);
+        if (decodedLayerNames.length) {
+            this.layerNamesState.next(decodedLayerNames);
+        }
+
+        for (const state of this.statePool.values()) {
+            if (state === this.layerNamesState || state === this.selectionState || state === this.stylesState) {
+                continue;
+            }
+            try {
+                state.deserialize(params);
+            } catch (error) {
+                console.error(`[AppStateService] Failed to hydrate v2 state '${state.name}'`, error);
+            }
+        }
+
+        if (this.hasStyleOptionParams(params)) {
+            const decodedStyles = decodeStyleOptionsV2(
+                params,
+                this.layerNames,
+                this.numViews,
+                this.stylesState.getValue()
+            );
+            this.stylesState.next(decodedStyles);
+        }
+
+        const selectionParam = firstParamValue(params, "sel");
+        if (selectionParam) {
+            try {
+                const mapNames = mapParam ? decodeMapNamesV2(mapParam) : [];
+                const panels = decodeSelectionsV2(
+                    selectionParam,
+                    this.layerNames,
+                    mapNames,
+                    DEFAULT_HIGHLIGHT_COLORS
+                );
+                if (panels.length) {
+                    this.selectionState.next(panels);
+                }
+            } catch (error) {
+                console.error("[AppStateService] Failed to hydrate v2 selection state", error);
+            }
+        }
+    }
+
+    /** Returns whether the params contain compact style-option entries. */
+    private hasStyleOptionParams(params: Params): boolean {
+        return Object.keys(params).some(key => this.stylesState.isStyleOptionUrlParamKey(key));
     }
 
     /**
@@ -1407,7 +1603,7 @@ export class AppStateService implements OnDestroy {
             }
 
             if (Object.keys(styleOptionEntries).length) {
-                this.stylesState.deserialize(styleOptionEntries);
+                this.deserializeStateSafely(this.stylesState, styleOptionEntries);
                 this.stylesState.next(new Map(this.stylesState.getValue()));
             }
         } finally {
@@ -1491,7 +1687,7 @@ export class AppStateService implements OnDestroy {
         }
         const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
         if (Object.keys(styleOptionEntries).length) {
-            this.stylesState.deserialize(styleOptionEntries);
+            this.deserializeStateSafely(this.stylesState, styleOptionEntries);
             this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.pendingOpenDialogs.clear();
@@ -1756,8 +1952,14 @@ export class AppStateService implements OnDestroy {
     };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
+    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
+    set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
     set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
+    get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
+    set lowFiTileThreshold(val: number) {
+        this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));
+    }
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
@@ -1809,6 +2011,8 @@ export class AppStateService implements OnDestroy {
     };
     get inspectionComparison() {return this.inspectionComparisonState.getValue();}
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
+    get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
+    set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}
@@ -2297,6 +2501,42 @@ export class AppStateService implements OnDestroy {
         return this.focusedInspectionPanelId === id;
     }
 
+    /** Stores row and header-button expansion state for the current in-memory inspection panel instance. */
+    setInspectionTreeExpansionState(panelId: number, state: InspectionTreeExpansionState): void {
+        this.inspectionTreeExpansionStates.set(panelId, this.cloneInspectionTreeExpansionState(state));
+    }
+
+    /** Returns a defensive copy of the last known expansion state for one inspection panel. */
+    getInspectionTreeExpansionState(panelId: number): InspectionTreeExpansionState | undefined {
+        const state = this.inspectionTreeExpansionStates.get(panelId);
+        return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
+    }
+
+    /** Clones an optional inspection-tree expansion snapshot. */
+    private cloneInspectionTreeExpansionSnapshot(
+        snapshot?: InspectionTreeExpansionSnapshot
+    ): InspectionTreeExpansionSnapshot | undefined {
+        return snapshot ? new Map(snapshot) : undefined;
+    }
+
+    /** Clones transient inspection-tree expansion state so component instances cannot share mutable maps. */
+    private cloneInspectionTreeExpansionState(state: InspectionTreeExpansionState): InspectionTreeExpansionState {
+        const clone: InspectionTreeExpansionState = {
+            expandedNodes: new Map(state.expandedNodes),
+            fullExpansionActive: state.fullExpansionActive,
+            fullCollapseActive: state.fullCollapseActive
+        };
+        const expandSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullExpand);
+        if (expandSnapshot) {
+            clone.expansionSnapshotBeforeFullExpand = expandSnapshot;
+        }
+        const collapseSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullCollapse);
+        if (collapseSnapshot) {
+            clone.expansionSnapshotBeforeFullCollapse = collapseSnapshot;
+        }
+        return clone;
+    }
+
     /** Returns the persisted layout for a dialog if one exists. */
     getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
         return this.dialogLayoutsState.getValue()[id];
@@ -2601,6 +2841,16 @@ export class AppStateService implements OnDestroy {
         for (const id of Object.keys(currentLayouts)) {
             if (!(id in nextLayouts)) {
                 this.pendingOpenDialogs.delete(id);
+            }
+        }
+    }
+
+    /** Removes transient inspection-tree expansion states for panels that no longer exist. */
+    private pruneInspectionTreeExpansionStates(activePanelIds: number[]): void {
+        const activeIds = new Set(activePanelIds);
+        for (const panelId of this.inspectionTreeExpansionStates.keys()) {
+            if (!activeIds.has(panelId)) {
+                this.inspectionTreeExpansionStates.delete(panelId);
             }
         }
     }

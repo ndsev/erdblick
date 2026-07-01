@@ -74,6 +74,8 @@ interface InspectionPanelContentAdapter {
                                       [(ngModel)]="selectedLayerItem"
                                       (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                      appendTo="body"
+                                      [overlayOptions]="sourceLayerDropdownOverlayOptions"
                                       optionLabel="label"
                                       optionDisabled="disabled"/>
                         } @else if (panel().features.length > 0) {
@@ -132,20 +134,6 @@ interface InspectionPanelContentAdapter {
             </div>
         </p-popover>
     `,
-    styles: [`
-        .inspection-focus-indicator {
-            align-items: center;
-            border: 2px solid transparent;
-            border-radius: 999px;
-            display: inline-flex;
-            justify-content: center;
-            padding: 2px;
-        }
-
-        .inspection-focus-indicator-active {
-            border-color: var(--p-primary-color, #2196f3);
-        }
-    `],
     standalone: false
 })
 /** Docked accordion variant of an inspection panel. */
@@ -158,6 +146,7 @@ export class InspectionPanelComponent {
     selectedLayerItem?: SourceLayerMenuItem;
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
+    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     dockedPanelCount = input<number>(0);

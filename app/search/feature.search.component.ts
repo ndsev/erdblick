@@ -499,7 +499,7 @@ interface FeatureSearchStyleRuleDraft {
                                 </div>
                             </section>
                             <p-accordion class="feature-search-style-accordion"
-                                         [multiple]="false"
+                                         [multiple]="true"
                                          [(value)]="styleRuleAccordionValue">
                                 @for (rule of styleRuleDrafts; track rule.id; let ruleIndex = $index) {
                                     <p-accordion-panel class="feature-search-style-panel"
@@ -924,7 +924,6 @@ interface FeatureSearchStyleRuleDraft {
         </app-confirm-popup>
         <div #alert></div>
     `,
-    styles: [``],
     standalone: false
 })
 /**
@@ -995,7 +994,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private nextStyleConditionId = 1;
     private nextStyleColorStopId = 1;
     styleRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
-    styleRuleAccordionValue: string | null = null;
+    styleRuleAccordionValue: string[] = [];
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
     };
@@ -1667,7 +1666,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const rule = this.createStyleRule(this.nextStyleRuleId++);
         const panelValue = this.styleRulePanelValue(rule);
         this.styleRuleDrafts = [rule, ...this.styleRuleDrafts];
-        this.styleRuleAccordionValue = panelValue;
+        this.styleRuleAccordionValue = [panelValue];
         this.onStyleRulesChanged();
     }
 
@@ -1675,9 +1674,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     protected deleteStyleRule(rule: FeatureSearchStyleRuleDraft): void {
         const panelValue = this.styleRulePanelValue(rule);
         this.styleRuleDrafts = this.styleRuleDrafts.filter(candidate => candidate.id !== rule.id);
-        if (this.styleRuleAccordionValue === panelValue) {
-            this.styleRuleAccordionValue = null;
-        }
+        this.styleRuleAccordionValue = this.styleRuleAccordionValue.filter(value => value !== panelValue);
         this.onStyleRulesChanged();
     }
 
@@ -1726,7 +1723,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.nextStyleColorStopId = 1;
         const rule = this.createStyleRule(this.nextStyleRuleId++);
         this.styleRuleDrafts = [rule];
-        this.styleRuleAccordionValue = this.styleRulePanelValue(rule);
+        this.styleRuleAccordionValue = [this.styleRulePanelValue(rule)];
         this.onStyleRulesChanged();
     }
 
@@ -1806,16 +1803,14 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (signature === this.styleRulesStateSignature) {
             return;
         }
-        const previousPanelValue = this.styleRuleAccordionValue;
+        const previousPanelValues = this.styleRuleAccordionValue;
         this.styleRulesStateSignature = signature;
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
         this.styleRuleDrafts = rules.map(rule => this.styleRuleToDraft(rule));
         const availablePanels = new Set(this.styleRuleDrafts.map(rule => this.styleRulePanelValue(rule)));
-        this.styleRuleAccordionValue = previousPanelValue && availablePanels.has(previousPanelValue)
-            ? previousPanelValue
-            : null;
+        this.styleRuleAccordionValue = previousPanelValues.filter(value => availablePanels.has(value));
     }
 
     /** Converts one editor draft into the persisted/search-request style-rule shape. */
@@ -2205,7 +2200,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const existingIds = this.styleRuleDrafts.map(rule => rule.id);
         this.styleRuleDrafts = fieldOptions.map((fieldOption, index) =>
             this.createAutoStyleRule(existingIds[index] ?? this.nextStyleRuleId++, fieldOption));
-        this.styleRuleAccordionValue = null;
+        this.styleRuleAccordionValue = [];
         this.onStyleRulesChanged();
         return true;
     }
@@ -2239,7 +2234,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.autoStyleRuleAttemptSignatures.add(this.autoStyleRuleAttemptSignature(session));
         this.styleRuleDrafts = fieldOptions.map(fieldOption =>
             this.createAutoStyleRule(this.nextStyleRuleId++, fieldOption));
-        this.styleRuleAccordionValue = null;
+        this.styleRuleAccordionValue = [];
         this.onStyleRulesChanged();
         return true;
     }
@@ -3595,7 +3590,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             if (lockSelection && panelId !== undefined) {
                 this.stateService.setInspectionPanelLockedState(panelId, true);
             }
-            this.inspectionSelection.focusOnFeature(this.stateService.focusedView, {
+            this.inspectionSelection.focusOnFeature(undefined, {
                 mapTileKey,
                 featureId: selectedFeatureId
             }).then();
@@ -3711,7 +3706,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
         this.styleRuleDrafts = [];
-        this.styleRuleAccordionValue = null;
+        this.styleRuleAccordionValue = [];
         this.activeSearchGroupId = "";
         this.completedSearchGroupId = "";
         this.resultTreeInputLength = 0;

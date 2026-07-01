@@ -8,7 +8,6 @@ import {FeatureSearchService} from "./feature.search.service";
             <feature-search [searchId]="session.id"></feature-search>
         }
     `,
-    styles: [``],
     standalone: false
 })
 /** Renders all feature-search sessions that are currently floating dialogs. */

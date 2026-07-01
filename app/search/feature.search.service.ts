@@ -36,6 +36,7 @@ import {
 import {
     DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
     DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
+    defaultFeatureSearchViewIndicesForMapLayers,
     FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
     FeatureSearchScope,
@@ -52,6 +53,7 @@ import type {
     SearchCompletionWorkerOptions,
     SearchCompletionResultMessage
 } from "./search-completion.worker.protocol";
+import {featureSearchDefinitionFromImportPayload} from "./feature-search-export.util";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -180,6 +182,8 @@ export interface FeatureSearchCompletionOptions {
 
 export interface FeatureSearchActionPayload {
     selectedMapLayers: FeatureSearchMapLayerRef[];
+    selectedViewIndices?: number[];
+    selectedMapLayersManual?: boolean;
 }
 
 /** Extracts a compact feature-search payload from a schema completion candidate. */
@@ -207,6 +211,38 @@ export function featureSearchSelectedMapLayersFromPayload(payload: unknown): Fea
         return mapId && layerId ? [{mapId, layerId}] : [];
     }));
     return result.length ? result : undefined;
+}
+
+/** Extracts selected result views from a persisted or transient feature-search action payload. */
+export function featureSearchSelectedViewIndicesFromPayload(payload: unknown): number[] | undefined {
+    const record = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null;
+    const selectedViewIndices = Array.isArray(record?.["selectedViewIndices"])
+        ? record["selectedViewIndices"]
+        : [];
+    const seen = new Set<number>();
+    const result: number[] = [];
+    for (const item of selectedViewIndices) {
+        const viewIndex = Number(item);
+        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= DEFAULT_FEATURE_SEARCH_VIEW_INDICES.length
+            || seen.has(viewIndex)) {
+            continue;
+        }
+        seen.add(viewIndex);
+        result.push(viewIndex);
+    }
+    return result.length ? result.sort((lhs, rhs) => lhs - rhs) : undefined;
+}
+
+/** Returns whether a feature-search action payload represents explicit user map-layer scope. */
+export function featureSearchMapLayersManualFromPayload(payload: unknown): boolean | undefined {
+    const record = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null;
+    return typeof record?.["selectedMapLayersManual"] === "boolean"
+        ? record["selectedMapLayersManual"]
+        : undefined;
 }
 
 /** Returns unique feature-search map/layer refs in first-seen order. */
@@ -247,6 +283,11 @@ export interface FeatureSearchExportDialogOptions {
     grouping?: FeatureSearchExportGroupingOption[];
     filterValue?: string;
 }
+
+export type FeatureSearchRunOptions = Partial<Pick<
+    FeatureSearchStateEntry,
+    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual"
+>>;
 
 @Injectable({providedIn: 'root'})
 /**
@@ -623,8 +664,49 @@ export class FeatureSearchService {
     }
 
     /** Returns the view indices that should receive visualizations for a newly created search. */
-    private activeFeatureSearchViewIndices(): number[] {
-        return [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES];
+    private activeFeatureSearchViewIndices(selectedMapLayers: FeatureSearchMapLayerRef[] = []): number[] {
+        return defaultFeatureSearchViewIndicesForMapLayers(
+            selectedMapLayers,
+            this.stateService.numViews,
+            (viewIndex, ref) => this.mapInfo.maps.getMapLayerVisibility(viewIndex, ref.mapId, ref.layerId)
+        );
+    }
+
+    /** Returns all feature map/layers enabled in a specific view. */
+    featureSearchLayersForView(viewIndex: number): FeatureSearchMapLayerRef[] {
+        const selected = new Map<string, FeatureSearchMapLayerRef>();
+        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= this.stateService.numViews) {
+            return [];
+        }
+        for (const [mapId, map] of this.mapInfo.maps.maps) {
+            for (const layer of map.allFeatureLayers()) {
+                if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
+                    continue;
+                }
+                selected.set(JSON.stringify([mapId, layer.id]), {mapId, layerId: layer.id});
+            }
+        }
+        return Array.from(selected.values())
+            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
+    }
+
+    /** Returns enabled feature map/layers that currently have loaded non-empty data in a specific view. */
+    featureSearchLayersWithDataForView(viewIndex: number): FeatureSearchMapLayerRef[] {
+        const selected = new Map<string, FeatureSearchMapLayerRef>();
+        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= this.stateService.numViews) {
+            return [];
+        }
+        for (const tile of this.tileStream.loadedTileLayers.values()) {
+            if (!tile.hasData() || tile.numFeatures <= 0 || !this.tileStream.viewShowsFeatureTile(viewIndex, tile)) {
+                continue;
+            }
+            selected.set(JSON.stringify([tile.mapName, tile.layerName]), {
+                mapId: tile.mapName,
+                layerId: tile.layerName
+            });
+        }
+        return Array.from(selected.values())
+            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
     }
 
     /** Reconciles persisted feature-search definitions with live runtime sessions. */
@@ -632,27 +714,67 @@ export class FeatureSearchService {
         this.reconcileFeatureSearchState(definitions);
     }
 
+    /** Starts a feature search from the compact payload stored on search actions/history entries. */
+    runFromActionPayload(query: string, payload?: unknown): FeatureSearchSession {
+        const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
+        const selectedViewIndices = featureSearchSelectedViewIndicesFromPayload(payload);
+        const selectedMapLayersManual = featureSearchMapLayersManualFromPayload(payload);
+        return this.run(query, {
+            ...(selectedMapLayers ? {selectedMapLayers} : {}),
+            ...(selectedViewIndices ? {selectedViewIndices} : {}),
+            ...(selectedMapLayersManual !== undefined ? {selectedMapLayersManual} : {})
+        });
+    }
+
     /** Starts a new feature search over the currently prioritized tiles, optionally with explicit scope/layers. */
     run(
         query: string,
-        options: Partial<Pick<FeatureSearchStateEntry, "scope" | "selectedMapLayers" | "selectedViewIndices">> = {}
+        options: FeatureSearchRunOptions = {}
     ): FeatureSearchSession {
+        const selectedMapLayers = options.selectedMapLayers === undefined
+            ? this.activeFeatureSearchLayers()
+            : this.mapLayersForSearchContext(options.selectedMapLayers);
+        const selectedViewIndices = options.selectedViewIndices
+            ?? this.activeFeatureSearchViewIndices(selectedMapLayers);
         const entry = this.stateService.addFeatureSearch({
             query,
             ...(options.scope ? {scope: options.scope} : {}),
             pinColor: this.nextDefaultSearchColor(),
-            selectedMapLayers: options.selectedMapLayers === undefined
-                ? this.activeFeatureSearchLayers()
-                : this.mapLayersForSearchContext(options.selectedMapLayers),
+            selectedMapLayers,
+            selectedMapLayersManual: options.selectedMapLayersManual ?? false,
             selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
-            selectedViewIndices: options.selectedViewIndices ?? this.activeFeatureSearchViewIndices()
+            selectedViewIndices
         });
-        const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
-        if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
-            this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
-            this.moveDockedSurfaceToTop(layoutId);
-            this.notifySessionsChanged();
+        this.placeNewSearchSurface(entry.id);
+        let session = this.getInternalSession(entry.id);
+        if (!session) {
+            this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
+            session = this.getInternalSession(entry.id);
         }
+        return session!;
+    }
+
+    /** Imports feature-search JSON as a fresh runnable search session. */
+    importSearchJsonPayload(payload: unknown): FeatureSearchSession {
+        const imported = featureSearchDefinitionFromImportPayload(payload).definition;
+        const selectedMapLayers = imported.selectedMapLayers.map(ref => ({...ref}));
+        const entry = this.stateService.addFeatureSearch({
+            query: imported.query,
+            scope: imported.scope,
+            autoUpdate: imported.autoUpdate,
+            bookmarked: imported.bookmarked,
+            enabled: true,
+            paused: false,
+            showResultsOnMap: imported.showResultsOnMap,
+            pinColor: imported.pinColor,
+            selectedMapLayers,
+            selectedMapLayersManual: imported.selectedMapLayersManual ?? false,
+            selectedTileLevels: [...imported.selectedTileLevels],
+            selectedViewIndices: [...imported.selectedViewIndices],
+            searchStyleRules: this.cloneJsonCompatible(imported.searchStyleRules),
+            renderStrategy: {...imported.renderStrategy}
+        });
+        this.placeNewSearchSurface(entry.id);
         let session = this.getInternalSession(entry.id);
         if (!session) {
             this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
@@ -871,8 +993,8 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {selectedMapLayers})) {
-            session.definition = {...session.definition, selectedMapLayers};
+        if (!this.stateService.patchFeatureSearch(sessionId, {selectedMapLayers, selectedMapLayersManual: true})) {
+            session.definition = {...session.definition, selectedMapLayers, selectedMapLayersManual: true};
             this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
             this.progress.next(session);
         }
@@ -940,6 +1062,7 @@ export class FeatureSearchService {
             showResultsOnMap: definition.showResultsOnMap,
             pinColor: definition.pinColor,
             selectedMapLayers: definition.selectedMapLayers.map(ref => ({...ref})),
+            selectedMapLayersManual: definition.selectedMapLayersManual ?? false,
             selectedTileLevels: [...definition.selectedTileLevels],
             selectedViewIndices: [...definition.selectedViewIndices],
             searchStyleRules: this.cloneJsonCompatible(definition.searchStyleRules),
@@ -989,6 +1112,16 @@ export class FeatureSearchService {
             .map(session => session.layoutId)
             .filter(id => id !== layoutId);
         this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, [layoutId, ...existingOrder]);
+    }
+
+    /** Docks a newly created search when the Search dock is already active. */
+    private placeNewSearchSurface(searchId: string): void {
+        const layoutId = FeatureSearchService.layoutIdForSearch(searchId);
+        if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
+            this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
+            this.moveDockedSurfaceToTop(layoutId);
+            this.notifySessionsChanged();
+        }
     }
 
     /** Centers searches that were first created in the dock and only have the generic dock fallback position. */
@@ -1315,6 +1448,9 @@ export class FeatureSearchService {
         session: FeatureSearchSession,
         inferredMapLayers: FeatureSearchMapLayerRef[]
     ): boolean {
+        if (session.definition.selectedMapLayersManual) {
+            return false;
+        }
         const selectedMapLayers = this.mapLayersForSearchContext(inferredMapLayers, session.definition.selectedMapLayers);
         return selectedMapLayers.length
             ? this.applySearchMapLayerSelection(session, selectedMapLayers)
@@ -1328,6 +1464,9 @@ export class FeatureSearchService {
     ): boolean {
         const session = this.getInternalSession(sessionId);
         if (!session) {
+            return false;
+        }
+        if (session.definition.selectedMapLayersManual) {
             return false;
         }
 
@@ -1365,11 +1504,11 @@ export class FeatureSearchService {
         if (this.sameSelectedMapLayers(session.definition.selectedMapLayers, normalizedLayers)) {
             return false;
         }
-        if (this.stateService.patchFeatureSearch(session.id, {selectedMapLayers: normalizedLayers})) {
+        if (this.stateService.patchFeatureSearch(session.id, {selectedMapLayers: normalizedLayers, selectedMapLayersManual: false})) {
             return true;
         }
 
-        const nextDefinition = {...session.definition, selectedMapLayers: normalizedLayers};
+        const nextDefinition = {...session.definition, selectedMapLayers: normalizedLayers, selectedMapLayersManual: false};
         this.resetSessionSearch(session, nextDefinition);
         this.progress.next(session);
         this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});

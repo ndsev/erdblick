@@ -156,8 +156,9 @@ export class InspectionSelectionService {
     }
 
     /** Loads a feature and centers the target view on its reported center point. */
-    async focusOnFeature(viewIndex: number, tileFeatureId: TileFeatureId) {
-        const features = await this.tileStream.loadFeatures([tileFeatureId]);
+    async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
+        // Feature centers and bounding radii are only reliable after every advertised stage has arrived.
+        const features = await this.tileStream.loadFeatures([tileFeatureId], {requireAllStages: true});
         if (!features.length) {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
@@ -225,7 +226,7 @@ export class InspectionSelectionService {
                 targetViews.push(i);
             }
         }
-        return targetViews;
+        return targetViews.length ? targetViews : [this.stateService.focusedView];
     }
 
     /** Fits the target view to the tile represented by a focused source-data inspection. */

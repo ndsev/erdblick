@@ -46,7 +46,6 @@ import {DockedPanelDragController, DockedPanelDragOffset} from "../shared/docked
             }
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /** Hosts docked inspection panels and manages drag-based docking/reordering. */

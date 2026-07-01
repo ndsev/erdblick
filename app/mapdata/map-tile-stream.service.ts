@@ -31,7 +31,11 @@ import {SearchResultTile} from "./search-result-tile.model";
 import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, TileFeatureId} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
-import {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
+import {
+    FeatureSearchMapLayerRef,
+    FeatureSearchStateEntry,
+    featureSearchVisibleInView
+} from "../shared/feature-search-state";
 
 interface LayerRequestEntry {
     mapId: string;
@@ -504,8 +508,12 @@ export class MapTileStreamService {
     }
 
     /** Ensures a set of tiles is loaded, using selection-style pin requests for cache misses. */
-    async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
+    async loadTiles(
+        tileKeys: Set<string | null>,
+        options: {requireAllStages?: boolean} = {}
+    ): Promise<Map<string, FeatureTile>> {
         const result = new Map<string, FeatureTile>();
+        const requireAllStages = options.requireAllStages ?? false;
 
         for (const tileKey of tileKeys) {
             if (!tileKey) {
@@ -520,7 +528,7 @@ export class MapTileStreamService {
             const [mapId, layerId, tileId] = parsedTileKey;
 
             let tile = this.loadedTileLayers.get(canonicalTileKey);
-            if (tile && tile.hasData()) {
+            if (tile && tile.hasData() && (!requireAllStages || this.isTileInspectionDataComplete(tile))) {
                 result.set(tileKey, tile);
                 result.set(canonicalTileKey, tile);
                 continue;
@@ -538,7 +546,7 @@ export class MapTileStreamService {
                     tileIds: [Number(tileId)],
                 },
                 tileKey: canonicalTileKey,
-                resolveWhenInspectionComplete: false,
+                resolveWhenInspectionComplete: requireAllStages,
                 resolve: null,
                 reject: null
             };
@@ -605,11 +613,19 @@ export class MapTileStreamService {
 
     /**
      * Resolves tile/feature ids to `FeatureWrapper`s.
-     * `allowIncomplete` keeps selection restore usable before all tile stages arrived.
+     *
+     * The default path waits for loaded tile data and rejects missing feature ids immediately.
+     * `InspectionSelectionService` uses `allowIncomplete` only while restoring saved selections:
+     * it may return wrappers backed by placeholder or partially hydrated tiles, then pins those
+     * tiles so later inspection-stage data can fill in without losing the panel.
+     *
+     * `requireAllStages` is for callers that immediately read inspection-derived feature data,
+     * such as feature focusing. It waits until all advertised tile stages have arrived instead of
+     * resolving after the first feature data stage.
      */
     async loadFeatures(
         tileFeatureIds: (TileFeatureId | null)[],
-        options?: {allowIncomplete?: boolean}
+        options?: {allowIncomplete?: boolean; requireAllStages?: boolean}
     ): Promise<FeatureWrapper[]> {
         const normalizedIds = tileFeatureIds.filter((tileFeatureId): tileFeatureId is TileFeatureId => !!tileFeatureId);
         const allowIncomplete = options?.allowIncomplete ?? false;
@@ -663,7 +679,10 @@ export class MapTileStreamService {
             return features;
         }
 
-        const tiles = await this.loadTiles(new Set(normalizedIds.map(id => id.mapTileKey)));
+        const tiles = await this.loadTiles(
+            new Set(normalizedIds.map(id => id.mapTileKey)),
+            {requireAllStages: options?.requireAllStages ?? false}
+        );
         const features: FeatureWrapper[] = [];
         for (const id of normalizedIds) {
             const tile = tiles.get(id?.mapTileKey || "");
@@ -1609,6 +1628,9 @@ export class MapTileStreamService {
         let requestOrder = 0;
         for (const ref of this.availableFeatureSearchLayerRefs(definition.selectedMapLayers)) {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                if (!featureSearchVisibleInView(definition, viewIndex)) {
+                    continue;
+                }
                 for (const level of this.effectiveFeatureSearchTileLevels(definition, ref, viewIndex)) {
                     const tileIds = this.viewState.visibleSearchTileIdsForLevel(viewIndex, level);
                     for (const tileId of tileIds) {

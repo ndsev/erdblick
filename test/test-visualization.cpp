@@ -6,6 +6,8 @@
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 #include "mapget/model/searchresultlayer.h"
+#include "mapget/model/sourceinfo.h"
+#include "mapget/model/sourcedatareference.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
@@ -15,6 +17,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <variant>
 
 using namespace erdblick;
 
@@ -403,6 +406,31 @@ nlohmann::json warningSignLayerInfoJson()
     };
 }
 
+/** Build a schema-backed render tile with one warning-sign enum attribute. */
+std::shared_ptr<mapget::TileFeatureLayer> makeWarningSignRenderTile(mapget::TileId tileId)
+{
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        tileId,
+        "WarningSignRenderNode",
+        "WarningSignRenderMap",
+        mapget::LayerInfo::fromJson(warningSignLayerInfoJson()),
+        std::make_shared<simfil::StringPool>());
+
+    auto const center = tileId.center();
+    auto feature = layer->newFeature("Road", {{"id", 1}});
+    feature->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+
+    auto attr = feature->attributeLayers()->newLayer("RoadRulesLayer")->newAttribute("WARNING_SIGN");
+    auto attrValue = layer->newObject();
+    REQUIRE(attrValue->addField("warningSign", "SPEED_LIMIT_END").has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    return layer;
+}
+
 std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId)
 {
     auto layer = std::make_shared<mapget::TileFeatureLayer>(
@@ -431,7 +459,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeRelationTestTile(
         "RelationTestNode",
         "RelationTestMap",
         relationTestLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
     auto const center = tileId.center();
@@ -470,7 +498,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapge
         "RelationTestNode",
         "RelationTestMap",
         relationTestLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
     auto const center = tileId.center();
@@ -528,6 +556,22 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
         mapget::Validity::Positive);
 
     return layer;
+}
+
+/** Creates a single source-data reference collection for inspection provenance tests. */
+mapget::model_ptr<mapget::SourceDataReferenceCollection> makeInspectionSourceDataRefs(
+    mapget::TileFeatureLayer& tile,
+    std::string const& layerId,
+    size_t bitOffset)
+{
+    auto const layerIdString = tile.strings()->emplace(layerId).value();
+    auto const qualifierString = tile.strings()->emplace("Value").value();
+    mapget::QualifiedSourceDataReference ref{
+        .address_ = mapget::SourceDataAddress::fromBitPosition(bitOffset, 8),
+        .layerId_ = layerIdString,
+        .qualifier_ = qualifierString,
+    };
+    return tile.newSourceDataReferenceCollection({&ref, 1});
 }
 
 /** Recursively collect rendered FeatureId rows from the inspection tree for focused assertions. */
@@ -616,6 +660,20 @@ nlohmann::json const* findInspectionNodeByKey(nlohmann::json const& node, std::s
     });
 }
 
+/** Find a direct inspection child by key without searching grandchildren. */
+nlohmann::json const* findInspectionDirectChildByKey(nlohmann::json const& node, std::string const& key)
+{
+    if (!node.contains("children") || !node.at("children").is_array()) {
+        return nullptr;
+    }
+    for (auto const& child : node.at("children")) {
+        if (child.value("key", nlohmann::json{}) == key) {
+            return &child;
+        }
+    }
+    return nullptr;
+}
+
 nlohmann::json const* findInspectionNodeByGeoJsonPath(nlohmann::json const& node, std::string const& path)
 {
     return findInspectionNode(node, [&path](nlohmann::json const& candidate) {
@@ -702,6 +760,26 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
 
         REQUIRE(inspection.size() > 0);
         REQUIRE(inspection.at(0)["key"].as<std::string>() == "Identifiers");
+
+        auto const* featureIdNode = findInspectionDirectChildByKey(inspection.at(0), "featureId");
+        REQUIRE(featureIdNode);
+        REQUIRE_FALSE(featureIdNode->contains("children"));
+        REQUIRE(featureIdNode->value("value", std::string{}) == f->id()->toString());
+        REQUIRE(featureIdNode->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
+        REQUIRE(featureIdNode->value("mapId", std::string{}) == f->model().mapId());
+        REQUIRE(featureIdNode->value("geoJsonPath", std::string{}) == "featureId");
+
+        for (auto const& [key, value] : f->id()->keyValuePairs()) {
+            auto const* idPartNode = findInspectionDirectChildByKey(inspection.at(0), std::string(key));
+            REQUIRE(idPartNode);
+            REQUIRE_FALSE(idPartNode->contains("children"));
+            REQUIRE(idPartNode->value("geoJsonPath", std::string{}) == key);
+            if (std::holds_alternative<int64_t>(value)) {
+                REQUIRE(idPartNode->at("value").get<int64_t>() == std::get<int64_t>(value));
+            } else {
+                REQUIRE(idPartNode->value("value", std::string{}) == std::get<std::string_view>(value));
+            }
+        }
 
         bool hasFeatureRoot = false;
         for (uint32_t i = 0; i < inspection.size(); ++i) {
@@ -806,6 +884,47 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     }));
 }
 
+TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto inspection = InspectionConverter().convert(feature);
+
+    auto const* geometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.type");
+    REQUIRE(geometryType);
+    REQUIRE(geometryType->value("value", std::string{}) == "Polyline");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.coordinates[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.coordinates[1]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[0]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[0][0]"));
+}
+
+TEST_CASE("FeatureInspection copies geometry collection search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto const center = tile->tileId().center();
+    feature->addPoint({center.x, center.y + 0.0005, 0.0});
+
+    auto inspection = InspectionConverter().convert(feature);
+
+    auto const* firstGeometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].type");
+    REQUIRE(firstGeometryType);
+    REQUIRE(firstGeometryType->value("value", std::string{}) == "Polyline");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[1]"));
+
+    auto const* secondGeometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].type");
+    REQUIRE(secondGeometryType);
+    REQUIRE(secondGeometryType->value("value", std::string{}) == "Points");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].coordinates[0]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[1]"));
+}
+
 TEST_CASE("FeatureInspection copies propagated attribute value search path", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
@@ -824,6 +943,51 @@ TEST_CASE("FeatureInspection copies propagated attribute value search path", "[e
     REQUIRE(
         attrNode->value("geoJsonPath", std::string{}) ==
         "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
+}
+
+TEST_CASE("FeatureInspection keeps attributes in model layers with source data references", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attrLayer = feature->attributeLayers()->newLayer("RoadRulesLayer");
+    auto speed = attrLayer->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(speed->addField("value", int64_t(30)).has_value());
+    speed->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "SourceData-RoadRulesLayer-3", 8));
+
+    auto warning = attrLayer->newAttribute("WARNING_SIGN");
+    REQUIRE(warning->addField("value", "YIELD").has_value());
+    warning->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "SourceData-RoadRulesLayer-9", 24));
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* rulesLayer = findInspectionNodeByKey(*inspection, "RoadRulesLayer");
+    REQUIRE(rulesLayer);
+    REQUIRE(rulesLayer->contains("children"));
+
+    auto const& attributes = rulesLayer->at("children");
+    REQUIRE(attributes.is_array());
+    REQUIRE(attributes.size() == 2);
+    REQUIRE(attributes.at(0).value("key", std::string{}) == "SPEED_LIMIT_METRIC");
+    REQUIRE(attributes.at(1).value("key", std::string{}) == "WARNING_SIGN");
+
+    auto const* speedNode = findInspectionNodeByKey(*rulesLayer, "SPEED_LIMIT_METRIC");
+    REQUIRE(speedNode);
+    REQUIRE(
+        speedNode->value("geoJsonPath", std::string{}) ==
+        "properties.layer.RoadRulesLayer.SPEED_LIMIT_METRIC.value");
+    REQUIRE(speedNode->value("hoverId", std::string{}) == "Way.1:attribute#0");
+    REQUIRE(speedNode->contains("sourceDataReferences"));
+    REQUIRE(
+        speedNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
+            .find("SourceData-RoadRulesLayer-3") != std::string::npos);
+
+    auto const* warningNode = findInspectionNodeByKey(*rulesLayer, "WARNING_SIGN");
+    REQUIRE(warningNode);
+    REQUIRE(warningNode->value("hoverId", std::string{}) == "Way.1:attribute#1");
+    REQUIRE(
+        warningNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
+            .find("SourceData-RoadRulesLayer-9") != std::string::npos);
 }
 
 TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspection]")
@@ -1509,6 +1673,55 @@ TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdbli
     visualization.run();
 
     REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+}
+
+TEST_CASE("DeckFeatureLayerVisualization rewrites style enum symbols through layer schema", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "WarningSignEnumStyle"
+rules:
+  - type: Road
+    geometry: [line]
+    filter: properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END
+    color-expression: "(properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END) and '#ff0000' or '#0000ff'"
+    width: 4
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeWarningSignRenderTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
+    DeckFeatureLayerVisualization visualization(0, "WarningSignRenderMap/Road/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
+}
+
+TEST_CASE("DeckFeatureLayerVisualization evaluates relation branches in relation context", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "RelationContextStyle"
+rules:
+  - type: "Diamond"
+    aspect: relation
+    first-of:
+      - relation-type: "doesNotMatch"
+        color: "#ff0000"
+        width: 4
+      - relation-type: "hasPoi"
+        filter: $target.typeId == "PointOfInterest"
+        color-expression: "($target.typeId == 'PointOfInterest') and '#00ff00' or '#ff0000'"
+        width: 4
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13), true, true);
+    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
 }
 
 TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added auxiliary tiles", "[erdblick.renderer]")

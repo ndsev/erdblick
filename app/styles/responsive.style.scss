@@ -1,0 +1,214 @@
+@media only screen and (max-width: 56em) {
+  .maps-close-button {
+    position: absolute;
+    top: 3em;
+    right: 0;
+    left: unset;
+    z-index: 140;
+
+    .p-button {
+      border-radius: var(--p-button-border-radius);
+    }
+  }
+
+  .main-layout {
+    .collapsible-dock {
+      &.open {
+        width: 100vw;
+        max-width: 100vw;
+      }
+
+      .undock-button {
+        display: none;
+      }
+
+      .app-dock-tabs {
+        .p-tablist {
+          padding-right: 2.5em;
+        }
+
+        .dock-tabbar-close-button {
+          display: inline-flex;
+        }
+      }
+
+      > .dock-empty .close-dock-button {
+        display: inline-flex;
+      }
+
+      .inspection-container {
+        .resizable-container {
+          width: 100%;
+          max-width: 100%;
+        }
+      }
+    }
+
+    .viewer-layout {
+      &.open {
+        visibility: visible;
+      }
+
+      &.collapsed {
+        visibility: collapse;
+      }
+    }
+  }
+
+  .search-wrapper {
+    .resizable-container {
+      position: relative;
+      min-width: 100%;
+      min-height: 0;
+      overflow: auto;
+      max-width: 100%;
+      max-height: calc(100vh - 11.5em);;
+      border-radius: 0;
+      margin-left: -3em;
+      resize: none;
+      left: 3em;
+    }
+
+    .p-dialog {
+      max-height: calc(100vh - 11.5em);
+      border-radius: 0 0 0.5em 0.5em;
+
+      .p-dialog-content:last-of-type {
+        border-bottom-right-radius: 0;
+        border-bottom-left-radius: 0;
+      }
+
+      .p-dialog-content:first-of-type {
+        border-top-right-radius: 0;
+        border-top-left-radius: 0;
+      }
+    }
+
+  }
+
+  .pref-dialog {
+    .p-dialog {
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: 100vw !important;
+      max-height: 100vh !important;
+      margin: 0;
+    }
+  }
+
+  .diagnostics-performance-dialog,
+  .diagnostics-log-dialog {
+    .p-dialog {
+      width: 100vw !important;
+      height: 100vh !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      max-width: 100vw !important;
+      max-height: 100vh !important;
+      margin: 0;
+    }
+
+    .p-dialog-content {
+      min-width: 0;
+      min-height: 0;
+    }
+  }
+
+  .diagnostics-performance-dialog {
+    .diagnostics-perf-progress,
+    .diagnostics-perf-filter,
+    .diagnostics-perf-table {
+      min-width: 0;
+    }
+  }
+
+  .diagnostics-log-dialog {
+    .diagnostics-log-actions {
+      flex-wrap: wrap;
+    }
+
+    .diagnostics-log-controls,
+    .diagnostics-log-actions,
+    .diagnostics-log-table {
+      min-width: 0;
+    }
+  }
+
+  .map-layer-dialog {
+    .close-maps-button {
+      display: block;
+      visibility: visible;
+    }
+
+    .p-dialog {
+      width: 100vw !important;
+      height: calc(100vh - 3em) !important;
+      max-width: 100vw !important;
+      max-height: calc(100vh - 3em) !important;
+      margin: 0;
+      top: 3em;
+      left: 0;
+      border-radius: 0;
+    }
+
+    .p-dialog-header {
+      padding: 1.5em 1.5em 0 1.5em;
+    }
+
+    .p-dialog-content {
+      padding: 0.5em;
+      border-radius: 0;
+    }
+
+    .tabs-container {
+      overflow: auto;
+      max-height: 100vh;
+    }
+  }
+
+  .p-overlaypanel:after, .p-overlaypanel:before {
+    left: unset !important;
+    right: 1.25rem !important;
+  }
+
+  .main-button-controls {
+    padding-top: 3.25em;
+  }
+
+  .editor-dialog {
+    .p-dialog {
+      width: 100vw;
+      height: 100vh;
+      max-width: 100vw;
+    }
+
+    .editor-container {
+      width: 100%;
+      height: auto;
+      max-height: none;
+    }
+
+    .editor-actions,
+    .advanced-preferences-actions {
+      flex-wrap: wrap;
+    }
+  }
+
+  .style-compare-dialog {
+    .p-dialog {
+      width: 100vw;
+      max-width: 100vw;
+      max-height: 100vh;
+    }
+
+    .style-compare-host {
+      flex: 1 1 auto;
+      width: 100%;
+      max-height: none;
+    }
+  }
+}
+
+.safari {
+  padding-bottom: 0.5em;
+}

@@ -18,6 +18,7 @@ import {Title} from "@angular/platform-browser";
 import {KeyboardService} from "./shared/keyboard.service";
 import {AppConfigService} from "./shared/app-config.service";
 import {StyleService} from "./styledata/style.service";
+import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -54,18 +55,6 @@ declare let window: DebugWindow;
         <about-dialog></about-dialog>
         <router-outlet></router-outlet>
     `,
-    styles: [`
-        .dialog-content {
-            margin-bottom: 0.5em;
-        }
-
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 3.5em;
-                padding-bottom: 0;
-            }
-        }
-    `],
     standalone: false
 })
 /**
@@ -97,6 +86,7 @@ export class AppComponent implements OnDestroy {
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
                 private configService: AppConfigService,
+                private diagnostics: DiagnosticsFacadeService,
                 private titleService: Title) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
@@ -255,7 +245,7 @@ export class AppComponent implements OnDestroy {
 
     /** Opens the diagnostics performance dialog from the global keyboard shortcut. */
     private openStatistics() {
-        this.stateService.openDialog(this.diagnosticsPerformanceDialogLayoutId);
+        this.diagnostics.openPerformanceDialog();
     }
 
     protected readonly environment = environment;

@@ -1,0 +1,156 @@
+app-surface-header {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-surface-header {
+  align-items: center;
+  display: flex;
+  gap: 0.25em;
+  justify-content: space-between;
+  min-width: 0;
+  width: 100%;
+  container-type: inline-size;
+
+  & > * {
+    align-items: center;
+    display: flex;
+    gap: 0.25em;
+    min-width: 0;
+  }
+}
+
+.app-surface-header-drag {
+  cursor: grab;
+}
+
+.app-surface-header-title-group {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  margin-right: 0.25em;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-surface-header-title {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  flex: 0 1 auto;
+  font: inherit;
+  font-weight: bold;
+  gap: 0.15em;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.15em 0.15em 0.15em 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.app-surface-header-title:is(button) {
+  cursor: pointer;
+}
+
+.app-surface-header-title:is(button):hover {
+  background-color: var(--p-primary-color);
+  border-radius: 6px;
+  color: var(--p-primary-contrast-color);
+
+  span {
+    color: inherit;
+  }
+}
+
+.app-surface-header-title .material-symbols-outlined {
+  font-size: 1.25em;
+}
+
+.app-surface-header-title-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-surface-header-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.app-surface-header-actions-extra {
+  align-items: center;
+  display: none;
+  gap: 0.25em;
+}
+
+.app-surface-header-actions-menu {
+  display: inline-flex;
+}
+
+@container (min-width: 36rem) {
+  .app-surface-header-actions-extra {
+    display: inline-flex;
+  }
+
+  .app-surface-header-actions-menu {
+    display: none;
+  }
+}
+
+.app-surface-header-actions .p-button,
+.app-surface-header .p-button {
+  height: 1.75em !important;
+  margin: 0;
+  width: 1.75em !important;
+}
+
+.app-surface-header-button-icon {
+  font-size: 1.2em;
+  margin: 0 auto;
+}
+
+.inspection-focus-indicator {
+  align-items: center;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+  padding: 2px;
+}
+
+.inspection-focus-indicator-active {
+  border-color: var(--p-primary-color, #2196f3);
+}
+
+.app-surface-header .p-colorpicker input {
+  height: 1.5em !important;
+  width: 1.5em !important;
+}
+
+.app-surface-header .p-toggleswitch {
+  flex: 0 0 auto;
+}
+
+.app-surface-header .inspection-focus-indicator-active .p-colorpicker input,
+.app-surface-header .inspection-focus-indicator-active .p-colorpicker-preview {
+  border-radius: 50%;
+}
+
+.app-dialog .p-dialog-header,
+.app-panel .p-accordionheader {
+  overflow: visible;
+}
+
+.app-panel .p-accordionheader {
+  flex: 0 0 auto;
+  padding: 0.25em 0.25em 0.25em 0.5em;
+}
+

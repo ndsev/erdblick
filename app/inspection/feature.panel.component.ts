@@ -7,6 +7,11 @@ import {FeatureWrapper} from "../mapdata/features.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
+import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    formatInspectionArrayContainerSummary,
+    formatInspectionArrayValueCount
+} from "./inspection-array-summary.util";
 
 /** Shape emitted by the WASM inspection converter for one inspection subtree. */
 interface InspectionModelData {
@@ -32,6 +37,7 @@ interface InspectionModelData {
             }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [geoJson]="geoJson"
+                             [featureIds]="featureIds"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
@@ -40,7 +46,6 @@ interface InspectionModelData {
             </inspection-tree>
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /** Renders feature inspection data and keeps it in sync while staged tiles continue loading. */
@@ -59,6 +64,7 @@ export class FeaturePanelComponent implements OnDestroy {
     ];
     filterOptions = new FeatureFilterOptions();
     geoJson: string = "";
+    featureIds: string[] = [];
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
     firstHighlightedItemIndex?: number;
@@ -132,11 +138,15 @@ export class FeaturePanelComponent implements OnDestroy {
         if (!this.selectedFeatures.length) {
             this.loading = false;
             this.geoJson = `{"type":"FeatureCollection","features":[]}`;
+            this.featureIds = [];
             this.treeData = [];
             this.firstHighlightedItemIndex = undefined;
             return;
         }
 
+        this.featureIds = Array.from(new Set(
+            this.selectedFeatures.map(feature => stripFeatureInspectionTarget(feature.featureId))
+        ));
         this.loading = this.selectedFeatures.some(feature =>
             !this.mapService.isTileInspectionDataComplete(feature.featureTile));
 
@@ -454,7 +464,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     node.data["strongHoverGroupId"] = nextStrongHoverGroupId;
                 }
 
-                let children = convertToTreeTableNodes(
+                const children = convertToTreeTableNodes(
                     Array.isArray(data?.children) ? data.children : [],
                     {
                         mapTileKey: context.mapTileKey,
@@ -469,6 +479,10 @@ export class FeaturePanelComponent implements OnDestroy {
                     if (nameBubble) {
                         node.data["stageLabelBubble"] = nameBubble;
                     }
+                }
+                if ((valueType & coreLib.ValueType.ARRAY.value) && children.length > 0) {
+                    node.data["valueCount"] = formatInspectionArrayValueCount(children);
+                    node.data["value"] = formatInspectionArrayContainerSummary(children);
                 }
                 node.children = children;
                 treeNodes.push(node);

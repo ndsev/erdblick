@@ -4,10 +4,7 @@ import {MapInfoService} from "../mapdata/map-info.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
-import {
-    FeatureSearchService,
-    featureSearchSelectedMapLayersFromPayload
-} from "./feature.search.service";
+import {FeatureSearchService} from "./feature.search.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
@@ -164,8 +161,7 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             execute: (value: string, payload?: unknown) => {
-                const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
-                this.searchService.run(value, selectedMapLayers ? {selectedMapLayers} : {});
+                this.searchService.runFromActionPayload(value, payload);
             },
             validate: (_: string) => {
                 return !simfilError;
