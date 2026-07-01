@@ -18,7 +18,7 @@ import {InfoMessageService} from "../shared/info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData, type InspectionTreeExpansionState} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
@@ -366,6 +366,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.fullCollapseActive = false;
             this.expansionSnapshotBeforeFullCollapse = undefined;
             this.data = [...this.data];
+            this.savePanelExpansionState();
             this.refreshLayout();
             this.cdr.markForCheck();
         }));
@@ -989,6 +990,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.expansionSnapshotBeforeFullCollapse = undefined;
         }
         this.data = [...this.data];
+        this.savePanelExpansionState();
         this.refreshLayout();
         this.cdr.markForCheck();
     }
@@ -1010,6 +1012,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.expansionSnapshotBeforeFullExpand = undefined;
         }
         this.data = [...this.data];
+        this.savePanelExpansionState();
         this.refreshLayout();
         this.cdr.markForCheck();
     }
@@ -1182,18 +1185,31 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!this.data.length) {
             return;
         }
-        this.stateService.setInspectionTreeExpansionSnapshot(
-            this.panelId(),
-            this.captureExpansionState(this.data));
+        const state: InspectionTreeExpansionState = {
+            expandedNodes: this.captureExpansionState(this.data),
+            fullExpansionActive: this.fullExpansionActive,
+            fullCollapseActive: this.fullCollapseActive
+        };
+        if (this.expansionSnapshotBeforeFullExpand) {
+            state.expansionSnapshotBeforeFullExpand = this.expansionSnapshotBeforeFullExpand;
+        }
+        if (this.expansionSnapshotBeforeFullCollapse) {
+            state.expansionSnapshotBeforeFullCollapse = this.expansionSnapshotBeforeFullCollapse;
+        }
+        this.stateService.setInspectionTreeExpansionState(this.panelId(), state);
     }
 
     /** Restores expansion state captured by a previous component instance for the same panel. */
     private restorePanelExpansionState(nodes: TreeNode[]): void {
-        const snapshot = this.stateService.getInspectionTreeExpansionSnapshot(this.panelId());
-        if (!snapshot) {
+        const state = this.stateService.getInspectionTreeExpansionState(this.panelId());
+        if (!state) {
             return;
         }
-        this.restoreExpansionState(nodes, snapshot, [], false);
+        this.restoreExpansionState(nodes, state.expandedNodes, [], false);
+        this.fullExpansionActive = state.fullExpansionActive;
+        this.expansionSnapshotBeforeFullExpand = state.expansionSnapshotBeforeFullExpand;
+        this.fullCollapseActive = state.fullCollapseActive;
+        this.expansionSnapshotBeforeFullCollapse = state.expansionSnapshotBeforeFullCollapse;
     }
 
     /** Restores a previously captured expansion map, collapsing new expandable nodes by default. */

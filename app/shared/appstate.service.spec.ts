@@ -1093,6 +1093,39 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('preserves transient inspection tree header expansion state defensively', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const expandedNodes = new Map<string, boolean | undefined>([['root', true], ['child', false]]);
+        const restoreSnapshot = new Map<string, boolean | undefined>([['root', false]]);
+
+        service.setInspectionTreeExpansionState(7, {
+            expandedNodes,
+            fullExpansionActive: true,
+            expansionSnapshotBeforeFullExpand: restoreSnapshot,
+            fullCollapseActive: false
+        });
+        expandedNodes.set('root', false);
+        restoreSnapshot.set('root', true);
+
+        const firstRead = service.getInspectionTreeExpansionState(7)!;
+        expect(firstRead.expandedNodes.get('root')).toBe(true);
+        expect(firstRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
+        expect(firstRead.fullExpansionActive).toBe(true);
+        expect(firstRead.fullCollapseActive).toBe(false);
+
+        firstRead.expandedNodes.set('root', false);
+        firstRead.expansionSnapshotBeforeFullExpand?.set('root', true);
+
+        const secondRead = service.getInspectionTreeExpansionState(7)!;
+        expect(secondRead.expandedNodes.get('root')).toBe(true);
+        expect(secondRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('focuses inspection panels when selections create, reuse, or target an existing panel', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;

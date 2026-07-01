@@ -178,6 +178,15 @@ export interface InspectionPanelModel<FeatureRepresentation> {
 /** Transient expansion state for one mounted inspection tree. */
 export type InspectionTreeExpansionSnapshot = Map<string, boolean | undefined>;
 
+/** Transient inspection-tree UI state kept while moving panels between docked and floating hosts. */
+export interface InspectionTreeExpansionState {
+    expandedNodes: InspectionTreeExpansionSnapshot;
+    fullExpansionActive: boolean;
+    expansionSnapshotBeforeFullExpand?: InspectionTreeExpansionSnapshot;
+    fullCollapseActive: boolean;
+    expansionSnapshotBeforeFullCollapse?: InspectionTreeExpansionSnapshot;
+}
+
 /** Persisted top-left dialog position in viewport pixels. */
 export interface AppDialogPosition {
     left: number;
@@ -370,7 +379,7 @@ export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
-    private readonly inspectionTreeExpansionSnapshots = new Map<number, InspectionTreeExpansionSnapshot>();
+    private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -963,7 +972,7 @@ export class AppStateService implements OnDestroy {
         this.selectionState.subscribe(panels => {
             const panelIds = panels.map(panel => panel.id);
             this.pruneInspectionDialogLayout(panelIds);
-            this.pruneInspectionTreeExpansionSnapshots(panelIds);
+            this.pruneInspectionTreeExpansionStates(panelIds);
             this.sanitizeFocusedInspectionPanel(panels);
         });
     }
@@ -2492,19 +2501,40 @@ export class AppStateService implements OnDestroy {
         return this.focusedInspectionPanelId === id;
     }
 
-    /** Stores row expansion state for the current in-memory inspection panel instance. */
-    setInspectionTreeExpansionSnapshot(panelId: number, snapshot: InspectionTreeExpansionSnapshot): void {
-        if (!snapshot.size) {
-            this.inspectionTreeExpansionSnapshots.delete(panelId);
-            return;
-        }
-        this.inspectionTreeExpansionSnapshots.set(panelId, new Map(snapshot));
+    /** Stores row and header-button expansion state for the current in-memory inspection panel instance. */
+    setInspectionTreeExpansionState(panelId: number, state: InspectionTreeExpansionState): void {
+        this.inspectionTreeExpansionStates.set(panelId, this.cloneInspectionTreeExpansionState(state));
     }
 
-    /** Returns a defensive copy of the last known row expansion state for one inspection panel. */
-    getInspectionTreeExpansionSnapshot(panelId: number): InspectionTreeExpansionSnapshot | undefined {
-        const snapshot = this.inspectionTreeExpansionSnapshots.get(panelId);
+    /** Returns a defensive copy of the last known expansion state for one inspection panel. */
+    getInspectionTreeExpansionState(panelId: number): InspectionTreeExpansionState | undefined {
+        const state = this.inspectionTreeExpansionStates.get(panelId);
+        return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
+    }
+
+    /** Clones an optional inspection-tree expansion snapshot. */
+    private cloneInspectionTreeExpansionSnapshot(
+        snapshot?: InspectionTreeExpansionSnapshot
+    ): InspectionTreeExpansionSnapshot | undefined {
         return snapshot ? new Map(snapshot) : undefined;
+    }
+
+    /** Clones transient inspection-tree expansion state so component instances cannot share mutable maps. */
+    private cloneInspectionTreeExpansionState(state: InspectionTreeExpansionState): InspectionTreeExpansionState {
+        const clone: InspectionTreeExpansionState = {
+            expandedNodes: new Map(state.expandedNodes),
+            fullExpansionActive: state.fullExpansionActive,
+            fullCollapseActive: state.fullCollapseActive
+        };
+        const expandSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullExpand);
+        if (expandSnapshot) {
+            clone.expansionSnapshotBeforeFullExpand = expandSnapshot;
+        }
+        const collapseSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullCollapse);
+        if (collapseSnapshot) {
+            clone.expansionSnapshotBeforeFullCollapse = collapseSnapshot;
+        }
+        return clone;
     }
 
     /** Returns the persisted layout for a dialog if one exists. */
@@ -2815,12 +2845,12 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    /** Removes transient inspection-tree expansion snapshots for panels that no longer exist. */
-    private pruneInspectionTreeExpansionSnapshots(activePanelIds: number[]): void {
+    /** Removes transient inspection-tree expansion states for panels that no longer exist. */
+    private pruneInspectionTreeExpansionStates(activePanelIds: number[]): void {
         const activeIds = new Set(activePanelIds);
-        for (const panelId of this.inspectionTreeExpansionSnapshots.keys()) {
+        for (const panelId of this.inspectionTreeExpansionStates.keys()) {
             if (!activeIds.has(panelId)) {
-                this.inspectionTreeExpansionSnapshots.delete(panelId);
+                this.inspectionTreeExpansionStates.delete(panelId);
             }
         }
     }
