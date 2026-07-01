@@ -55,6 +55,7 @@ export class RightClickMenuService {
     preferredTileIdForSourceData: bigint | null = null;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
+    closeContextMenus: Subject<void> = new Subject<void>();
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
@@ -84,6 +85,11 @@ export class RightClickMenuService {
             }
             this.rebuildMenuItems();
         });
+    }
+
+    /** Requests every map view to hide its PrimeNG context menu before another one opens. */
+    closeAllContextMenus(): void {
+        this.closeContextMenus.next();
     }
 
     /** Returns whether the source-data picker dialog is currently visible. */

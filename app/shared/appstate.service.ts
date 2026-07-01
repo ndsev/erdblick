@@ -73,6 +73,9 @@ export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const MAX_DECK_STYLE_WORKERS = 32;
 export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
+export const DEFAULT_LOW_FI_TILE_THRESHOLD = 128;
+export const MIN_LOW_FI_TILE_THRESHOLD = 1;
+export const MAX_LOW_FI_TILE_THRESHOLD = 4096;
 export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
 export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
 export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
@@ -101,6 +104,19 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+/** Clamp one low-fi tile threshold to the supported integer preference range. */
+export function clampLowFiTileThreshold(
+    value: unknown,
+    fallback = DEFAULT_LOW_FI_TILE_THRESHOLD): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+    return Math.min(
+        MAX_LOW_FI_TILE_THRESHOLD,
+        Math.max(MIN_LOW_FI_TILE_THRESHOLD, Math.trunc(numeric)));
+}
 
 /** Normalizes feature search grouping values from persisted state. */
 function normalizeFeatureSearchGrouping(value: unknown): number[] {
@@ -595,7 +611,7 @@ export class AppStateService implements OnDestroy {
 
     readonly deckAntialiasingEnabledState = this.createState<boolean>({
         name: 'deckAntialiasingEnabled',
-        defaultValue: false,
+        defaultValue: true,
         schema: Boolish
     });
 
@@ -603,6 +619,14 @@ export class AppStateService implements OnDestroy {
         name: 'pinLowFiToMaxLod',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly lowFiTileThresholdState = this.createState<number>({
+        name: 'lowFiTileThreshold',
+        defaultValue: DEFAULT_LOW_FI_TILE_THRESHOLD,
+        schema: z.coerce.number().int(),
+        toStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD),
+        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD)
     });
 
     readonly deckStyleWorkersCountState = this.createState<number>({
@@ -1917,6 +1941,10 @@ export class AppStateService implements OnDestroy {
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
     set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
+    get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
+    set lowFiTileThreshold(val: number) {
+        this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));
+    }
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}

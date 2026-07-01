@@ -17,6 +17,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <variant>
 
 using namespace erdblick;
 
@@ -659,6 +660,20 @@ nlohmann::json const* findInspectionNodeByKey(nlohmann::json const& node, std::s
     });
 }
 
+/** Find a direct inspection child by key without searching grandchildren. */
+nlohmann::json const* findInspectionDirectChildByKey(nlohmann::json const& node, std::string const& key)
+{
+    if (!node.contains("children") || !node.at("children").is_array()) {
+        return nullptr;
+    }
+    for (auto const& child : node.at("children")) {
+        if (child.value("key", nlohmann::json{}) == key) {
+            return &child;
+        }
+    }
+    return nullptr;
+}
+
 nlohmann::json const* findInspectionNodeByGeoJsonPath(nlohmann::json const& node, std::string const& path)
 {
     return findInspectionNode(node, [&path](nlohmann::json const& candidate) {
@@ -745,6 +760,26 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
 
         REQUIRE(inspection.size() > 0);
         REQUIRE(inspection.at(0)["key"].as<std::string>() == "Identifiers");
+
+        auto const* featureIdNode = findInspectionDirectChildByKey(inspection.at(0), "featureId");
+        REQUIRE(featureIdNode);
+        REQUIRE_FALSE(featureIdNode->contains("children"));
+        REQUIRE(featureIdNode->value("value", std::string{}) == f->id()->toString());
+        REQUIRE(featureIdNode->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
+        REQUIRE(featureIdNode->value("mapId", std::string{}) == f->model().mapId());
+        REQUIRE(featureIdNode->value("geoJsonPath", std::string{}) == "featureId");
+
+        for (auto const& [key, value] : f->id()->keyValuePairs()) {
+            auto const* idPartNode = findInspectionDirectChildByKey(inspection.at(0), std::string(key));
+            REQUIRE(idPartNode);
+            REQUIRE_FALSE(idPartNode->contains("children"));
+            REQUIRE(idPartNode->value("geoJsonPath", std::string{}) == key);
+            if (std::holds_alternative<int64_t>(value)) {
+                REQUIRE(idPartNode->at("value").get<int64_t>() == std::get<int64_t>(value));
+            } else {
+                REQUIRE(idPartNode->value("value", std::string{}) == std::get<std::string_view>(value));
+            }
+        }
 
         bool hasFeatureRoot = false;
         for (uint32_t i = 0; i < inspection.size(); ++i) {

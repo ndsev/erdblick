@@ -123,6 +123,27 @@ inspection-tree {
     }
   }
 
+  .inspection-value-copy-button {
+    align-self: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+
+    .p-button {
+      align-items: center;
+      height: 1em;
+      justify-content: center;
+      margin-top: 0.1em;
+      padding: 0.1em;
+      width: 1.2em;
+    }
+
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-size: 1em;
+      line-height: 1;
+    }
+  }
+
   .inspection-feature-id-pill {
     background: color-mix(in srgb, var(--p-primary-color) 16%, transparent);
     border-radius: 999px;
@@ -180,6 +201,15 @@ inspection-tree {
     line-height: 1;
     padding: 0.15em 0.55em;
     white-space: nowrap;
+  }
+
+  .inspection-node-count-tag {
+    align-self: center;
+    flex: 0 0 auto;
+    font-size: 0.75em;
+    line-height: 1;
+    min-width: 1.35em;
+    padding: 0.12em 0.45em;
   }
 
   .filter-panel-content {

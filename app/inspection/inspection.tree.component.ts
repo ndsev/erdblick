@@ -117,17 +117,6 @@ export class FeatureFilterOptions {
                                                 {{ fullCollapseActive ? 'settings_backup_restore' : 'unfold_less' }}
                                             </span>
                                         </p-button>
-                                        @if (featureIds().length > 0) {
-                                            <p-button class="table-header-button"
-                                                      severity="secondary"
-                                                      (click)="copyFeatureIds($event)"
-                                                      pTooltip="Copy Feature ID"
-                                                      [tooltipOptions]="{appendTo: 'body'}"
-                                                      tooltipPosition="bottom"
-                                                      aria-label="Copy Feature ID">
-                                                <span class="material-symbols-outlined">fingerprint</span>
-                                            </p-button>
-                                        }
                                     </p-buttonGroup>
                                 }
                             </div>
@@ -160,6 +149,16 @@ export class FeatureFilterOptions {
                                             <p-treeTableToggler [rowNode]="rowNode"/>
                                         </span>
                                     }
+                                    @if (shouldShowValueCopyButton(rowNode, rowData, col.key)) {
+                                        <p-button class="inspection-value-copy-button"
+                                                  severity="secondary"
+                                                  (click)="copyNodeValue($event, rowData)"
+                                                  pTooltip="Copy"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="left">
+                                            <span class="material-symbols-outlined">content_copy</span>
+                                        </p-button>
+                                    }
                                     @if (col.key === "value" && isFeatureIdValueRow(rowData)) {
                                         <a href=""
                                            (click)="onFeatureIdLinkClick($event, rowData)"
@@ -186,6 +185,14 @@ export class FeatureFilterOptions {
                                     }
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
                                         <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    }
+                                    @if (rowData.hasOwnProperty("valueCount") && $index === 0) {
+                                        <p-tag class="inspection-node-count-tag"
+                                               severity="info"
+                                               [rounded]="true"
+                                               [value]="rowData['valueCount']"
+                                               [pTooltip]="'Value count: ' + rowData['valueCount']"
+                                               tooltipPosition="top"/>
                                     }
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
@@ -559,6 +566,26 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey === "value" && this.isFeatureIdValueRow(rowData)) {
             this.onValueClick(event, rowData);
         }
+    }
+
+    /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
+    protected shouldShowValueCopyButton(rowNode: any, rowData: any, colKey: string): boolean {
+        if (colKey !== "value" || this.hasChildNodes(rowNode?.node) || !rowData?.hasOwnProperty?.("value")) {
+            return false;
+        }
+        const value = rowData["value"];
+        return value !== null && value !== undefined && String(value).length > 0;
+    }
+
+    /** Copies the exact value-cell text without also toggling the row or following FeatureId links. */
+    protected copyNodeValue(event: MouseEvent, rowData: any): void {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = rowData?.["value"];
+        if (value === null || value === undefined || String(value).length === 0) {
+            return;
+        }
+        this.copyToClipboard(String(value));
     }
 
     /** Opens the row action menu for copy/docs/search-path helpers. */
@@ -982,16 +1009,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.data = [...this.data];
         this.refreshLayout();
         this.cdr.markForCheck();
-    }
-
-    /** Copies the inspected feature id or all compared feature ids from the table header. */
-    protected copyFeatureIds(event: MouseEvent) {
-        event.stopPropagation();
-        const ids = this.featureIds().filter(id => id.trim().length > 0);
-        if (!ids.length) {
-            return;
-        }
-        this.copyToClipboard(ids.join("\n"));
     }
 
     /** Expands the selected row and every descendant below it. */

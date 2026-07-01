@@ -641,17 +641,23 @@ Two important consequences:
 - `stageLabels` are informational; `highFidelityStage` is what decides whether erdblick runs `fidelity: low` or `fidelity: high` rules.
 - Stage and LOD are independent. Stage answers “which backend payload slices arrived?”, while `lod` answers “may this feature be culled in low-fi rendering?”.
 
-Frontend view policy is tile-count based **per zoom level**:
+Frontend view policy is tile-count based **per zoom level**. The default preference threshold is 128 visible tiles:
 
-- visible tiles `>= 4096` -> `fidelity=low`, render `lod <= LOD_0`
-- visible tiles `>= 1024` -> `fidelity=low`, render `lod <= LOD_1`
-- visible tiles `>= 512` -> `fidelity=low`, render `lod <= LOD_2`
-- visible tiles `>= 256` -> `fidelity=low`, render `lod <= LOD_3`
-- visible tiles `>= 128` -> `fidelity=low`, render `lod <= LOD_4`
-- visible tiles `>= 64` -> `fidelity=low`, render `lod <= LOD_5`
-- visible tiles `>= 32` -> `fidelity=low`, render `lod <= LOD_6`
-- visible tiles `>= 16` -> `fidelity=low`, render `lod <= LOD_7`
-- visible tiles `< 16` -> `fidelity=high`, no low-fi LOD culling
+- visible tiles below the configured threshold (default `128`) -> `fidelity=high`, no low-fi LOD culling
+- visible tiles at or above the configured threshold -> `fidelity=low`
+
+When low-fi rendering is active, the fixed LOD bucket thresholds apply:
+
+- visible tiles `>= 4096` -> render `lod <= LOD_0`
+- visible tiles `>= 1024` -> render `lod <= LOD_1`
+- visible tiles `>= 512` -> render `lod <= LOD_2`
+- visible tiles `>= 256` -> render `lod <= LOD_3`
+- visible tiles `>= 128` -> render `lod <= LOD_4`
+- visible tiles `>= 64` -> render `lod <= LOD_5`
+- visible tiles `>= 32` -> render `lod <= LOD_6`
+- visible tiles `>= 16` -> render `lod <= LOD_7`
+
+The Preferences dialog exposes one high/low-fi threshold. Raising it keeps high-fidelity rendering active for denser views; it does not scale or rewrite the fixed LOD bucket thresholds.
 
 Stage retrieval is independent from this render policy: visible tiles are requested up to the layer max stage, and missing stages are streamed incrementally via `tileIdsByNextStage`.
 

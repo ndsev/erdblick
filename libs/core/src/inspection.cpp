@@ -269,6 +269,10 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         auto scope = push(convertString("Identifiers"), "", ValueType::Section);
         convertSourceDataReferences(featurePtr->sourceDataReferences(), *scope);
         push("type", "typeId", ValueType::String)->value_ = convertString(featurePtr->typeId());
+        {
+            auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
+            assignFeatureReference(*featureIdScope, featurePtr->id());
+        }
 
         // Add map and layer names to the Identifiers section.
         push("mapId", "mapId", ValueType::String)->value_ = convertString(featurePtr->model().mapId());

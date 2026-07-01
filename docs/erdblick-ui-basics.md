@@ -127,6 +127,7 @@ Open **Edit -> Settings** to access the main viewer preferences:
 - **Tile pull compression** toggles compressed tile downloads
 - **Threaded tile rendering** and **Render worker count override** control deck.gl-side rendering parallelism
 - **Pin low-fi rendering to max LOD** changes the low-fidelity culling policy
+- **High/Low-Fi Tile Threshold** controls the visible-tile-count cutoff between high- and low-fidelity rendering
 - **Dark Mode** switches between on, off, and automatic
 - **Collapse Dock automatically** controls the inspection dock behavior
 - the **Clear** actions reset viewer/search state, imported styles, or modified built-in styles

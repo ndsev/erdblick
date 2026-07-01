@@ -8,6 +8,10 @@ import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspectio
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    formatInspectionArrayContainerSummary,
+    formatInspectionArrayValueCount
+} from "./inspection-array-summary.util";
 
 /** Shape emitted by the WASM inspection converter for one inspection subtree. */
 interface InspectionModelData {
@@ -365,35 +369,6 @@ export class FeaturePanelComponent implements OnDestroy {
             return trimmed;
         };
 
-        /** Creates the compact value-column preview for array containers rendered as child rows. */
-        const formatArrayContainerSummary = (children: TreeTableNode[]): string => {
-            const childSummaries = children.map(child => formatContainerElementSummary(child));
-            return `${children.length} [${childSummaries.join(", ")}]`;
-        };
-
-        /** Formats one array element, falling back to a shallow object-like summary for nested children. */
-        const formatContainerElementSummary = (node: TreeTableNode, depth = 0): string => {
-            const value = node.data?.["value"];
-            if (value !== null && value !== undefined && String(value).length > 0) {
-                return String(value);
-            }
-            const key = node.data?.["key"];
-            if (!node.children?.length || depth > 0) {
-                return key !== null && key !== undefined ? String(key) : "";
-            }
-            const entries = node.children
-                .map(child => {
-                    const childKey = child.data?.["key"];
-                    const childValue = formatContainerElementSummary(child, depth + 1);
-                    if (childKey !== null && childKey !== undefined && String(childKey).length > 0) {
-                        return childValue.length > 0 ? `${childKey}: ${childValue}` : String(childKey);
-                    }
-                    return childValue;
-                })
-                .filter(entry => entry.length > 0);
-            return entries.length ? `{${entries.join(", ")}}` : String(key ?? "");
-        };
-
         /** Removes validity suffixes from displayed inspection names. */
         const stripValiditySuffix = (hoverId: string): string => {
             const validityIndex = hoverId.indexOf(":validity#");
@@ -506,7 +481,8 @@ export class FeaturePanelComponent implements OnDestroy {
                     }
                 }
                 if ((valueType & coreLib.ValueType.ARRAY.value) && children.length > 0) {
-                    node.data["value"] = formatArrayContainerSummary(children);
+                    node.data["valueCount"] = formatInspectionArrayValueCount(children);
+                    node.data["value"] = formatInspectionArrayContainerSummary(children);
                 }
                 node.children = children;
                 treeNodes.push(node);

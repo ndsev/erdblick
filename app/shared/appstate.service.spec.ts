@@ -106,6 +106,46 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('clamps the low-fi tile threshold', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.lowFiTileThreshold).toBe(128);
+
+        service.lowFiTileThreshold = 1024;
+        expect(service.lowFiTileThreshold).toBe(1024);
+
+        service.lowFiTileThreshold = 9999;
+        expect(service.lowFiTileThreshold).toBe(4096);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('enables deck antialiasing by default', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.deckAntialiasingEnabled).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('hydrates the focused inspection panel from selection URL state', async () => {
         const routerStub = createRouterStub({ sel: '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0' });
         const infoServiceStub = {

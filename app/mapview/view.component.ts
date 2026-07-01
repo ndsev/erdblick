@@ -119,9 +119,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
-    private deckAntialiasingEnabled = false;
+    private deckAntialiasingEnabled = true;
     private contextMenuVisible = false;
     private pendingContextMenuOpenEvent: {clientX: number; clientY: number; pageX: number; pageY: number} | null = null;
+    private pendingContextMenuOpenTimeout?: ReturnType<typeof setTimeout>;
     private rightPressStart: {x: number; y: number} | null = null;
     private rightPressMoved = false;
     private viewerPointerDownCapture?: (event: PointerEvent) => void;
@@ -195,6 +196,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 }
             })
         );
+        this.subscriptions.push(
+            this.menuService.closeContextMenus.subscribe(() => {
+                this.pendingContextMenuOpenEvent = null;
+                this.clearPendingContextMenuOpenTimeout();
+                this.viewerContextMenu?.hide();
+            })
+        );
 
         this.mediaQueryList = window.matchMedia('(max-width: 56em)');
         this.isNarrow = this.mediaQueryList.matches;
@@ -245,7 +253,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (this.pendingContextMenuOpenEvent && this.viewerContextMenu) {
             const event = this.pendingContextMenuOpenEvent;
             this.pendingContextMenuOpenEvent = null;
-            setTimeout(() => this.openContextMenu(this.viewerContextMenu!, event), 0);
+            this.pendingContextMenuOpenTimeout = setTimeout(() => {
+                this.pendingContextMenuOpenTimeout = undefined;
+                this.openContextMenu(this.viewerContextMenu!, event);
+            }, 0);
             return;
         }
         this.resetPreparedSourceData(false, false);
@@ -291,6 +302,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Component cleanup when destroyed
      */
     ngOnDestroy() {
+        this.pendingContextMenuOpenEvent = null;
+        this.clearPendingContextMenuOpenTimeout();
+        this.viewerContextMenu?.hide();
         this.teardownViewerContextMenuHandling();
         if (this.mediaQueryList && this.mediaQueryChangeListener) {
             this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
@@ -389,6 +403,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private resetRightPressTracking(): void {
         this.rightPressStart = null;
         this.rightPressMoved = false;
+    }
+
+    /** Cancels a queued same-view context-menu reopen when another view is about to open one. */
+    private clearPendingContextMenuOpenTimeout(): void {
+        if (this.pendingContextMenuOpenTimeout === undefined) {
+            return;
+        }
+        clearTimeout(this.pendingContextMenuOpenTimeout);
+        this.pendingContextMenuOpenTimeout = undefined;
     }
 
     /**
@@ -498,6 +521,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
     private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
+        this.menuService.closeAllContextMenus();
         try {
             this.prepareSourceDataContextMenu(event);
         } catch (error) {

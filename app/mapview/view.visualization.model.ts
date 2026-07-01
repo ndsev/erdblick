@@ -1,6 +1,7 @@
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
 import type {ITileVisualization} from "./render-view.model";
+import {clampLowFiTileThreshold, DEFAULT_LOW_FI_TILE_THRESHOLD} from "../shared/appstate.service";
 
 export const DEFAULT_VIEWPORT: Viewport = {
     south: .0,
@@ -33,11 +34,21 @@ export interface TileRenderPolicy {
 }
 
 /** Maps a visible tile count to the low-/high-fidelity policy that should be applied at that density. */
-function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean): TileRenderPolicy {
+function tileRenderPolicyForCount(
+    tileCount: number,
+    pinLowFiToMaxLod: boolean,
+    lowFiTileThreshold: number): TileRenderPolicy {
+    const threshold = clampLowFiTileThreshold(lowFiTileThreshold);
     const lowFiPolicy = (maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7): TileRenderPolicy => ({
         targetFidelity: "low",
         maxLowFiLod: pinLowFiToMaxLod ? LOW_FI_MAX_LOD : maxLowFiLod
     });
+    if (tileCount < threshold) {
+        return {
+            targetFidelity: "high",
+            maxLowFiLod: null
+        };
+    }
     if (tileCount >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(0);
     }
@@ -62,10 +73,7 @@ function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean):
     if (tileCount >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(7);
     }
-    return {
-        targetFidelity: "high",
-        maxLowFiLod: null
-    };
+    return lowFiPolicy(LOW_FI_MAX_LOD);
 }
 
 /**
@@ -340,7 +348,8 @@ export class ViewVisualizationState {
         tileLimit: number,
         levels: Iterable<number>,
         canonicalCameraAltitudeMeters: number,
-        pinLowFiToMaxLod = false
+        pinLowFiToMaxLod = false,
+        lowFiTileThreshold = DEFAULT_LOW_FI_TILE_THRESHOLD
     ) {
         this.visibleTileIds.clear();
         this.tileRenderPolicy.clear();
@@ -362,7 +371,10 @@ export class ViewVisualizationState {
             }
 
             const canonicalTileCount = coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level);
-            const levelPolicy = tileRenderPolicyForCount(canonicalTileCount, pinLowFiToMaxLod);
+            const levelPolicy = tileRenderPolicyForCount(
+                canonicalTileCount,
+                pinLowFiToMaxLod,
+                lowFiTileThreshold);
 
             for (const tileId of visibleTileIdsForLevel) {
                 this.tileRenderPolicy.set(tileId, levelPolicy);
