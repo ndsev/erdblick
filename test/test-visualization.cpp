@@ -945,7 +945,7 @@ TEST_CASE("FeatureInspection copies propagated attribute value search path", "[e
         "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
 }
 
-TEST_CASE("FeatureInspection separates same-name attribute layers by source data", "[erdblick.inspection]")
+TEST_CASE("FeatureInspection keeps attributes in model layers with source data references", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
     auto feature = tile->find("Way.1");
@@ -965,13 +965,13 @@ TEST_CASE("FeatureInspection separates same-name attribute layers by source data
     REQUIRE(rulesLayer);
     REQUIRE(rulesLayer->contains("children"));
 
-    auto const& sourceGroups = rulesLayer->at("children");
-    REQUIRE(sourceGroups.is_array());
-    REQUIRE(sourceGroups.size() == 2);
-    REQUIRE(sourceGroups.at(0).value("key", std::string{}) == "SourceData-RoadRulesLayer-3");
-    REQUIRE(sourceGroups.at(1).value("key", std::string{}) == "SourceData-RoadRulesLayer-9");
+    auto const& attributes = rulesLayer->at("children");
+    REQUIRE(attributes.is_array());
+    REQUIRE(attributes.size() == 2);
+    REQUIRE(attributes.at(0).value("key", std::string{}) == "SPEED_LIMIT_METRIC");
+    REQUIRE(attributes.at(1).value("key", std::string{}) == "WARNING_SIGN");
 
-    auto const* speedNode = findInspectionNodeByKey(sourceGroups.at(0), "SPEED_LIMIT_METRIC");
+    auto const* speedNode = findInspectionNodeByKey(*rulesLayer, "SPEED_LIMIT_METRIC");
     REQUIRE(speedNode);
     REQUIRE(
         speedNode->value("geoJsonPath", std::string{}) ==
@@ -982,7 +982,7 @@ TEST_CASE("FeatureInspection separates same-name attribute layers by source data
         speedNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
             .find("SourceData-RoadRulesLayer-3") != std::string::npos);
 
-    auto const* warningNode = findInspectionNodeByKey(sourceGroups.at(1), "WARNING_SIGN");
+    auto const* warningNode = findInspectionNodeByKey(*rulesLayer, "WARNING_SIGN");
     REQUIRE(warningNode);
     REQUIRE(warningNode->value("hoverId", std::string{}) == "Way.1:attribute#1");
     REQUIRE(

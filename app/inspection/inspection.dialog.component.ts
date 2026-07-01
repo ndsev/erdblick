@@ -246,7 +246,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!panel.features.length) {
             return;
         }
-        this.inspectionSelection.zoomToFeature(this.stateService.focusedView, panel.features[0]);
+        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
     }
 
     /** Menu/header action wrapper for focusing the primary feature. */

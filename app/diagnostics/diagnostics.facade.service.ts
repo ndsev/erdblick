@@ -15,7 +15,6 @@ import {
     DiagnosticsLogFilter,
     LogEntry,
     PerformanceDiagnosticsScope,
-    PerformanceDiagnosticsScopeRequest,
     TileSizeDistribution
 } from './diagnostics.model';
 import {StyleValidationReportService} from '../styledata/style-validation-report.service';
@@ -49,7 +48,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */
-    openPerformanceDialog(scope?: PerformanceDiagnosticsScopeRequest) {
+    openPerformanceDialog(scope?: PerformanceDiagnosticsScope) {
         this.performanceScope$.next(scope ? {
             ...scope,
             requestId: this.nextPerformanceScopeRequestId++

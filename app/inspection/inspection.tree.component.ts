@@ -324,12 +324,14 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 private messageService: InfoMessageService,
                 private featureSearchService: FeatureSearchService) {
         effect(() => {
+            this.savePanelExpansionState();
             this.data = this.treeData();
             this.fullExpansionActive = false;
             this.expansionSnapshotBeforeFullExpand = undefined;
             this.fullCollapseActive = false;
             this.expansionSnapshotBeforeFullCollapse = undefined;
             this.applyInitialExpansion(this.data);
+            this.restorePanelExpansionState(this.data);
 
             this.refreshLayout();
             this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
@@ -388,6 +390,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Releases resize listeners, pending frames, and reactive subscriptions. */
     ngOnDestroy() {
+        this.savePanelExpansionState();
         this.unfreeze();
         this.destroyed = true;
         this.resizeObserver?.disconnect();
@@ -1112,8 +1115,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Applies the global filter and restores default expansion when the filter is cleared. */
     filterTree(filterString: string) {
         if (!filterString) {
+            this.savePanelExpansionState();
             this.data = this.treeData();
             this.applyInitialExpansion(this.data);
+            this.restorePanelExpansionState(this.data);
         }
 
         const query = filterString.toLowerCase();
@@ -1172,18 +1177,42 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return result;
     }
 
+    /** Saves expansion state so dock/undock remounts keep the user's current tree shape. */
+    private savePanelExpansionState(): void {
+        if (!this.data.length) {
+            return;
+        }
+        this.stateService.setInspectionTreeExpansionSnapshot(
+            this.panelId(),
+            this.captureExpansionState(this.data));
+    }
+
+    /** Restores expansion state captured by a previous component instance for the same panel. */
+    private restorePanelExpansionState(nodes: TreeNode[]): void {
+        const snapshot = this.stateService.getInspectionTreeExpansionSnapshot(this.panelId());
+        if (!snapshot) {
+            return;
+        }
+        this.restoreExpansionState(nodes, snapshot, [], false);
+    }
+
     /** Restores a previously captured expansion map, collapsing new expandable nodes by default. */
     private restoreExpansionState(
         nodes: TreeNode[],
         snapshot: Map<string, boolean | undefined>,
-        path: number[] = []
+        path: number[] = [],
+        collapseMissing = true
     ): void {
         nodes.forEach((node, index) => {
             const nodePath = [...path, index];
             const key = this.expansionStateKey(node, nodePath);
-            node.expanded = snapshot.has(key) ? snapshot.get(key) : false;
+            if (snapshot.has(key)) {
+                node.expanded = snapshot.get(key);
+            } else if (collapseMissing) {
+                node.expanded = false;
+            }
             if (node.children) {
-                this.restoreExpansionState(node.children, snapshot, nodePath);
+                this.restoreExpansionState(node.children, snapshot, nodePath, collapseMissing);
             }
         });
     }

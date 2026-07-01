@@ -175,6 +175,9 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     undocked: boolean;
 }
 
+/** Transient expansion state for one mounted inspection tree. */
+export type InspectionTreeExpansionSnapshot = Map<string, boolean | undefined>;
+
 /** Persisted top-left dialog position in viewport pixels. */
 export interface AppDialogPosition {
     left: number;
@@ -367,6 +370,7 @@ export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
+    private readonly inspectionTreeExpansionSnapshots = new Map<number, InspectionTreeExpansionSnapshot>();
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -957,7 +961,9 @@ export class AppStateService implements OnDestroy {
         });
 
         this.selectionState.subscribe(panels => {
-            this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+            const panelIds = panels.map(panel => panel.id);
+            this.pruneInspectionDialogLayout(panelIds);
+            this.pruneInspectionTreeExpansionSnapshots(panelIds);
             this.sanitizeFocusedInspectionPanel(panels);
         });
     }
@@ -2486,6 +2492,21 @@ export class AppStateService implements OnDestroy {
         return this.focusedInspectionPanelId === id;
     }
 
+    /** Stores row expansion state for the current in-memory inspection panel instance. */
+    setInspectionTreeExpansionSnapshot(panelId: number, snapshot: InspectionTreeExpansionSnapshot): void {
+        if (!snapshot.size) {
+            this.inspectionTreeExpansionSnapshots.delete(panelId);
+            return;
+        }
+        this.inspectionTreeExpansionSnapshots.set(panelId, new Map(snapshot));
+    }
+
+    /** Returns a defensive copy of the last known row expansion state for one inspection panel. */
+    getInspectionTreeExpansionSnapshot(panelId: number): InspectionTreeExpansionSnapshot | undefined {
+        const snapshot = this.inspectionTreeExpansionSnapshots.get(panelId);
+        return snapshot ? new Map(snapshot) : undefined;
+    }
+
     /** Returns the persisted layout for a dialog if one exists. */
     getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
         return this.dialogLayoutsState.getValue()[id];
@@ -2790,6 +2811,16 @@ export class AppStateService implements OnDestroy {
         for (const id of Object.keys(currentLayouts)) {
             if (!(id in nextLayouts)) {
                 this.pendingOpenDialogs.delete(id);
+            }
+        }
+    }
+
+    /** Removes transient inspection-tree expansion snapshots for panels that no longer exist. */
+    private pruneInspectionTreeExpansionSnapshots(activePanelIds: number[]): void {
+        const activeIds = new Set(activePanelIds);
+        for (const panelId of this.inspectionTreeExpansionSnapshots.keys()) {
+            if (!activeIds.has(panelId)) {
+                this.inspectionTreeExpansionSnapshots.delete(panelId);
             }
         }
     }

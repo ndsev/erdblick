@@ -2,7 +2,6 @@
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
-#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
@@ -104,48 +103,6 @@ std::string directChildGeoJsonPath(std::string_view base)
         return "*";
     }
     return fmt::format("{}.*", base);
-}
-
-/** Returns the source-data layer ids referenced by an attribute, preserving first-seen order. */
-std::vector<std::string> sourceDataLayerIds(model_ptr<Attribute> const& attr)
-{
-    std::vector<std::string> result;
-    if (!attr) {
-        return result;
-    }
-    auto refs = attr->sourceDataReferences();
-    if (!refs) {
-        return result;
-    }
-    refs->forEachReference([&result](SourceDataReferenceItem const& item) {
-        std::string layerId{item.layerId()};
-        if (layerId.empty() || std::find(result.begin(), result.end(), layerId) != result.end()) {
-            return;
-        }
-        result.push_back(std::move(layerId));
-    });
-    return result;
-}
-
-/** Builds the inspection-only source provenance key for one attribute. */
-std::string sourceDataLayerGroupKey(model_ptr<Attribute> const& attr)
-{
-    auto layerIds = sourceDataLayerIds(attr);
-    if (layerIds.empty()) {
-        return "Unknown source";
-    }
-    if (layerIds.size() == 1) {
-        return layerIds.front();
-    }
-
-    std::string result;
-    for (auto const& layerId : layerIds) {
-        if (!result.empty()) {
-            result += ", ";
-        }
-        result += layerId;
-    }
-    return result;
 }
 
 /**
@@ -419,45 +376,22 @@ void InspectionConverter::convertAttributeLayer(
         attributeFieldIds.push_back(fieldId);
     }
 
-    struct AttributeInspectionEntry {
-        model_ptr<Attribute> attr;
-        simfil::StringId fieldId;
-        uint32_t featureAttributeIndex;
-        std::string sourceGroupKey;
-    };
-
-    std::vector<AttributeInspectionEntry> entries;
-    std::vector<std::string> sourceGroupKeys;
     size_t layerAttributeIndex = 0;
-    l->forEachAttribute([&](model_ptr<Attribute> const& attr) {
+    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex, &layerAttributeIndex](model_ptr<Attribute> const& attr)
+    {
         auto const featureAttributeIndex = static_cast<uint32_t>(attributeIndex++);
         auto const thisLayerAttributeIndex = layerAttributeIndex++;
         auto fieldId = thisLayerAttributeIndex < attributeFieldIds.size()
             ? attributeFieldIds[thisLayerAttributeIndex]
             : simfil::StringId{};
-        auto sourceGroupKey = sourceDataLayerGroupKey(attr);
-        if (std::find(sourceGroupKeys.begin(), sourceGroupKeys.end(), sourceGroupKey) == sourceGroupKeys.end()) {
-            sourceGroupKeys.push_back(sourceGroupKey);
-        }
-        entries.push_back(AttributeInspectionEntry{
-            attr,
-            fieldId,
-            featureAttributeIndex,
-            std::move(sourceGroupKey)
-        });
-        return true;
-    });
 
-    auto convertAttribute = [this](AttributeInspectionEntry const& entry) {
-        auto fieldName = entry.fieldId
-            ? convertString(entry.fieldId).toString()
-            : convertString(entry.attr->name()).toString();
-        auto attrScope = push(convertString(entry.fieldId), fieldName, ValueType::Null);
-        convertSourceDataReferences(entry.attr->sourceDataReferences(), *attrScope);
+        auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
+        auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
+        convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
         auto numValues = 0;
         OptionalValueAndType singleValue;
-        entry.attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val) {
+        attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val) {
             auto singleValueForField = convertField(fieldName, val);
             if (singleValueForField) {
                 ++numValues;
@@ -481,29 +415,12 @@ void InspectionConverter::convertAttributeLayer(
 
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
-                              std::to_string(entry.featureAttributeIndex);
-        if (auto validity = entry.attr->validityOrNull()) {
+                              std::to_string(featureAttributeIndex);
+        if (auto validity = attr->validityOrNull()) {
             convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
         }
-    };
-
-    if (sourceGroupKeys.size() <= 1) {
-        for (auto const& entry : entries) {
-            convertAttribute(entry);
-        }
-        return;
-    }
-
-    // The feature model groups attributes by semantic layer name. For inspection only,
-    // split same-name attributes by source-data layer so duplicate side layers remain visible.
-    for (auto const& sourceGroupKey : sourceGroupKeys) {
-        auto sourceScope = push(convertString(sourceGroupKey), RawPath{""}, ValueType::Section);
-        for (auto const& entry : entries) {
-            if (entry.sourceGroupKey == sourceGroupKey) {
-                convertAttribute(entry);
-            }
-        }
-    }
+        return true;
+    });
 }
 
 void InspectionConverter::convertRelation(const model_ptr<Relation>& r)

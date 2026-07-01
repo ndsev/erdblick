@@ -388,7 +388,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                     if (!focusFeature) {
                         return;
                     }
-                    this.inspectionSelection.zoomToFeature(this.stateService.focusedView, focusFeature);
+                    this.inspectionSelection.zoomToFeature(undefined, focusFeature);
                 }
             },
             {

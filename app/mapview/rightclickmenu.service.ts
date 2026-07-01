@@ -8,7 +8,7 @@ import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
-import {PerformanceDiagnosticsLayerScope} from "../diagnostics/diagnostics.model";
+import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -41,7 +41,7 @@ export interface FeatureSearchContextMenuScope {
 export interface TileDiagnosticsMenuOption {
     tileId: string;
     level: number;
-    layers: PerformanceDiagnosticsLayerScope[];
+    layers: PerformanceDiagnosticsScope["layers"];
 }
 
 @Injectable()

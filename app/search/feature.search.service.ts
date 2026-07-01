@@ -714,6 +714,18 @@ export class FeatureSearchService {
         this.reconcileFeatureSearchState(definitions);
     }
 
+    /** Starts a feature search from the compact payload stored on search actions/history entries. */
+    runFromActionPayload(query: string, payload?: unknown): FeatureSearchSession {
+        const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
+        const selectedViewIndices = featureSearchSelectedViewIndicesFromPayload(payload);
+        const selectedMapLayersManual = featureSearchMapLayersManualFromPayload(payload);
+        return this.run(query, {
+            ...(selectedMapLayers ? {selectedMapLayers} : {}),
+            ...(selectedViewIndices ? {selectedViewIndices} : {}),
+            ...(selectedMapLayersManual !== undefined ? {selectedMapLayersManual} : {})
+        });
+    }
+
     /** Starts a new feature search over the currently prioritized tiles, optionally with explicit scope/layers. */
     run(
         query: string,

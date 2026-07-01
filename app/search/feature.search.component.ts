@@ -3590,7 +3590,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             if (lockSelection && panelId !== undefined) {
                 this.stateService.setInspectionPanelLockedState(panelId, true);
             }
-            this.inspectionSelection.focusOnFeature(this.stateService.focusedView, {
+            this.inspectionSelection.focusOnFeature(undefined, {
                 mapTileKey,
                 featureId: selectedFeatureId
             }).then();

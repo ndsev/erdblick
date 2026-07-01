@@ -443,7 +443,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         const scopedTileIds = new Set(scope.tileIds);
         this.selectedTileIds = this.availableTileIds.filter(tileId => scopedTileIds.has(tileId.tileId));
-        this.appliedPerformanceScopeRequestId = scope.requestId;
+        this.appliedPerformanceScopeRequestId = scope.requestId ?? null;
     }
 
     /** Compares layer-option lists to avoid resetting selection state unnecessarily. */

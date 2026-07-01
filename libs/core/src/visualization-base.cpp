@@ -204,15 +204,10 @@ void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
     auto const sourceId = sourceFeature->id()->toString();
     auto const targetRef = relation->target();
     auto const targetRefString = targetRef->toString();
-    auto const relationName = std::string(relation->name());
-    auto const relationIdentity =
-        relationName + "\n" + targetRefString + "\n" + std::to_string(relation->addr().index());
     auto& relationsForSource = relationsBySourceFeatureId_[sourceId];
     for (auto const& existingRelation : relationsForSource) {
         if (existingRelation.relation_
-            && std::string(existingRelation.relation_->name()) + "\n"
-                + existingRelation.relation_->target()->toString() + "\n"
-                + std::to_string(existingRelation.relation_->addr().index()) == relationIdentity) {
+            && existingRelation.relation_->target()->toString() == targetRefString) {
             return;
         }
     }
@@ -230,9 +225,7 @@ void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
         if (rule_.relationMergeTwoWay() && relationsForTargetIt != relationsBySourceFeatureId_.end()) {
             for (auto& existingRelation : relationsForTargetIt->second) {
                 if (existingRelation.targetFeature_
-                    && existingRelation.targetFeature_->id()->toString() == sourceId
-                    && existingRelation.relation_
-                    && existingRelation.relation_->name() == relation->name()) {
+                    && existingRelation.targetFeature_->id()->toString() == sourceId) {
                     existingRelation.twoway_ = true;
                     return;
                 }

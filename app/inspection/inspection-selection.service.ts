@@ -156,8 +156,9 @@ export class InspectionSelectionService {
     }
 
     /** Loads a feature and centers the target view on its reported center point. */
-    async focusOnFeature(viewIndex: number, tileFeatureId: TileFeatureId) {
-        const features = await this.tileStream.loadFeatures([tileFeatureId], {requireInspectionComplete: true});
+    async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
+        // Feature centers and bounding radii are only reliable after every advertised stage has arrived.
+        const features = await this.tileStream.loadFeatures([tileFeatureId], {requireAllStages: true});
         if (!features.length) {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
@@ -199,10 +200,6 @@ export class InspectionSelectionService {
             if (!this.isFiniteWgs84Point(center)) {
                 return;
             }
-            if (!this.featureCenterMatchesTile(center, featureWrapper.mapTileKey)) {
-                this.showErrorMessage(`Could not determine a valid center for feature ${featureWrapper.featureId}.`);
-                return;
-            }
             const radiusPoint = feature.boundingRadiusEndPoint() as Wgs84Point;
             const boundingRadius = this.featureBoundingRadiusMeters(center, radiusPoint);
             const altitude = this.featureZoomAltitude(center.z, boundingRadius);
@@ -229,7 +226,7 @@ export class InspectionSelectionService {
                 targetViews.push(i);
             }
         }
-        return targetViews;
+        return targetViews.length ? targetViews : [this.stateService.focusedView];
     }
 
     /** Fits the target view to the tile represented by a focused source-data inspection. */
@@ -260,27 +257,6 @@ export class InspectionSelectionService {
     /** Validates the WGS84 point shape returned by the WASM feature bindings. */
     private isFiniteWgs84Point(point: Wgs84Point | undefined): point is Wgs84Point {
         return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
-    }
-
-    /** Rejects placeholder centers, such as 0/0, when they fall outside the feature tile bounds. */
-    private featureCenterMatchesTile(center: Wgs84Point, mapTileKey: string): boolean {
-        const parsedKey = this.tileStream.parseMapTileKeySafe(mapTileKey);
-        if (!parsedKey) {
-            return true;
-        }
-        const [, , tileId] = parsedKey;
-        const tileBox = coreLib.getTileBox(tileId) as number[];
-        if (!Array.isArray(tileBox) || tileBox.length < 4) {
-            return true;
-        }
-        const [west, south, east, north] = tileBox;
-        if (![west, south, east, north].every(Number.isFinite)) {
-            return true;
-        }
-        const longitudeInTile = west <= east
-            ? center.x >= west && center.x <= east
-            : center.x >= west || center.x <= east;
-        return longitudeInTile && center.y >= south && center.y <= north;
     }
 
     /** Computes a metric radius from two WGS84 points, falling back to zero for incomplete feature bounds. */

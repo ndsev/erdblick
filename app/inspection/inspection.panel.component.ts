@@ -284,7 +284,7 @@ export class InspectionPanelComponent {
         if (!panel.features.length) {
             return;
         }
-        this.inspectionSelection.zoomToFeature(this.stateService.focusedView, panel.features[0]);
+        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
     }
 
     /** UI wrapper around the focus action for toolbar buttons and menus. */
