@@ -238,11 +238,23 @@ std::string JsValue::toString() const {
         case Type::Null:
             return "Null";
         case Type::Bool:
+#ifdef EMSCRIPTEN
+            return value_.call<std::string>("toString");
+#else
             return fmt::format("{}", as<bool>());
+#endif
         case Type::Number:
+#ifdef EMSCRIPTEN
+            return value_.call<std::string>("toString");
+#else
             return fmt::format("{}", as<double>());
+#endif
         case Type::String:
+#ifdef EMSCRIPTEN
+            return value_.call<std::string>("toString");
+#else
             return fmt::format("{}", as<std::string>());
+#endif
         case Type::ObjectOrList:
             return "Object";
         default:
