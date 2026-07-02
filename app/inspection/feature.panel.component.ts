@@ -13,6 +13,14 @@ import {
     formatInspectionArrayValueCount
 } from "./inspection-array-summary.util";
 
+/** Click target metadata emitted by C++ for propagated scalar value pills. */
+interface InspectionValueBubble {
+    label: string;
+    targetNodeId?: string;
+    kind?: string;
+    children?: InspectionValueBubble[];
+}
+
 /** Shape emitted by the WASM inspection converter for one inspection subtree. */
 interface InspectionModelData {
     key: string;
@@ -22,6 +30,8 @@ interface InspectionModelData {
     hoverId?: string;
     geoJsonPath?: string;
     mapId?: string;
+    nodeId?: string;
+    valueBubbles?: InspectionValueBubble[];
     sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
 }
@@ -345,6 +355,7 @@ export class FeaturePanelComponent implements OnDestroy {
             softHoverGroupId?: string;
             strongHoverGroupId?: string;
             nodePath: string;
+            nodeIdPrefix: string;
         }
 
         /** Checks whether an inspection value identifies a geometry type. */
@@ -381,6 +392,23 @@ export class FeaturePanelComponent implements OnDestroy {
         /** Builds a stable tree node id from the current traversal path. */
         const makeNodeId = (context: HoverAnnotationContext, key: string, ordinal: number): string =>
             `${context.nodePath}/${ordinal}:${key}`;
+
+        /** Prefixes WASM-local bubble targets with the feature namespace used by the merged tree. */
+        const prefixValueBubbleTargets = (
+            bubbles: InspectionValueBubble[] | undefined,
+            nodeIdPrefix: string
+        ): InspectionValueBubble[] | undefined => {
+            if (!Array.isArray(bubbles) || !bubbles.length) {
+                return undefined;
+            }
+            return bubbles.map(bubble => ({
+                ...bubble,
+                targetNodeId: typeof bubble.targetNodeId === "string"
+                    ? `${nodeIdPrefix}${bubble.targetNodeId}`
+                    : bubble.targetNodeId,
+                children: prefixValueBubbleTargets(bubble.children, nodeIdPrefix)
+            }));
+        };
 
         /** Converts inspection model sections into PrimeNG tree table nodes. */
         const convertToTreeTableNodes = (
@@ -422,12 +450,15 @@ export class FeaturePanelComponent implements OnDestroy {
                     }
                 }
 
+                const nodeId = typeof data?.nodeId === "string"
+                    ? `${context.nodeIdPrefix}${data.nodeId}`
+                    : makeNodeId(context, data?.key ?? "", nodeIndex);
                 node.data = {
                     key: data?.key ?? "",
                     value: value ?? "",
                     type: valueType,
                     mapTileKey: context.mapTileKey,
-                    nodeId: makeNodeId(context, data?.key ?? "", nodeIndex),
+                    nodeId,
                     mapId: context.mapId ?? ""
                 };
                 if (data?.hasOwnProperty("info")) {
@@ -444,6 +475,10 @@ export class FeaturePanelComponent implements OnDestroy {
                 }
                 if (data?.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = data.sourceDataReferences;
+                }
+                const valueBubbles = prefixValueBubbleTargets(data?.valueBubbles, context.nodeIdPrefix);
+                if (valueBubbles) {
+                    node.data["valueBubbles"] = valueBubbles;
                 }
 
                 let nextSoftHoverGroupId = context.softHoverGroupId;
@@ -471,7 +506,8 @@ export class FeaturePanelComponent implements OnDestroy {
                         mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
                         softHoverGroupId: nextSoftHoverGroupId,
                         strongHoverGroupId: nextStrongHoverGroupId,
-                        nodePath: node.data["nodeId"]
+                        nodePath: node.data["nodeId"],
+                        nodeIdPrefix: context.nodeIdPrefix
                     }
                 );
                 if (isGeometryTypeValue(node.data["value"])) {
@@ -501,9 +537,12 @@ export class FeaturePanelComponent implements OnDestroy {
             }
             const mapTileKey = this.selectedFeatures?.[featureIndex]?.mapTileKey ?? "";
             const mapId = this.selectedFeatures?.[featureIndex]?.featureTile.mapName ?? "";
+            const nodeIdPrefix = `feature-${featureIndex}:`;
             for (const section of inspectionModels) {
                 const node: TreeTableNode = {};
-                const sectionNodeId = `feature-${featureIndex}:${section?.key ?? ""}`;
+                const sectionNodeId = typeof section?.nodeId === "string"
+                    ? `${nodeIdPrefix}${section.nodeId}`
+                    : `${nodeIdPrefix}${section?.key ?? ""}`;
                 node.data = {
                     key: section?.key ?? "",
                     value: section?.value ?? "",
@@ -517,12 +556,17 @@ export class FeaturePanelComponent implements OnDestroy {
                 if (section?.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = section.sourceDataReferences;
                 }
+                const valueBubbles = prefixValueBubbleTargets(section?.valueBubbles, nodeIdPrefix);
+                if (valueBubbles) {
+                    node.data["valueBubbles"] = valueBubbles;
+                }
                 node.children = convertToTreeTableNodes(
                     Array.isArray(section?.children) ? section.children : [],
                     {
                         mapTileKey,
                         mapId,
-                        nodePath: sectionNodeId
+                        nodePath: sectionNodeId,
+                        nodeIdPrefix
                     }
                 );
                 treeNodes.push(node);

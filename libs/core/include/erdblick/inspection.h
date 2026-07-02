@@ -54,15 +54,25 @@ public:
         std::deque<InspectionNode> children_;
         JsValue direction_;
         std::string geoJsonPath_;
+        std::string nodeId_;
 
         /** Source-data backlink attached to an inspection node. */
         struct SourceDataReference {
-            uint64_t tileId_;
+            int32_t tileId_;
             uint64_t address_;
             std::string layerId_;
             std::string qualifier_;
         };
         sfl::small_vector<SourceDataReference, 1> sourceDataRefs_; // Most nodes have a single source-data reference.
+
+        /** Clickable scalar summary shown in a parent node's value column. */
+        struct ValueBubble {
+            std::string label_;
+            std::string targetNodeId_;
+            std::string kind_;
+            std::deque<ValueBubble> children_;
+        };
+        std::deque<ValueBubble> valueBubbles_;
 
         /** Materialize this node and its metadata as a JS object for the UI. */
         [[nodiscard]] JsValue toJsValue(std::string_view const& mapId) const;

@@ -151,6 +151,53 @@ inspection-tree {
     display: inline-block;
   }
 
+  .inspection-value-bubbles {
+    align-items: center;
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25em;
+    min-width: 0;
+  }
+
+  .inspection-value-bubble {
+    background: color-mix(in srgb, var(--p-primary-color) 16%, var(--p-content-background));
+    border: 1px solid color-mix(in srgb, var(--p-primary-color) 40%, var(--p-content-border-color));
+    border-radius: 999px;
+    color: var(--p-content-color);
+    cursor: pointer;
+    font: inherit;
+    line-height: 1.15;
+    max-width: 28em;
+    overflow: hidden;
+    padding: 0.08em 0.55em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &:hover {
+      background: color-mix(in srgb, var(--p-primary-color) 30%, var(--p-content-background));
+      border-color: color-mix(in srgb, var(--p-primary-color) 58%, var(--p-content-border-color));
+    }
+  }
+
+  .inspection-value-bubble-boolean {
+    background: color-mix(in srgb, var(--p-green-500) 18%, var(--p-content-background));
+    border-color: color-mix(in srgb, var(--p-green-500) 45%, var(--p-content-border-color));
+  }
+
+  .inspection-value-bubble-group {
+    background: color-mix(in srgb, var(--p-yellow-500) 16%, var(--p-content-background));
+    border-color: color-mix(in srgb, var(--p-yellow-500) 42%, var(--p-content-border-color));
+  }
+
+  .inspection-value-bubble-validity {
+    background: color-mix(in srgb, var(--p-blue-500) 18%, var(--p-content-background));
+    border-color: color-mix(in srgb, var(--p-blue-500) 45%, var(--p-content-border-color));
+  }
+
+  tr.inspection-value-bubble-target > td {
+    background: color-mix(in srgb, var(--p-primary-color) 24%, transparent);
+  }
+
   .inspection-row-actions {
     align-items: center;
     background: color-mix(in srgb, var(--p-content-background) 82%, var(--p-primary-color) 18%);

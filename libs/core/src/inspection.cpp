@@ -2,6 +2,7 @@
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
@@ -119,7 +120,7 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
 
     const auto& model = modelNode->model();
     const auto& strings = model.strings();
-    const auto tileId = model.tileId().value_;
+    const auto tileId = model.tileId().value();
 
     modelNode->forEachReference([tileId, &node](const SourceDataReferenceItem& item) {
         node.sourceDataRefs_.push_back(Ref{
@@ -213,6 +214,324 @@ bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t sta
     return stage > highFidelityStage(layer);
 }
 
+using InspectionNode = InspectionConverter::InspectionNode;
+using ValueBubble = InspectionConverter::InspectionNode::ValueBubble;
+
+constexpr auto kMaxPropagatedBubbles = 12U;
+
+/** Return the non-array base value type for scalar propagation decisions. */
+InspectionConverter::ValueType baseValueType(InspectionConverter::ValueType type)
+{
+    return static_cast<InspectionConverter::ValueType>(
+        static_cast<uint8_t>(type) & ~static_cast<uint8_t>(InspectionConverter::ValueType::ArrayBit));
+}
+
+/** Return whether this inspection value represents an array payload rather than one scalar. */
+bool isArrayValue(InspectionConverter::ValueType type)
+{
+    return (static_cast<uint8_t>(type) & static_cast<uint8_t>(InspectionConverter::ValueType::ArrayBit)) != 0;
+}
+
+/** Convert an inspection key to a stable display string for node ids and propagated labels. */
+std::string inspectionKeyString(InspectionNode const& node)
+{
+    return node.key_.toString();
+}
+
+/** Assign local, traversal-stable node ids before value bubbles reference their target rows. */
+void assignInspectionNodeIds(InspectionNode& node, std::string_view parentPath = {})
+{
+    uint32_t index = 0;
+    for (auto& child : node.children_) {
+        auto const key = inspectionKeyString(child);
+        child.nodeId_ = parentPath.empty()
+            ? fmt::format("{}:{}", index, key)
+            : fmt::format("{}/{}:{}", parentPath, index, key);
+        assignInspectionNodeIds(child, child.nodeId_);
+        ++index;
+    }
+}
+
+/** Identify generated zserio count fields which should not dominate parent summaries. */
+bool isLikelyZserioCountField(std::string const& key)
+{
+    if (key == "numLanes") {
+        return false;
+    }
+    if (key == "length" || key == "Length") {
+        return true;
+    }
+    return key.size() > 3
+        && key.rfind("num", 0) == 0
+        && std::isupper(static_cast<unsigned char>(key[3]));
+}
+
+/** Containers whose name is structural rather than meaningful in propagated summaries. */
+bool isTransparentPropagationContainer(std::string const& key)
+{
+    return key == "attributeValue"
+        || key == "conditionValue"
+        || key == "propertyValue";
+}
+
+/** Construct one value bubble with the mandatory target row metadata. */
+ValueBubble makeValueBubble(std::string label, std::string targetNodeId, std::string kind)
+{
+    return ValueBubble{
+        .label_ = std::move(label),
+        .targetNodeId_ = std::move(targetNodeId),
+        .kind_ = std::move(kind)
+    };
+}
+
+/** Return the first concrete row target inside a bubble tree. */
+std::string firstBubbleTarget(ValueBubble const& bubble)
+{
+    if (!bubble.targetNodeId_.empty()) {
+        return bubble.targetNodeId_;
+    }
+    for (auto const& child : bubble.children_) {
+        auto target = firstBubbleTarget(child);
+        if (!target.empty()) {
+            return target;
+        }
+    }
+    return {};
+}
+
+/** Combine child bubbles into one grouped summary bubble for propagation through a container. */
+ValueBubble makeGroupedBubble(std::deque<ValueBubble> children)
+{
+    std::string label;
+    for (auto const& child : children) {
+        label += "[";
+        label += child.label_;
+        label += "]";
+    }
+    auto group = makeValueBubble(std::move(label), children.empty() ? std::string{} : firstBubbleTarget(children.front()), "group");
+    group.children_ = std::move(children);
+    return group;
+}
+
+/** Render a leaf scalar according to the inspection propagation rules. */
+std::optional<ValueBubble> scalarBubbleForNode(InspectionNode const& node)
+{
+    if (!node.children_.empty() || isArrayValue(node.type_)) {
+        return std::nullopt;
+    }
+
+    switch (baseValueType(node.type_)) {
+    case InspectionConverter::ValueType::Boolean:
+        if (node.value_.type() == JsValue::Type::Bool && node.value_.as<bool>()) {
+            return makeValueBubble(inspectionKeyString(node), node.nodeId_, "boolean");
+        }
+        return std::nullopt;
+    case InspectionConverter::ValueType::Number:
+    case InspectionConverter::ValueType::String:
+    case InspectionConverter::ValueType::FeatureId:
+        return makeValueBubble(node.value_.toString(), node.nodeId_, "scalar");
+    case InspectionConverter::ValueType::Null:
+        return std::nullopt;
+    case InspectionConverter::ValueType::Section:
+    case InspectionConverter::ValueType::ArrayBit:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+/** Find a direct child by inspection key. */
+InspectionNode const* directChildByKey(InspectionNode const& node, std::string_view key)
+{
+    for (auto const& child : node.children_) {
+        if (inspectionKeyString(child) == key) {
+            return &child;
+        }
+    }
+    return nullptr;
+}
+
+/** Convert verbose validity direction values into compact prefix markers. */
+std::string compactValidityDirection(InspectionNode const& validityNode)
+{
+    auto const* direction = directChildByKey(validityNode, "direction");
+    if (!direction) {
+        return {};
+    }
+    auto const value = direction->value_.toString();
+    if (value == "POSITIVE") {
+        return "+";
+    }
+    if (value == "NEGATIVE") {
+        return "-";
+    }
+    if (value == "COMPLETE" || value == "BOTH") {
+        return "+-";
+    }
+    return {};
+}
+
+/** Compact one validity offset value into percent, metric, index, or explicit-position notation. */
+std::string compactValidityOffset(InspectionNode const& offsetNode)
+{
+    if (offsetNode.value_.type() == JsValue::Type::ObjectOrList) {
+        return "⌖";
+    }
+    auto value = offsetNode.value_.toString();
+    constexpr std::string_view pointIndexPrefix = "Point Index ";
+    if (value.rfind(pointIndexPrefix, 0) == 0) {
+        return "#" + value.substr(pointIndexPrefix.size());
+    }
+    return value;
+}
+
+/** Create the label for one compact validity bubble. */
+std::string compactValidityLabel(InspectionNode const& validityNode)
+{
+    std::vector<std::string> parts;
+    if (auto direction = compactValidityDirection(validityNode); !direction.empty()) {
+        parts.push_back(std::move(direction));
+    }
+    if (auto const* featureId = directChildByKey(validityNode, "featureId")) {
+        parts.push_back(featureId->value_.toString());
+    }
+    else if (auto const* transitionNumber = directChildByKey(validityNode, "transitionNumber")) {
+        parts.push_back("T" + transitionNumber->value_.toString());
+    }
+
+    if (auto const* point = directChildByKey(validityNode, "point")) {
+        parts.push_back(compactValidityOffset(*point));
+    }
+    else {
+        auto const* start = directChildByKey(validityNode, "start");
+        auto const* end = directChildByKey(validityNode, "end");
+        if (start && end) {
+            parts.push_back(fmt::format("{} to {}", compactValidityOffset(*start), compactValidityOffset(*end)));
+        }
+    }
+
+    if (parts.empty()) {
+        return "validity";
+    }
+
+    std::string label;
+    for (auto const& part : parts) {
+        if (!label.empty()) {
+            label += " ";
+        }
+        label += part;
+    }
+    return label;
+}
+
+/** Return whether a node represents a validity container or one indexed validity entry. */
+bool isValidityNode(InspectionNode const& node)
+{
+    auto const key = inspectionKeyString(node);
+    return key == "validity"
+        || key == "sourceValidity"
+        || key == "targetValidity"
+        || node.hoverId_.find(":validity#") != std::string::npos;
+}
+
+/** Build the special one-bubble-per-validity representation. */
+std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
+{
+    std::deque<ValueBubble> bubbles;
+    for (auto const& child : node.children_) {
+        auto const hasValidityHoverId = child.hoverId_.find(":validity#") != std::string::npos;
+        auto const looksLikeIndexedValidity = child.key_.type() == JsValue::Type::Number
+            && (directChildByKey(child, "direction")
+                || directChildByKey(child, "featureId")
+                || directChildByKey(child, "transitionNumber")
+                || directChildByKey(child, "start")
+                || directChildByKey(child, "point"));
+        if (!hasValidityHoverId && !looksLikeIndexedValidity) {
+            continue;
+        }
+        bubbles.push_back(makeValueBubble(compactValidityLabel(child), child.nodeId_, "validity"));
+    }
+    if (!bubbles.empty()) {
+        return bubbles;
+    }
+    bubbles.push_back(makeValueBubble(compactValidityLabel(node), node.nodeId_, "validity"));
+    return bubbles;
+}
+
+/** Convert a bubble tree into the JS shape consumed by the inspection table. */
+JsValue valueBubbleToJsValue(ValueBubble const& bubble)
+{
+    auto value = JsValue::Dict({
+        {"label", JsValue(bubble.label_)},
+        {"targetNodeId", JsValue(bubble.targetNodeId_)},
+        {"kind", JsValue(bubble.kind_)}
+    });
+    if (!bubble.children_.empty()) {
+        auto children = JsValue::List();
+        for (auto const& child : bubble.children_) {
+            children.push(valueBubbleToJsValue(child));
+        }
+        value.set("children", children);
+    }
+    return value;
+}
+
+/** Compute propagated scalar bubbles bottom-up and return this node's contribution to its parent. */
+std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node)
+{
+    struct ChildContribution {
+        ValueBubble bubble_;
+        bool isCountField_ = false;
+    };
+
+    std::vector<ChildContribution> childContributions;
+    for (auto& child : node.children_) {
+        auto childBubbles = buildPropagatedValueBubbles(child);
+        auto const isCountField = isLikelyZserioCountField(inspectionKeyString(child));
+        for (auto& bubble : childBubbles) {
+            childContributions.push_back(ChildContribution{
+                .bubble_ = std::move(bubble),
+                .isCountField_ = isCountField
+            });
+        }
+    }
+
+    if (isValidityNode(node)) {
+        node.valueBubbles_ = validityBubblesForNode(node);
+        return node.valueBubbles_;
+    }
+
+    auto scalarBubble = scalarBubbleForNode(node);
+    if (scalarBubble) {
+        return std::deque<ValueBubble>{std::move(*scalarBubble)};
+    }
+
+    if (baseValueType(node.type_) == InspectionConverter::ValueType::Section) {
+        return {};
+    }
+
+    auto const hasNonCountContribution = std::ranges::any_of(
+        childContributions,
+        [](auto const& contribution) { return !contribution.isCountField_; });
+    for (auto& contribution : childContributions) {
+        if (hasNonCountContribution && contribution.isCountField_) {
+            continue;
+        }
+        node.valueBubbles_.push_back(std::move(contribution.bubble_));
+    }
+
+    if (node.valueBubbles_.empty() || node.valueBubbles_.size() > kMaxPropagatedBubbles) {
+        node.valueBubbles_.clear();
+        return {};
+    }
+    if (isTransparentPropagationContainer(inspectionKeyString(node))) {
+        return node.valueBubbles_;
+    }
+    if (node.valueBubbles_.size() == 1) {
+        return std::deque<ValueBubble>{node.valueBubbles_.front()};
+    }
+    return std::deque<ValueBubble>{makeGroupedBubble(node.valueBubbles_)};
+}
+
 }
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
@@ -301,6 +620,8 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         });
     }
 
+    assignInspectionNodeIds(root_);
+    buildPropagatedValueBubbles(root_);
     return root_.childrenToJsValue(tile_->mapId());
 }
 
@@ -838,13 +1159,26 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("children", childrenToJsValue(mapId));
     if (!geoJsonPath_.empty())
         newDict.set("geoJsonPath", JsValue(geoJsonPath_));
+    if (!nodeId_.empty())
+        newDict.set("nodeId", JsValue(nodeId_));
     if (mapId_)
         newDict.set("mapId", *mapId_);
+    if (!valueBubbles_.empty()) {
+        auto bubbles = JsValue::List();
+        for (auto const& bubble : valueBubbles_) {
+            bubbles.push(valueBubbleToJsValue(bubble));
+        }
+        newDict.set("valueBubbles", bubbles);
+    }
     if (!sourceDataRefs_.empty()) {
         auto list = JsValue::List();
         for (const auto& ref : sourceDataRefs_) {
             list.push(JsValue::Dict({
-                {"mapTileKey", JsValue(MapTileKey(LayerType::SourceData, std::string(mapId), ref.layerId_, ref.tileId_).toString())},
+                {"mapTileKey", JsValue(MapTileKey(
+                    LayerType::SourceData,
+                    std::string(mapId),
+                    ref.layerId_,
+                    mapget::TileId::fromValue(ref.tileId_)).toString())},
                 {"address", JsValue(ref.address_)},
                 {"qualifier", JsValue(ref.qualifier_)},
             }));

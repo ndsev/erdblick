@@ -159,7 +159,21 @@ export class FeatureFilterOptions {
                                             <span class="material-symbols-outlined">content_copy</span>
                                         </p-button>
                                     }
-                                    @if (col.key === "value" && isFeatureIdValueRow(rowData)) {
+                                    @if (col.key === "value" && hasValueBubbles(rowData)) {
+                                        <span class="inspection-value-bubbles">
+                                            @for (bubble of rowData["valueBubbles"]; track bubble.targetNodeId + ':' + bubble.label + ':' + $index) {
+                                                <button type="button"
+                                                        class="inspection-value-bubble"
+                                                        [ngClass]="'inspection-value-bubble-' + (bubble.kind ?? 'scalar')"
+                                                        (click)="onValueBubbleClick($event, bubble)"
+                                                        [pTooltip]="'Show source row: ' + bubble.label"
+                                                        [tooltipOptions]="{appendTo: 'body'}"
+                                                        tooltipPosition="top">
+                                                    {{ bubble.label }}
+                                                </button>
+                                            }
+                                        </span>
+                                    } @else if (col.key === "value" && isFeatureIdValueRow(rowData)) {
                                         <a href=""
                                            (click)="onFeatureIdLinkClick($event, rowData)"
                                            (mouseenter)="onNodeValueHover(rowData, col.key)"
@@ -260,6 +274,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private activeSoftHoverGroupId?: string;
     private activeStrongHoverGroupId?: string;
     private activeFeatureIdNodeId?: string;
+    private activeValueBubbleTargetNodeId?: string;
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -551,7 +566,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Toggles row expansion unless the user clicked an explicit action control. */
     onRowClick(event: MouseEvent, rowNode: any) {
         const target = event.target as HTMLElement | null;
-        if (target?.closest(".inspection-row-actions") || target?.closest(".p-treetable-toggler") || target?.closest("a")) {
+        if (target?.closest(".inspection-row-actions")
+            || target?.closest(".inspection-value-bubble")
+            || target?.closest(".p-treetable-toggler")
+            || target?.closest("a")) {
             return;
         }
         const node: TreeNode = rowNode.node;
@@ -570,6 +588,28 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey === "value" && this.isFeatureIdValueRow(rowData)) {
             this.onValueClick(event, rowData);
         }
+    }
+
+    /** Returns whether C++ supplied propagated child-value pills for this row. */
+    protected hasValueBubbles(rowData: any): boolean {
+        return Array.isArray(rowData?.["valueBubbles"]) && rowData["valueBubbles"].length > 0;
+    }
+
+    /** Expands and highlights the inspection row represented by one propagated value bubble. */
+    protected onValueBubbleClick(event: MouseEvent, bubble: any): void {
+        event.preventDefault();
+        event.stopPropagation();
+        const targetNodeId = bubble?.targetNodeId;
+        if (typeof targetNodeId !== "string" || !targetNodeId.length) {
+            return;
+        }
+        if (!this.expandPathToNodeId(this.data, targetNodeId)) {
+            return;
+        }
+        this.activeValueBubbleTargetNodeId = targetNodeId;
+        this.data = [...this.data];
+        this.scrollToHighlightedIndex(this.visibleIndexForNodeId(this.data, targetNodeId));
+        this.cdr.markForCheck();
     }
 
     /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
@@ -928,6 +968,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             : undefined;
         return {
             [rowData?.styleClass ?? ""]: !!rowData?.styleClass,
+            "inspection-value-bubble-target": typeof rowData?.["nodeId"] === "string" &&
+                rowData["nodeId"] === this.activeValueBubbleTargetNodeId,
             "inspection-selection-soft": rowData?.["selectionHighlight"] === "soft",
             "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
             "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
@@ -1265,6 +1307,42 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 this.expandTreeNodes(node.children, node);
             }
         });
+    }
+
+    /** Opens the ancestor chain for a node id emitted by the C++ inspection converter. */
+    private expandPathToNodeId(nodes: TreeNode[], targetNodeId: string): boolean {
+        for (const node of nodes) {
+            if (node.data?.["nodeId"] === targetNodeId) {
+                node.expanded = true;
+                return true;
+            }
+            if (node.children && this.expandPathToNodeId(node.children, targetNodeId)) {
+                node.expanded = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Computes the virtual-scroll row index for an already-expanded node id. */
+    private visibleIndexForNodeId(nodes: TreeNode[], targetNodeId: string): number | undefined {
+        let index = 0;
+        const visit = (nodeList: TreeNode[]): number | undefined => {
+            for (const node of nodeList) {
+                if (node.data?.["nodeId"] === targetNodeId) {
+                    return index;
+                }
+                index += 1;
+                if (node.expanded && node.children?.length) {
+                    const childIndex = visit(node.children);
+                    if (childIndex !== undefined) {
+                        return childIndex;
+                    }
+                }
+            }
+            return undefined;
+        };
+        return visit(nodes);
     }
 
     /** Scrolls virtual inspection trees to selected attr/validity rows after PrimeNG has applied data changes. */

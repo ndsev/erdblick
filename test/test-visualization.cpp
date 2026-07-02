@@ -6,6 +6,7 @@
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 #include "mapget/model/searchresultlayer.h"
+#include "mapget/model/point.h"
 #include "mapget/model/sourceinfo.h"
 #include "mapget/model/sourcedatareference.h"
 #include "mapget/model/stringpool.h"
@@ -452,7 +453,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId
         lineTestLayerInfo(),
         std::make_shared<simfil::StringPool>());
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     auto feature = layer->newFeature("Way", {{"wayId", 1}});
     feature->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -474,7 +475,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeRelationTestTile(
         std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     if (includeSource) {
         auto source = layer->newFeature("Diamond", {{"diamondId", 1}});
         source->addLine({
@@ -513,7 +514,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapge
         std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     auto source = layer->newFeature("Diamond", {{"diamondId", 1}});
     source->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -551,7 +552,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
         externalReferenceInspectionLayerInfo(),
         std::make_shared<simfil::StringPool>());
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     auto source = layer->newFeature("Way", {{"wayId", 1}});
     source->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -684,6 +685,19 @@ nlohmann::json const* findInspectionDirectChildByKey(nlohmann::json const& node,
         }
     }
     return nullptr;
+}
+
+/** Collect the labels from value bubbles attached directly to one inspection node. */
+std::vector<std::string> inspectionValueBubbleLabels(nlohmann::json const& node)
+{
+    std::vector<std::string> labels;
+    if (!node.contains("valueBubbles") || !node.at("valueBubbles").is_array()) {
+        return labels;
+    }
+    for (auto const& bubble : node.at("valueBubbles")) {
+        labels.push_back(bubble.value("label", std::string{}));
+    }
+    return labels;
 }
 
 nlohmann::json const* findInspectionNodeByGeoJsonPath(nlohmann::json const& node, std::string const& path)
@@ -957,6 +971,56 @@ TEST_CASE("FeatureInspection copies propagated attribute value search path", "[e
         "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
 }
 
+TEST_CASE("FeatureInspection exposes propagated scalar value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("ROAD_LOCATION_ID");
+    auto roadLocation = tile->newObject();
+    REQUIRE(roadLocation->addField("locationId", int64_t(418182439)).has_value());
+    REQUIRE(roadLocation->addField("locationIndex", int64_t(0)).has_value());
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("numLocations", int64_t(1)).has_value());
+    REQUIRE(attrValue->addField("roadLocationId", roadLocation).has_value());
+    REQUIRE(attrValue->addField("sameDirectionAsSource", true).has_value());
+    REQUIRE(attrValue->addField("completeLocation", true).has_value());
+    REQUIRE(attrValue->addField("optionalFlag", false).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "ROAD_LOCATION_ID");
+    REQUIRE(attrNode);
+    auto labels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "[418182439][0]") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "sameDirectionAsSource") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "completeLocation") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "numLocations") == labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "optionalFlag") == labels.end());
+}
+
+TEST_CASE("FeatureInspection exposes compact validity value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(attr->addField("value", int64_t(30)).has_value());
+    attr->validity()->newFeatureId(
+        tile->newFeatureId("Way", {{"wayId", 1}}),
+        mapget::Validity::Positive);
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
+    REQUIRE(attrNode);
+    auto labels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "30") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "+ Way.1") != labels.end());
+}
+
 TEST_CASE("FeatureInspection keeps attributes in model layers with source data references", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
@@ -1012,7 +1076,7 @@ TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspectio
         std::make_shared<simfil::StringPool>());
     tile->setIdPrefix({{"areaId", "Area"}});
 
-    auto const center = tile->tileId().center();
+    auto const center = mapget::Point(tile->tileId().centerWgs84());
     auto source = tile->newFeature("Diamond", {{"diamondId", 1}});
     source->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -1548,7 +1612,7 @@ TEST_CASE("DeckTileSearchResultLayerVisualization does not connect point-cloud v
         lineTestLayerInfo(),
         strings);
 
-    auto const center = layer->tileId().center();
+    auto const center = mapget::Point(layer->tileId().centerWgs84());
     auto geometry = layer->newGeometryCollection();
     auto line = geometry->newGeometry(mapget::GeomType::Line);
     for (auto pointIndex = 0; pointIndex < 10; ++pointIndex) {
@@ -1587,7 +1651,7 @@ TEST_CASE("DeckTileSearchResultLayerVisualization renders every matching style r
         strings);
     layer->setResultFields({"name"});
 
-    auto const center = layer->tileId().center();
+    auto const center = mapget::Point(layer->tileId().centerWgs84());
     auto geometry = layer->newGeometryCollection();
     auto line = geometry->newGeometry(mapget::GeomType::Line);
     line->append({center.x, center.y, 0.0});
@@ -1642,7 +1706,7 @@ TEST_CASE("TileSearchResultLayer value summaries aggregate fields and typed trac
     layer->setResultFields({"speed", "category", "shape"});
 
     auto geometry = layer->newGeometryCollection();
-    geometry->newGeometry(mapget::GeomType::Points)->append(layer->tileId().center());
+    geometry->newGeometry(mapget::GeomType::Points)->append(mapget::Point(layer->tileId().centerWgs84()));
     auto firstFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
     auto secondFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(2)}});
     auto listValue = layer->newArray(1, true);
