@@ -21,6 +21,11 @@
     "@typescript-eslint"
   ],
   "rules": {
+    "max-lines": ["warn", {
+      "max": 2000,
+      "skipBlankLines": false,
+      "skipComments": false
+    }],
     "no-restricted-imports": ["error", {
       "paths": [{
         "name": "cesium",

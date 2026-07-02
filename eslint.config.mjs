@@ -35,6 +35,11 @@ export default [
         },
 
         rules: {
+            "max-lines": ["warn", {
+                max: 2000,
+                skipBlankLines: false,
+                skipComments: false,
+            }],
             "prefer-const": "off",
             "@typescript-eslint/no-explicit-any": "off",
             "@typescript-eslint/no-unused-vars": "off",
