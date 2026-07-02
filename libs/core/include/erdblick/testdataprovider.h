@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/point.h"
 #include "mapget/model/stringpool.h"
 #include "parser.h"
 #include "style.h"
@@ -166,7 +167,7 @@ public:
             std::cout << "Generated Way " << i << std::endl;
             // Create a feature with line geometry
             auto feature = result->newFeature("Way", {{"wayId", 42 + i}});
-            auto linePoints = generateRandomPoints(2, 8, tileId.ne(), tileId.sw());
+            auto linePoints = generateRandomPoints(2, 8, mapget::Point(tileId.northEastWgs84()), mapget::Point(tileId.southWestWgs84()));
             feature->addLine(linePoints);
 
             // Add a random wayType attribute
@@ -186,7 +187,7 @@ public:
 
             // Create a feature with polygon geometry
             auto feature = result->newFeature("Sign", {{"signId", 100 + i}});
-            auto polyPoints = generateRandomPoints(2, 6, tileId.ne(), tileId.sw());
+            auto polyPoints = generateRandomPoints(2, 6, mapget::Point(tileId.northEastWgs84()), mapget::Point(tileId.southWestWgs84()));
             feature->addPoly(polyPoints);
 
             // Add a random signType attribute
@@ -199,7 +200,7 @@ public:
             std::cout << "Generated POI " << i << std::endl;
 
             auto feature = result->newFeature("PointOfInterest", {{"pointId", 200 + i}});
-            auto points = generateRandomPoints(1, 1, tileId.ne(), tileId.sw());
+            auto points = generateRandomPoints(1, 1, mapget::Point(tileId.northEastWgs84()), mapget::Point(tileId.southWestWgs84()));
             feature->addPoints(points);
         }
 
@@ -208,14 +209,14 @@ public:
             std::cout << "Generated PONI " << i << std::endl;
 
             auto feature = result->newFeature("PointOfNoInterest", {{"pointId", 300 + i}});
-            auto points = generateRandomPoints(1, 1, tileId.ne(), tileId.sw());
+            auto points = generateRandomPoints(1, 1, mapget::Point(tileId.northEastWgs84()), mapget::Point(tileId.southWestWgs84()));
             feature->addPoints(points);
         }
 
         // Add a diamond mesh in the center of the tile.
         auto diamondMeshFeature = result->newFeature("Diamond", {{"diamondId", 999}});
-        auto center = tileId.center();
-        auto size = tileId.size();
+        auto center = mapget::Point(tileId.centerWgs84());
+        auto size = mapget::Point(tileId.wgs84Size());
         size.x *= .25;
         size.y *= .25;
         size.z = 1000.;

@@ -82,7 +82,7 @@ export interface MergedPointVisualization {
  *  and its View-Map-Layer-Style-Rule ID combination.
  */
 export class MergedPointsTile {
-    referencingTiles: Array<bigint> = [];
+    referencingTiles: Array<number> = [];
 
     features: Map<PositionHash, MergedPointVisualization> = new Map<PositionHash, MergedPointVisualization>;
     readonly viewIndex: number
@@ -92,7 +92,7 @@ export class MergedPointsTile {
 
     /** Creates the corner-tile aggregate keyed by NW tile id and view/layer/style identity. */
     constructor(
-        public readonly tileId: bigint,  // NW tile ID
+        public readonly tileId: number,  // NW tile ID
         public readonly mapViewLayerStyleRuleId: MapViewLayerStyleRule)
     {
         this.viewIndex = Number(mapViewLayerStyleRuleId.split(":")[0]);
@@ -180,7 +180,7 @@ export class MergedPointsTile {
     /**
      * Add a neighboring tile which keeps this corner tile alive
      */
-    addReference(sourceTileId: bigint) {
+    addReference(sourceTileId: number) {
         if (this.referencingTiles.findIndex(v => v == sourceTileId) == -1) {
             this.referencingTiles.push(sourceTileId);
         }
@@ -455,14 +455,14 @@ export class MergedPointsTile {
 @Injectable({providedIn: 'root'})
 export class PointMergeService
 {
-    mergedPointsTiles: Map<MapViewLayerStyleRule, Map<bigint, MergedPointsTile>> = new Map<MapViewLayerStyleRule, Map<bigint, MergedPointsTile>>();
+    mergedPointsTiles: Map<MapViewLayerStyleRule, Map<number, MergedPointsTile>> = new Map<MapViewLayerStyleRule, Map<number, MergedPointsTile>>();
 
     /**
      * Build a snapshot of merge counts for the corner tiles touched by sourceTileId.
      * Keys are encoded as `${mapViewLayerStyleRuleId}|${positionHash}`.
      */
     makeMergeCountSnapshot(
-        sourceTileId: bigint,
+        sourceTileId: number,
         mapViewLayerStyleId: string,
         excludedSourceTileKey?: string
     ): Record<string, number> {
@@ -532,11 +532,11 @@ export class PointMergeService
     /**
      * Get (or create) a corner tile by its style-rule-id + tile-id combo.
      */
-    getCornerTileById(tileId: bigint, mapViewLayerStyleRuleId: MapViewLayerStyleRule): MergedPointsTile {
+    getCornerTileById(tileId: number, mapViewLayerStyleRuleId: MapViewLayerStyleRule): MergedPointsTile {
         // Get or create the tile-map for the mapViewLayerStyleRuleId.
         let styleRuleMap = this.mergedPointsTiles.get(mapViewLayerStyleRuleId);
         if (!styleRuleMap) {
-            styleRuleMap = new Map<bigint, MergedPointsTile>();
+            styleRuleMap = new Map<number, MergedPointsTile>();
             this.mergedPointsTiles.set(mapViewLayerStyleRuleId, styleRuleMap);
         }
 
@@ -555,7 +555,7 @@ export class PointMergeService
      * the missingTiles of each. MergedPointsTiles with empty referencingTiles (requiring render)
      * are yielded. The sourceTileId is also added to the MergedPointsTiles referencingTiles set.
      */
-    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, sourceTileKey: string, mapViewLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
+    *insert(points: Array<MergedPointVisualization>, sourceTileId: number, sourceTileKey: string, mapViewLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
         // Insert the points into the relevant corner tiles.
         let level = coreLib.getTileLevel(sourceTileId);
         for (let point of points) {
@@ -582,7 +582,7 @@ export class PointMergeService
      * prefix-match with the mapViewLayerStyleId. Yields all touched corner tiles so callers can refresh their scene
      * representation. Tiles whose references become empty are removed from the service map.
      */
-    *remove(sourceTileId: bigint, sourceTileKey: string, mapViewLayerStyleId: string): Generator<MergedPointsTile> {
+    *remove(sourceTileId: number, sourceTileKey: string, mapViewLayerStyleId: string): Generator<MergedPointsTile> {
         for (let [mapViewLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {
             if (mapViewLayerStyleRuleId.startsWith(mapViewLayerStyleId)) {
                 for (let [tileId, tile] of tiles) {

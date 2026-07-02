@@ -87,11 +87,11 @@ export interface SearchResultTilePayload {
     refresh: number;
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
-    sourceTileId: bigint;
+    sourceTileId: number;
     requestOrder: number;
     resultCount: number;
     resultFields: string[];

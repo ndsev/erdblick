@@ -1384,7 +1384,7 @@ void FeatureLayerVisualizationBase::addMergedPointGeometry(
                 "count",
                 pointCartographic,
                 gridPositionHash,
-                tile_->tileId().z(),
+                tile_->tileId().level(),
                 mapLayerStyleRuleId);
         } catch (...) {
             externalMergedPointCount = 0;

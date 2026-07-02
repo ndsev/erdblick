@@ -1754,7 +1754,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.nodeId(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
-        tileLayer.tileId().value_,
+        tileLayer.tileId().value(),
         stage,
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",

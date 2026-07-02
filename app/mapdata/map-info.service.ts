@@ -27,6 +27,7 @@ interface SourceCatalogEntryUpdate {
     progress?: number | null;
 }
 
+
 /**
  * Owns datasource metadata, the map/layer tree, shared parser metadata, legal info, and layer-tree mutations.
  */
@@ -533,7 +534,7 @@ export class MapInfoService {
     }
 
     /** Returns every map that could expose source-data for a tile id at the matching level. */
-    findSourceDataMapsForTileId(tileId: bigint): Array<{id: string, name: string}> {
+    findSourceDataMapsForTileId(tileId: number): Array<{id: string, name: string}> {
         const level = coreLib.getTileLevel(tileId);
         const result: Array<{id: string, name: string}> = [];
         for (const mapInfo of this.maps.maps.values()) {

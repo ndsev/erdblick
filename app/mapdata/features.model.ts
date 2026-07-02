@@ -32,7 +32,7 @@ export class FeatureTile implements RenderableTileLayer {
     nodeId: string = "undefined";
     mapName: string = "undefined";
     layerName: string = "undefined";
-    tileId: bigint = BigInt(0);
+    tileId: number = 0;
     legalInfo: string = "";
     numFeatures: number = 0;
     error?: string;
@@ -78,7 +78,7 @@ export class FeatureTile implements RenderableTileLayer {
         parser: TileLayerParser,
         tileFeatureLayerBlob: Uint8Array | null,
         preventCulling: boolean,
-        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: bigint})
+        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: number})
     {
         this.parser = parser;
         this.preventCulling = preventCulling;
@@ -108,7 +108,7 @@ export class FeatureTile implements RenderableTileLayer {
             nodeId: string;
             mapName: string;
             layerName: string;
-            tileId: bigint;
+            tileId: number;
             stage?: number;
             legalInfo?: string;
             error?: string;
@@ -140,7 +140,7 @@ export class FeatureTile implements RenderableTileLayer {
         this.nodeId = mapTileMetadata.nodeId as string;
         this.mapName = mapTileMetadata.mapName as string;
         this.layerName = mapTileMetadata.layerName as string;
-        this.tileId = BigInt(mapTileMetadata.tileId as any);
+        this.tileId = Number(mapTileMetadata.tileId);
         this.legalInfo = mapTileMetadata.legalInfo as string;
         this.error = mapTileMetadata.error ? mapTileMetadata.error as string : undefined;
         const parsedNumFeatures = Number(mapTileMetadata.numFeatures);
@@ -357,7 +357,7 @@ export class FeatureTile implements RenderableTileLayer {
         id?: string;
         mapName?: string;
         layerName?: string;
-        tileId?: bigint;
+        tileId?: number;
     }): string {
         if (metadata.id) {
             try {
@@ -547,9 +547,9 @@ export class FeatureTile implements RenderableTileLayer {
         });
     }
 
-    /** Returns the tile level encoded in the low 16 bits of the NDS tile id. */
+    /** Returns the tile level decoded by the native packed-tile helper. */
     level() {
-        return Number(this.tileId & BigInt(0xffff));
+        return Number(coreLib.getTileLevel(this.tileId));
     }
 
     /** Returns true when the normalized feature id can be resolved inside this tile. */

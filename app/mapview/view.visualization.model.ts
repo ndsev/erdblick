@@ -111,7 +111,7 @@ export class VisualizationQueue {
     }
 
     /** Pops the highest-priority visualization whose tile is not currently blocked. */
-    dequeueNext(blockedTileIds?: ReadonlyMap<bigint, number>): ITileVisualization | undefined {
+    dequeueNext(blockedTileIds?: ReadonlyMap<number, number>): ITileVisualization | undefined {
         if (!this.queue.length) {
             return undefined;
         }
@@ -212,13 +212,13 @@ export class VisualizationQueue {
  */
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
-    visibleTileIds: Set<bigint> = new Set();
-    visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
-    visibleTileIdSetsPerLevel = new Map<number, Set<bigint>>();
-    searchVisibleTileIdsPerLevel = new Map<number, Array<bigint>>();
-    searchVisibleTileIdSetsPerLevel = new Map<number, Set<bigint>>();
-    tileRenderPolicy = new Map<bigint, TileRenderPolicy>();
-    tileOrder = new Map<bigint, number>();
+    visibleTileIds: Set<number> = new Set();
+    visibleTileIdsPerLevel = new Map<number, Array<number>>();
+    visibleTileIdSetsPerLevel = new Map<number, Set<number>>();
+    searchVisibleTileIdsPerLevel = new Map<number, Array<number>>();
+    searchVisibleTileIdSetsPerLevel = new Map<number, Set<number>>();
+    tileRenderPolicy = new Map<number, TileRenderPolicy>();
+    tileOrder = new Map<number, number>();
     readonly visualizationQueue = new VisualizationQueue();
     private visualizedTileLayers: Map<string, Map<string, ITileVisualization>> = new Map();
 
@@ -362,8 +362,8 @@ export class ViewVisualizationState {
             if (this.visibleTileIdsPerLevel.has(level)) {
                 continue;
             }
-            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, tileLimit) as bigint[];
-            const visibleTileIdSetForLevel = new Set<bigint>(visibleTileIdsForLevel);
+            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, tileLimit) as number[];
+            const visibleTileIdSetForLevel = new Set<number>(visibleTileIdsForLevel);
             this.visibleTileIdsPerLevel.set(level, visibleTileIdsForLevel);
             this.visibleTileIdSetsPerLevel.set(level, visibleTileIdSetForLevel);
             for (const tileId of visibleTileIdSetForLevel) {
@@ -387,7 +387,7 @@ export class ViewVisualizationState {
     }
 
     /** Returns the cached fidelity policy for a tile, defaulting to the most conservative low-fi fallback. */
-    getTileRenderPolicy(tileId: bigint): TileRenderPolicy {
+    getTileRenderPolicy(tileId: number): TileRenderPolicy {
         return this.tileRenderPolicy.get(tileId) ?? {
             targetFidelity: "low",
             maxLowFiLod: 0
@@ -395,7 +395,7 @@ export class ViewVisualizationState {
     }
 
     /** Returns the cached render-order index for a tile, or a large fallback for unknown tiles. */
-    getTileOrder(tileId: bigint): number {
+    getTileOrder(tileId: number): number {
         return this.tileOrder.get(tileId) ?? Number.MAX_SAFE_INTEGER;
     }
 }

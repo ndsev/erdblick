@@ -4,9 +4,15 @@ import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {GeoMath} from "../integrations/geo";
 import {ClipboardService} from "../shared/clipboard.service";
-import {coreLib} from "../integrations/wasm";
 import {KeyValue} from "@angular/common";
 import {combineLatest, Subscription} from "rxjs";
+import {
+    NDS_COORDINATES_OPTION,
+    ndsCoordinatesFromWgs84,
+    normalizeCoordinatePanelOptionName,
+    packedTileIdFromWgs84,
+    packedTileIdOptionName
+} from "./nds-coordinate.util";
 
 interface PanelOption {
     name: string,
@@ -31,13 +37,18 @@ interface PanelOption {
                         <span class="coord-span">{{ longitude.toFixed(8) }}</span>
                         <span class="coord-span">{{ latitude.toFixed(8) }}</span>
                     </div>
+                    <div class="coordinates-entry" *ngIf="ndsCoordinates && isSelectedOption(ndsCoordinatesOption)">
+                        <span class="name-span" (click)="copyToClipboard(ndsCoordinates)">NDS:</span>
+                        <span class="coord-span">{{ ndsCoordinates[0] }}</span>
+                        <span class="coord-span">{{ ndsCoordinates[1] }}</span>
+                    </div>
                     <ng-container *ngFor="let coords of auxiliaryCoordinates | keyvalue">
                         <div *ngIf="isSelectedOption(coords.key)" class="coordinates-entry">
                             <span class="name-span" (click)="copyToClipboard(coords.value)">{{ coords.key }}:</span>
                             <span *ngFor="let component of coords.value" class="coord-span">{{ component }}</span>
                         </div>
                     </ng-container>
-                    <ng-container *ngFor="let tileId of mapgetTileIds | keyvalue: compareLevels">
+                    <ng-container *ngFor="let tileId of packedTileIds | keyvalue: compareLevels">
                         <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
                             <span class="name-span"
                                   (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}
@@ -75,13 +86,15 @@ export class CoordinatesPanelComponent implements OnDestroy {
     latitude: number | undefined = undefined;
     isMarkerEnabled: boolean = false;
     markerPosition: {x: number, y: number} | null = null;
+    ndsCoordinates: Array<number> | undefined = undefined;
     auxiliaryCoordinates: Map<string, Array<number>> = new Map<string, Array<number>>();
-    mapgetTileIds: Map<string, bigint> = new Map<string, bigint>();
-    auxiliaryTileIds: Map<string, bigint> = new Map<string, bigint>();
+    packedTileIds: Map<string, number> = new Map<string, number>();
+    auxiliaryTileIds: Map<string, number> = new Map<string, number>();
     markerButtonIcon: string = "location_off";
     markerButtonTooltip: string = "Enable marker placement";
-    displayOptions: Array<PanelOption> = [{name: "WGS84"}];
+    displayOptions: Array<PanelOption> = [{name: "WGS84"}, {name: NDS_COORDINATES_OPTION}];
     selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
+    readonly ndsCoordinatesOption = NDS_COORDINATES_OPTION;
     private subscriptions: Subscription[] = [];
 
     constructor(public mapService: MapViewStateService,
@@ -89,7 +102,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
                 public clipboardService: ClipboardService,
                 public stateService: AppStateService) {
         for (let level = 0; level <= 15; level++) {
-            this.displayOptions.push({name: `Mapget TileId (level ${level})`});
+            this.displayOptions.push({name: packedTileIdOptionName(level)});
         }
         this.subscriptions.push(combineLatest([
             this.stateService.markerState,
@@ -141,14 +154,27 @@ export class CoordinatesPanelComponent implements OnDestroy {
     /** Reapplies persisted display-option selections after option lists change. */
     private restoreSelectedOptions() {
         for (const option of this.stateService.enabledCoordsTileIds) {
-            if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
-                this.selectedOptions.push({name: option});
+            const normalizedOption = normalizeCoordinatePanelOptionName(option);
+            if (!this.isSelectedOption(normalizedOption) && this.displayOptions.some(val => val.name == normalizedOption)) {
+                this.selectedOptions.push({name: normalizedOption});
             }
         }
     }
 
     /** Recomputes all displayed coordinate systems and tile ids from the current lon/lat. */
     private updateValues() {
+        this.ndsCoordinates = undefined;
+        this.packedTileIds.clear();
+        this.auxiliaryCoordinates.clear();
+        this.auxiliaryTileIds.clear();
+        if (this.longitude !== undefined && this.latitude !== undefined) {
+            this.ndsCoordinates = ndsCoordinatesFromWgs84(this.longitude, this.latitude);
+            for (let level = 0; level <= 15; level++) {
+                this.packedTileIds.set(
+                    packedTileIdOptionName(level),
+                    packedTileIdFromWgs84(this.longitude, this.latitude, level));
+            }
+        }
         if (this.coordinatesService.auxiliaryCoordinatesFun) {
             if (this.longitude !== undefined && this.latitude !== undefined) {
                 this.auxiliaryCoordinates =
@@ -164,22 +190,15 @@ export class CoordinatesPanelComponent implements OnDestroy {
                 }
             }
         }
-        if (this.longitude !== undefined && this.latitude !== undefined) {
-            for (let level = 0; level <= 15; level++) {
-                this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
-                    coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
-
-            }
-        }
         if (this.coordinatesService.auxiliaryTileIdsFun) {
             if (this.longitude !== undefined && this.latitude !== undefined) {
                 for (let level = 0; level <= 15; level++) {
-                const levelData: Map<string, bigint> =
+                const levelData: Map<string, number> =
                     this.coordinatesService.auxiliaryTileIdsFun(this.longitude, this.latitude, level).reduce(
-                        (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
-                            map.set(key, value);
+                        (map: Map<string, number>, [key, value]: [string, bigint | number]) => {
+                            map.set(key, Number(value));
                             return map;
-                        }, new Map<string, bigint>());
+                        }, new Map<string, number>());
 
                 levelData.forEach((value, key) => {
                     this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
@@ -243,7 +262,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     /** Sorts tile-id display entries by extracted level number. */
-    compareLevels(a: KeyValue<string, bigint> , b: KeyValue<string, bigint>): number {
+    compareLevels(a: KeyValue<string, number> , b: KeyValue<string, number>): number {
         const aLevel = parseInt(a.key.match(/\d+/)?.[0] ?? '0', 10);
         const bLevel = parseInt(b.key.match(/\d+/)?.[0] ?? '0', 10);
 

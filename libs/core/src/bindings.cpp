@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <cxxabi.h>
+#include <optional>
 
 #include <sanitizer/lsan_interface.h>
 #include <sanitizer/asan_interface.h>
@@ -27,6 +28,7 @@ const char *__asan_default_options() {
 #include "buffer.h"
 #include "interop/js-object.h"
 #include "mapget/model/info.h"
+#include "mapget/model/point.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/simfilutil.h"
 #include "simfil/model/nodes.h"
@@ -264,16 +266,16 @@ em::val getTileIds(Viewport const& vp, int level, int limit)
         {
             if (l.second != r.second)
                 return l.second < r.second;
-            return l.first.value_ < r.first.value_;
+            return l.first.value() < r.first.value();
         });
 
     em::val resultArray = em::val::array();
-    int64_t prevTileId = -1;
+    std::optional<int32_t> prevTileId;
     for (const auto& tileId : prioritizedTileIds) {
-        if (tileId.first.value_ == prevTileId)
+        if (prevTileId && tileId.first.value() == *prevTileId)
             continue;
-        resultArray.call<void>("push", tileId.first.value_);
-        prevTileId = tileId.first.value_;
+        resultArray.call<void>("push", tileId.first.value());
+        prevTileId = tileId.first.value();
     }
 
     return resultArray;
@@ -301,37 +303,39 @@ uint32_t getNumTileIdsForCanonicalCamera(double altitudeMeters, int level)
 }
 
 /** Evaluate the same camera-relative tile priority function used by `getTileIds()`. */
-double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
+double getTilePriorityById(Viewport const& vp, int32_t tileId) {
     if (!isFiniteViewport(vp))
         return 0.0;
     return Wgs84AABB::radialDistancePrioFn(
         {normalizeLongitude(vp.camPosLon), vp.camPosLat},
-        vp.orientation)(tileId);
+        vp.orientation)(mapget::TileId::fromValue(tileId));
 }
 
 /** Get the center position for a mapget tile id in WGS84. */
-mapget::Point getTilePosition(uint64_t tileIdValue) {
-    return mapget::TileId(tileIdValue).center();
+mapget::Point getTilePosition(int32_t tileIdValue) {
+    return mapget::Point(mapget::TileId::fromValue(tileIdValue).centerWgs84());
 }
 
 /** Get the level for a mapget tile id. */
-uint16_t getTileLevel(uint64_t tileIdValue) {
-    return mapget::TileId(tileIdValue).z();
+uint16_t getTileLevel(int32_t tileIdValue) {
+    return static_cast<uint16_t>(mapget::TileId::fromValue(tileIdValue).level());
 }
 
 /** Get the tile ID for the given level and position. */
-uint64_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
-    return mapget::TileId::fromWgs84(longitude, latitude, level).value_;
+int32_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
+    return mapget::TileId::fromWgs84(longitude, latitude, level).value();
 }
 
 /** Get the bounding box for a mapget tile id in WGS84. */
-em::val getTileBox(uint64_t tileIdValue) {
-    mapget::TileId tid(tileIdValue);
+em::val getTileBox(int32_t tileIdValue) {
+    auto tid = mapget::TileId::fromValue(tileIdValue);
+    auto sw = mapget::Point(tid.southWestWgs84());
+    auto ne = mapget::Point(tid.northEastWgs84());
     return *JsValue::List({
-        JsValue(tid.sw().x),
-        JsValue(tid.sw().y),
-        JsValue(tid.ne().x),
-        JsValue(tid.ne().y)
+        JsValue(sw.x),
+        JsValue(sw.y),
+        JsValue(ne.x),
+        JsValue(ne.y)
     });
 }
 
@@ -341,11 +345,11 @@ em::val getTileBox(uint64_t tileIdValue) {
  * the width and height on both axes, so it sits squarely at
  * the intersection point of four tiles.
  */
-em::val getCornerTileBox(uint64_t tileIdValue) {
-    mapget::TileId tid(tileIdValue);
-    auto halfSize = tid.size() * mapget::Point(.5, -.5);
-    auto sw = tid.sw() + halfSize;
-    auto ne = tid.ne() + halfSize;
+em::val getCornerTileBox(int32_t tileIdValue) {
+    auto tid = mapget::TileId::fromValue(tileIdValue);
+    auto halfSize = mapget::Point(tid.wgs84Size()) * mapget::Point(.5, -.5);
+    auto sw = mapget::Point(tid.southWestWgs84()) + halfSize;
+    auto ne = mapget::Point(tid.northEastWgs84()) + halfSize;
     return *JsValue::List({
         JsValue(sw.x),
         JsValue(sw.y),
@@ -431,18 +435,18 @@ mapget::Point preferredFeatureBoundingRadiusEndPoint(mapget::model_ptr<mapget::F
  * so a positive/negative wraparound is not possible. The tile id column will wrap at the
  * antimeridian.
  */
-uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
-    return mapget::TileId(tileIdValue).neighbor(offsetX, offsetY).value_;
+int32_t getTileNeighbor(int32_t tileIdValue, int32_t offsetX, int32_t offsetY) {
+    return mapget::TileId::fromValue(tileIdValue).neighbor(offsetX, offsetY).value();
 }
 
 /** Get the full string key of a map tile feature layer. */
-std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
-    return mapget::MapTileKey(mapget::LayerType::Features, mapId, layerId, tileId).toString();
+std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, int32_t tileId) {
+    return mapget::MapTileKey(mapget::LayerType::Features, mapId, layerId, mapget::TileId::fromValue(tileId)).toString();
 }
 
 /** Get the full string key of a map SourceData layer. */
-std::string getSourceDataLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
-    return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, tileId).toString();
+std::string getSourceDataLayerKey(std::string const& mapId, std::string const& layerId, int32_t tileId) {
+    return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, mapget::TileId::fromValue(tileId)).toString();
 }
 
 /** Get mapId, layerId, tileId and stage of a MapTileKey. */
@@ -451,7 +455,7 @@ NativeJsValue parseMapTileKey(std::string const& key) {
     return *JsValue::List({
         JsValue(tileKey.mapId_),
         JsValue(tileKey.layerId_),
-        JsValue(tileKey.tileId_.value_),
+        JsValue(tileKey.tileId_.value()),
         JsValue(tileKey.stage_)
     });
 }

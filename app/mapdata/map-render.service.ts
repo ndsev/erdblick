@@ -59,7 +59,7 @@ export class MapRenderService {
     private hoverHighlightSignature = "";
     private nextVisualizationViewIndex = 0;
     private inFlightVisualizationRendersByView: number[] = [];
-    private inFlightBlockedTileIdsByView: Array<Map<bigint, number>> = [];
+    private inFlightBlockedTileIdsByView: Array<Map<number, number>> = [];
     private frameTimeMsEwma = 0;
     private lastAnimationFrameTimestampMs: number | null = null;
     private frameTimeSamplingStarted = false;
@@ -218,7 +218,7 @@ export class MapRenderService {
         if (this.inFlightBlockedTileIdsByView.length !== viewCount) {
             this.inFlightBlockedTileIdsByView = Array.from(
                 {length: viewCount},
-                (_, index) => this.inFlightBlockedTileIdsByView[index] ?? new Map<bigint, number>()
+                (_, index) => this.inFlightBlockedTileIdsByView[index] ?? new Map<number, number>()
             );
         }
         const maxInFlightPerView = this.maxInFlightVisualizationRendersPerView();
@@ -968,7 +968,7 @@ export class MapRenderService {
     }
 
     /** Returns whether high-fidelity search-result geometry should currently be rendered for one tile. */
-    prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: bigint): boolean {
+    prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: number): boolean {
         const request = this.tileStream.activeFeatureSearchRequest(searchId);
         if (!request?.showResultsOnMap
             || !featureSearchVisibleInView(request, viewIndex)
@@ -1191,13 +1191,13 @@ export class MapRenderService {
     }
 
     /** Returns the tile plus its Moore neighborhood for render deduplication around tile seams. */
-    private tileNeighborhoodForConcurrentRenderBlock(tileId: bigint): bigint[] {
-        const blockedTileIds = new Set<bigint>();
+    private tileNeighborhoodForConcurrentRenderBlock(tileId: number): number[] {
+        const blockedTileIds = new Set<number>();
         blockedTileIds.add(tileId);
         for (let dy = -1; dy <= 1; dy++) {
             for (let dx = -1; dx <= 1; dx++) {
                 try {
-                    blockedTileIds.add(BigInt(coreLib.getTileNeighbor(tileId, dx, dy)));
+                    blockedTileIds.add(coreLib.getTileNeighbor(tileId, dx, dy));
                 } catch (_error) {
                     // Keep rendering robust at tile-grid boundaries.
                 }
@@ -1207,7 +1207,7 @@ export class MapRenderService {
     }
 
     /** Marks one tile neighborhood as in-flight so concurrent renders do not overlap seam work. */
-    private markTileInFlightForView(viewIndex: number, tileId: bigint): void {
+    private markTileInFlightForView(viewIndex: number, tileId: number): void {
         const blockedByView = this.inFlightBlockedTileIdsByView[viewIndex];
         if (!blockedByView) {
             return;
@@ -1218,7 +1218,7 @@ export class MapRenderService {
     }
 
     /** Releases the in-flight neighborhood block once a visualization finished rendering. */
-    private unmarkTileInFlightForView(viewIndex: number, tileId: bigint): void {
+    private unmarkTileInFlightForView(viewIndex: number, tileId: number): void {
         const blockedByView = this.inFlightBlockedTileIdsByView[viewIndex];
         if (!blockedByView) {
             return;

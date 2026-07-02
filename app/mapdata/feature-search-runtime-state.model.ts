@@ -131,7 +131,7 @@ export class FeatureSearchRuntimeState {
         for (const entry of visibleLayerTiles.values()) {
             for (const visibleTile of entry.tiles.values()) {
                 const tileId = visibleTile.tileId;
-                const sourceTileId = BigInt(tileId);
+                const sourceTileId = tileId;
                 const sourceTileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, sourceTileId);
                 desiredKeys.add(sourceTileKey);
                 const existing = this.tilesBySourceKey.get(sourceTileKey);
@@ -224,8 +224,8 @@ export class FeatureSearchRuntimeState {
             if (tile.completed) {
                 continue;
             }
-            const tileId = Number(tile.sourceTileId);
-            const tileLevel = Math.trunc(tileId % 0x10000);
+            const tileId = tile.sourceTileId;
+            const tileLevel = Number(coreLib.getTileLevel(tileId));
             const key = `${tile.sourceMapId}/${tile.sourceLayerId}/${tileLevel}`;
             let entry = statesByLevelLayer.get(key);
             if (!entry) {

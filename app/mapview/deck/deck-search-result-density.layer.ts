@@ -129,7 +129,7 @@ export function searchResultDensityRenderSizePixels(
     return searchResultDensitySizeScale(size, countDomain) * sizeScale;
 }
 
-/** Assigns size-aware, stable screen offsets for markers sharing the same aggregate mapget tile. */
+/** Assigns size-aware, stable screen offsets for markers sharing the same aggregate packed tile. */
 export function layoutSearchResultDensityMarkers(
     entries: SearchResultDensityLayoutEntry[],
     sizeScale = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE

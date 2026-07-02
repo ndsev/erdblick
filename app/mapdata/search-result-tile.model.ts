@@ -18,12 +18,12 @@ export class SearchResultTile implements RenderableTileLayer {
     readonly sourceTileKey: string;
     readonly sourceMapId: string;
     readonly sourceLayerId: string;
-    readonly sourceTileId: bigint;
+    readonly sourceTileId: number;
     mapTileKey: string;
     nodeId: string;
     mapName: string;
     layerName: string;
-    tileId: bigint;
+    tileId: number;
     refresh: number;
     priority: boolean;
     requestOrder: number;
@@ -46,7 +46,7 @@ export class SearchResultTile implements RenderableTileLayer {
         sourceTileKey: string,
         sourceMapId: string,
         sourceLayerId: string,
-        sourceTileId: bigint,
+        sourceTileId: number,
         refresh: number,
         priority: boolean,
         requestOrder: number

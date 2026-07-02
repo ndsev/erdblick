@@ -21,13 +21,16 @@ describe("ViewVisualizationState", () => {
             orientation: 0
         };
 
-        const tileIdsForLevel = new Map<number, bigint[]>();
-        tileIdsForLevel.set(0, [1000n]);
-        tileIdsForLevel.set(1, [2000n]);
-        tileIdsForLevel.set(2, [3000n]);
-        tileIdsForLevel.set(3, [4000n]);
-        tileIdsForLevel.set(4, [5000n]);
-        tileIdsForLevel.set(5, [6000n]);
+        const tileIdsForLevel = new Map<number, number[]>();
+        tileIdsForLevel.set(0, [1000]);
+        tileIdsForLevel.set(1, [2000]);
+        tileIdsForLevel.set(2, [3000]);
+        tileIdsForLevel.set(3, [4000]);
+        tileIdsForLevel.set(4, [5000]);
+        tileIdsForLevel.set(5, [6000]);
+        tileIdsForLevel.set(6, [7000]);
+        tileIdsForLevel.set(7, [8000]);
+        tileIdsForLevel.set(8, [9000]);
         const canonicalTileCountsByLevel = new Map<number, number>([
             [0, 4096],
             [1, 1024],
@@ -102,7 +105,7 @@ describe("ViewVisualizationState", () => {
         };
 
         const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
-            .mockReturnValue([1000n]);
+            .mockReturnValue([1000]);
         const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
             .mockReturnValue(LOW_FI_LOD4_TILE_COUNT_THRESHOLD);
 
@@ -113,7 +116,7 @@ describe("ViewVisualizationState", () => {
             getNumTileIdsForCanonicalCameraSpy.mockRestore();
         }
 
-        expect(state.getTileRenderPolicy(1000n)).toEqual({
+        expect(state.getTileRenderPolicy(1000)).toEqual({
             targetFidelity: "low",
             maxLowFiLod: LOW_FI_MAX_LOD
         });

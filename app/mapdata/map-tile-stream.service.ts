@@ -66,11 +66,11 @@ interface SearchResultEntryExtractionContext {
     refresh: number;
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
-    sourceTileId: bigint;
+    sourceTileId: number;
     requestOrder: number;
     resultCount: number;
     resultFields: string[];
@@ -593,7 +593,7 @@ export class MapTileStreamService {
                 remoteRequest: {
                     mapId: mapId,
                     layerId: layerId,
-                    tileIds: [Number(tileId)],
+                    tileIds: [tileId],
                 },
                 tileKey: canonicalTileKey,
                 resolveWhenInspectionComplete: requireAllStages,
@@ -717,7 +717,7 @@ export class MapTileStreamService {
                 }
 
                 if (!tile.has(resolvedFeatureId)) {
-                    const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0n];
+                    const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0];
                     this.showErrorMessage(
                         `The feature ${id.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
                     continue;
@@ -747,7 +747,7 @@ export class MapTileStreamService {
             }
             if (!tile.has(resolvedFeatureId)) {
                 const parsedTileKey = this.parseMapTileKeySafe(id?.mapTileKey || "");
-                const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0n];
+                const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0];
                 this.showErrorMessage(
                     `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
                 continue;
@@ -766,7 +766,7 @@ export class MapTileStreamService {
             id: string;
             mapName: string;
             layerName: string;
-            tileId: bigint;
+            tileId: number;
             stage?: number;
         };
         const tileStage = Number.isInteger(mapTileMetadata.stage) ? Number(mapTileMetadata.stage) : 0;
@@ -820,7 +820,7 @@ export class MapTileStreamService {
             const refresh = Number(rawInfo["refresh"] ?? 0);
             const resultFieldsValue = searchResultLayer.resultFields();
             const resultFields = Array.isArray(resultFieldsValue) ? resultFieldsValue.map(String) : [];
-            const tileId = this.bigIntFromUnknown(searchResultLayer.tileId());
+            const tileId = this.tileIdFromUnknown(searchResultLayer.tileId());
             const sourceMapId = typeof rawInfo["sourceMapId"] === "string"
                 ? rawInfo["sourceMapId"]
                 : searchResultLayer.mapId();
@@ -828,7 +828,7 @@ export class MapTileStreamService {
                 ? rawInfo["sourceLayerId"]
                 : searchResultLayer.layerId();
             const sourceTileId = rawInfo["sourceTileId"] !== undefined
-                ? this.bigIntFromUnknown(rawInfo["sourceTileId"], tileId)
+                ? this.tileIdFromUnknown(rawInfo["sourceTileId"], tileId)
                 : tileId;
             const sourceTileKey = coreLib.getTileFeatureLayerKey(sourceMapId, sourceLayerId, sourceTileId);
             const normalizedRefresh = Number.isFinite(refresh) ? refresh : 0;
@@ -1030,7 +1030,7 @@ export class MapTileStreamService {
             nextMissingStage: number,
             priority = false
         ) => {
-            const tileLevel = Math.trunc(tileId % 0x10000);
+            const tileLevel = Number(coreLib.getTileLevel(tileId));
             const key = `${mapId}/${layerId}/${tileLevel}`;
             let entry = requestByLayer.get(key);
             if (!entry) {
@@ -1094,7 +1094,7 @@ export class MapTileStreamService {
                 this.ensureTilePlaceholder(
                     selectionMapId,
                     selectionLayerId,
-                    BigInt(tileId),
+                    tileId,
                     true);
                 const selectionStageCount = this.mapInfo.getLayerStageCount(
                     selectionMapId,
@@ -1110,7 +1110,7 @@ export class MapTileStreamService {
                 const nextMissingStage = this.tileMinimumMissingStage(
                     selectionMapId,
                     selectionLayerId,
-                    BigInt(tileId),
+                    tileId,
                     selectionRequestedMaxStage);
                 if (nextMissingStage !== undefined) {
                     queueTile(
@@ -1151,10 +1151,10 @@ export class MapTileStreamService {
                         }
                         const stageCount = this.mapInfo.getLayerStageCount(mapName, layer.id);
                         const layerMaxStage = Math.max(0, stageCount - 1);
-                        trackRequestedTile(mapName, layer.id, Number(tileId), layerMaxStage);
+                        trackRequestedTile(mapName, layer.id, tileId, layerMaxStage);
                         const nextMissingStage = this.tileMinimumMissingStage(mapName, layer.id, tileId, layerMaxStage);
                         if (nextMissingStage !== undefined) {
-                            queueTile(mapName, layer.id, Number(tileId), nextMissingStage, isSelectedTile);
+                            queueTile(mapName, layer.id, tileId, nextMissingStage, isSelectedTile);
                         }
                     }
                 }
@@ -1244,7 +1244,7 @@ export class MapTileStreamService {
 
             for (const [tileId, requestedMaxStage] of entry.tileIdToRequestedMaxStage.entries()) {
                 const clampedMaxStage = Math.max(0, Math.min(layerStageCount - 1, Math.floor(requestedMaxStage)));
-                const tileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, BigInt(tileId));
+                const tileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, tileId);
                 const existingMaxStage = layerState.tileMaxRequestedStageByKey.get(tileKey) ?? -1;
                 if (clampedMaxStage > existingMaxStage) {
                     layerState.tileMaxRequestedStageByKey.set(tileKey, clampedMaxStage);
@@ -1400,43 +1400,42 @@ export class MapTileStreamService {
     }
 
     /** Parses tile keys defensively, including a fallback for older slash-separated forms. */
-    parseMapTileKeySafe(tileKey: string): [string, string, bigint] | null {
+    parseMapTileKeySafe(tileKey: string): [string, string, number] | null {
         try {
             const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
-            return [mapId, layerId, this.bigIntFromUnknown(tileId)];
+            return [mapId, layerId, this.tileIdFromUnknown(tileId)];
         } catch (_error) {
             const parts = tileKey.split('/');
             if (parts.length < 3) {
                 return null;
             }
             try {
-                return [parts[0], parts[1], BigInt(parts[2])];
+                return [parts[0], parts[1], this.tileIdFromUnknown(parts[2])];
             } catch (_parseError) {
                 return null;
             }
         }
     }
 
-    /** Converts embind-returned ids to bigint without assuming one fixed JS representation. */
-    private bigIntFromUnknown(value: unknown, fallback: bigint = 0n): bigint {
+    /** Converts embind-returned ids to signed int32 numbers without assuming one fixed JS representation. */
+    private tileIdFromUnknown(value: unknown, fallback = 0): number {
         if (typeof value === "bigint") {
-            return value;
+            return Number(value);
         }
         if (typeof value === "number" && Number.isFinite(value)) {
-            return BigInt(Math.trunc(value));
+            return Math.trunc(value);
         }
         if (typeof value === "string" && value.length > 0) {
-            try {
-                return BigInt(value);
-            } catch (_error) {
-                return fallback;
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) {
+                return Math.trunc(parsed);
             }
         }
         return fallback;
     }
 
     /** Ensures a placeholder `FeatureTile` exists so selection and progress logic can reference missing tiles. */
-    private ensureTilePlaceholder(mapId: string, layerId: string, tileId: bigint, preventCulling: boolean): boolean {
+    private ensureTilePlaceholder(mapId: string, layerId: string, tileId: number, preventCulling: boolean): boolean {
         const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
         const existing = this.loadedTileLayers.get(tileKey);
         if (existing) {
@@ -1459,13 +1458,13 @@ export class MapTileStreamService {
     }
 
     /** Pins a tile until inspection has seen every advertised stage, without exposing a caller-visible promise. */
-    private pinTileForSelectionInspection(mapId: string, layerId: string, tileId: bigint, canonicalTileKey: string): void {
+    private pinTileForSelectionInspection(mapId: string, layerId: string, tileId: number, canonicalTileKey: string): void {
         if (this.selectionTileRequests.some(request => request.tileKey === canonicalTileKey)) {
             return;
         }
 
         this.selectionTileRequests.push({
-            remoteRequest: {mapId, layerId, tileIds: [Number(tileId)]},
+            remoteRequest: {mapId, layerId, tileIds: [tileId]},
             tileKey: canonicalTileKey,
             resolveWhenInspectionComplete: true,
             resolve: () => {},
@@ -1505,7 +1504,7 @@ export class MapTileStreamService {
     private tileMinimumMissingStage(
         mapId: string,
         layerId: string,
-        tileId: bigint,
+        tileId: number,
         requestedMaxStage?: number
     ): number | undefined {
         const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
@@ -1589,7 +1588,7 @@ export class MapTileStreamService {
         visibleLayerTiles: Map<string, SearchLayerTileSet>,
         mapId: string,
         layerId: string,
-        tileId: bigint,
+        tileId: number,
         requestOrder: number,
         priority: boolean
     ): void {
@@ -1599,13 +1598,12 @@ export class MapTileStreamService {
             entry = {mapId, layerId, tiles: new Map<number, {tileId: number; requestOrder: number; priority: boolean}>()};
             visibleLayerTiles.set(key, entry);
         }
-        const numericTileId = Number(tileId);
-        const existing = entry.tiles.get(numericTileId);
+        const existing = entry.tiles.get(tileId);
         if (existing) {
             existing.priority = existing.priority || priority;
             return;
         }
-        entry.tiles.set(numericTileId, {tileId: numericTileId, requestOrder, priority});
+        entry.tiles.set(tileId, {tileId, requestOrder, priority});
     }
 
     /** Emits removal/eviction notifications for search-result tiles no longer owned by a runtime. */

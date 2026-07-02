@@ -34,9 +34,31 @@ import {
     LocationSearchService,
     normalizeLocationSearchPayload
 } from "./location.search.service";
+import {
+    packedTileIdFromMortonString,
+    packedTileIdFromParsedNdsCoordinates,
+    parseMortonCoordinateString,
+    parseNdsCoordinateString,
+    parsePackedTileId as parsePackedTileIdValue
+} from "../coords/nds-coordinate.util";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
+}
+
+interface ParsedCoordinateJump {
+    target: Rectangle | number[];
+    label: string;
+    coords: number[];
+    x?: number;
+    y?: number;
+    level?: number;
+}
+
+interface ParsedNdsCoordinateLabel {
+    x: number;
+    y: number;
+    level?: number;
 }
 
 @Component({
@@ -209,23 +231,80 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         const targetsArray: Array<SearchTarget> = [];
         const value = inputValue.trim();
 
-        /////////// Jump to mapget tile id
-        let label = "tileId = ?";
-        const mapgetTileIdValid = this.jumpService.validateMapgetTileId(value);
-        if (mapgetTileIdValid) {
-            label = `tileId = ${value}`;
+        /////////// Jump to packed tile id
+        let label = "packedTileId = ?";
+        const packedTileIdValid = this.jumpService.validatePackedTileId(value);
+        if (packedTileIdValid) {
+            label = `packedTileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
-            id: "j:mapget-tile-id",
+            id: "j:packed-tile-id",
             icon: "pi-table",
             color: "green",
-            name: "Mapget Tile ID",
+            name: "PackedTileId",
             label: label,
-            enabled: mapgetTileIdValid,
-            jump: (value: string) => { return this.parseMapgetTileId(value) },
-            validate: (value: string) => { return this.jumpService.validateMapgetTileId(value) }
+            enabled: packedTileIdValid,
+            jump: (value: string) => { return this.parsePackedTileId(value) },
+            validate: (value: string) => { return this.jumpService.validatePackedTileId(value) }
+        });
+
+        /////////// Jump to NDS x-y
+        label = "x = ? | y = ? | (level = ?)";
+        const ndsXyValid = this.validateNdsCoordinates(value, true);
+        if (ndsXyValid) {
+            label = this.parseNdsCoordinates(value, true)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:nds-x-y",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "NDS X-Y Coordinates",
+            label: label,
+            enabled: ndsXyValid,
+            jump: (value: string) => { return this.parseNdsCoordinates(value, true)?.target },
+            validate: (value: string) => { return this.validateNdsCoordinates(value, true) }
+        });
+
+        /////////// Jump to NDS y-x
+        label = "y = ? | x = ? | (level = ?)";
+        const ndsYxValid = this.validateNdsCoordinates(value, false);
+        if (ndsYxValid) {
+            label = this.parseNdsCoordinates(value, false)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:nds-y-x",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "NDS Y-X Coordinates",
+            label: label,
+            enabled: ndsYxValid,
+            jump: (value: string) => { return this.parseNdsCoordinates(value, false)?.target },
+            validate: (value: string) => { return this.validateNdsCoordinates(value, false) }
+        });
+
+        /////////// Jump to Morton code
+        label = "mortonCode = ? | (level = ?)";
+        const mortonValid = this.validateMortonCoordinates(value);
+        if (mortonValid) {
+            label = this.parseMortonCoordinates(value)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:morton-code",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "Morton Code Coordinates",
+            label: label,
+            enabled: mortonValid,
+            jump: (value: string) => { return this.parseMortonCoordinates(value)?.target },
+            validate: (value: string) => { return this.validateMortonCoordinates(value) }
         });
 
         /////////// Jump to lon-lat
@@ -813,7 +892,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /**
      * Parses decimal or degree-minute-second WGS84 coordinate strings, optionally with a tile level.
      */
-    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): {target: Rectangle | number[], label: string, coords: number[]} | undefined {
+    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): ParsedCoordinateJump | undefined {
         let lon = 0;
         let lat = 0;
         let level = 0;
@@ -898,21 +977,96 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         return undefined;
     }
 
-    /**
-     * Converts a numeric mapget tile id into a WGS84 rectangle for camera jumps.
-     */
-    parseMapgetTileId(value: string): Rectangle | undefined {
+    /** Converts a signed NDS.Live packed tile id into a WGS84 rectangle for camera jumps. */
+    parsePackedTileId(value: string): Rectangle | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
             return;
         }
         try {
-            const wgs84TileId = BigInt(value);
-            return Rectangle.fromDegrees(...coreLib.getTileBox(wgs84TileId));
+            const packedTileId = parsePackedTileIdValue(value);
+            if (!packedTileId) {
+                throw new Error("TileId is not a valid PackedTileId.");
+            }
+            return Rectangle.fromDegrees(...coreLib.getTileBox(packedTileId.value));
         } catch (e) {
-            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+            this.messageService.showError("Possibly malformed PackedTileId: " + (e as Error).message.toString());
         }
         return undefined;
+    }
+
+    /** Parses NDS coordinate pairs into either a point jump or a tile-extent jump when a level is present. */
+    parseNdsCoordinates(value: string, isXyOrder: boolean): ParsedCoordinateJump | undefined {
+        const parsed = parseNdsCoordinateString(value, isXyOrder);
+        if (!parsed) {
+            return undefined;
+        }
+        const label = this.ndsCoordinateLabel(parsed, isXyOrder);
+        if (parsed.level !== undefined) {
+            const tileId = packedTileIdFromParsedNdsCoordinates(parsed);
+            if (tileId === undefined) {
+                return undefined;
+            }
+            return {
+                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                label,
+                coords: [parsed.lat, parsed.lon],
+                x: parsed.x,
+                y: parsed.y,
+                level: parsed.level
+            };
+        }
+        return {
+            target: [parsed.lat, parsed.lon, 0],
+            label,
+            coords: [parsed.lat, parsed.lon],
+            x: parsed.x,
+            y: parsed.y
+        };
+    }
+
+    /** Parses a Morton code into either a point jump or a tile-extent jump when a level is present. */
+    parseMortonCoordinates(value: string): ParsedCoordinateJump | undefined {
+        const parsed = parseMortonCoordinateString(value);
+        if (!parsed) {
+            return undefined;
+        }
+        const label = this.mortonCoordinateLabel(parsed);
+        if (parsed.level !== undefined) {
+            const tileId = packedTileIdFromMortonString(value);
+            if (tileId === undefined) {
+                return undefined;
+            }
+            return {
+                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                label,
+                coords: [parsed.lat, parsed.lon],
+                x: parsed.x,
+                y: parsed.y,
+                level: parsed.level
+            };
+        }
+        return {
+            target: [parsed.lat, parsed.lon, 0],
+            label,
+            coords: [parsed.lat, parsed.lon],
+            x: parsed.x,
+            y: parsed.y
+        };
+    }
+
+    /** Builds the search-action label for parsed NDS coordinate input. */
+    private ndsCoordinateLabel(parsed: ParsedNdsCoordinateLabel, isXyOrder: boolean): string {
+        const ordered = isXyOrder
+            ? `x = ${parsed.x} | y = ${parsed.y}`
+            : `y = ${parsed.y} | x = ${parsed.x}`;
+        return parsed.level === undefined ? ordered : `${ordered} | level = ${parsed.level}`;
+    }
+
+    /** Builds the search-action label for parsed Morton-code input. */
+    private mortonCoordinateLabel(parsed: ParsedNdsCoordinateLabel): string {
+        const base = `x = ${parsed.x} | y = ${parsed.y}`;
+        return parsed.level === undefined ? base : `${base} | level = ${parsed.level}`;
     }
 
     /**
@@ -1015,6 +1169,16 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             return result.coords[0] >= -90 && result.coords[0] <= 90 && result.coords[1] >= -180 && result.coords[1] <= 180;
         }
         return false;
+    }
+
+    /** Validates integer NDS coordinate input accepted by the built-in NDS jump targets. */
+    validateNdsCoordinates(value: string, isXyOrder: boolean) {
+        return this.parseNdsCoordinates(value, isXyOrder) !== undefined;
+    }
+
+    /** Validates Morton-code input accepted by the built-in Morton jump target. */
+    validateMortonCoordinates(value: string) {
+        return this.parseMortonCoordinates(value) !== undefined;
     }
 
     /**

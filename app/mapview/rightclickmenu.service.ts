@@ -12,7 +12,7 @@ import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
-    id: bigint | string,
+    id: number | string,
     name: string,
     disabled?: boolean
     tileLevel?: number;
@@ -52,7 +52,7 @@ export interface TileDiagnosticsMenuOption {
 export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
-    preferredTileIdForSourceData: bigint | null = null;
+    preferredTileIdForSourceData: number | null = null;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     closeContextMenus: Subject<void> = new Subject<void>();
@@ -61,7 +61,7 @@ export class RightClickMenuService {
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
     private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
-    private sourceDataShortcut: {tileId: bigint, mapId: string, layerId: string} | null = null;
+    private sourceDataShortcut: {tileId: number, mapId: string, layerId: string} | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
@@ -77,7 +77,7 @@ export class RightClickMenuService {
                 const tileId = this.preferredSourceDataTile(tileIds);
                 if (tileId) {
                     this.sourceDataShortcut = {
-                        tileId: tileId.id as bigint,
+                        tileId: Number(tileId.id),
                         mapId: lastOption.mapId,
                         layerId: lastOption.layerId
                     };
@@ -133,7 +133,7 @@ export class RightClickMenuService {
 
         const lastOption = this.lastInspectedTileSourceDataOption.getValue();
         if (lastOption) {
-            const level = coreLib.getTileLevel(BigInt(lastOption.tileId));
+            const level = coreLib.getTileLevel(lastOption.tileId);
             const matchingTile = tileIds.find(tileId => tileId.tileLevel === level && !tileId.disabled);
             if (matchingTile) {
                 return matchingTile;
@@ -150,7 +150,7 @@ export class RightClickMenuService {
     }
 
     /** Publishes a temporary outline rectangle for a tile id, mainly for source-data picking. */
-    outlineTile(tileId: bigint, color: Color = Color.HOTPINK) {
+    outlineTile(tileId: number, color: Color = Color.HOTPINK) {
         const tileBox = coreLib.getTileBox(tileId);
         this.tileOutline.next({
             rectangle: {
@@ -202,7 +202,7 @@ export class RightClickMenuService {
     }
 
     /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
-    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}): MenuItem {
+    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: number, mapId: string, layerId: string}): MenuItem {
         return {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',

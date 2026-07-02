@@ -1,4 +1,5 @@
 #include "aabb.h"
+#include "mapget/model/point.h"
 #include "glm/ext.hpp"
 
 
@@ -42,7 +43,9 @@ Wgs84AABB::Wgs84AABB(const Wgs84Point& sw, glm::dvec2 size) : sw_(sw.x, sw.y), s
 }
 
 Wgs84AABB::Wgs84AABB(const TileId& tileId)
-    : Wgs84AABB(tileId.sw(), glm::abs(vec(tileId.sw()) - vec(tileId.ne())))
+    : Wgs84AABB(mapget::Point(tileId.southWestWgs84()),
+          glm::abs(vec(mapget::Point(tileId.southWestWgs84())) -
+                   vec(mapget::Point(tileId.northEastWgs84()))))
 {
 }
 
@@ -197,7 +200,7 @@ TilePriorityFn Wgs84AABB::radialDistancePrioFn(glm::vec2 const& camPos, float or
 {
     return [camPos, orientation](TileId const& tid)
     {
-        auto center = tid.center();
+        auto center = mapget::Point(tid.centerWgs84());
         float xDiff = static_cast<float>(center.x) - camPos.x;
         float yDiff = static_cast<float>(center.y) - camPos.y;
         auto angle = glm::atan(yDiff, xDiff);  // Angle to east (x axis) direction. glm::atan is atan2.

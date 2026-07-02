@@ -604,7 +604,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
         const outlinedTile = this.menuService.preferredSourceDataTile(tileIds);
         if (outlinedTile) {
-            this.menuService.outlineTile(BigInt(outlinedTile.id));
+            this.menuService.outlineTile(Number(outlinedTile.id));
         } else {
             this.menuService.tileOutline.next(null);
         }
@@ -622,7 +622,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
 
             const level = this.mapViewState.getEffectiveMapLayerLevel(viewIndex, layer.mapId, layer.id);
-            const tileId = BigInt(coreLib.getTileIdFromPosition(lon, lat, level));
+            const tileId = coreLib.getTileIdFromPosition(lon, lat, level);
             if (!this.mapViewState.showsFeatureTileInView(viewIndex, layer.mapId, layer.id, tileId)) {
                 continue;
             }
@@ -668,21 +668,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private preferredPickedTileId(
         screenPos: {x: number; y: number},
         tileIds: SourceDataDropdownOption[]
-    ): bigint | null {
+    ): number | null {
         if (!this.mapView) {
             return null;
         }
         const availableTileIds = new Set(
             tileIds
                 .filter(tileId => !tileId.disabled)
-                .map(tileId => tileId.id as bigint)
+                .map(tileId => Number(tileId.id))
         );
-        let bestTileId: bigint | null = null;
+        let bestTileId: number | null = null;
         for (const featureId of this.mapView.pickFeature(screenPos)) {
             if (!featureId) {
                 continue;
             }
-            const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, bigint];
+            const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, number];
             if (!availableTileIds.has(tileId)) {
                 continue;
             }
@@ -694,12 +694,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Falls back to the deepest source-data tile whose level matches currently visible feature data. */
-    private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): bigint | null {
+    private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): number | null {
         const visibleLevels = this.mapViewState.visibleFeatureLevelsInView(this.viewIndex());
         const preferredTile = [...tileIds]
             .reverse()
             .find(tileId => !tileId.disabled && visibleLevels.has(tileId.tileLevel ?? -1));
-        return preferredTile?.id as bigint | undefined ?? null;
+        return preferredTile === undefined ? null : Number(preferredTile.id);
     }
 
     /** Clears the transient source-data context prepared for the right-click menu. */

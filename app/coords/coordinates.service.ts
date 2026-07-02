@@ -12,8 +12,8 @@ import {AppConfigService} from "../shared/app-config.service";
 export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
-    auxiliaryCoordinatesFun: ((x: number, y: number)=>any) | null = null;
-    auxiliaryTileIdsFun: ((x: number, y: number, level: number)=>any) | null = null;
+    auxiliaryCoordinatesFun: ((x: number, y: number) => Array<[string, Array<number>]>) | null = null;
+    auxiliaryTileIdsFun: ((x: number, y: number, level: number) => Array<[string, bigint | number]>) | null = null;
 
     constructor(public stateService: AppStateService,
                 private configService: AppConfigService) {
@@ -38,16 +38,12 @@ export class CoordinatesService {
 
         const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
         this.loadJumpTargetsModule(jumpTargetsPath).then((plugin) => {
-            const { getAuxCoordinates, getAuxTileIds } = plugin;
-            if (getAuxCoordinates) {
+            const {getAuxCoordinates, getAuxTileIds} = plugin;
+            if (typeof getAuxCoordinates === "function") {
                 this.auxiliaryCoordinatesFun = getAuxCoordinates;
-            } else {
-                console.error('Function getAuxCoordinates not found in the plugin.');
             }
-            if (getAuxTileIds) {
+            if (typeof getAuxTileIds === "function") {
                 this.auxiliaryTileIdsFun = getAuxTileIds;
-            } else {
-                console.error('Function getAuxTileIds not found in the plugin.');
             }
         }).catch((error) => {
                 console.error(error);

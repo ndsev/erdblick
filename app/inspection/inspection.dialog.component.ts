@@ -153,7 +153,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (panel.sourceData !== undefined) {
             const selection = panel.sourceData!;
             const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
-            this.isMetadata = tileId === 0n;
+            this.isMetadata = tileId === 0;
             this.title = this.isMetadata ? `${mapId}:` : `${tileId}.`;
             const map = this.mapService.maps.maps.get(mapId);
             if (map) {

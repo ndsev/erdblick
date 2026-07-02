@@ -448,7 +448,7 @@ export class MapPanelComponent {
                                 label: layer.name,
                                 command: () => {
                                     this.stateService.setSelection({
-                                        mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0n)
+                                        mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0)
                                     } as SelectedSourceData);
                                 }
                             }))
@@ -640,8 +640,8 @@ export class MapPanelComponent {
         event.stopPropagation();
         let tileIds = coverages.map(coverage => {
             return coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max") ?
-                [BigInt((coverage as CoverageRectItem).min), BigInt((coverage as CoverageRectItem).max)] :
-                [BigInt(coverage as number)]
+                [Number((coverage as CoverageRectItem).min), Number((coverage as CoverageRectItem).max)] :
+                [Number(coverage as number)]
         }).flat();
         let targetRect: Rectangle | null = null;
         for (const tileId of tileIds) {

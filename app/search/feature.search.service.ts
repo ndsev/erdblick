@@ -66,7 +66,7 @@ export interface FeatureSearchResultEntry {
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
-    sourceTileId: bigint;
+    sourceTileId: number;
     hoverFeatureId: string;
     attributeIndex?: number;
     validityIndex?: number;
@@ -135,7 +135,7 @@ interface SearchResultTileContribution {
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
-    sourceTileId: bigint;
+    sourceTileId: number;
     requestOrder: number;
     resultCount: number;
     resultFields: string[];
@@ -2832,7 +2832,7 @@ export class FeatureSearchService {
         sourceTileKey: string,
         sourceMapId: string,
         sourceLayerId: string,
-        sourceTileId: bigint,
+        sourceTileId: number,
         mapId: string,
         layerId: string,
         mapTileKey: string,

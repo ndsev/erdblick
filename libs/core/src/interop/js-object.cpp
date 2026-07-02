@@ -1,4 +1,5 @@
 #include "interop/js-object.h"
+#include "fmt/core.h"
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>

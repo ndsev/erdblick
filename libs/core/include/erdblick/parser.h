@@ -58,7 +58,7 @@ public:
         std::string nodeId;
         std::string mapName;
         std::string layerName;
-        uint64_t tileId;
+        int32_t tileId;
         uint32_t stage;
         std::string legalInfo;
         std::string error;

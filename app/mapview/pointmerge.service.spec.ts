@@ -18,7 +18,7 @@ class DeckStub implements DeckLike {
 
 describe('MergedPointsTile', () => {
     it('adds new points and merges feature IDs, updating parameters only when new IDs are added', () => {
-        const tile = new MergedPointsTile(1n, '0:map:layer:style:1');
+        const tile = new MergedPointsTile(1, '0:map:layer:style:1');
         const hash = 'pos-hash';
 
         const point1 = {
@@ -55,7 +55,7 @@ describe('MergedPointsTile', () => {
     });
 
     it('renders and removes merged points through deck scene handles', () => {
-        const tile = new MergedPointsTile(1n, '0:map:layer:style:0:7');
+        const tile = new MergedPointsTile(1, '0:map:layer:style:0:7');
         tile.add({
             position: {x: 8, y: 49, z: 0},
             positionHash: 'deck-pos',
@@ -118,7 +118,7 @@ describe('PointMergeService', () => {
             featureAddresses: [1],
         } as any;
 
-        const sourceTileId = 5n;
+        const sourceTileId = 5;
         const yielded = Array.from(service.insert([point], sourceTileId, 'k', ruleId));
 
         const styleMap = service.mergedPointsTiles.get(ruleId)!;
@@ -139,8 +139,8 @@ describe('PointMergeService', () => {
     it('removes source tile feature contributions from surviving corner tiles', () => {
         const service = new PointMergeService();
         const ruleId = '0:map:layer:style:1';
-        const tile = new MergedPointsTile(1n, ruleId);
-        tile.referencingTiles = [10n, 20n];
+        const tile = new MergedPointsTile(1, ruleId);
+        tile.referencingTiles = [10, 20];
         tile.features.set('h', {
             position: {x: 0, y: 0, z: 0},
             positionHash: 'h',
@@ -150,13 +150,13 @@ describe('PointMergeService', () => {
             featureTileKeys: ['tile-a', 'tile-b']
         } as any);
 
-        service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
-            [1n, tile]
+        service.mergedPointsTiles.set(ruleId, new Map<number, MergedPointsTile>([
+            [1, tile]
         ]));
 
-        const touched = Array.from(service.remove(10n, 'tile-a', '0:map'));
+        const touched = Array.from(service.remove(10, 'tile-a', '0:map'));
         expect(touched).toEqual([tile]);
-        expect(tile.referencingTiles).toEqual([20n]);
+        expect(tile.referencingTiles).toEqual([20]);
         expect(tile.features.get('h')?.featureAddresses).toEqual([22]);
         expect(tile.features.get('h')?.featureTileKeys).toEqual(['tile-b']);
     });
@@ -164,7 +164,7 @@ describe('PointMergeService', () => {
     it('captures merge-count snapshot for surrounding corner tiles', () => {
         const service = new PointMergeService();
         const ruleId = '0:map:layer:style:0:7';
-        const sourceTileId = 5n;
+        const sourceTileId = 5;
         const cornerTile = new MergedPointsTile(sourceTileId, ruleId);
         cornerTile.features.set('h', {
             position: {x: 0, y: 0, z: 0},
@@ -174,7 +174,7 @@ describe('PointMergeService', () => {
             featureAddresses: [11, 22]
         } as any);
 
-        service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
+        service.mergedPointsTiles.set(ruleId, new Map<number, MergedPointsTile>([
             [sourceTileId, cornerTile]
         ]));
 
@@ -185,7 +185,7 @@ describe('PointMergeService', () => {
     it('excludes the current source tile from merge-count snapshot and direct counts', () => {
         const service = new PointMergeService();
         const ruleId = '0:map:layer:style:0:7';
-        const sourceTileId = 5n;
+        const sourceTileId = 5;
         const cornerTile = new MergedPointsTile(sourceTileId, ruleId);
         cornerTile.features.set('h', {
             position: {x: 0, y: 0, z: 0},
@@ -196,7 +196,7 @@ describe('PointMergeService', () => {
             featureTileKeys: ['tile-a', 'tile-b']
         } as any);
 
-        service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
+        service.mergedPointsTiles.set(ruleId, new Map<number, MergedPointsTile>([
             [sourceTileId, cornerTile]
         ]));
 
@@ -214,21 +214,21 @@ describe('PointMergeService', () => {
         const service = new PointMergeService();
         const ruleId = '0:map:layer:style:1';
 
-        const tileA = new MergedPointsTile(1n, ruleId);
-        tileA.referencingTiles = [10n];
-        const tileB = new MergedPointsTile(2n, ruleId);
-        tileB.referencingTiles = [10n, 20n];
+        const tileA = new MergedPointsTile(1, ruleId);
+        tileA.referencingTiles = [10];
+        const tileB = new MergedPointsTile(2, ruleId);
+        tileB.referencingTiles = [10, 20];
 
-        service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
-            [1n, tileA],
-            [2n, tileB],
+        service.mergedPointsTiles.set(ruleId, new Map<number, MergedPointsTile>([
+            [1, tileA],
+            [2, tileB],
         ]));
 
-        const removed = Array.from(service.remove(10n, 'tile-key', '0:map'));
+        const removed = Array.from(service.remove(10, 'tile-key', '0:map'));
         expect(removed).toEqual([tileA, tileB]);
         const remainingMap = service.mergedPointsTiles.get(ruleId)!;
-        expect(remainingMap.has(1n)).toBe(false);
-        expect(remainingMap.get(2n)!.referencingTiles).toEqual([20n]);
+        expect(remainingMap.has(1)).toBe(false);
+        expect(remainingMap.get(2)!.referencingTiles).toEqual([20]);
     });
 
     it('clear yields and removes all tiles whose style-rule ID matches the prefix', () => {
@@ -237,16 +237,16 @@ describe('PointMergeService', () => {
         const ruleA = '0:map:layer:style:1';
         const ruleB = '1:other:layer:style:1';
 
-        const tile1 = new MergedPointsTile(1n, ruleA);
-        const tile2 = new MergedPointsTile(2n, ruleA);
-        const tileOther = new MergedPointsTile(3n, ruleB);
+        const tile1 = new MergedPointsTile(1, ruleA);
+        const tile2 = new MergedPointsTile(2, ruleA);
+        const tileOther = new MergedPointsTile(3, ruleB);
 
-        service.mergedPointsTiles.set(ruleA, new Map<bigint, MergedPointsTile>([
-            [1n, tile1],
-            [2n, tile2],
+        service.mergedPointsTiles.set(ruleA, new Map<number, MergedPointsTile>([
+            [1, tile1],
+            [2, tile2],
         ]));
-        service.mergedPointsTiles.set(ruleB, new Map<bigint, MergedPointsTile>([
-            [3n, tileOther],
+        service.mergedPointsTiles.set(ruleB, new Map<number, MergedPointsTile>([
+            [3, tileOther],
         ]));
 
         const cleared = Array.from(service.clear('0:map'));

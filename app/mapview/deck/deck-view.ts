@@ -1919,7 +1919,7 @@ export abstract class DeckMapView implements IRenderView {
     /** Returns whether this search wants high-fidelity overlay state for the supplied source tile. */
     private prefersHighFidelityForSearchResultOverlay(
         searchLayer: FeatureSearchOverlayLayer,
-        tileId: bigint
+        tileId: number
     ): boolean {
         const strategy = searchLayer.renderStrategy;
         const hasHighFidelityVisualization = strategy.showHighFiResultDots
@@ -2183,7 +2183,7 @@ export abstract class DeckMapView implements IRenderView {
             }
 
             const pixels = new Uint8ClampedArray(extent.width * extent.height * 4);
-            const visibleTileIds = coreLib.getTileIds(viewport, level, tileLimitPerView) as bigint[];
+            const visibleTileIds = coreLib.getTileIds(viewport, level, tileLimitPerView) as number[];
             for (const tileId of visibleTileIds) {
                 const stateKind = this.tileStateKindForTile(tileId, visibleLayers);
                 if (stateKind === 0) {
@@ -2309,7 +2309,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Classifies one tile cell as error, empty, or uncolored across every visible layer at that level. */
-    private tileStateKindForTile(tileId: bigint, visibleLayers: VisibleLayerRef[]): number {
+    private tileStateKindForTile(tileId: number, visibleLayers: VisibleLayerRef[]): number {
         let hasParticipant = false;
         let hasPendingParticipant = false;
         let hasEmptyParticipant = false;
@@ -2346,7 +2346,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Converts a tile id to its raster-cell coordinates inside the current tile-grid extent. */
-    private tileGridCellForTile(tileId: bigint, extent: TileGridLevelExtent): {col: number; row: number} | null {
+    private tileGridCellForTile(tileId: number, extent: TileGridLevelExtent): {col: number; row: number} | null {
         const tileBox = coreLib.getTileBox(tileId) as unknown;
         if (!Array.isArray(tileBox) || tileBox.length < 4) {
             return null;

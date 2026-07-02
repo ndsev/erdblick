@@ -39,7 +39,7 @@ export interface RenderableTileLayer {
     nodeId: string;
     mapName: string;
     layerName: string;
-    tileId: bigint;
+    tileId: number;
     dataVersion: number;
     disposed: boolean;
     stats: Map<string, number[]>;
