@@ -102,6 +102,10 @@ import {AppConfigService} from "../shared/app-config.service";
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
+    private static readonly WEBGL_SETUP_HINT =
+        "Ensure WebGL2 is available and browser hardware acceleration is enabled. " +
+        "If hardware acceleration is unavailable, switch the browser to a supported software WebGL renderer " +
+        "(this is controlled by the browser). Reload the page afterwards.";
     protected readonly isSyncOptionSelected = (code: string) => this.stateService.viewSync.includes(code);
 
     subscriptions: Subscription[] = [];
@@ -329,7 +333,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             console.error('Failed to initialize viewer:', error);
             const detail = error instanceof Error ? error.message : String(error);
             const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
-            this.viewerInitError = `${summary} Check that WebGL2 and browser hardware acceleration are enabled, then reload the page.`;
+            this.viewerInitError = `${summary} ${MapViewComponent.WEBGL_SETUP_HINT}`;
         }).finally(() => {
             // Hide the global loading spinner
             const spinner = document.getElementById('global-spinner-container');
