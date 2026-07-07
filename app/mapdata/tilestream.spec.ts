@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
     MAP_TILE_STREAM_HEADER_SIZE,
     MAP_TILE_STREAM_PROTOCOL_MAJOR,
@@ -56,6 +56,84 @@ describe('MapTileStreamClient', () => {
             const url = new URL(tileStream.resolvePullUrl(7));
             expect(url.pathname).toBe('/interactive/payload');
             expect(url.searchParams.get('clientId')).toBe('7');
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('falls back from /interactive to /tiles when the websocket fails before opening', async () => {
+        const originalWebSocket = globalThis.WebSocket;
+        const openedUrls: string[] = [];
+
+        class MockWebSocket {
+            static readonly CONNECTING = 0;
+            static readonly OPEN = 1;
+            static readonly CLOSING = 2;
+            static readonly CLOSED = 3;
+            readyState = MockWebSocket.CONNECTING;
+            binaryType = "";
+            onopen: ((event: Event) => void) | null = null;
+            onerror: ((event: Event) => void) | null = null;
+            onclose: ((event: CloseEvent) => void) | null = null;
+            onmessage: ((event: MessageEvent) => void) | null = null;
+            send = vi.fn();
+
+            constructor(url: string) {
+                openedUrls.push(url);
+                queueMicrotask(() => {
+                    if (new URL(url).pathname === "/interactive") {
+                        this.onerror?.(new Event("error"));
+                        return;
+                    }
+                    this.readyState = MockWebSocket.OPEN;
+                    this.onopen?.(new Event("open"));
+                });
+            }
+
+            close() {
+                this.readyState = MockWebSocket.CLOSED;
+            }
+        }
+
+        globalThis.WebSocket = MockWebSocket as any;
+        const client = new MapTileStreamClient('/interactive');
+        try {
+            await client.connect();
+
+            expect(openedUrls.map(url => new URL(url).pathname)).toEqual([
+                "/interactive",
+                "/tiles"
+            ]);
+            expect(client.isOpen()).toBe(true);
+            expect(client.getDebugState()).toMatchObject({
+                activeWebSocketPath: "/tiles",
+                activePullPath: "/tiles/next",
+                usingLegacyWebSocketFallback: true,
+                usingLegacyPullFallback: true
+            });
+        } finally {
+            client.destroy();
+            globalThis.WebSocket = originalWebSocket;
+        }
+    });
+
+    it('falls back from /interactive/payload to /tiles/next when the payload route is missing', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            expect(new URL(tileStream.resolvePullUrl(7)).pathname).toBe('/interactive/payload');
+
+            expect(tileStream.activateLegacyPullFallbackForStatus(404)).toBe(true);
+
+            const url = new URL(tileStream.resolvePullUrl(7));
+            expect(url.pathname).toBe('/tiles/next');
+            expect(url.searchParams.get('clientId')).toBe('7');
+            expect(client.getDebugState()).toMatchObject({
+                activeWebSocketPath: "/interactive",
+                activePullPath: "/tiles/next",
+                usingLegacyWebSocketFallback: false,
+                usingLegacyPullFallback: true
+            });
         } finally {
             client.destroy();
         }

@@ -125,6 +125,10 @@ export interface MapTileStreamProtocolMismatch {
 export interface MapTileStreamDebugState {
     isOpen: boolean;
     awaitingCompletion: boolean;
+    activeWebSocketPath: string;
+    activePullPath: string;
+    usingLegacyWebSocketFallback: boolean;
+    usingLegacyPullFallback: boolean;
     latestRequestedRequestId: number | null;
     incomingRequestId: number | null;
     supportsRequestContextFrames: boolean;
@@ -187,6 +191,9 @@ export class MapTileStreamClient {
     private knownCompressedBytes: number = 0;
     private knownCompressedUncompressedBytes: number = 0;
     private responsesWithKnownCompressedBytes: number = 0;
+    private activeStreamPath: string;
+    private usingLegacyWebSocketFallback: boolean = false;
+    private usingLegacyPullFallback: boolean = false;
     private readonly ownsParser: boolean;
     private protocolMismatchReported: boolean = false;
 
@@ -205,6 +212,7 @@ export class MapTileStreamClient {
 
     /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
     constructor(private path: string = "/interactive", parser?: TileLayerParser) {
+        this.activeStreamPath = path;
         this.ownsParser = !parser;
         this.parser = parser ?? new coreLib.TileLayerParser();
     }
@@ -428,6 +436,10 @@ export class MapTileStreamClient {
         return {
             isOpen: this.isOpen(),
             awaitingCompletion: this.awaitingCompletion,
+            activeWebSocketPath: this.debugPath(this.activeStreamPath),
+            activePullPath: this.debugPath(this.resolvePullPath()),
+            usingLegacyWebSocketFallback: this.usingLegacyWebSocketFallback,
+            usingLegacyPullFallback: this.usingLegacyPullFallback,
             latestRequestedRequestId: this.latestRequestedRequestId,
             incomingRequestId: this.incomingRequestId,
             supportsRequestContextFrames: this.supportsRequestContextFrames,
@@ -623,18 +635,73 @@ export class MapTileStreamClient {
         if (this.socket?.readyState === WebSocket.OPEN) {
             return;
         }
-        if (this.socket?.readyState === WebSocket.CONNECTING && this.connecting) {
+        if (this.connecting) {
             return this.connecting;
         }
 
-        this.connecting = new Promise((resolve, reject) => {
-            const url = this.resolveUrl();
-            const socket = new WebSocket(url);
+        const attempt = this.connectWithEndpointFallback();
+        this.connecting = attempt;
+        try {
+            await attempt;
+        } finally {
+            if (this.connecting === attempt) {
+                this.connecting = null;
+            }
+        }
+    }
+
+    /** Attempts the configured websocket endpoint first, then legacy `/tiles` for stale proxy setups. */
+    private async connectWithEndpointFallback(): Promise<void> {
+        const candidates = this.streamEndpointCandidates();
+        let lastError: Event | CloseEvent | unknown = undefined;
+        for (let index = 0; index < candidates.length; ++index) {
+            const candidate = candidates[index];
+            try {
+                await this.openSocket(candidate);
+                this.activeStreamPath = candidate;
+                this.usingLegacyWebSocketFallback = index > 0;
+                this.usingLegacyPullFallback = index > 0;
+                if (index > 0) {
+                    console.warn(`Fell back to legacy mapget tile stream endpoint ${this.debugPath(candidate)}.`);
+                }
+                return;
+            } catch (error) {
+                lastError = error;
+                if (index === 0 && candidates.length > 1) {
+                    console.warn(
+                        `Mapget tile stream endpoint ${this.debugPath(candidate)} failed before opening; trying ${this.debugPath(candidates[1])}.`);
+                }
+            }
+        }
+        this.reportConnectionFailure(lastError);
+        throw lastError;
+    }
+
+    /** Opens one websocket endpoint and resolves only after the connection is usable. */
+    private openSocket(path: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const socket = new WebSocket(this.resolveUrl(path));
+            let opened = false;
+            let rejected = false;
             socket.binaryType = "arraybuffer";
             this.socket = socket;
 
+            const rejectBeforeOpen = (event: Event | CloseEvent) => {
+                if (opened || rejected) {
+                    return;
+                }
+                rejected = true;
+                if (this.socket === socket) {
+                    this.socket = null;
+                }
+                reject(event);
+            };
+
             socket.onopen = () => {
-                this.connecting = null;
+                if (this.socket !== socket || rejected) {
+                    return;
+                }
+                opened = true;
                 this.protocolMismatchReported = false;
                 this.onOpen?.();
                 resolve();
@@ -643,32 +710,26 @@ export class MapTileStreamClient {
                 if (this.socket !== socket) {
                     return;
                 }
-                if (this.connecting) {
-                    this.connecting = null;
-                    reject(event);
+                if (!opened) {
+                    rejectBeforeOpen(event);
+                    return;
                 }
-                if (this.onError) {
-                    this.onError(event);
-                }
+                this.onError?.(event);
                 if (this.awaitingCompletion) {
                     this.rejectCompletion(event);
                 }
             };
             socket.onclose = (event) => {
-                if (this.connecting) {
-                    this.connecting = null;
-                    reject(event);
+                if (!opened) {
+                    rejectBeforeOpen(event);
+                    return;
                 }
                 const isCurrent = this.socket === socket;
                 if (isCurrent) {
                     this.socket = null;
                     this.pullClientId = null;
                     this.stopPullLoops();
-                }
-                if (isCurrent) {
-                    if (this.onClose) {
-                        this.onClose(event);
-                    }
+                    this.onClose?.(event);
                     if (this.awaitingCompletion) {
                         this.rejectCompletion(event);
                     }
@@ -681,8 +742,18 @@ export class MapTileStreamClient {
                 this.enqueueFrame(event.data);
             };
         });
+    }
 
-        return this.connecting;
+    /** Reports final connection failure after all endpoint candidates have been exhausted. */
+    private reportConnectionFailure(error: unknown): void {
+        if (typeof CloseEvent !== "undefined" && error instanceof CloseEvent) {
+            this.onClose?.(error);
+        } else if (typeof Event !== "undefined" && error instanceof Event) {
+            this.onError?.(error);
+        }
+        if (this.awaitingCompletion) {
+            this.rejectCompletion(error);
+        }
     }
 
     /** Lazily allocates the promise resolved by the final interactive status frame. */
@@ -722,9 +793,15 @@ export class MapTileStreamClient {
         this.resetCompletionPromise();
     }
 
+    /** Returns the websocket endpoint candidates, preserving custom non-interactive paths. */
+    private streamEndpointCandidates(): string[] {
+        const legacyPath = this.legacyEndpointPath(this.path, "interactive", "tiles");
+        return legacyPath ? [this.path, legacyPath] : [this.path];
+    }
+
     /** Resolves the websocket URL relative to the current document and upgrades HTTP to WS. */
-    private resolveUrl(): string {
-        const url = new URL(this.path, document.baseURI);
+    private resolveUrl(path: string = this.activeStreamPath): string {
+        const url = new URL(path, document.baseURI);
         if (url.protocol === "http:") {
             url.protocol = "ws:";
         } else if (url.protocol === "https:") {
@@ -1048,7 +1125,7 @@ export class MapTileStreamClient {
         this.pullControllers = [];
     }
 
-    /** Long-polls `/interactive/payload` until the server reports the request is gone or the controller aborts. */
+    /** Long-polls the active payload endpoint until the server reports the request is gone or the controller aborts. */
     private async runPullLoop(controller: AbortController) {
         while (!controller.signal.aborted) {
             const clientId = this.pullClientId;
@@ -1091,6 +1168,10 @@ export class MapTileStreamClient {
                     }
                     return;
                 }
+
+                if (this.activateLegacyPullFallbackForStatus(response.status)) {
+                    continue;
+                }
             } catch (err) {
                 if (controller.signal.aborted) {
                     return;
@@ -1101,15 +1182,66 @@ export class MapTileStreamClient {
         }
     }
 
-    /** Builds the `/interactive/payload` URL with the current adaptive batch size and compression flags. */
+    /** Builds the active payload URL with the current adaptive batch size and compression flags. */
     private resolvePullUrl(clientId: number): string {
-        const normalizedPath = this.path.replace(/\/+$/, "");
-        const pullUrl = new URL(`${normalizedPath}/payload`, document.baseURI);
+        const pullUrl = new URL(this.resolvePullPath(), document.baseURI);
         pullUrl.searchParams.set("clientId", String(clientId));
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
         pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));
         pullUrl.searchParams.set("compress", this.pullCompressionEnabled ? "1" : "0");
         return pullUrl.toString();
+    }
+
+    /** Returns the payload endpoint paired with the active websocket endpoint. */
+    private resolvePullPath(): string {
+        const legacyPullPath = this.legacyEndpointPath(this.activeStreamPath, "interactive", "tiles/next");
+        if (this.usingLegacyPullFallback && legacyPullPath) {
+            return legacyPullPath;
+        }
+
+        const url = new URL(this.activeStreamPath, document.baseURI);
+        const normalizedPath = url.pathname.replace(/\/+$/, "");
+        if (normalizedPath.endsWith("/tiles")) {
+            url.pathname = `${normalizedPath}/next`;
+        } else {
+            url.pathname = `${normalizedPath}/payload`;
+        }
+        url.search = "";
+        url.hash = "";
+        return url.toString();
+    }
+
+    /** Switches payload pulls to `/tiles/next` when a stale proxy rejects `/interactive/payload`. */
+    private activateLegacyPullFallbackForStatus(status: number): boolean {
+        if (this.usingLegacyPullFallback || ![404, 405, 501].includes(status)) {
+            return false;
+        }
+        if (!this.legacyEndpointPath(this.activeStreamPath, "interactive", "tiles/next")) {
+            return false;
+        }
+        this.usingLegacyPullFallback = true;
+        console.warn(`Fell back to legacy mapget tile payload endpoint ${this.debugPath(this.resolvePullPath())}.`);
+        return true;
+    }
+
+    /** Rewrites the trailing endpoint segment while preserving origin and proxy prefix. */
+    private legacyEndpointPath(path: string, currentSegment: string, replacementSegment: string): string | null {
+        const url = new URL(path, document.baseURI);
+        const normalizedPath = url.pathname.replace(/\/+$/, "");
+        const suffix = `/${currentSegment}`;
+        if (!normalizedPath.endsWith(suffix)) {
+            return null;
+        }
+        url.pathname = `${normalizedPath.slice(0, -suffix.length)}/${replacementSegment}`;
+        url.search = "";
+        url.hash = "";
+        return url.toString();
+    }
+
+    /** Returns a compact endpoint path for diagnostics without leaking origin noise. */
+    private debugPath(path: string): string {
+        const url = new URL(path, document.baseURI);
+        return `${url.pathname}${url.search}`;
     }
 
     /** Returns the currently advertised `maxBytes` budget for the next pull response. */
