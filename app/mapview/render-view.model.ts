@@ -27,6 +27,11 @@ export type RenderBackend = "deck";
 
 export const MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT = "erdblick-map-view-layout-resize-prepare";
 
+/** Controls how much shared renderer state is torn down when a render view is destroyed. */
+export interface RenderViewDestroyOptions {
+    clearTileVisualizations?: boolean;
+}
+
 /** Opaque handle that lets visualizations talk to the currently active renderer implementation. */
 export interface IRenderSceneHandle {
     readonly renderer: RenderBackend;
@@ -80,7 +85,7 @@ export interface IRenderView {
     readonly hoveredFeatureIds: BehaviorSubject<HoveredFeatureIds | undefined>;
 
     setup(): Promise<void>;
-    destroy(): Promise<void>;
+    destroy(options?: RenderViewDestroyOptions): Promise<void>;
     isAvailable(): boolean;
     requestRender(): void;
     prepareForLayoutResize(targetCssSize: {width: number; height: number}): void;

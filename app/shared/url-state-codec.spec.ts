@@ -103,16 +103,16 @@ describe("URL state v2 codec", () => {
 
         const encoded = encodeSelectionsV2(panels, layerNames, layerEncoding.mapNames, defaultColors);
 
-        expect(encoded).toContain("F:0:545379780");
+        expect(encoded).toContain("F:0:21fa0777000d");
         expect(encoded).toContain("Lane.545379780.24%3Aattribute%231%2Cvalidity%230");
-        expect(encoded).toContain("SD:1:LaneGeometryLayer-1:545379780");
+        expect(encoded).toContain("SD:1:LaneGeometryLayer-1:21fa0777000d");
 
         const decoded = decodeSelectionsV2(encoded ?? "", layerNames, layerEncoding.mapNames, defaultColors);
         expect(decoded).toEqual([
             {
                 id: 0,
                 features: [{
-                    mapTileKey: "Features:MapA:Lane:545379780:0",
+                    mapTileKey: "Features:MapA:Lane:21fa0777000d:0",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
                 }],
                 locked: true,
@@ -124,7 +124,7 @@ describe("URL state v2 codec", () => {
                 id: 3,
                 features: [],
                 sourceData: {
-                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:545379780:0",
+                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:21fa0777000d:0",
                     address: 783783249845n,
                 },
                 locked: true,

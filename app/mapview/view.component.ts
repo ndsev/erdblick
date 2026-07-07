@@ -135,6 +135,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private viewerPointerCancelCapture?: (_event: PointerEvent) => void;
     private viewerContextMenuCapture?: (event: MouseEvent) => void;
     private layoutResizePrepareListener?: (event: Event) => void;
+    private viewerSetupGeneration = 0;
 
     @ViewChild('popover') featureIdsPopover!: Popover;
     @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
@@ -278,7 +279,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /**
      * Recreate the viewer with different projection for 2D/3D modes
      */
-    private async createViewerForMode(is2D: boolean) {
+    private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
         if (this.mapView) {
@@ -298,14 +299,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
+        if (setupGeneration !== this.viewerSetupGeneration) {
+            await this.ngZone.runOutsideAngular(() => mapView.destroy({clearTileVisualizations: false}));
+            return undefined;
+        }
         this.mapView = mapView;
+        this.mapRender.rebuildTileVisualizationsForScene(this.viewIndex(), mapView.getSceneHandle());
         this.viewerInitError = "";
+        return mapView;
     }
 
     /**
      * Component cleanup when destroyed
      */
     ngOnDestroy() {
+        this.viewerSetupGeneration++;
         this.pendingContextMenuOpenEvent = null;
         this.clearPendingContextMenuOpenTimeout();
         this.viewerContextMenu?.hide();
@@ -329,12 +337,19 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * This includes hover popovers, sync toggles, and the initial viewport refresh.
      */
     private initializeViewer(mode2d: boolean) {
-        this.createViewerForMode(mode2d).catch((error) => {
+        const setupGeneration = ++this.viewerSetupGeneration;
+        this.createViewerForMode(mode2d, setupGeneration).catch((error) => {
+            if (setupGeneration !== this.viewerSetupGeneration) {
+                return;
+            }
             console.error('Failed to initialize viewer:', error);
             const detail = error instanceof Error ? error.message : String(error);
             const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
             this.viewerInitError = `${summary} ${MapViewComponent.WEBGL_SETUP_HINT}`;
         }).finally(() => {
+            if (setupGeneration !== this.viewerSetupGeneration) {
+                return;
+            }
             // Hide the global loading spinner
             const spinner = document.getElementById('global-spinner-container');
             if (spinner) {

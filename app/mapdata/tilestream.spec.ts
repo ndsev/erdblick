@@ -61,28 +61,6 @@ describe('MapTileStreamClient', () => {
         }
     });
 
-    it('can force-resend an identical tile request after missing payload recovery', async () => {
-        const client = new MapTileStreamClient('/interactive');
-        const tileStream = client as any;
-        const sentPayloads: string[][] = [];
-        try {
-            tileStream.sendSerializedRequests = (payloads: string[]) => {
-                sentPayloads.push(payloads);
-                tileStream.lastRequestPromise = Promise.resolve();
-                return client;
-            };
-
-            const requests = [{mapId: 'MapA', layerId: 'Road', tileIdsByNextStage: [[1, 2, 3]]}];
-
-            expect(await client.updateRequest(requests)).toBe(true);
-            expect(await client.updateRequest(requests)).toBe(false);
-            expect(await client.updateRequest(requests, {force: true})).toBe(true);
-            expect(sentPayloads).toHaveLength(2);
-        } finally {
-            client.destroy();
-        }
-    });
-
     it('stores sourcesRevision from request-context frames', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;

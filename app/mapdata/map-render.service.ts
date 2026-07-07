@@ -198,6 +198,18 @@ export class MapRenderService {
         }
     }
 
+    /**
+     * Rebuilds the per-view tile visualization cache after the renderer scene was replaced.
+     *
+     * Tile visualization instances remember only their tile/style inputs, not the deck registry they were
+     * last applied to. If a Deck view is recreated while tile renders are in flight, a visualization can
+     * otherwise be marked clean even though its layers were installed into an obsolete scene.
+     */
+    rebuildTileVisualizationsForScene(viewIndex: number, sceneHandle: IRenderSceneHandle): void {
+        this.clearAllTileVisualizations(viewIndex, sceneHandle);
+        this.updateVisualizations();
+    }
+
     /** Continuously dispatches dirty visualizations under a small frame budget. */
     private processVisualizationTasks() {
         if (this.tileStream.tilePipelinePaused) {

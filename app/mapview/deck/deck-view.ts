@@ -38,7 +38,7 @@ import {
     type WmsBackgroundLayerConfig,
     type XyzBackgroundLayerConfig
 } from "../../shared/app-config.service";
-import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
+import {IRenderSceneHandle, IRenderView, ITileVisualization, RenderViewDestroyOptions} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import {environment} from "../../environments/environment";
@@ -388,7 +388,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Tears down deck, overlay state, and every subscription associated with this view. */
-    async destroy(): Promise<void> {
+    async destroy(options: RenderViewDestroyOptions = {}): Promise<void> {
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.subscriptions.length = 0;
         this.stopTickLoop();
@@ -413,7 +413,9 @@ export abstract class DeckMapView implements IRenderView {
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
-        this.mapRender.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
+        if (options.clearTileVisualizations !== false) {
+            this.mapRender.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
+        }
 
         if (this.deck) {
             this.deck.finalize();

@@ -1,5 +1,4 @@
 import type {Params} from "@angular/router";
-import {normalizeMapTileIdString} from "./tile-id-normalization";
 
 export type UrlV2Primitive = string | number | boolean;
 
@@ -356,13 +355,12 @@ function parseMapTileKey(mapTileKey: string): ParsedMapTileKey | null {
 
 /** Builds the existing MapTileKey string representation. */
 function buildMapTileKey(layerType: string, mapId: string, layerId: string, tileId: string, stage: string): string {
-    return `${layerType}:${mapId}:${layerId}:${normalizeMapTileIdString(tileId)}:${stage || "0"}`;
+    return `${layerType}:${mapId}:${layerId}:${tileId}:${stage || "0"}`;
 }
 
 /** Encodes stage zero compactly while preserving non-zero stages. */
 function encodeTileAndStage(tileId: string, stage: string): string {
-    const normalizedTileId = normalizeMapTileIdString(tileId);
-    return stage && stage !== "0" ? `${normalizedTileId}.${stage}` : normalizedTileId;
+    return stage && stage !== "0" ? `${tileId}.${stage}` : tileId;
 }
 
 /** Decodes the compact tile/stage form used by v2 selections. */
