@@ -517,6 +517,10 @@ inspection-tree {
 
 }
 
+.inspection-value-bubble-popover-host {
+  display: contents;
+}
+
 .inspection-value-bubble-popover {
   background: color-mix(in srgb, var(--p-content-background) 94%, transparent);
   border: 1px solid color-mix(in srgb, var(--p-content-border-color) 78%, transparent);

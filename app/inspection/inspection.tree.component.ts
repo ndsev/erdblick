@@ -3,7 +3,6 @@ import {
     ChangeDetectionStrategy,
     ChangeDetectorRef,
     Component,
-    ElementRef,
     ViewChild,
     input,
     OnDestroy,
@@ -136,10 +135,10 @@ export class FeatureFilterOptions {
                         [ngClass]="getRowClasses(rowData)">
                         @for (col of columns(); track $index) {
                             <td [class]="getStyleClassByType(rowData) + ' inspection-tree-cell'"
-                                [pTooltip]="valueCellUsesBubblePopover(rowData, col.key) ? '' : cellTooltip(rowData, col.key)"
+                                [pTooltip]="valueCellUsesBubblePopover(rowNode, rowData, col.key) ? '' : cellTooltip(rowNode, rowData, col.key)"
                                 tooltipPosition="left"
                                 [tooltipOptions]="tooltipOptions"
-                                (mouseenter)="onValueCellMouseEnter($event, rowData, col.key)"
+                                (mouseenter)="onValueCellMouseEnter($event, rowNode, rowData, col.key)"
                                 (mouseleave)="onValueCellMouseLeave(col.key)">
                                 <div [class.inspection-first-cell-content]="$index === 0"
                                      [class.inspection-value-cell-content]="col.key === 'value'"
@@ -280,34 +279,6 @@ export class FeatureFilterOptions {
         <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" appendTo="body" [baseZIndex]="30000"></p-menu>
         <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="30000" appendTo="body"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        @if (activeValueBubblePopoverBubbles.length) {
-            <div #valueBubblePopover
-                 class="inspection-value-bubble-popover"
-                 [style.left.px]="valueBubblePopoverLeft"
-                 [style.top.px]="valueBubblePopoverTop"
-                 [style.max-width.px]="valueBubblePopoverMaxWidth"
-                 [style.width.px]="valueBubblePopoverWidth">
-                <div class="inspection-value-bubble-popover-content">
-                    @for (bubble of activeValueBubblePopoverBubbles; track bubble.targetNodeId + ':' + bubble.label + ':' + $index) {
-                        @if (hasBubbleChildren(bubble)) {
-                            <span class="inspection-value-bubble-group inspection-value-bubble-popover-group">
-                                @for (child of bubble.children; track child.targetNodeId + ':' + child.label + ':' + $index) {
-                                    <span class="inspection-value-bubble inspection-value-bubble-popover-item"
-                                          [ngClass]="valueBubbleClasses(child)">
-                                        {{ child.label }}
-                                    </span>
-                                }
-                            </span>
-                        } @else {
-                            <span class="inspection-value-bubble inspection-value-bubble-popover-item"
-                                  [ngClass]="valueBubbleClasses(bubble)">
-                                {{ bubble.label }}
-                            </span>
-                        }
-                    }
-                </div>
-            </div>
-        }
         <p-popover *ngIf="filterOptions() !== undefined" #filterPanel class="filter-panel">
             <div class="font-bold white-space-nowrap"
                  style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
@@ -341,7 +312,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
-    @ViewChild('valueBubblePopover') valueBubblePopover?: ElementRef<HTMLDivElement>;
 
     data: TreeTableNode[] = [];
     treeData = input.required<TreeTableNode[]>();
@@ -380,11 +350,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private destroyed = false;
     private resizeObserver?: ResizeObserver;
     private scrollerRecalcFrame?: number;
-    protected activeValueBubblePopoverBubbles: any[] = [];
-    protected valueBubblePopoverLeft = 0;
-    protected valueBubblePopoverTop = 0;
-    protected valueBubblePopoverMaxWidth = 1;
-    protected valueBubblePopoverWidth: number | undefined;
+    private valueBubblePopoverHost?: HTMLElement;
+    private valueBubblePopoverElement?: HTMLDivElement;
     private valueBubblePopoverFrame?: number;
     private readonly valueBubblePopoverGapPx = 8;
     private readonly valueBubblePopoverMarginPx = 4;
@@ -499,6 +466,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             window.cancelAnimationFrame(this.valueBubblePopoverFrame);
             this.valueBubblePopoverFrame = undefined;
         }
+        this.valueBubblePopoverHost?.remove();
+        this.valueBubblePopoverHost = undefined;
+        this.valueBubblePopoverElement = undefined;
         this.subscriptions.forEach(s => s.unsubscribe());
     }
 
@@ -694,9 +664,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return Array.isArray(rowData?.["valueBubbles"]) && rowData["valueBubbles"].length > 0;
     }
 
-    /** Provides one cell-level tooltip, using bubble labels when bubbles replace the value text. */
-    protected cellTooltip(rowData: any, colKey: string): string {
-        if (colKey === "value" && this.hasValueBubbles(rowData)) {
+    /** Provides one cell-level tooltip, using bubble labels only when bubbles are visibly replacing the value text. */
+    protected cellTooltip(rowNode: any, rowData: any, colKey: string): string {
+        if (colKey === "value" && this.shouldShowValueBubbles(rowNode, rowData)) {
             return this.valueBubbleTooltip(rowData["valueBubbles"]);
         }
         const value = rowData?.[colKey];
@@ -727,23 +697,20 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Returns whether a value cell should use the structured bubble popover instead of a plain tooltip. */
-    protected valueCellUsesBubblePopover(rowData: any, colKey: string): boolean {
-        return colKey === "value" && this.hasValueBubbles(rowData);
+    protected valueCellUsesBubblePopover(rowNode: any, rowData: any, colKey: string): boolean {
+        return colKey === "value" && this.shouldShowValueBubbles(rowNode, rowData);
     }
 
     /** Shows the structured bubble popover next to collapsed summary rows. */
-    protected onValueCellMouseEnter(event: MouseEvent, rowData: any, colKey: string): void {
-        if (!this.valueCellUsesBubblePopover(rowData, colKey)) {
+    protected onValueCellMouseEnter(event: MouseEvent, rowNode: any, rowData: any, colKey: string): void {
+        if (!this.valueCellUsesBubblePopover(rowNode, rowData, colKey)) {
             return;
         }
         const cell = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined;
         if (!cell) {
             return;
         }
-        this.positionValueBubblePopoverBeforeRender(cell);
-        this.activeValueBubblePopoverBubbles = rowData["valueBubbles"];
-        this.cdr.detectChanges();
-        this.scheduleValueBubblePopoverAlignment(cell);
+        this.showValueBubblePopover(cell, rowData["valueBubbles"]);
     }
 
     /** Hides the structured bubble popover when the pointer leaves a value cell. */
@@ -751,70 +718,133 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey !== "value") {
             return;
         }
-        this.activeValueBubblePopoverBubbles = [];
-        this.cdr.markForCheck();
+        this.hideValueBubblePopover();
     }
 
 
-    /** Places the popover near its final position before Angular creates the DOM node. */
-    private positionValueBubblePopoverBeforeRender(cell: HTMLElement): void {
-        const cellRect = cell.getBoundingClientRect();
-        const placement = this.calculateValueBubblePopoverPlacement(
-            cellRect,
-            this.valueBubblePopoverPreferredWidthPx
-        );
-        this.valueBubblePopoverMaxWidth = placement.maxWidth;
-        this.valueBubblePopoverWidth = undefined;
-        this.valueBubblePopoverLeft = placement.left;
-        this.valueBubblePopoverTop = Math.max(this.valueBubblePopoverMarginPx, cellRect.top);
-    }
-
-    /** Repositions the value popover next to the inspected value cell without covering it. */
-    private scheduleValueBubblePopoverAlignment(cell: HTMLElement): void {
+    /** Builds the value-bubble popover in document.body so undocked dialogs cannot clip it. */
+    private showValueBubblePopover(cell: HTMLElement, bubbles: any[]): void {
+        const container = this.ensureValueBubblePopoverElement();
+        const content = document.createElement("div");
+        content.className = "inspection-value-bubble-popover-content";
+        for (const bubble of bubbles) {
+            content.appendChild(this.createValueBubblePopoverNode(bubble));
+        }
+        container.replaceChildren(content);
+        container.style.visibility = "hidden";
+        container.style.display = "block";
+        container.style.width = "";
+        container.style.maxWidth = `${this.valueBubblePopoverPreferredWidthPx}px`;
+        this.alignValueBubblePopover(cell);
         if (this.valueBubblePopoverFrame !== undefined) {
             window.cancelAnimationFrame(this.valueBubblePopoverFrame);
         }
         this.valueBubblePopoverFrame = window.requestAnimationFrame(() => {
             this.valueBubblePopoverFrame = undefined;
-            const container = this.valueBubblePopover?.nativeElement;
-            if (!container) {
-                return;
-            }
-            const cellRect = cell.getBoundingClientRect();
-            const naturalWidth = container.scrollWidth;
-            const placement = this.calculateValueBubblePopoverPlacement(cellRect, naturalWidth);
-            this.valueBubblePopoverMaxWidth = placement.maxWidth;
-            this.valueBubblePopoverWidth = placement.width;
-            const top = Math.min(
-                Math.max(this.valueBubblePopoverMarginPx, cellRect.top + cellRect.height / 2 - container.offsetHeight / 2),
-                Math.max(this.valueBubblePopoverMarginPx, window.innerHeight - container.offsetHeight - this.valueBubblePopoverMarginPx));
-            this.valueBubblePopoverLeft = placement.left;
-            this.valueBubblePopoverTop = top;
-            this.cdr.markForCheck();
+            this.alignValueBubblePopover(cell);
         });
     }
 
-    /** Computes side placement and width for a value bubble popover without overlapping the source cell. */
+    /** Returns the singleton body-level popover element used for structured value previews. */
+    private ensureValueBubblePopoverElement(): HTMLDivElement {
+        if (this.valueBubblePopoverElement) {
+            return this.valueBubblePopoverElement;
+        }
+        const element = document.createElement("div");
+        element.className = "inspection-value-bubble-popover";
+        element.style.display = "none";
+        const host = document.createElement("inspection-tree");
+        host.className = "inspection-value-bubble-popover-host";
+        host.appendChild(element);
+        document.body.appendChild(host);
+        this.valueBubblePopoverHost = host;
+        this.valueBubblePopoverElement = element;
+        return element;
+    }
+
+    /** Converts one bubble tree to non-interactive popover DOM while reusing normal bubble styling. */
+    private createValueBubblePopoverNode(bubble: any): HTMLElement {
+        if (this.hasBubbleChildren(bubble)) {
+            const group = document.createElement("span");
+            group.className = "inspection-value-bubble-group inspection-value-bubble-popover-group";
+            for (const child of bubble.children) {
+                group.appendChild(this.createValueBubblePopoverLeaf(child));
+            }
+            return group;
+        }
+        return this.createValueBubblePopoverLeaf(bubble);
+    }
+
+    /** Converts one leaf bubble to a styled non-interactive popover item. */
+    private createValueBubblePopoverLeaf(bubble: any): HTMLElement {
+        const item = document.createElement("span");
+        item.classList.add("inspection-value-bubble", "inspection-value-bubble-popover-item");
+        for (const [className, enabled] of Object.entries(this.valueBubbleClasses(bubble))) {
+            if (enabled) {
+                item.classList.add(className);
+            }
+        }
+        item.textContent = this.valueBubbleText(bubble);
+        return item;
+    }
+
+    /** Hides and detaches transient state for the body-level value-bubble popover. */
+    private hideValueBubblePopover(): void {
+        if (this.valueBubblePopoverFrame !== undefined) {
+            window.cancelAnimationFrame(this.valueBubblePopoverFrame);
+            this.valueBubblePopoverFrame = undefined;
+        }
+        if (this.valueBubblePopoverElement) {
+            this.valueBubblePopoverElement.style.display = "none";
+        }
+    }
+
+    /** Repositions the value popover to the left of the inspected value cell without covering it. */
+    private alignValueBubblePopover(cell: HTMLElement): void {
+        const container = this.valueBubblePopoverElement;
+        if (!container || container.style.display === "none") {
+            return;
+        }
+        const cellRect = cell.getBoundingClientRect();
+        const desiredWidth = Math.min(
+            container.scrollWidth || this.valueBubblePopoverPreferredWidthPx,
+            this.valueBubblePopoverMaxWidthPx
+        );
+        const placement = this.calculateValueBubblePopoverPlacement(cellRect, desiredWidth);
+        container.style.maxWidth = `${placement.maxWidth}px`;
+        if (placement.width === undefined) {
+            container.style.width = "";
+        } else {
+            container.style.width = `${placement.width}px`;
+        }
+        const top = Math.min(
+            Math.max(this.valueBubblePopoverMarginPx, cellRect.top + cellRect.height / 2 - container.offsetHeight / 2),
+            Math.max(this.valueBubblePopoverMarginPx, window.innerHeight - container.offsetHeight - this.valueBubblePopoverMarginPx)
+        );
+        container.style.left = `${placement.left}px`;
+        container.style.top = `${top}px`;
+        container.style.visibility = "visible";
+    }
+
+    /** Computes left-side placement and width for a value bubble popover without overlapping the source cell. */
     private calculateValueBubblePopoverPlacement(cellRect: DOMRect, desiredWidth: number): {
         left: number;
         maxWidth: number;
         width: number | undefined;
     } {
         const leftSpace = Math.max(1, cellRect.left - this.valueBubblePopoverGapPx - this.valueBubblePopoverMarginPx);
-        const rightSpace = Math.max(1, window.innerWidth - cellRect.right - this.valueBubblePopoverGapPx - this.valueBubblePopoverMarginPx);
-        const useLeftSide = leftSpace >= Math.min(desiredWidth, this.valueBubblePopoverMaxWidthPx) || leftSpace >= rightSpace;
-        const availableWidth = useLeftSide ? leftSpace : rightSpace;
-        const maxWidth = Math.max(1, Math.min(this.valueBubblePopoverMaxWidthPx, availableWidth));
+        const maxWidth = Math.max(1, Math.min(this.valueBubblePopoverMaxWidthPx, leftSpace));
         const width = desiredWidth > maxWidth ? maxWidth : undefined;
         const renderedWidth = width ?? Math.min(desiredWidth, maxWidth);
-        const left = useLeftSide
-            ? Math.max(this.valueBubblePopoverMarginPx, cellRect.left - renderedWidth - this.valueBubblePopoverGapPx)
-            : Math.min(
-                window.innerWidth - renderedWidth - this.valueBubblePopoverMarginPx,
-                cellRect.right + this.valueBubblePopoverGapPx
-            );
+        const left = Math.max(
+            this.valueBubblePopoverMarginPx,
+            Math.min(
+                cellRect.left - renderedWidth - this.valueBubblePopoverGapPx,
+                window.innerWidth - renderedWidth - this.valueBubblePopoverMarginPx
+            )
+        );
         return {
-            left: Math.max(this.valueBubblePopoverMarginPx, left),
+            left,
             maxWidth,
             width
         };
