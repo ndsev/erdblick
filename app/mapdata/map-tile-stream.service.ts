@@ -4,6 +4,7 @@ import {MapInfoService} from "./map-info.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapTileRequestStatus, MapTileStreamClient} from "./tilestream";
 import {FeatureSearchResolvedDefinition, FeatureSearchRuntimeState} from "./feature-search-runtime-state.model";
+import {tileIdNumberFromString} from "../shared/tile-id-normalization";
 import type {
     MapTileStreamSourceCatalogChangePayload,
     MapTileStreamSearchStatusPayload,
@@ -122,6 +123,9 @@ export class MapTileStreamService {
     private readonly searchResultEntryFrameBudgetMs = 12;
     private sourceCatalogReloadPromise: Promise<void> | null = null;
     private backendProtocolMismatchActive = false;
+    private forceNextTileRequest = false;
+    private incompleteCompletionRetryCount = 0;
+    private readonly maxIncompleteCompletionRetries = 2;
 
     constructor(
         private readonly stateService: AppStateService,
@@ -692,6 +696,18 @@ export class MapTileStreamService {
                     const [mapId, layerId, tileId] = parsedTileKey;
                     this.ensureTilePlaceholder(mapId, layerId, tileId, true);
                     tile = this.loadedTileLayers.get(canonicalTileKey);
+                } else if (!tile) {
+                    const textParts = this.parseTextMapTileKeyComponents(canonicalTileKey)
+                        ?? this.parseTextMapTileKeyComponents(id.mapTileKey);
+                    if (textParts) {
+                        this.ensureTilePlaceholder(
+                            textParts.mapId,
+                            textParts.layerId,
+                            textParts.tileId ?? 0,
+                            true,
+                            canonicalTileKey);
+                        tile = this.loadedTileLayers.get(canonicalTileKey);
+                    }
                 }
 
                 if (!tile) {
@@ -1399,26 +1415,56 @@ export class MapTileStreamService {
         return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
     }
 
-    /** Parses tile keys defensively, including a fallback for older slash-separated forms. */
+    /** Parses tile keys defensively, including text-only fallbacks that do not collapse packed ids to zero. */
     parseMapTileKeySafe(tileKey: string): [string, string, number] | null {
         try {
             const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
-            return [mapId, layerId, this.tileIdFromUnknown(tileId)];
+            const parsedTileId = this.tileIdFromUnknownOrNull(tileId);
+            return parsedTileId === null ? null : [mapId, layerId, parsedTileId];
         } catch (_error) {
-            const parts = tileKey.split('/');
-            if (parts.length < 3) {
-                return null;
-            }
-            try {
-                return [parts[0], parts[1], this.tileIdFromUnknown(parts[2])];
-            } catch (_parseError) {
-                return null;
-            }
+            return this.parseTextMapTileKey(tileKey);
         }
+    }
+
+    /** Parses map/layer/tile from string keys only when the tile id is still numeric. */
+    private parseTextMapTileKey(tileKey: string): [string, string, number] | null {
+        const parts = this.parseTextMapTileKeyComponents(tileKey);
+        if (!parts || parts.tileId === null) {
+            return null;
+        }
+        return [parts.mapId, parts.layerId, parts.tileId];
+    }
+
+    /** Parses textual map-tile keys without requiring the tile id to use the legacy numeric encoding. */
+    private parseTextMapTileKeyComponents(tileKey: string): {mapId: string; layerId: string; tileId: number | null} | null {
+        const colonParts = tileKey.split(':');
+        if (colonParts.length >= 4 && colonParts[1] && colonParts[2]) {
+            return {
+                mapId: colonParts[1],
+                layerId: colonParts[2],
+                tileId: this.tileIdFromUnknownOrNull(colonParts[3])
+            };
+        }
+
+        const slashParts = tileKey.split('/');
+        if (slashParts.length >= 3 && slashParts[0] && slashParts[1]) {
+            return {
+                mapId: slashParts[0],
+                layerId: slashParts[1],
+                tileId: this.tileIdFromUnknownOrNull(slashParts[2])
+            };
+        }
+
+        return null;
     }
 
     /** Converts embind-returned ids to signed int32 numbers without assuming one fixed JS representation. */
     private tileIdFromUnknown(value: unknown, fallback = 0): number {
+        return this.tileIdFromUnknownOrNull(value) ?? fallback;
+    }
+
+    /** Converts embind-returned ids to numbers, preserving unparseable packed ids as `null`. */
+    private tileIdFromUnknownOrNull(value: unknown): number | null {
         if (typeof value === "bigint") {
             return Number(value);
         }
@@ -1426,17 +1472,20 @@ export class MapTileStreamService {
             return Math.trunc(value);
         }
         if (typeof value === "string" && value.length > 0) {
-            const parsed = Number(value);
-            if (Number.isFinite(parsed)) {
-                return Math.trunc(parsed);
-            }
+            return tileIdNumberFromString(value);
         }
-        return fallback;
+        return null;
     }
 
     /** Ensures a placeholder `FeatureTile` exists so selection and progress logic can reference missing tiles. */
-    private ensureTilePlaceholder(mapId: string, layerId: string, tileId: number, preventCulling: boolean): boolean {
-        const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+    private ensureTilePlaceholder(
+        mapId: string,
+        layerId: string,
+        tileId: number,
+        preventCulling: boolean,
+        tileKeyOverride?: string
+    ): boolean {
+        const tileKey = tileKeyOverride ?? coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
         const existing = this.loadedTileLayers.get(tileKey);
         if (existing) {
             if (preventCulling) {

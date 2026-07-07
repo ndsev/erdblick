@@ -3,10 +3,12 @@
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -275,12 +277,17 @@ bool isTransparentPropagationContainer(std::string const& key)
 }
 
 /** Construct one value bubble with the mandatory target row metadata. */
-ValueBubble makeValueBubble(std::string label, std::string targetNodeId, std::string kind)
+ValueBubble makeValueBubble(
+    std::string label,
+    std::string targetNodeId,
+    std::string kind,
+    std::string colorKey = {})
 {
     return ValueBubble{
         .label_ = std::move(label),
         .targetNodeId_ = std::move(targetNodeId),
-        .kind_ = std::move(kind)
+        .kind_ = std::move(kind),
+        .colorKey_ = std::move(colorKey)
     };
 }
 
@@ -299,18 +306,199 @@ std::string firstBubbleTarget(ValueBubble const& bubble)
     return {};
 }
 
+/** Return whether a bubble carries compact validity information. */
+bool isValidityBubble(ValueBubble const& bubble)
+{
+    return bubble.kind_.rfind("validity", 0) == 0;
+}
+
+/** Return whether a bubble only says that the validity covers the complete host. */
+bool isCompleteValidityBubble(ValueBubble const& bubble)
+{
+    return bubble.kind_ == "validity-complete";
+}
+
+/** Return whether a bubble is weak metadata for an empty zserio bitmask. */
+bool isEmptyBitmaskBubble(ValueBubble const& bubble)
+{
+    return bubble.label_ == "0[]";
+}
+
+/** Return whether this bubble must remain visually independent while propagating. */
+bool isUngroupedBubble(ValueBubble const& bubble)
+{
+    return bubble.kind_ == "relation"
+        || bubble.kind_ == "pair"
+        || bubble.kind_ == "days-of-week"
+        || bubble.kind_ == "months-of-year";
+}
+
+/** Return whether any bubble in this group should remain visually independent. */
+bool containsUngroupedBubble(std::deque<ValueBubble> const& bubbles)
+{
+    return std::ranges::any_of(bubbles, [](auto const& bubble) { return isUngroupedBubble(bubble); });
+}
+
+/** Keep validity summaries at the front so spatial constraints are visible first. */
+void sortValidityBubblesFirst(std::deque<ValueBubble>& bubbles)
+{
+    std::stable_sort(bubbles.begin(), bubbles.end(), [](auto const& a, auto const& b) {
+        return isValidityBubble(a) && !isValidityBubble(b);
+    });
+}
+
+/** Add a bubble to a grouped visual, flattening nested groups to keep one level of agglomeration. */
+void appendGroupedBubblePart(ValueBubble bubble, std::deque<ValueBubble>& parts)
+{
+    if (bubble.kind_ == "group" && !bubble.children_.empty()) {
+        for (auto& child : bubble.children_) {
+            appendGroupedBubblePart(std::move(child), parts);
+        }
+        return;
+    }
+    parts.push_back(std::move(bubble));
+}
+
 /** Combine child bubbles into one grouped summary bubble for propagation through a container. */
 ValueBubble makeGroupedBubble(std::deque<ValueBubble> children)
 {
-    std::string label;
-    for (auto const& child : children) {
-        label += "[";
-        label += child.label_;
-        label += "]";
+    std::deque<ValueBubble> parts;
+    for (auto& child : children) {
+        appendGroupedBubblePart(std::move(child), parts);
     }
-    auto group = makeValueBubble(std::move(label), children.empty() ? std::string{} : firstBubbleTarget(children.front()), "group");
-    group.children_ = std::move(children);
+    sortValidityBubblesFirst(parts);
+
+    std::string label;
+    for (auto const& child : parts) {
+        if (!label.empty()) {
+            label += " ";
+        }
+        label += child.label_;
+    }
+    auto group = makeValueBubble(
+        std::move(label),
+        parts.empty() ? std::string{} : firstBubbleTarget(parts.front()),
+        parts.size() == 2
+            && std::ranges::all_of(parts, [](auto const& part) {
+                return part.kind_ == "scalar" || part.kind_ == "feature-id";
+            })
+                ? "pair"
+                : "group");
+    group.children_ = std::move(parts);
     return group;
+}
+
+InspectionNode const* directChildByKey(InspectionNode const& node, std::string_view key);
+
+/** Return whether a child node is a true boolean flag. */
+bool isTrueBooleanChild(InspectionNode const* child)
+{
+    return child
+        && baseValueType(child->type_) == InspectionConverter::ValueType::Boolean
+        && child->value_.type() == JsValue::Type::Bool
+        && child->value_.as<bool>();
+}
+
+/** Return a compact label for an inclusive range of named boolean flags. */
+std::string rangeLabel(
+    std::span<std::pair<std::string_view, InspectionNode const*> const> values,
+    size_t first,
+    size_t last)
+{
+    if (first == last) {
+        return std::string(values[first].first);
+    }
+    return fmt::format("{}-{}", values[first].first, values[last].first);
+}
+
+/** Summarize a named boolean-flag structure as compact continuous ranges plus the inclusive flag. */
+std::deque<ValueBubble> booleanRangeBubblesForNode(
+    InspectionNode const& node,
+    std::span<std::pair<std::string_view, std::string_view> const> fields,
+    std::string_view kind,
+    std::string_view colorKey)
+{
+    std::vector<std::pair<std::string_view, InspectionNode const*>> values;
+    values.reserve(fields.size());
+    for (auto const& [label, field] : fields) {
+        values.emplace_back(label, directChildByKey(node, field));
+    }
+
+    auto const looksLikeRangeStructure = std::ranges::any_of(values, [](auto const& value) {
+        return value.second != nullptr;
+    }) && directChildByKey(node, "isInclusive") != nullptr;
+    if (!looksLikeRangeStructure) {
+        return {};
+    }
+
+    std::vector<std::string> ranges;
+    std::string targetNodeId;
+    for (size_t index = 0; index < values.size();) {
+        if (!isTrueBooleanChild(values[index].second)) {
+            ++index;
+            continue;
+        }
+        if (targetNodeId.empty()) {
+            targetNodeId = values[index].second->nodeId_;
+        }
+        auto rangeEnd = index;
+        while (rangeEnd + 1 < values.size() && isTrueBooleanChild(values[rangeEnd + 1].second)) {
+            ++rangeEnd;
+        }
+        ranges.push_back(rangeLabel(values, index, rangeEnd));
+        index = rangeEnd + 1;
+    }
+
+    std::deque<ValueBubble> bubbles;
+    if (!ranges.empty()) {
+        auto label = std::string{};
+        for (auto const& range : ranges) {
+            if (!label.empty()) {
+                label += ",";
+            }
+            label += range;
+        }
+        bubbles.push_back(makeValueBubble(std::move(label), targetNodeId, std::string(kind), std::string(colorKey)));
+    }
+    if (auto const* isInclusive = directChildByKey(node, "isInclusive"); isTrueBooleanChild(isInclusive)) {
+        bubbles.push_back(makeValueBubble("isInclusive", isInclusive->nodeId_, "boolean", "isInclusive"));
+    }
+    return bubbles;
+}
+
+/** Summarize zserio/NDS day-of-week structures as compact weekday ranges plus the inclusive flag. */
+std::deque<ValueBubble> daysOfWeekBubblesForNode(InspectionNode const& node)
+{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kDays = {{
+        {"Mon", "isMonday"},
+        {"Tue", "isTuesday"},
+        {"Wed", "isWednesday"},
+        {"Thu", "isThursday"},
+        {"Fri", "isFriday"},
+        {"Sat", "isSaturday"},
+        {"Sun", "isSunday"},
+    }};
+    return booleanRangeBubblesForNode(node, kDays, "days-of-week", "daysOfWeek");
+}
+
+/** Summarize zserio/NDS month-of-year structures as compact month ranges plus the inclusive flag. */
+std::deque<ValueBubble> monthsOfYearBubblesForNode(InspectionNode const& node)
+{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 12> kMonths = {{
+        {"Jan", "january"},
+        {"Feb", "february"},
+        {"Mar", "march"},
+        {"Apr", "april"},
+        {"May", "may"},
+        {"Jun", "june"},
+        {"Jul", "july"},
+        {"Aug", "august"},
+        {"Sep", "september"},
+        {"Oct", "october"},
+        {"Nov", "november"},
+        {"Dec", "december"},
+    }};
+    return booleanRangeBubblesForNode(node, kMonths, "months-of-year", "monthsOfYear");
 }
 
 /** Render a leaf scalar according to the inspection propagation rules. */
@@ -323,15 +511,45 @@ std::optional<ValueBubble> scalarBubbleForNode(InspectionNode const& node)
     switch (baseValueType(node.type_)) {
     case InspectionConverter::ValueType::Boolean:
         if (node.value_.type() == JsValue::Type::Bool && node.value_.as<bool>()) {
-            return makeValueBubble(inspectionKeyString(node), node.nodeId_, "boolean");
+            auto key = inspectionKeyString(node);
+            return makeValueBubble(key, node.nodeId_, "boolean", key);
         }
         return std::nullopt;
     case InspectionConverter::ValueType::Number:
     case InspectionConverter::ValueType::String:
+        return makeValueBubble(node.value_.toString(), node.nodeId_, "scalar", inspectionKeyString(node));
     case InspectionConverter::ValueType::FeatureId:
-        return makeValueBubble(node.value_.toString(), node.nodeId_, "scalar");
+        return makeValueBubble(node.value_.toString(), node.nodeId_, "feature-id", inspectionKeyString(node));
     case InspectionConverter::ValueType::Null:
         return std::nullopt;
+    case InspectionConverter::ValueType::Section:
+    case InspectionConverter::ValueType::ArrayBit:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+/** Render a leaf scalar on its own row; propagation uses stricter boolean semantics. */
+std::optional<ValueBubble> leafDisplayBubbleForNode(InspectionNode const& node, std::string_view parentKey)
+{
+    if (!node.children_.empty() || isArrayValue(node.type_)) {
+        return std::nullopt;
+    }
+
+    auto const key = inspectionKeyString(node);
+    if (key == "direction" && (
+            parentKey == "validity" || parentKey == "sourceValidity" || parentKey == "targetValidity")) {
+        return makeValueBubble(node.value_.toString(), node.nodeId_, "validity", "validity");
+    }
+
+    switch (baseValueType(node.type_)) {
+    case InspectionConverter::ValueType::Boolean:
+    case InspectionConverter::ValueType::Number:
+    case InspectionConverter::ValueType::String:
+        return makeValueBubble(node.value_.toString(), node.nodeId_, "scalar", key);
+    case InspectionConverter::ValueType::FeatureId:
+        return makeValueBubble(node.value_.toString(), node.nodeId_, "feature-id", key);
+    case InspectionConverter::ValueType::Null:
     case InspectionConverter::ValueType::Section:
     case InspectionConverter::ValueType::ArrayBit:
         return std::nullopt;
@@ -365,7 +583,7 @@ std::string compactValidityDirection(InspectionNode const& validityNode)
         return "-";
     }
     if (value == "COMPLETE" || value == "BOTH") {
-        return "+-";
+        return "±";
     }
     return {};
 }
@@ -384,33 +602,48 @@ std::string compactValidityOffset(InspectionNode const& offsetNode)
     return value;
 }
 
+/** Label and propagation strength for one compact validity bubble. */
+struct CompactValidityBubble {
+    std::string label_;
+    std::string kind_;
+};
+
 /** Create the label for one compact validity bubble. */
-std::string compactValidityLabel(InspectionNode const& validityNode)
+CompactValidityBubble compactValidityBubble(InspectionNode const& validityNode)
 {
     std::vector<std::string> parts;
+    auto hasCompleteDirectionOnly = false;
     if (auto direction = compactValidityDirection(validityNode); !direction.empty()) {
+        hasCompleteDirectionOnly = direction == "±";
         parts.push_back(std::move(direction));
     }
     if (auto const* featureId = directChildByKey(validityNode, "featureId")) {
         parts.push_back(featureId->value_.toString());
+        hasCompleteDirectionOnly = false;
     }
     else if (auto const* transitionNumber = directChildByKey(validityNode, "transitionNumber")) {
         parts.push_back("T" + transitionNumber->value_.toString());
+        hasCompleteDirectionOnly = false;
     }
 
     if (auto const* point = directChildByKey(validityNode, "point")) {
         parts.push_back(compactValidityOffset(*point));
+        hasCompleteDirectionOnly = false;
     }
     else {
         auto const* start = directChildByKey(validityNode, "start");
         auto const* end = directChildByKey(validityNode, "end");
         if (start && end) {
             parts.push_back(fmt::format("{} to {}", compactValidityOffset(*start), compactValidityOffset(*end)));
+            hasCompleteDirectionOnly = false;
         }
     }
 
     if (parts.empty()) {
-        return "validity";
+        return CompactValidityBubble{.label_ = "validity", .kind_ = "validity"};
+    }
+    if (hasCompleteDirectionOnly) {
+        return CompactValidityBubble{.label_ = "COMPLETE", .kind_ = "validity-complete"};
     }
 
     std::string label;
@@ -420,17 +653,20 @@ std::string compactValidityLabel(InspectionNode const& validityNode)
         }
         label += part;
     }
-    return label;
+    return CompactValidityBubble{.label_ = std::move(label), .kind_ = "validity"};
 }
 
 /** Return whether a node represents a validity container or one indexed validity entry. */
 bool isValidityNode(InspectionNode const& node)
 {
     auto const key = inspectionKeyString(node);
-    return key == "validity"
-        || key == "sourceValidity"
-        || key == "targetValidity"
-        || node.hoverId_.find(":validity#") != std::string::npos;
+    if (key == "validity" || key == "sourceValidity" || key == "targetValidity") {
+        return true;
+    }
+    if (directChildByKey(node, "target")) {
+        return false;
+    }
+    return node.hoverId_.find(":validity#") != std::string::npos;
 }
 
 /** Build the special one-bubble-per-validity representation. */
@@ -448,12 +684,22 @@ std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
         if (!hasValidityHoverId && !looksLikeIndexedValidity) {
             continue;
         }
-        bubbles.push_back(makeValueBubble(compactValidityLabel(child), child.nodeId_, "validity"));
+        auto compact = compactValidityBubble(child);
+        if (compact.label_ == "validity") {
+            continue;
+        }
+        auto kind = std::move(compact.kind_);
+        bubbles.push_back(makeValueBubble(std::move(compact.label_), child.nodeId_, kind, "validity"));
     }
     if (!bubbles.empty()) {
         return bubbles;
     }
-    bubbles.push_back(makeValueBubble(compactValidityLabel(node), node.nodeId_, "validity"));
+    auto compact = compactValidityBubble(node);
+    if (compact.label_ == "validity") {
+        return {};
+    }
+    auto kind = std::move(compact.kind_);
+    bubbles.push_back(makeValueBubble(std::move(compact.label_), node.nodeId_, kind, "validity"));
     return bubbles;
 }
 
@@ -465,6 +711,12 @@ JsValue valueBubbleToJsValue(ValueBubble const& bubble)
         {"targetNodeId", JsValue(bubble.targetNodeId_)},
         {"kind", JsValue(bubble.kind_)}
     });
+    if (!bubble.hoverTargetNodeId_.empty()) {
+        value.set("hoverTargetNodeId", JsValue(bubble.hoverTargetNodeId_));
+    }
+    if (!bubble.colorKey_.empty()) {
+        value.set("colorKey", JsValue(bubble.colorKey_));
+    }
     if (!bubble.children_.empty()) {
         auto children = JsValue::List();
         for (auto const& child : bubble.children_) {
@@ -475,28 +727,153 @@ JsValue valueBubbleToJsValue(ValueBubble const& bubble)
     return value;
 }
 
+/** Return whether a node is a relation object or relation row in inspection form. */
+bool isRelationNode(InspectionNode const& node)
+{
+    return node.hoverId_.find(":relation#") != std::string::npos
+        || (directChildByKey(node, "target")
+            && (directChildByKey(node, "sourceValidity") || directChildByKey(node, "targetValidity")));
+}
+
+/** Append compact validity bubbles from a relation-side validity child. */
+void appendRelationValidityBubbles(InspectionNode const* validityNode, std::deque<ValueBubble>& children)
+{
+    if (!validityNode) {
+        return;
+    }
+    if (validityNode->valueBubbles_.empty()) {
+        return;
+    }
+    if (validityNode->valueBubbles_.size() == 1) {
+        children.push_back(validityNode->valueBubbles_.front());
+        return;
+    }
+    children.push_back(makeGroupedBubble(validityNode->valueBubbles_));
+}
+
+/** Pick the concrete target-validity row that a relation target feature bubble should preview. */
+std::string relationTargetValidityHoverNodeId(InspectionNode const* validityNode)
+{
+    if (!validityNode) {
+        return {};
+    }
+    if (!validityNode->valueBubbles_.empty()) {
+        return firstBubbleTarget(validityNode->valueBubbles_.front());
+    }
+    return validityNode->nodeId_;
+}
+
+/** Build the compact relation bubble: target feature plus optional source/target validity summaries. */
+std::optional<ValueBubble> relationBubbleForNode(InspectionNode const& node)
+{
+    if (!isRelationNode(node)) {
+        return std::nullopt;
+    }
+
+    auto const* targetValidity = directChildByKey(node, "targetValidity");
+    std::deque<ValueBubble> children;
+    appendRelationValidityBubbles(directChildByKey(node, "sourceValidity"), children);
+
+    if (auto const* target = directChildByKey(node, "target")) {
+        std::optional<ValueBubble> targetFeature;
+        if (!target->valueBubbles_.empty()) {
+            targetFeature = target->valueBubbles_.front();
+        }
+        else if (target->value_.type() == JsValue::Type::String) {
+            targetFeature = makeValueBubble(target->value_.toString(), target->nodeId_, "feature-id", inspectionKeyString(*target));
+        }
+        if (targetFeature) {
+            targetFeature->hoverTargetNodeId_ = relationTargetValidityHoverNodeId(targetValidity);
+            children.push_back(std::move(*targetFeature));
+        }
+    }
+
+    appendRelationValidityBubbles(targetValidity, children);
+
+    if (children.empty()) {
+        return std::nullopt;
+    }
+
+    std::string label;
+    for (auto const& child : children) {
+        if (!label.empty()) {
+            label += " ";
+        }
+        label += child.label_;
+    }
+    auto relation = makeValueBubble(std::move(label), firstBubbleTarget(children.front()), "relation", "relation");
+    relation.children_ = std::move(children);
+    return relation;
+}
+
+/** Prefer a relation's single target-validity row when selecting/highlighting relation references. */
+std::string relationRowHoverId(model_ptr<Relation> const& relation, std::string const& relationHoverId)
+{
+    auto targetValidity = relation ? relation->targetValidityOrNull() : nullptr;
+    if (targetValidity && targetValidity->size() == 1) {
+        return relationHoverId + ":validity#0";
+    }
+    return relationHoverId;
+}
+
 /** Compute propagated scalar bubbles bottom-up and return this node's contribution to its parent. */
-std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node)
+std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::string_view parentKey = {})
 {
     struct ChildContribution {
         ValueBubble bubble_;
         bool isCountField_ = false;
+        bool isCompleteValidity_ = false;
+        bool isEmptyBitmask_ = false;
     };
 
     std::vector<ChildContribution> childContributions;
+    auto const key = inspectionKeyString(node);
     for (auto& child : node.children_) {
-        auto childBubbles = buildPropagatedValueBubbles(child);
+        auto childBubbles = buildPropagatedValueBubbles(child, key);
         auto const isCountField = isLikelyZserioCountField(inspectionKeyString(child));
         for (auto& bubble : childBubbles) {
+            auto const isCompleteValidity = isCompleteValidityBubble(bubble);
+            auto const isEmptyBitmask = isEmptyBitmaskBubble(bubble);
             childContributions.push_back(ChildContribution{
                 .bubble_ = std::move(bubble),
-                .isCountField_ = isCountField
+                .isCountField_ = isCountField,
+                .isCompleteValidity_ = isCompleteValidity,
+                .isEmptyBitmask_ = isEmptyBitmask
             });
         }
     }
 
+    if (parentKey == "Attribute Layers") {
+        return {};
+    }
+    if (parentKey == "Identifiers") {
+        return {};
+    }
+
+    if (auto leafDisplayBubble = leafDisplayBubbleForNode(node, parentKey)) {
+        node.valueBubbles_.push_back(*leafDisplayBubble);
+    }
+
     if (isValidityNode(node)) {
         node.valueBubbles_ = validityBubblesForNode(node);
+        return node.valueBubbles_;
+    }
+
+    auto daysOfWeekBubbles = daysOfWeekBubblesForNode(node);
+    if (!daysOfWeekBubbles.empty()) {
+        node.valueBubbles_ = std::move(daysOfWeekBubbles);
+        return node.valueBubbles_;
+    }
+
+    auto monthsOfYearBubbles = monthsOfYearBubblesForNode(node);
+    if (!monthsOfYearBubbles.empty()) {
+        node.valueBubbles_ = std::move(monthsOfYearBubbles);
+        return node.valueBubbles_;
+    }
+
+    auto relationBubble = relationBubbleForNode(node);
+    if (relationBubble) {
+        node.valueBubbles_.push_back(std::move(*relationBubble));
         return node.valueBubbles_;
     }
 
@@ -512,18 +889,41 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node)
     auto const hasNonCountContribution = std::ranges::any_of(
         childContributions,
         [](auto const& contribution) { return !contribution.isCountField_; });
+    auto const hasStrongContribution = std::ranges::any_of(
+        childContributions,
+        [hasNonCountContribution](auto const& contribution) {
+            return !(hasNonCountContribution && contribution.isCountField_)
+                && !contribution.isCompleteValidity_;
+        });
+    auto const hasNonEmptyBitmaskContribution = std::ranges::any_of(
+        childContributions,
+        [hasNonCountContribution, hasStrongContribution](auto const& contribution) {
+            auto const wouldKeep = !(hasNonCountContribution && contribution.isCountField_)
+                && !(hasStrongContribution && contribution.isCompleteValidity_);
+            return wouldKeep && !contribution.isEmptyBitmask_;
+        });
     for (auto& contribution : childContributions) {
         if (hasNonCountContribution && contribution.isCountField_) {
             continue;
         }
+        if (hasStrongContribution && contribution.isCompleteValidity_) {
+            continue;
+        }
+        if (hasNonEmptyBitmaskContribution && contribution.isEmptyBitmask_) {
+            continue;
+        }
         node.valueBubbles_.push_back(std::move(contribution.bubble_));
     }
+    sortValidityBubblesFirst(node.valueBubbles_);
 
     if (node.valueBubbles_.empty() || node.valueBubbles_.size() > kMaxPropagatedBubbles) {
         node.valueBubbles_.clear();
         return {};
     }
     if (isTransparentPropagationContainer(inspectionKeyString(node))) {
+        return node.valueBubbles_;
+    }
+    if (containsUngroupedBubble(node.valueBubbles_)) {
         return node.valueBubbles_;
     }
     if (node.valueBubbles_.size() == 1) {
@@ -710,26 +1110,14 @@ void InspectionConverter::convertAttributeLayer(
         auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
         convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
-        auto numValues = 0;
-        OptionalValueAndType singleValue;
-        attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val) {
-            auto singleValueForField = convertField(fieldName, val);
-            if (singleValueForField) {
-                ++numValues;
-                singleValue = singleValueForField;
-            }
+        auto hasFields = false;
+        attr->forEachField([this, &hasFields](auto const& fieldName, auto const& val) {
+            hasFields = true;
+            convertField(fieldName, val);
             return true;
         });
 
-        if (numValues == 1) {
-            if (current_->children_.size() == 1) {
-                inheritFlattenedChild(*current_, current_->children_.front());
-            }
-            else {
-                std::tie(current_->value_, current_->type_) = *singleValue;
-            }
-        }
-        else if (numValues == 0) {
+        if (!hasFields) {
             current_->value_ = JsValue(true);
             current_->type_ = ValueType::Boolean;
         }
@@ -744,6 +1132,39 @@ void InspectionConverter::convertAttributeLayer(
     });
 }
 
+uint32_t InspectionConverter::relationIndexFor(const model_ptr<Relation>& r)
+{
+    if (auto featureRelationIndex = r->featureRelationIndex()) {
+        return *featureRelationIndex;
+    }
+    return nextRelationIndex_++;
+}
+
+void InspectionConverter::convertRelation(
+    JsValue const& key,
+    FieldOrIndex const& path,
+    const model_ptr<Relation>& r,
+    uint32_t relationIndex,
+    std::optional<std::string> targetGeoJsonPath)
+{
+    auto const relationHoverId = featureId_ + ":relation#" + std::to_string(relationIndex);
+    auto relationScope = push(key, path);
+    relationScope->hoverId_ = relationRowHoverId(r, relationHoverId);
+    convertSourceDataReferences(r->sourceDataReferences(), *relationScope);
+    {
+        auto targetPath = targetGeoJsonPath.value_or(appendGeoJsonPathField(relationScope->geoJsonPath_, "target"));
+        auto targetScope = push(convertString("target"), RawPath{""}, ValueType::FeatureId);
+        assignFeatureReference(*targetScope, r->target());
+        targetScope->geoJsonPath_ = std::move(targetPath);
+    }
+    if (auto const sourceValidity = r->sourceValidityOrNull()) {
+        convertValidity(convertString("sourceValidity"), sourceValidity);
+    }
+    if (auto const targetValidity = r->targetValidityOrNull()) {
+        convertValidity(convertString("targetValidity"), targetValidity, &relationHoverId);
+    }
+}
+
 void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
 {
     auto& relGroup = relationsByType_[r->name()];
@@ -755,20 +1176,14 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
             simfilStringLiteral(r->name()));
     }
     auto relGroupScope = push(relGroup);
-    auto const relationIndex = nextRelationIndex_++;
+    auto const relationIndex = relationIndexFor(r);
     auto const relationObjectPath = fmt::format("relations[{}]", relationIndex);
-    auto relScope = push(JsValue(relGroup->children_.size()), relationIndex, ValueType::FeatureId);
-    relScope->geoJsonPath_ = relationObjectPath;
-    assignFeatureReference(*relScope, r->target());
-    relScope->hoverId_ = featureId_+":relation#"+std::to_string(relationIndex);
-    convertSourceDataReferences(r->sourceDataReferences(), *relScope);
-    if (auto const sourceValidity = r->sourceValidityOrNull()) {
-        convertValidity(convertString("sourceValidity"), sourceValidity);
-    }
-    if (auto const targetValidity = r->targetValidityOrNull()) {
-        convertValidity(convertString("targetValidity"), targetValidity);
-    }
-    relScope->geoJsonPath_ = appendGeoJsonPathField(relationObjectPath, "target");
+    convertRelation(
+        JsValue(relGroup->children_.size()),
+        RawPath{relationObjectPath},
+        r,
+        relationIndex,
+        appendGeoJsonPathField(relationObjectPath, "target"));
 }
 
 void InspectionConverter::convertGeometry(
@@ -983,63 +1398,80 @@ void InspectionConverter::convertValidity(
     });
 }
 
-InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
+void InspectionConverter::convertField(
     const simfil::StringId& fieldId,
     const simfil::ModelNode::Ptr& value)
 {
-    return convertField(convertString(fieldId), value);
+    convertField(convertString(fieldId), value);
 }
 
-InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
+void InspectionConverter::convertField(
     const std::string_view& fieldName,
     const simfil::ModelNode::Ptr& value)
 {
-    return convertField(convertString(fieldName), value);
+    convertField(convertString(fieldName), value);
 }
 
-InspectionConverter::OptionalValueAndType
-InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelNode::Ptr& value)
+void InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelNode::Ptr& value)
 {
     auto path = fieldName.toString();
-    return convertField(fieldName, std::string_view(path), value);
+    convertField(fieldName, std::string_view(path), value);
 }
 
-InspectionConverter::OptionalValueAndType
-InspectionConverter::convertField(
+void InspectionConverter::convertField(
     const JsValue& fieldName,
     FieldOrIndex const& path,
     const simfil::ModelNode::Ptr& value)
 {
+    if (value->addr().column() == TileFeatureLayer::ColumnId::RelationReferences) {
+        auto relationRef = tile_->resolve<RelationReference>(*value);
+        auto relation = relationRef->relation();
+        convertRelation(fieldName, path, relation, relationIndexFor(relation));
+        return;
+    }
+
     auto fieldScope = push(fieldName, path);
     bool isArray = false;
-    OptionalValueAndType singleValue;
 
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
         value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
     {
         auto featureId = tile_->resolve<FeatureId>(*value);
         assignFeatureReference(*fieldScope, featureId);
-        singleValue = {fieldScope->value_, ValueType::FeatureId};
+        return;
     }
     else {
         switch (value->type()) {
-        case simfil::ValueType::Undef: return {};
+        case simfil::ValueType::Undef:
+            return;
         case simfil::ValueType::TransientObject: break;
-        case simfil::ValueType::Null: singleValue = {JsValue(), ValueType::Null}; break;
-        case simfil::ValueType::Bool: singleValue = {JsValue(std::get<bool>(value->value())), ValueType::Boolean}; break;
-        case simfil::ValueType::Int: singleValue = {JsValue(std::get<int64_t>(value->value())), ValueType::Number}; break;
-        case simfil::ValueType::Float: singleValue = {JsValue(std::get<double>(value->value())), ValueType::Number}; break;
+        case simfil::ValueType::Null:
+            return;
+        case simfil::ValueType::Bool:
+            fieldScope->value_ = JsValue(std::get<bool>(value->value()));
+            fieldScope->type_ = ValueType::Boolean;
+            return;
+        case simfil::ValueType::Int:
+            fieldScope->value_ = JsValue(std::get<int64_t>(value->value()));
+            fieldScope->type_ = ValueType::Number;
+            return;
+        case simfil::ValueType::Float:
+            fieldScope->value_ = JsValue(std::get<double>(value->value()));
+            fieldScope->type_ = ValueType::Number;
+            return;
         case simfil::ValueType::String: {
             auto vv = value->value();
             if (std::holds_alternative<std::string_view>(vv))
-                singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::String};
+                fieldScope->value_ = convertString(std::get<std::string_view>(vv));
             else
-                singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
-            break;
+                fieldScope->value_ = JsValue(std::get<std::string>(vv));
+            fieldScope->type_ = ValueType::String;
+            return;
         }
         case simfil::ValueType::Bytes:
-            singleValue = {JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value()))), ValueType::String};
-            break;
+            fieldScope->value_ = JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value())));
+            fieldScope->type_ = ValueType::String;
+            return;
         case simfil::ValueType::Object: break;
         case simfil::ValueType::Array:
             isArray = true;
@@ -1049,56 +1481,22 @@ InspectionConverter::convertField(
         }
     }
 
-    if (singleValue) {
-        std::tie(fieldScope->value_, fieldScope->type_) = *singleValue;
-        return singleValue;
-    }
-
     auto const containerPath = fieldScope->geoJsonPath_;
-    auto numValues = 0;
     auto index = 0;
     for (auto const& [k, v] : value->fields()) {
         auto kk = isArray ? JsValue(index) : convertString(k);
         auto keyPath = kk.toString();
-        auto singleValueForField = isArray
-            ? convertField(kk, static_cast<uint32_t>(index), v)
-            : convertField(kk, std::string_view(keyPath), v);
-        if (singleValueForField) {
-            ++numValues;
-            singleValue = singleValueForField;
+        if (isArray) {
+            convertField(kk, static_cast<uint32_t>(index), v);
+        }
+        else {
+            convertField(kk, std::string_view(keyPath), v);
         }
         ++index;
     }
 
-    if (numValues == 1) {
-        if (fieldScope->children_.size() == 1) {
-            inheritFlattenedChild(*fieldScope, fieldScope->children_.front());
-        }
-        else {
-            std::tie(fieldScope->value_, fieldScope->type_) = *singleValue;
-        }
-        if (isArray) {
-            fieldScope->type_ = fieldScope->type_ | ValueType::ArrayBit;
-            fieldScope->geoJsonPath_ = directChildGeoJsonPath(containerPath);
-        }
-        return singleValue;
-    }
     if (isArray) {
         fieldScope->geoJsonPath_ = directChildGeoJsonPath(containerPath);
-    }
-    return {};
-}
-
-void InspectionConverter::inheritFlattenedChild(InspectionNode& parent, InspectionNode const& child)
-{
-    parent.value_ = child.value_;
-    parent.type_ = child.type_;
-    parent.mapId_ = child.mapId_;
-    parent.hoverId_ = child.hoverId_;
-    parent.info_ = child.info_;
-    parent.geoJsonPath_ = child.geoJsonPath_;
-    if (!child.sourceDataRefs_.empty()) {
-        parent.sourceDataRefs_ = child.sourceDataRefs_;
     }
 }
 
@@ -1169,6 +1567,9 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
             bubbles.push(valueBubbleToJsValue(bubble));
         }
         newDict.set("valueBubbles", bubbles);
+    }
+    if (isArrayValue(type_) && (!children_.empty() || value_.type() == JsValue::Type::Null)) {
+        newDict.set("valueCount", JsValue(std::to_string(children_.size())));
     }
     if (!sourceDataRefs_.empty()) {
         auto list = JsValue::List();

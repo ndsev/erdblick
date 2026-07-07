@@ -1,4 +1,5 @@
 import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
+import {tileIdNumberFromString} from "../shared/tile-id-normalization";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
@@ -362,7 +363,11 @@ export class FeatureTile implements RenderableTileLayer {
         if (metadata.id) {
             try {
                 const [mapId, layerId, tileId] = coreLib.parseMapTileKey(metadata.id);
-                return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+                const numericTileId = typeof tileId === "string" ? tileIdNumberFromString(tileId) : Number(tileId);
+                if (numericTileId === null || !Number.isFinite(numericTileId)) {
+                    return metadata.id;
+                }
+                return coreLib.getTileFeatureLayerKey(mapId, layerId, Math.trunc(numericTileId));
             } catch (_error) {
                 return metadata.id;
             }

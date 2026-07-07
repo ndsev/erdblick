@@ -10,6 +10,7 @@ import {
     encodeMapNamesV2,
     encodeSelectionsV2,
     encodeStyleOptionsV2,
+    featureSelectionLayerNames,
     sourceDataSelectionMapIds
 } from "./url-state-codec";
 
@@ -102,16 +103,16 @@ describe("URL state v2 codec", () => {
 
         const encoded = encodeSelectionsV2(panels, layerNames, layerEncoding.mapNames, defaultColors);
 
-        expect(encoded).toContain("F:0:21fa0777000d");
+        expect(encoded).toContain("F:0:545379780");
         expect(encoded).toContain("Lane.545379780.24%3Aattribute%231%2Cvalidity%230");
-        expect(encoded).toContain("SD:1:LaneGeometryLayer-1:21fa0777000d");
+        expect(encoded).toContain("SD:1:LaneGeometryLayer-1:545379780");
 
         const decoded = decodeSelectionsV2(encoded ?? "", layerNames, layerEncoding.mapNames, defaultColors);
         expect(decoded).toEqual([
             {
                 id: 0,
                 features: [{
-                    mapTileKey: "Features:MapA:Lane:21fa0777000d:0",
+                    mapTileKey: "Features:MapA:Lane:545379780:0",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
                 }],
                 locked: true,
@@ -123,7 +124,7 @@ describe("URL state v2 codec", () => {
                 id: 3,
                 features: [],
                 sourceData: {
-                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:21fa0777000d:0",
+                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:545379780:0",
                     address: 783783249845n,
                 },
                 locked: true,
@@ -132,5 +133,116 @@ describe("URL state v2 codec", () => {
                 undocked: true,
             },
         ]);
+    });
+
+    it("round-trips selected features from slash-containing map ids when their layer is active", () => {
+        const layerNames = [
+            "Island-3D/Display3D",
+            "Provider/Sample Munich/Landmark",
+        ];
+        const panels = [{
+            id: 0,
+            features: [
+                {
+                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    featureId: "DisplayMesh.545666604.8",
+                },
+                {
+                    mapTileKey: "Features:Provider%2FSample Munich:Landmark:545666604:0",
+                    featureId: "Landmark.545666604.12",
+                },
+            ],
+            locked: false,
+            size: [30, 20] as [number, number],
+            color: "#fff314",
+            undocked: false,
+        }];
+        const layerEncoding = encodeLayerNamesV2(layerNames);
+
+        const encoded = encodeSelectionsV2(panels, layerNames, layerEncoding.mapNames, defaultColors);
+
+        expect(encoded).toContain("F:0:545666604");
+        expect(encoded).toContain("F:1:545666604");
+        expect(decodeLayerNamesV2(layerEncoding.map ?? "", layerEncoding.l ?? "")).toEqual(layerNames);
+        expect(decodeSelectionsV2(encoded ?? "", layerNames, layerEncoding.mapNames, defaultColors)).toEqual([{
+            id: 0,
+            features: [
+                {
+                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    featureId: "DisplayMesh.545666604.8",
+                },
+                {
+                    mapTileKey: "Features:Provider/Sample Munich:Landmark:545666604:0",
+                    featureId: "Landmark.545666604.12",
+                },
+            ],
+            locked: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }]);
+    });
+
+    it("adds selected feature layers to v2 layer encoding when active layer state missed them", () => {
+        const activeLayerNames = [
+            "Germany/Road",
+            "Island-3D/Display3D",
+        ];
+        const panels = [{
+            id: 0,
+            features: [
+                {
+                    mapTileKey: "Features:Provider%2FSample Munich:Lane:545555209:0",
+                    featureId: "Lane.545555209.16803",
+                },
+                {
+                    mapTileKey: "Features:Germany:Road:545666614:0",
+                    featureId: "Road.545666614.1132",
+                },
+                {
+                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    featureId: "DisplayMesh.545666604.54",
+                },
+            ],
+            locked: true,
+            size: [30, 20] as [number, number],
+            color: "#fff314",
+            undocked: false,
+        }];
+        const urlLayerNames = [...activeLayerNames];
+        for (const layerName of featureSelectionLayerNames(panels)) {
+            if (!urlLayerNames.includes(layerName)) {
+                urlLayerNames.push(layerName);
+            }
+        }
+        const layerEncoding = encodeLayerNamesV2(urlLayerNames);
+        const encoded = encodeSelectionsV2(panels, urlLayerNames, layerEncoding.mapNames, defaultColors);
+
+        expect(decodeLayerNamesV2(layerEncoding.map ?? "", layerEncoding.l ?? "")).toEqual([
+            "Germany/Road",
+            "Island-3D/Display3D",
+            "Provider/Sample Munich/Lane",
+        ]);
+        expect(decodeSelectionsV2(encoded ?? "", urlLayerNames, layerEncoding.mapNames, defaultColors)).toEqual([{
+            id: 0,
+            features: [
+                {
+                    mapTileKey: "Features:Provider/Sample Munich:Lane:545555209:0",
+                    featureId: "Lane.545555209.16803",
+                },
+                {
+                    mapTileKey: "Features:Germany:Road:545666614:0",
+                    featureId: "Road.545666614.1132",
+                },
+                {
+                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    featureId: "DisplayMesh.545666604.54",
+                },
+            ],
+            locked: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }]);
     });
 });

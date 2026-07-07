@@ -6,6 +6,7 @@ import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
 import { AppStateService } from './appstate.service';
+import {MapTreeNode} from "../mapdata/map.tree.model";
 
 // @ts-expect-error this is a mock router
 interface RouterStub extends Partial<Router> {
@@ -43,6 +44,24 @@ const createRouterStub = (queryParams: Record<string, unknown> = {}): RouterStub
 
 const feature = (id: string, mapTileKey = 'map/layer/tile') => ({ featureId: id, mapTileKey });
 const sourceData = (mapTileKey = 'SourceData:m1:SourceData-LAYER:1', address?: bigint) => ({ mapTileKey, address });
+const infoServiceStub = () => ({
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
+    showWarning: vi.fn(),
+    registerDefaultContainer: vi.fn(),
+    showAlertDialogDefault: vi.fn()
+}) as any;
+
+const layerInfo = (layerId: string, type = "Feature") => ({
+    layerId,
+    type,
+    canRead: true,
+    canWrite: false,
+    coverage: [],
+    featureTypes: [],
+    version: {major: 1, minor: 0, patch: 0},
+    zoomLevels: [],
+});
 
 describe('AppStateService', () => {
     beforeEach(() => {
@@ -104,6 +123,137 @@ describe('AppStateService', () => {
 
         service.ngOnDestroy();
         routerStub.events.complete();
+    });
+
+    it('keeps selected features with packed tile ids during datasource pruning', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [feature(
+                "Intersection.545554858.3348",
+                "Features:Very-Large-Map:Road:22100770000d:0"
+            )],
+            locked: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Very-Large-Map", new MapTreeNode({
+                mapId: "Very-Large-Map",
+                nodeId: "Very-Large-Map",
+                maxParallelJobs: 1,
+                addOn: false,
+                extraJsonAttachment: {},
+                layers: {Road: layerInfo("Road")},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d:0");
+    });
+
+
+    it('keeps selected features while datasource layers are still initializing', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [feature(
+                "Intersection.545554858.3348",
+                "Features:Very-Large-Map:Road:545554858:0"
+            )],
+            locked: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Very-Large-Map", new MapTreeNode({
+                mapId: "Very-Large-Map",
+                nodeId: "Very-Large-Map",
+                maxParallelJobs: 0,
+                addOn: false,
+                status: "initializing",
+                extraJsonAttachment: {},
+                layers: {},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858:0");
+    });
+
+    it('preserves focused selection metadata while pruning unavailable selections', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [
+                feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
+                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858:0"),
+            ],
+            locked: true,
+            focused: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Very-Large-Map", new MapTreeNode({
+                mapId: "Very-Large-Map",
+                nodeId: "Very-Large-Map",
+                maxParallelJobs: 1,
+                addOn: false,
+                extraJsonAttachment: {},
+                layers: {Road: layerInfo("Road")},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].focused).toBe(true);
+        expect(service.selection[0].features).toEqual([
+            feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
+        ]);
+    });
+
+    it('keeps selections whose MapTileKey encodes slashes in the map id', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [feature(
+                "Landmark.545666604.12",
+                "Features:Provider%2FSample Munich:Landmark:545666604:0"
+            )],
+            locked: true,
+            focused: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Provider/Sample Munich", new MapTreeNode({
+                mapId: "Provider/Sample Munich",
+                nodeId: "Provider/Sample Munich",
+                maxParallelJobs: 1,
+                addOn: false,
+                extraJsonAttachment: {},
+                layers: {Landmark: layerInfo("Landmark")},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].focused).toBe(true);
+        expect(service.selection[0].features[0]).toEqual(feature(
+            "Landmark.545666604.12",
+            "Features:Provider%2FSample Munich:Landmark:545666604:0"
+        ));
     });
 
     it('clamps the low-fi tile threshold', () => {
@@ -236,7 +386,7 @@ describe('AppStateService', () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: 'Features:MapA:Lane:21fa0777000d:0',
+                    mapTileKey: 'Features:MapA:Lane:545379780:0',
                     featureId: 'Lane.1:attribute#1'
                 }],
                 locked: true,
@@ -248,7 +398,7 @@ describe('AppStateService', () => {
                 id: 1,
                 features: [],
                 sourceData: {
-                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:21fa0777000e:0',
+                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1451349444:0',
                     address: 783783249845n
                 },
                 locked: true,
@@ -260,6 +410,51 @@ describe('AppStateService', () => {
         ]);
         expect(service.focusedInspectionPanelId).toBe(1);
         expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('clears stored inspections when a v2 URL does not contain a selection', async () => {
+        localStorage.setItem('selected', JSON.stringify([
+            '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
+        ]));
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'Very-Large-Map',
+            l: 'Road:0',
+            s: JSON.stringify(['features', '"PROHIBITED"']),
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates legacy selection payloads even when a v2 URL marker is present', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'MapA',
+            l: 'Road:0',
+            sel: '5~1f~Features:MapA:Road:tile-1:0~Road.1:attribute#0:validity#0~30:20~abc123~0',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].id).toBe(5);
+        expect(service.selection[0].focused).toBe(true);
+        expect(service.selection[0].features[0]).toEqual({
+            mapTileKey: 'Features:MapA:Road:tile-1:0',
+            featureId: 'Road.1:attribute#0:validity#0',
+        });
 
         service.ngOnDestroy();
         routerStub.events.complete();

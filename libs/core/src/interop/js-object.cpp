@@ -265,9 +265,10 @@ std::string JsValue::toString() const {
 JsValue::Type JsValue::type() const
 {
 #ifdef EMSCRIPTEN
+    if (value_.isUndefined()) return Type::Undefined;
+    if (value_.isNull()) return Type::Null;
     std::string typeStr = value_.typeOf().as<std::string>(); // Convert emscripten::val to std::string
-    if (typeStr == "undefined") return Type::Undefined;
-    else if (typeStr == "object") return Type::ObjectOrList;
+    if (typeStr == "object") return Type::ObjectOrList;
     else if (typeStr == "boolean") return Type::Bool;
     else if (typeStr == "number" || typeStr == "bigint") return Type::Number;
     else if (typeStr == "string") return Type::String;

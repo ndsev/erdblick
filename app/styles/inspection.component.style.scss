@@ -48,7 +48,7 @@ inspection-tree {
       padding: 0;
     }
 
-    .inspection-key-header-content {
+    .inspection-header-content {
       align-items: center;
       display: flex;
       flex-direction: row;
@@ -113,6 +113,11 @@ inspection-tree {
     gap: 0.25em;
   }
 
+  .inspection-value-cell-content {
+    min-width: 0;
+    overflow: hidden;
+  }
+
   .inspection-node-value {
     cursor: pointer;
 
@@ -154,44 +159,278 @@ inspection-tree {
   .inspection-value-bubbles {
     align-items: center;
     display: inline-flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.25em;
+    max-width: 100%;
     min-width: 0;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .inspection-value-bubbles-overflowing {
+    padding-right: 1.2em;
+
+    &::after {
+      align-items: center;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        color-mix(in srgb, var(--p-content-background) 88%, transparent) 24%,
+        var(--p-content-background) 58%
+      );
+      bottom: 0;
+      color: var(--p-text-muted-color);
+      content: "…";
+      display: flex;
+      font-weight: 700;
+      justify-content: flex-end;
+      padding-left: 1em;
+      pointer-events: none;
+      position: absolute;
+      right: 0;
+      top: 0;
+      width: 2em;
+    }
   }
 
   .inspection-value-bubble {
-    background: color-mix(in srgb, var(--p-primary-color) 16%, var(--p-content-background));
-    border: 1px solid color-mix(in srgb, var(--p-primary-color) 40%, var(--p-content-border-color));
-    border-radius: 999px;
+    --inspection-value-bubble-color: var(--p-primary-color);
+    --inspection-value-bubble-outline-style: solid;
+    --inspection-value-bubble-outline-width: 1px;
+
+    background: color-mix(in srgb, var(--inspection-value-bubble-color) 16%, var(--p-content-background));
+    border: var(--inspection-value-bubble-outline-width) var(--inspection-value-bubble-outline-style)
+      color-mix(in srgb, var(--inspection-value-bubble-color) 54%, var(--p-content-border-color));
+    border-radius: 0.18rem;
     color: var(--p-content-color);
     cursor: pointer;
+    flex: 0 0 auto;
     font: inherit;
     line-height: 1.15;
-    max-width: 28em;
+    min-width: 0;
     overflow: hidden;
-    padding: 0.08em 0.55em;
-    text-overflow: ellipsis;
+    padding: 0.04em 0.32em;
     white-space: nowrap;
 
     &:hover {
-      background: color-mix(in srgb, var(--p-primary-color) 30%, var(--p-content-background));
-      border-color: color-mix(in srgb, var(--p-primary-color) 58%, var(--p-content-border-color));
+      background: color-mix(in srgb, var(--inspection-value-bubble-color) 30%, var(--p-content-background));
+      border-color: color-mix(in srgb, var(--inspection-value-bubble-color) 58%, var(--p-content-border-color));
+    }
+  }
+
+  .inspection-value-bubble-frame {
+    display: inline-flex;
+    flex: 0 0 auto;
+    min-width: 0;
+    position: relative;
+
+    &:hover .inspection-value-bubble-copy {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  .inspection-value-bubble-copy {
+    align-items: center;
+    background: color-mix(in srgb, var(--p-content-background) 28%, transparent);
+    border: none;
+    border-radius: 0.18rem;
+    color: var(--p-content-color);
+    cursor: pointer;
+    display: inline-flex;
+    height: 1.15em;
+    justify-content: center;
+    opacity: 0;
+    padding: 0;
+    pointer-events: none;
+    position: absolute;
+    right: 0.1em;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: opacity 120ms ease;
+    width: 1.15em;
+
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-size: 0.9em;
+      line-height: 1;
     }
   }
 
   .inspection-value-bubble-boolean {
-    background: color-mix(in srgb, var(--p-green-500) 18%, var(--p-content-background));
-    border-color: color-mix(in srgb, var(--p-green-500) 45%, var(--p-content-border-color));
+    font-weight: 600;
   }
 
   .inspection-value-bubble-group {
-    background: color-mix(in srgb, var(--p-yellow-500) 16%, var(--p-content-background));
-    border-color: color-mix(in srgb, var(--p-yellow-500) 42%, var(--p-content-border-color));
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 0;
+    min-width: 0;
+    overflow: hidden;
+
+    .inspection-value-bubble-frame {
+      margin-left: -1px;
+    }
+
+    .inspection-value-bubble {
+      border-radius: 0;
+    }
+
+    .inspection-value-bubble-frame:first-child {
+      border-bottom-left-radius: 0.18rem;
+      border-top-left-radius: 0.18rem;
+      margin-left: 0;
+
+      .inspection-value-bubble {
+        border-bottom-left-radius: 0.18rem;
+        border-top-left-radius: 0.18rem;
+      }
+    }
+
+    .inspection-value-bubble-frame:last-child {
+      .inspection-value-bubble {
+        border-bottom-right-radius: 0.18rem;
+        border-top-right-radius: 0.18rem;
+      }
+    }
   }
 
   .inspection-value-bubble-validity {
-    background: color-mix(in srgb, var(--p-blue-500) 18%, var(--p-content-background));
-    border-color: color-mix(in srgb, var(--p-blue-500) 45%, var(--p-content-border-color));
+    font-weight: 600;
+  }
+
+  .inspection-value-bubble-validity-complete {
+    font-style: italic;
+  }
+
+  .inspection-value-bubble-relation {
+    font-weight: 600;
+  }
+
+  .inspection-value-bubble-feature-id {
+    font-style: italic;
+  }
+
+  .inspection-value-bubble-days-of-week {
+    font-weight: 600;
+  }
+
+  .inspection-value-bubble-months-of-year {
+    font-weight: 600;
+  }
+
+  .inspection-value-bubble-outline-1 {
+    --inspection-value-bubble-outline-style: dashed;
+  }
+
+  .inspection-value-bubble-outline-2 {
+    --inspection-value-bubble-outline-style: dotted;
+    --inspection-value-bubble-outline-width: 2px;
+  }
+
+  .inspection-value-bubble-outline-3 {
+    --inspection-value-bubble-outline-style: double;
+    --inspection-value-bubble-outline-width: 3px;
+  }
+
+  .inspection-value-bubble-outline-4 {
+    box-shadow:
+      inset 2px 0 0 color-mix(in srgb, var(--inspection-value-bubble-color) 72%, var(--p-content-color)),
+      inset -2px 0 0 color-mix(in srgb, var(--inspection-value-bubble-color) 72%, var(--p-content-color));
+  }
+
+  .inspection-value-bubble-outline-5 {
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--inspection-value-bubble-color) 74%, var(--p-content-color));
+  }
+
+  .inspection-value-bubble-outline-6 {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--inspection-value-bubble-color) 64%, var(--p-content-color));
+  }
+
+  .inspection-value-bubble-outline-7 {
+    outline: 1px dotted color-mix(in srgb, var(--inspection-value-bubble-color) 88%, var(--p-content-color));
+    outline-offset: -3px;
+  }
+
+  .inspection-value-bubble-color-0 {
+    --inspection-value-bubble-color: var(--p-blue-500, #3b82f6);
+  }
+
+  .inspection-value-bubble-color-1 {
+    --inspection-value-bubble-color: var(--p-green-500, #22c55e);
+  }
+
+  .inspection-value-bubble-color-2 {
+    --inspection-value-bubble-color: var(--p-yellow-500, #eab308);
+  }
+
+  .inspection-value-bubble-color-3 {
+    --inspection-value-bubble-color: var(--p-orange-500, #f97316);
+  }
+
+  .inspection-value-bubble-color-4 {
+    --inspection-value-bubble-color: var(--p-pink-500, #ec4899);
+  }
+
+  .inspection-value-bubble-color-5 {
+    --inspection-value-bubble-color: var(--p-cyan-500, #06b6d4);
+  }
+
+  .inspection-value-bubble-color-6 {
+    --inspection-value-bubble-color: var(--p-teal-500, #14b8a6);
+  }
+
+  .inspection-value-bubble-color-7 {
+    --inspection-value-bubble-color: var(--p-purple-500, #a855f7);
+  }
+
+  .inspection-value-bubble-color-8 {
+    --inspection-value-bubble-color: var(--p-red-500, #ef4444);
+  }
+
+  .inspection-value-bubble-color-9 {
+    --inspection-value-bubble-color: var(--p-lime-500, #84cc16);
+  }
+
+  .inspection-value-bubble-stripe-1 {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 20%, transparent) 0 2px,
+        transparent 2px 5px
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+  }
+
+  .inspection-value-bubble-stripe-2 {
+    background:
+      repeating-linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 18%, transparent) 0 2px,
+        transparent 2px 6px
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+  }
+
+  .inspection-value-bubble-stripe-3 {
+    background:
+      radial-gradient(
+        circle at 3px 3px,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 30%, transparent) 0 1px,
+        transparent 1.5px
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+    background-size: 6px 6px;
+  }
+
+  .inspection-value-bubble-stripe-4 {
+    background:
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 18%, transparent) 0 45%,
+        transparent 45% 100%
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
   }
 
   tr.inspection-value-bubble-target > td {
@@ -274,6 +513,51 @@ inspection-tree {
   .inspection-filter-trigger,
   .inspection-filter-clear-icon {
     cursor: pointer;
+  }
+
+}
+
+.inspection-value-bubble-popover {
+  background: color-mix(in srgb, var(--p-content-background) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--p-content-border-color) 78%, transparent);
+  border-radius: 0.35rem;
+  box-shadow: 0 0.45rem 1.1rem color-mix(in srgb, #000 28%, transparent);
+  box-sizing: border-box;
+  max-height: min(24rem, calc(100vh - 0.5rem));
+  max-width: min(46rem, 70vw);
+  overflow: auto;
+  padding: 0.35rem;
+  pointer-events: none;
+  position: fixed;
+  z-index: 30000;
+
+  .inspection-value-bubble-popover-content {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.22rem;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .inspection-value-bubble-popover-group {
+    margin-right: 0.12rem;
+    max-width: 100%;
+
+    .inspection-value-bubble:first-child {
+      border-bottom-left-radius: 0.18rem;
+      border-top-left-radius: 0.18rem;
+    }
+
+    .inspection-value-bubble:last-child {
+      border-bottom-right-radius: 0.18rem;
+      border-top-right-radius: 0.18rem;
+    }
+  }
+
+  .inspection-value-bubble-popover-item {
+    cursor: default;
+    display: inline-flex;
   }
 }
 

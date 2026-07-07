@@ -889,6 +889,9 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     items->append(tile->newValue("B"));
     REQUIRE(testObject->addField("items", items).has_value());
 
+    auto emptyItems = tile->newArray();
+    REQUIRE(testObject->addField("emptyItems", emptyItems).has_value());
+
     auto objectItems = tile->newArray();
     auto objectItem = tile->newObject();
     REQUIRE(objectItem->addField("code", "C").has_value());
@@ -900,6 +903,10 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     auto inspection = InspectionConverter().convert(feature);
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.items.*"));
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.items[0]"));
+    auto const* emptyItemsNode = findInspectionNodeByGeoJsonPath(*inspection, "properties.test.emptyItems.*");
+    REQUIRE(emptyItemsNode);
+    REQUIRE(emptyItemsNode->at("value").is_null());
+    REQUIRE(emptyItemsNode->value("valueCount", std::string{}) == "0");
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.objectItems.*"));
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.objectItems[0].code"));
 
@@ -951,7 +958,7 @@ TEST_CASE("FeatureInspection copies geometry collection search paths", "[erdblic
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[1]"));
 }
 
-TEST_CASE("FeatureInspection copies propagated attribute value search path", "[erdblick.inspection]")
+TEST_CASE("FeatureInspection keeps scalar value paths on leaf nodes", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
     auto feature = tile->find("Way.1");
@@ -965,10 +972,16 @@ TEST_CASE("FeatureInspection copies propagated attribute value search path", "[e
     auto inspection = InspectionConverter().convert(feature);
     auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
     REQUIRE(attrNode);
-    REQUIRE(attrNode->value("value", 0) == 50);
+    REQUIRE(attrNode->value("value", std::string{}) == std::string{});
     REQUIRE(
         attrNode->value("geoJsonPath", std::string{}) ==
+        "properties.layer.rules.SPEED_LIMIT_METRIC");
+
+    auto const* speedLimitNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
         "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
+    REQUIRE(speedLimitNode);
+    REQUIRE(speedLimitNode->value("value", 0) == 50);
 }
 
 TEST_CASE("FeatureInspection exposes propagated scalar value bubbles", "[erdblick.inspection]")
@@ -985,20 +998,105 @@ TEST_CASE("FeatureInspection exposes propagated scalar value bubbles", "[erdblic
     auto attrValue = tile->newObject();
     REQUIRE(attrValue->addField("numLocations", int64_t(1)).has_value());
     REQUIRE(attrValue->addField("roadLocationId", roadLocation).has_value());
-    REQUIRE(attrValue->addField("sameDirectionAsSource", true).has_value());
-    REQUIRE(attrValue->addField("completeLocation", true).has_value());
-    REQUIRE(attrValue->addField("optionalFlag", false).has_value());
+    REQUIRE(attrValue->addBool("sameDirectionAsSource", true).has_value());
+    REQUIRE(attrValue->addBool("completeLocation", true).has_value());
+    REQUIRE(attrValue->addBool("optionalFlag", false).has_value());
     REQUIRE(attr->addField("attributeValue", attrValue).has_value());
 
     auto inspection = InspectionConverter().convert(feature);
     auto const* attrNode = findInspectionNodeByKey(*inspection, "ROAD_LOCATION_ID");
     REQUIRE(attrNode);
     auto labels = inspectionValueBubbleLabels(*attrNode);
-    REQUIRE(std::find(labels.begin(), labels.end(), "[418182439][0]") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "418182439 0") != labels.end());
     REQUIRE(std::find(labels.begin(), labels.end(), "sameDirectionAsSource") != labels.end());
     REQUIRE(std::find(labels.begin(), labels.end(), "completeLocation") != labels.end());
     REQUIRE(std::find(labels.begin(), labels.end(), "numLocations") == labels.end());
     REQUIRE(std::find(labels.begin(), labels.end(), "optionalFlag") == labels.end());
+
+    auto const* completeLocationNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "properties.layer.rules.ROAD_LOCATION_ID.attributeValue.completeLocation");
+    REQUIRE(completeLocationNode);
+    auto leafLabels = inspectionValueBubbleLabels(*completeLocationNode);
+    REQUIRE(std::find(leafLabels.begin(), leafLabels.end(), "true") != leafLabels.end());
+
+    auto const* rulesLayer = findInspectionNodeByKey(*inspection, "rules");
+    REQUIRE(rulesLayer);
+    REQUIRE_FALSE(rulesLayer->contains("valueBubbles"));
+
+    auto const* identifiersNode = findInspectionNodeByKey(*inspection, "Identifiers");
+    REQUIRE(identifiersNode);
+    REQUIRE_FALSE(identifiersNode->contains("valueBubbles"));
+    auto const* featureIdNode = findInspectionDirectChildByKey(*identifiersNode, "featureId");
+    REQUIRE(featureIdNode);
+    REQUIRE_FALSE(featureIdNode->contains("valueBubbles"));
+}
+
+TEST_CASE("FeatureInspection summarizes days of week as compact value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("ACTIVE_DAYS");
+    auto daysOfWeek = tile->newObject();
+    REQUIRE(daysOfWeek->addBool("isMonday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isTuesday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isWednesday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isThursday", false).has_value());
+    REQUIRE(daysOfWeek->addBool("isFriday", false).has_value());
+    REQUIRE(daysOfWeek->addBool("isSaturday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isSunday", false).has_value());
+    REQUIRE(daysOfWeek->addBool("isInclusive", true).has_value());
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("daysOfWeek", daysOfWeek).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* daysNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "properties.layer.rules.ACTIVE_DAYS.attributeValue.daysOfWeek");
+    REQUIRE(daysNode);
+    auto labels = inspectionValueBubbleLabels(*daysNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "Mon-Wed,Sat") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "isInclusive") != labels.end());
+}
+
+TEST_CASE("FeatureInspection summarizes months of year as compact value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("ACTIVE_MONTHS");
+    auto monthsOfYear = tile->newObject();
+    REQUIRE(monthsOfYear->addBool("january", true).has_value());
+    REQUIRE(monthsOfYear->addBool("february", true).has_value());
+    REQUIRE(monthsOfYear->addBool("march", false).has_value());
+    REQUIRE(monthsOfYear->addBool("april", false).has_value());
+    REQUIRE(monthsOfYear->addBool("may", true).has_value());
+    REQUIRE(monthsOfYear->addBool("june", true).has_value());
+    REQUIRE(monthsOfYear->addBool("july", true).has_value());
+    REQUIRE(monthsOfYear->addBool("august", false).has_value());
+    REQUIRE(monthsOfYear->addBool("september", false).has_value());
+    REQUIRE(monthsOfYear->addBool("october", false).has_value());
+    REQUIRE(monthsOfYear->addBool("november", false).has_value());
+    REQUIRE(monthsOfYear->addBool("december", true).has_value());
+    REQUIRE(monthsOfYear->addBool("isInclusive", true).has_value());
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("monthsOfYear", monthsOfYear).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* monthsNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "properties.layer.rules.ACTIVE_MONTHS.attributeValue.monthsOfYear");
+    REQUIRE(monthsNode);
+    auto labels = inspectionValueBubbleLabels(*monthsNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "Jan-Feb,May-Jul,Dec") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "isInclusive") != labels.end());
 }
 
 TEST_CASE("FeatureInspection exposes compact validity value bubbles", "[erdblick.inspection]")
@@ -1019,6 +1117,29 @@ TEST_CASE("FeatureInspection exposes compact validity value bubbles", "[erdblick
     auto labels = inspectionValueBubbleLabels(*attrNode);
     REQUIRE(std::find(labels.begin(), labels.end(), "30") != labels.end());
     REQUIRE(std::find(labels.begin(), labels.end(), "+ Way.1") != labels.end());
+}
+
+TEST_CASE("FeatureInspection keeps complete validity bubbles local when values add more information", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(attr->addField("value", int64_t(30)).has_value());
+    attr->validity()->newDirection(mapget::Validity::Both);
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
+    REQUIRE(attrNode);
+    auto attrLabels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(attrLabels.begin(), attrLabels.end(), "30") != attrLabels.end());
+    REQUIRE(std::find(attrLabels.begin(), attrLabels.end(), "COMPLETE") == attrLabels.end());
+
+    auto const* validityNode = findInspectionNodeByKey(*attrNode, "validity");
+    REQUIRE(validityNode);
+    auto validityLabels = inspectionValueBubbleLabels(*validityNode);
+    REQUIRE(std::find(validityLabels.begin(), validityLabels.end(), "COMPLETE") != validityLabels.end());
 }
 
 TEST_CASE("FeatureInspection keeps attributes in model layers with source data references", "[erdblick.inspection]")
@@ -1095,13 +1216,91 @@ TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspectio
     REQUIRE(relationGroup);
     REQUIRE(relationGroup->value("geoJsonPath", std::string{}) == "relations.*{name = \"hasPoi\"}");
 
+    auto const* relationRow = findInspectionNodeByGeoJsonPath(*inspection, "relations[0]");
+    REQUIRE(relationRow);
+    REQUIRE(relationRow->value("hoverId", std::string{}) == "Diamond.1:relation#0:validity#0");
+
     auto const* targetRow = findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target");
     REQUIRE(targetRow);
     REQUIRE(targetRow->value("value", std::string{}).find("PointOfInterest") != std::string::npos);
+    REQUIRE(targetRow->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
 
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].sourceValidity.direction"));
     REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].targetValidity.direction"));
+    auto const* targetValidity = findInspectionDirectChildByKey(*relationRow, "targetValidity");
+    REQUIRE(targetValidity);
+    REQUIRE(targetValidity->value("hoverId", std::string{}) == "Diamond.1:relation#0:validity#0");
+    auto relationBubbles = relationRow->at("valueBubbles");
+    REQUIRE(relationBubbles.is_array());
+    auto const& relationBubble = relationBubbles.at(0);
+    REQUIRE(relationBubble.at("children").is_array());
+    auto const targetValidityNodeId = targetValidity->value("nodeId", std::string{});
+    auto const& relationBubbleChildren = relationBubble.at("children");
+    REQUIRE(relationBubbleChildren.size() == 3);
+    REQUIRE(relationBubbleChildren.at(0).value("label", std::string{}) == "+");
+    REQUIRE(relationBubbleChildren.at(2).value("label", std::string{}) == "-");
+    auto targetFeatureBubble = std::find_if(
+        relationBubbleChildren.begin(),
+        relationBubbleChildren.end(),
+        [](auto const& bubble) { return bubble.value("kind", std::string{}) == "feature-id"; });
+    REQUIRE(targetFeatureBubble != relationBubbleChildren.end());
+    REQUIRE(targetFeatureBubble->value("hoverTargetNodeId", std::string{}) == targetValidityNodeId);
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target.sourceValidity.direction"));
+}
+
+TEST_CASE("FeatureInspection renders relation references like relation rows", "[erdblick.inspection]")
+{
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::TileId::fromWgs84(42., 11., 13),
+        "RelationReferenceInspectionNode",
+        "RelationReferenceInspectionMap",
+        relationTestLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+    tile->setIdPrefix({{"areaId", "Area"}});
+
+    auto const center = mapget::Point(tile->tileId().centerWgs84());
+    auto source = tile->newFeature("Diamond", {{"diamondId", 1}});
+    source->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+    auto relation = source->addRelation(
+        "hasPoi",
+        "PointOfInterest",
+        {{"areaId", "Area"}, {"pointId", 200}});
+    relation->targetValidity()->newDirection(mapget::Validity::Direction::Negative);
+
+    auto relationRefEnvelope = tile->newObject();
+    REQUIRE(relationRefEnvelope->addField("primary", tile->newRelationReference(relation)).has_value());
+    auto attr = source->attributeLayers()->newLayer("rules")->newAttribute("TURN_RESTRICTION");
+    REQUIRE(attr->addField("attributeValue", relationRefEnvelope).has_value());
+
+    auto inspection = InspectionConverter().convert(source);
+    auto const* refNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "properties.layer.rules.TURN_RESTRICTION.attributeValue.primary");
+    REQUIRE(refNode);
+    REQUIRE(refNode->value("hoverId", std::string{}) == "Diamond.1:relation#0:validity#0");
+    REQUIRE(refNode->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::Null));
+
+    auto const* targetRow = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "properties.layer.rules.TURN_RESTRICTION.attributeValue.primary.target");
+    REQUIRE(targetRow);
+    REQUIRE(targetRow->value("value", std::string{}).find("PointOfInterest") != std::string::npos);
+    REQUIRE(targetRow->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
+    REQUIRE(findInspectionDirectChildByKey(*refNode, "targetValidity"));
+
+    auto relationBubbles = refNode->at("valueBubbles");
+    REQUIRE(relationBubbles.is_array());
+    REQUIRE(relationBubbles.at(0).at("children").is_array());
+    auto const& relationBubbleChildren = relationBubbles.at(0).at("children");
+    auto targetFeatureBubble = std::find_if(
+        relationBubbleChildren.begin(),
+        relationBubbleChildren.end(),
+        [](auto const& bubble) { return bubble.value("kind", std::string{}) == "feature-id"; });
+    REQUIRE(targetFeatureBubble != relationBubbleChildren.end());
+    REQUIRE(targetFeatureBubble->value("hoverTargetNodeId", std::string{}).empty() == false);
 }
 
 TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is replaced", "[erdblick.parser]")

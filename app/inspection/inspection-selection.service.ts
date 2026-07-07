@@ -114,9 +114,38 @@ export class InspectionSelectionService {
                         panel.features.some(feature => feature.equals(hoveredFeature)))));
             }
         });
-        this.tileStream.tileDataChanged.subscribe(() => {
+        this.tileStream.tileDataChanged.subscribe(change => {
             this.lastHoverRequestSignature = "";
+            if (change.reason === "loaded" && this.selectionStateReferencesTile(change.tileKey)) {
+                this.reprojectCurrentSelection();
+            }
         });
+    }
+
+
+    /** Re-emits persisted selection after late tile arrivals so empty reload panels can hydrate. */
+    private reprojectCurrentSelection(): void {
+        this.stateService.selectionState.next([...this.stateService.selectionState.getValue()]);
+    }
+
+    /** Checks whether a tile-data update belongs to one of the persisted selected features/source-data rows. */
+    private selectionStateReferencesTile(tileKey: string): boolean {
+        const updatedIdentity = this.mapTileKeyIdentity(tileKey);
+        return this.stateService.selectionState.getValue().some(panel => {
+            if (panel.sourceData && this.mapTileKeyIdentity(panel.sourceData.mapTileKey) === updatedIdentity) {
+                return true;
+            }
+            return panel.features.some(feature => this.mapTileKeyIdentity(feature.mapTileKey) === updatedIdentity);
+        });
+    }
+
+    /** Normalizes textual map-tile keys without requiring WASM to understand the current tile-id encoding. */
+    private mapTileKeyIdentity(tileKey: string): string {
+        const colonParts = tileKey.split(":");
+        if (colonParts.length >= 4) {
+            return `${colonParts[0]}:${colonParts[1]}:${colonParts[2]}:${colonParts[3]}:${colonParts[4] ?? "0"}`;
+        }
+        return this.tileStream.canonicalizeMapTileKey(tileKey);
     }
 
     /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */

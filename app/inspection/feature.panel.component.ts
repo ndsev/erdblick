@@ -8,16 +8,14 @@ import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspectio
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {Subscription} from "rxjs";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {
-    formatInspectionArrayContainerSummary,
-    formatInspectionArrayValueCount
-} from "./inspection-array-summary.util";
 
 /** Click target metadata emitted by C++ for propagated scalar value pills. */
 interface InspectionValueBubble {
     label: string;
     targetNodeId?: string;
+    hoverTargetNodeId?: string;
     kind?: string;
+    colorKey?: string;
     children?: InspectionValueBubble[];
 }
 
@@ -31,6 +29,7 @@ interface InspectionModelData {
     geoJsonPath?: string;
     mapId?: string;
     nodeId?: string;
+    valueCount?: string;
     valueBubbles?: InspectionValueBubble[];
     sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
@@ -406,6 +405,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 targetNodeId: typeof bubble.targetNodeId === "string"
                     ? `${nodeIdPrefix}${bubble.targetNodeId}`
                     : bubble.targetNodeId,
+                hoverTargetNodeId: typeof bubble.hoverTargetNodeId === "string"
+                    ? `${nodeIdPrefix}${bubble.hoverTargetNodeId}`
+                    : bubble.hoverTargetNodeId,
                 children: prefixValueBubbleTargets(bubble.children, nodeIdPrefix)
             }));
         };
@@ -476,6 +478,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 if (data?.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = data.sourceDataReferences;
                 }
+                if (data?.hasOwnProperty("valueCount")) {
+                    node.data["valueCount"] = data.valueCount;
+                }
                 const valueBubbles = prefixValueBubbleTargets(data?.valueBubbles, context.nodeIdPrefix);
                 if (valueBubbles) {
                     node.data["valueBubbles"] = valueBubbles;
@@ -515,10 +520,6 @@ export class FeaturePanelComponent implements OnDestroy {
                     if (nameBubble) {
                         node.data["stageLabelBubble"] = nameBubble;
                     }
-                }
-                if ((valueType & coreLib.ValueType.ARRAY.value) && children.length > 0) {
-                    node.data["valueCount"] = formatInspectionArrayValueCount(children);
-                    node.data["value"] = formatInspectionArrayContainerSummary(children);
                 }
                 node.children = children;
                 treeNodes.push(node);

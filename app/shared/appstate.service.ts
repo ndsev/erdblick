@@ -47,6 +47,7 @@ import {
     encodeLayerNamesV2,
     encodeSelectionsV2,
     encodeStyleOptionsV2,
+    featureSelectionLayerNames,
     firstParamValue,
     sourceDataSelectionMapIds
 } from "./url-state-codec";
@@ -873,6 +874,24 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly inspectionValueVaryColorsState = this.createState<boolean>({
+        name: 'inspectionValueVaryColors',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly inspectionValueVaryOutlinesState = this.createState<boolean>({
+        name: 'inspectionValueVaryOutlines',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly inspectionValueVaryStripingState = this.createState<boolean>({
+        name: 'inspectionValueVaryStriping',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
         name: 'inspectionComparisonState',
         defaultValue: null,
@@ -1285,8 +1304,15 @@ export class AppStateService implements OnDestroy {
             }
         }
 
+        const urlLayerNames = [...this.layerNames];
+        for (const layerName of featureSelectionLayerNames(this.selection)) {
+            if (!urlLayerNames.includes(layerName)) {
+                urlLayerNames.push(layerName);
+            }
+        }
+
         const layerEncoding = encodeLayerNamesV2(
-            this.layerNames,
+            urlLayerNames,
             sourceDataSelectionMapIds(this.selection)
         );
         if (layerEncoding.map) {
@@ -1298,7 +1324,7 @@ export class AppStateService implements OnDestroy {
 
         const selection = encodeSelectionsV2(
             this.selection,
-            this.layerNames,
+            urlLayerNames,
             layerEncoding.mapNames,
             DEFAULT_HIGHLIGHT_COLORS
         );
@@ -1308,7 +1334,7 @@ export class AppStateService implements OnDestroy {
 
         for (const [key, value] of Object.entries(encodeStyleOptionsV2(
             this.styles,
-            this.layerNames,
+            urlLayerNames,
             this.numViews
         ))) {
             params[key] = value;
@@ -1463,7 +1489,7 @@ export class AppStateService implements OnDestroy {
         }
 
         const selectionParam = firstParamValue(params, "sel");
-        if (selectionParam) {
+        if (selectionParam !== undefined) {
             try {
                 const mapNames = mapParam ? decodeMapNamesV2(mapParam) : [];
                 const panels = decodeSelectionsV2(
@@ -1472,13 +1498,26 @@ export class AppStateService implements OnDestroy {
                     mapNames,
                     DEFAULT_HIGHLIGHT_COLORS
                 );
-                if (panels.length) {
+                if (panels.length || !this.looksLikeLegacySelectionParam(selectionParam)) {
                     this.selectionState.next(panels);
+                } else {
+                    this.selectionState.next([]);
+                    this.deserializeStateSafely(this.selectionState, {sel: selectionParam});
                 }
             } catch (error) {
                 console.error("[AppStateService] Failed to hydrate v2 selection state", error);
             }
+        } else {
+            this.selectionState.next([]);
         }
+    }
+
+    /** Detects pre-v2 `sel` payloads that may still be attached to a v2 URL during upgrades or shared-link reuse. */
+    private looksLikeLegacySelectionParam(selectionParam: string): boolean {
+        if (!selectionParam.trim()) {
+            return false;
+        }
+        return selectionParam.includes("Features:") || selectionParam.includes("SourceData:");
     }
 
     /** Returns whether the params contain compact style-option entries. */
@@ -2013,6 +2052,12 @@ export class AppStateService implements OnDestroy {
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
     set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
+    get inspectionValueVaryColors() {return this.inspectionValueVaryColorsState.getValue();}
+    set inspectionValueVaryColors(val: boolean) {this.inspectionValueVaryColorsState.next(!!val);}
+    get inspectionValueVaryOutlines() {return this.inspectionValueVaryOutlinesState.getValue();}
+    set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
+    get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
+    set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}
@@ -3256,14 +3301,24 @@ export class AppStateService implements OnDestroy {
             // 1) Build sets of present maps, layers and styles
             const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
             const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
+            const presentMapIds = new Set<string>();
+            const mapsWithKnownFeatureLayers = new Set<string>();
+            const mapsWithKnownSelectionLayers = new Set<string>();
             for (const [mapId, mapNode] of presentMaps.entries()) {
+                presentMapIds.add(mapId);
                 // Use feature layers (exclude SourceData) via children
                 for (const layer of mapNode.children) {
                     presentLayerIds.add(`${mapId}/${layer.id}`);
                 }
+                if (mapNode.children.length > 0) {
+                    mapsWithKnownFeatureLayers.add(mapId);
+                }
                 // Selection pruning must keep SourceData inspections too.
                 for (const layerId of mapNode.layers.keys()) {
                     presentSelectionLayerIds.add(`${mapId}/${layerId}`);
+                }
+                if (mapNode.layers.size > 0) {
+                    mapsWithKnownSelectionLayers.add(mapId);
                 }
             }
 
@@ -3368,15 +3423,47 @@ export class AppStateService implements OnDestroy {
         // 6) Prune selections that reference maps/layers that are not present anymore
         const panels = this.selectionState.getValue();
         const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
+        let selectionChanged = false;
 
-        const parseKey = (tileKey: string): string | undefined => {
+        const normalizeTileKeyComponent = (component: string): string => {
             try {
-                const [mapId, layerId, _] = coreLib.parseMapTileKey(tileKey);
-                // res is expected to be [mapId, layerId, tileId]
-                return `${mapId}/${layerId}`
-            } catch (_) {
-                return;
+                return decodeURIComponent(component);
+            } catch {
+                return component;
             }
+        };
+
+        const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
+            const parts = tileKey.split(":");
+            if (parts.length < 3 || !parts[1] || !parts[2]) {
+                return undefined;
+            }
+            const mapId = normalizeTileKeyComponent(parts[1]);
+            const layerId = normalizeTileKeyComponent(parts[2]);
+            return {mapId, mapLayerId: `${mapId}/${layerId}`};
+        };
+
+        const keepFeatureSelection = (tileKey: string): boolean => {
+            const parsed = parseKey(tileKey);
+            if (!parsed) {
+                return false;
+            }
+            if (presentLayerIds.has(parsed.mapLayerId)) {
+                return true;
+            }
+            // Nonblocking datasource startup can transiently publish a map before its layers.
+            return !presentMapIds.has(parsed.mapId) || !mapsWithKnownFeatureLayers.has(parsed.mapId);
+        };
+
+        const keepSourceDataSelection = (tileKey: string): boolean => {
+            const parsed = parseKey(tileKey);
+            if (!parsed) {
+                return false;
+            }
+            if (presentSelectionLayerIds.has(parsed.mapLayerId)) {
+                return true;
+            }
+            return !presentMapIds.has(parsed.mapId) || !mapsWithKnownSelectionLayers.has(parsed.mapId);
         };
 
         for (const panel of panels) {
@@ -3387,31 +3474,35 @@ export class AppStateService implements OnDestroy {
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
                 color: panel.color,
-                undocked: panel.undocked
+                undocked: panel.undocked,
+                focused: panel.focused
             };
 
             // Filter features
             for (const feat of panel.features) {
-                const mapLayerId = parseKey(feat.mapTileKey);
-                if (mapLayerId && presentLayerIds.has(mapLayerId)) {
+                if (keepFeatureSelection(feat.mapTileKey)) {
                     updated.features.push(feat);
                 }
             }
 
             // Validate sourceData if present
-            if (updated.sourceData) {
-                const mapLayerId = parseKey(updated.sourceData.mapTileKey);
-                if (!mapLayerId || !presentSelectionLayerIds.has(mapLayerId)) {
-                    delete updated.sourceData;
-                }
+            if (updated.sourceData && !keepSourceDataSelection(updated.sourceData.mapTileKey)) {
+                delete updated.sourceData;
+            }
+
+            if (updated.features.length !== panel.features.length ||
+                (panel.sourceData !== undefined && updated.sourceData === undefined)) {
+                selectionChanged = true;
             }
 
             if (updated.features.length || updated.sourceData) {
                 nextPanels.push(updated);
+            } else {
+                selectionChanged = true;
             }
         }
 
-        if (nextPanels.length !== panels.length) {
+        if (selectionChanged || nextPanels.length !== panels.length) {
             this.selectionState.next(nextPanels);
         }
             this.sanitizeInspectionComparisonForSelection(nextPanels);

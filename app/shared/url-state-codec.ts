@@ -1,4 +1,5 @@
 import type {Params} from "@angular/router";
+import {normalizeMapTileIdString} from "./tile-id-normalization";
 
 export type UrlV2Primitive = string | number | boolean;
 
@@ -65,6 +66,11 @@ function decodeToken(value: string): string {
     } catch {
         return value;
     }
+}
+
+/** Normalizes MapTileKey components whose textual form escapes delimiters such as slashes. */
+function normalizeMapTileKeyComponent(value: string): string {
+    return decodeToken(value);
 }
 
 /** Converts booleans and other primitive values to compact URL tokens. */
@@ -350,12 +356,13 @@ function parseMapTileKey(mapTileKey: string): ParsedMapTileKey | null {
 
 /** Builds the existing MapTileKey string representation. */
 function buildMapTileKey(layerType: string, mapId: string, layerId: string, tileId: string, stage: string): string {
-    return `${layerType}:${mapId}:${layerId}:${tileId}:${stage || "0"}`;
+    return `${layerType}:${mapId}:${layerId}:${normalizeMapTileIdString(tileId)}:${stage || "0"}`;
 }
 
 /** Encodes stage zero compactly while preserving non-zero stages. */
 function encodeTileAndStage(tileId: string, stage: string): string {
-    return stage && stage !== "0" ? `${tileId}.${stage}` : tileId;
+    const normalizedTileId = normalizeMapTileIdString(tileId);
+    return stage && stage !== "0" ? `${normalizedTileId}.${stage}` : normalizedTileId;
 }
 
 /** Decodes the compact tile/stage form used by v2 selections. */
@@ -422,8 +429,29 @@ export function sourceDataSelectionMapIds(panels: readonly UrlV2InspectionPanel[
             continue;
         }
         const parsed = parseMapTileKey(panel.sourceData.mapTileKey);
-        if (parsed && !result.includes(parsed.mapId)) {
-            result.push(parsed.mapId);
+        const mapId = parsed ? normalizeMapTileKeyComponent(parsed.mapId) : null;
+        if (mapId && !result.includes(mapId)) {
+            result.push(mapId);
+        }
+    }
+    return result;
+}
+
+/** Returns every feature map/layer id needed to make selected-feature URLs self-contained. */
+export function featureSelectionLayerNames(panels: readonly UrlV2InspectionPanel[]): string[] {
+    const result: string[] = [];
+    for (const panel of panels) {
+        for (const feature of panel.features) {
+            const parsed = parseMapTileKey(feature.mapTileKey);
+            if (!parsed) {
+                continue;
+            }
+            const mapId = normalizeMapTileKeyComponent(parsed.mapId);
+            const layerId = normalizeMapTileKeyComponent(parsed.layerId);
+            const layerName = `${mapId}/${layerId}`;
+            if (!result.includes(layerName)) {
+                result.push(layerName);
+            }
         }
     }
     return result;
@@ -444,7 +472,8 @@ export function encodeSelectionsV2(
             if (!parsed) {
                 continue;
             }
-            const mapIndex = mapNames.indexOf(parsed.mapId);
+            const mapId = normalizeMapTileKeyComponent(parsed.mapId);
+            const mapIndex = mapNames.indexOf(mapId);
             if (mapIndex < 0) {
                 continue;
             }
@@ -464,7 +493,9 @@ export function encodeSelectionsV2(
             if (!parsed) {
                 continue;
             }
-            const layerIndex = layerNames.indexOf(`${parsed.mapId}/${parsed.layerId}`);
+            const mapId = normalizeMapTileKeyComponent(parsed.mapId);
+            const layerId = normalizeMapTileKeyComponent(parsed.layerId);
+            const layerIndex = layerNames.indexOf(`${mapId}/${layerId}`);
             if (layerIndex < 0) {
                 continue;
             }
@@ -531,10 +562,13 @@ function decodeFeaturePanel(
     const features: UrlV2TileFeatureId[] = [];
     for (let index = 2; index < parts.length - 2;) {
         const payload = parts[index];
-        if (!payload?.startsWith("F:") || index + 1 >= parts.length - 2) {
+        if (!payload || index + 1 >= parts.length - 2) {
             break;
         }
         const payloadParts = payload.split(":");
+        if (!payload.startsWith("F:")) {
+            break;
+        }
         const layerIndex = Number(payloadParts[1]);
         if (!Number.isInteger(layerIndex) || layerIndex < 0 || layerIndex >= layerNames.length) {
             index += 2;

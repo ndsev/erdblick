@@ -89,6 +89,29 @@ import {environment} from "../environments/environment";
                 <label>Expand inspection trees by default</label>
                 <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
             </div>
+            <div class="button-container value-presentation-container">
+                <label>Inspection value bubbles</label>
+                <div class="value-presentation-controls">
+                    <label class="value-presentation-option" for="inspection-value-vary-colors">
+                        <p-checkbox [(ngModel)]="stateService.inspectionValueVaryColors"
+                                    [binary]="true"
+                                    inputId="inspection-value-vary-colors"/>
+                        <span>Vary Value Colors</span>
+                    </label>
+                    <label class="value-presentation-option" for="inspection-value-vary-outlines">
+                        <p-checkbox [(ngModel)]="stateService.inspectionValueVaryOutlines"
+                                    [binary]="true"
+                                    inputId="inspection-value-vary-outlines"/>
+                        <span>Vary Value Outlines</span>
+                    </label>
+                    <label class="value-presentation-option" for="inspection-value-vary-striping">
+                        <p-checkbox [(ngModel)]="stateService.inspectionValueVaryStriping"
+                                    [binary]="true"
+                                    inputId="inspection-value-vary-striping"/>
+                        <span>Vary Background Striping</span>
+                    </label>
+                </div>
+            </div>
             <p-divider></p-divider>
             <div class="slider-container">
                 <label [for]="locationSearchResultLimitInput">Location Matches</label>

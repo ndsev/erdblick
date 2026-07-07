@@ -69,7 +69,9 @@ public:
         struct ValueBubble {
             std::string label_;
             std::string targetNodeId_;
+            std::string hoverTargetNodeId_;
             std::string kind_;
+            std::string colorKey_;
             std::deque<ValueBubble> children_;
         };
         std::deque<ValueBubble> valueBubbles_;
@@ -106,7 +108,6 @@ public:
         InspectionConverter* converter_ = nullptr;
     };
 
-    using OptionalValueAndType = std::optional<std::pair<JsValue, ValueType>>;
     /** Marker for a pre-rendered GeoJSON path segment that should not be escaped again. */
     struct RawPath {
         std::string_view value_;
@@ -130,6 +131,15 @@ public:
         std::string_view const& name,
         mapget::model_ptr<mapget::AttributeLayer> const& l,
         size_t& attributeIndex);
+    /** Pick the canonical relation index used by GeoJSON paths and hover ids. */
+    uint32_t relationIndexFor(mapget::model_ptr<mapget::Relation> const& r);
+    /** Convert one relation row/reference through the same representation everywhere it appears. */
+    void convertRelation(
+        JsValue const& key,
+        FieldOrIndex const& path,
+        mapget::model_ptr<mapget::Relation> const& r,
+        uint32_t relationIndex,
+        std::optional<std::string> targetGeoJsonPath = std::nullopt);
     /** Convert one relation and attach hover metadata if applicable. */
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     /** Convert one geometry node, including stage/name metadata and points. */
@@ -144,19 +154,16 @@ public:
         std::string const* hoverIdPrefix = nullptr);
 
     /** Convert a field value while resolving the field id through the current string pool. */
-    OptionalValueAndType convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
+    void convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     /** Convert a named field value into its inspection representation. */
-    OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
+    void convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
     /** Convert a field using an already translated key. */
-    OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
+    void convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
     /** Convert a field using independent display and path metadata. */
-    OptionalValueAndType convertField(
+    void convertField(
         JsValue const& fieldName,
         FieldOrIndex const& path,
         simfil::ModelNode::Ptr const& value);
-
-    /** Copy display/search metadata from a flattened child node to its visible parent. */
-    static void inheritFlattenedChild(InspectionNode& parent, InspectionNode const& child);
 
     /**
      * Store one referenced feature id as inspection node payload.

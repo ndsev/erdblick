@@ -436,7 +436,7 @@ mapget::Point preferredFeatureBoundingRadiusEndPoint(mapget::model_ptr<mapget::F
  * antimeridian.
  */
 int32_t getTileNeighbor(int32_t tileIdValue, int32_t offsetX, int32_t offsetY) {
-    return mapget::TileId::fromValue(tileIdValue).neighbor(offsetX, offsetY).value();
+    return mapget::TileId::fromValue(tileIdValue).neighbour(offsetX, offsetY).value();
 }
 
 /** Get the full string key of a map tile feature layer. */
