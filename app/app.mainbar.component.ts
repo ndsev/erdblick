@@ -23,7 +23,7 @@ import {StyleService} from "./styledata/style.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
-const MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM = 45;
+const MAIN_BAR_AVAILABLE_WIDTH_BREAKPOINT_EM = 56;
 const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
 const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
@@ -39,7 +39,8 @@ interface StyleSheetExportMenuNode {
 @Component({
     selector: 'main-bar',
     host: {
-        '[class.main-bar-mobile-layout]': 'isMobileMenubar'
+        '[class.main-bar-mobile-layout]': 'isMobileMenubar',
+        '[class.main-bar-viewport-mobile-layout]': 'viewportMobileMenubar'
     },
     template: `
         @if (mapsPanelOpen) {
@@ -113,8 +114,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private mobileMenubarStateFrame?: number;
     private mapsPanelTooltipAlignFrame?: number;
     private mapsPanelTooltipSafetyTimeout?: number;
-    private viewportMobileMenubar = false;
+    protected viewportMobileMenubar = false;
     private viewerLayoutMobileMenubar = false;
+    private mobileMapsMenuIncluded = false;
 
     protected isMobileMenubar = false;
     protected readonly desktopMenubarBreakpoint = MAIN_BAR_BREAKPOINT;
@@ -164,6 +166,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.stateService.viewSyncState.subscribe(() => {
             this.rebuildMenuItems();
         }));
+        this.subscriptions.add(this.stateService.dockOpenState.subscribe(() => {
+            this.scheduleMobileMenubarStateUpdate();
+        }));
         this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
             this.rebuildMenuItems();
         }));
@@ -178,6 +183,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Starts observing the viewer layout width once the main bar is attached to the DOM. */
     ngAfterViewInit() {
         this.setupViewerLayoutTracking();
+        this.scheduleMobileMenubarStateUpdate();
     }
 
     /** Releases media-query, resize-observer, and tooltip-alignment resources. */
@@ -398,7 +404,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.mediaQueryList = undefined;
     }
 
-    /** Computes the initial viewer-layout-driven mobile menubar state. */
+    /** Computes the initial available-width-driven mobile menubar state before resize observation starts. */
     private initializeViewerLayoutMobileState() {
         const viewerLayoutElement = this.findViewerLayoutElement();
         if (!viewerLayoutElement) {
@@ -411,7 +417,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
+        this.viewerLayoutMobileMenubar = width < this.getAvailableWidthMobileBreakpointPx();
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
     }
 
@@ -426,10 +432,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
             this.ngZone.run(() => {
                 const [entry] = entries;
-                const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
-                if (typeof width === 'number') {
-                    this.updateViewerLayoutMobileState(width);
-                }
+                const width = entry?.contentRect.width
+                    ?? this.viewerLayoutElement?.getBoundingClientRect().width
+                    ?? 0;
+                this.updateViewerLayoutMobileState(width);
             });
         });
         this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
@@ -442,16 +448,24 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.viewerLayoutElement = undefined;
     }
 
-    /** Updates the viewer-layout contribution to the mobile menubar state. */
+    /** Updates the available-width contribution to the mobile menubar state. */
     private updateViewerLayoutMobileState(width: number) {
-        this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
+        if (!Number.isFinite(width) || width <= 0) {
+            return;
+        }
+        this.viewerLayoutMobileMenubar = width < this.getAvailableWidthMobileBreakpointPx();
         this.scheduleMobileMenubarStateUpdate();
     }
 
     /** Applies the effective mobile menubar state and rebuilds menu items if it changed. */
     private updateMobileMenubarState() {
+        const width = this.viewerLayoutElement?.getBoundingClientRect().width ?? 0;
+        if (Number.isFinite(width) && width > 0) {
+            this.viewerLayoutMobileMenubar = width < this.getAvailableWidthMobileBreakpointPx();
+        }
         const isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
-        if (this.isMobileMenubar === isMobileMenubar) {
+        const mobileMapsMenuChanged = this.mobileMapsMenuIncluded !== this.viewportMobileMenubar;
+        if (this.isMobileMenubar === isMobileMenubar && !mobileMapsMenuChanged) {
             return;
         }
         this.isMobileMenubar = isMobileMenubar;
@@ -479,16 +493,17 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return viewerLayoutElement instanceof HTMLElement ? viewerLayoutElement : undefined;
     }
 
-    /** Converts the viewer-layout breakpoint from `em` to pixels. */
-    private getViewerLayoutMobileBreakpointPx(): number {
+    /** Converts the available-width breakpoint from `em` to pixels. */
+    private getAvailableWidthMobileBreakpointPx(): number {
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
         const effectiveRootFontSize = Number.isFinite(rootFontSize) ? rootFontSize : 16;
-        return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * effectiveRootFontSize;
+        return MAIN_BAR_AVAILABLE_WIDTH_BREAKPOINT_EM * effectiveRootFontSize;
     }
 
     /** Rebuilds the current menu model using the latest view count and layout mode. */
     private rebuildMenuItems(numViews: number = this.stateService.numViews): void {
-        this.menuItems = this.buildMenuItems(numViews, this.isMobileMenubar);
+        this.mobileMapsMenuIncluded = this.viewportMobileMenubar;
+        this.menuItems = this.buildMenuItems(numViews, this.mobileMapsMenuIncluded);
     }
 
     /** Builds the PrimeNG menu model for the current application and layout state. */
