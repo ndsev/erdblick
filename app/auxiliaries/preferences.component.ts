@@ -90,27 +90,21 @@ import {environment} from "../environments/environment";
                 <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
             </div>
             <div class="button-container value-presentation-container">
-                <label>Inspection value bubbles</label>
-                <div class="value-presentation-controls">
-                    <label class="value-presentation-option" for="inspection-value-vary-colors">
-                        <p-checkbox [(ngModel)]="stateService.inspectionValueVaryColors"
-                                    [binary]="true"
-                                    inputId="inspection-value-vary-colors"/>
-                        <span>Vary Value Colors</span>
-                    </label>
-                    <label class="value-presentation-option" for="inspection-value-vary-outlines">
-                        <p-checkbox [(ngModel)]="stateService.inspectionValueVaryOutlines"
-                                    [binary]="true"
-                                    inputId="inspection-value-vary-outlines"/>
-                        <span>Vary Value Outlines</span>
-                    </label>
-                    <label class="value-presentation-option" for="inspection-value-vary-striping">
-                        <p-checkbox [(ngModel)]="stateService.inspectionValueVaryStriping"
-                                    [binary]="true"
-                                    inputId="inspection-value-vary-striping"/>
-                        <span>Vary Background Striping</span>
-                    </label>
-                </div>
+                <label for="inspection-value-presentation">Inspection value bubbles</label>
+                <p-multiSelect inputId="inspection-value-presentation"
+                               class="value-presentation-select"
+                               [options]="inspectionValuePresentationOptions"
+                               [ngModel]="inspectionValuePresentationSelection"
+                               optionLabel="label"
+                               optionValue="value"
+                               [filter]="false"
+                               [showToggleAll]="false"
+                               [maxSelectedLabels]="1"
+                               selectedItemsLabel="{0} options"
+                               placeholder="Plain"
+                               appendTo="body"
+                               (ngModelChange)="onInspectionValuePresentationChange($event)">
+                </p-multiSelect>
             </div>
             <p-divider></p-divider>
             <div class="slider-container">
@@ -331,6 +325,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         { label: 'On', value: 'on' },
         { label: 'Auto', value: 'auto' }
     ];
+    readonly inspectionValuePresentationOptions = [
+        {label: "Vary Value Colors", value: "colors"},
+        {label: "Vary Value Outlines", value: "outlines"},
+        {label: "Vary Background Striping", value: "striping"}
+    ];
+    inspectionValuePresentationSelection: string[] = [];
     private mediaQueryList?: MediaQueryList;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly DARK_MODE_KEY = 'ui.darkMode';
@@ -382,6 +382,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.mapZoomStepState.subscribe(step => {
             this.mapZoomStepInput = step;
         }));
+        this.subscriptions.push(this.stateService.inspectionValueVaryColorsState.subscribe(() => {
+            this.syncInspectionValuePresentationSelection();
+        }));
+        this.subscriptions.push(this.stateService.inspectionValueVaryOutlinesState.subscribe(() => {
+            this.syncInspectionValuePresentationSelection();
+        }));
+        this.subscriptions.push(this.stateService.inspectionValueVaryStripingState.subscribe(() => {
+            this.syncInspectionValuePresentationSelection();
+        }));
+        this.syncInspectionValuePresentationSelection();
         this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
@@ -391,6 +401,36 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     set dialogVisible(visible: boolean) {
         this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+    }
+
+    /** Keeps the multiselect value stable between change-detection passes. */
+    private syncInspectionValuePresentationSelection(): void {
+        const selection: string[] = [];
+        if (this.stateService.inspectionValueVaryColors) {
+            selection.push("colors");
+        }
+        if (this.stateService.inspectionValueVaryOutlines) {
+            selection.push("outlines");
+        }
+        if (this.stateService.inspectionValueVaryStriping) {
+            selection.push("striping");
+        }
+        if (selection.join("|") !== this.inspectionValuePresentationSelection.join("|")) {
+            this.inspectionValuePresentationSelection = selection;
+        }
+    }
+
+    /** Applies the compact inspection-value bubble presentation selection. */
+    onInspectionValuePresentationChange(values: string[] | null | undefined): void {
+        const nextValues = values ?? [];
+        if (nextValues.join("|") === this.inspectionValuePresentationSelection.join("|")) {
+            return;
+        }
+        this.inspectionValuePresentationSelection = [...nextValues];
+        const selection = new Set(values ?? []);
+        this.stateService.inspectionValueVaryColors = selection.has("colors");
+        this.stateService.inspectionValueVaryOutlines = selection.has("outlines");
+        this.stateService.inspectionValueVaryStriping = selection.has("striping");
     }
 
     /** Restores the persisted dark-mode preference during component startup. */
