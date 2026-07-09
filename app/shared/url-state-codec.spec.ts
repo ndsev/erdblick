@@ -13,6 +13,7 @@ import {
     featureSelectionLayerNames,
     sourceDataSelectionMapIds
 } from "./url-state-codec";
+import {coreLib} from "../integrations/wasm";
 
 const defaultColors = [
     "#fff314",
@@ -20,6 +21,14 @@ const defaultColors = [
     "#8f52ff",
     "#ff1212",
 ];
+
+const testMapTileKeyFactory = (
+    layerType: string,
+    mapId: string,
+    layerId: string,
+    tileId: string,
+    stage: string
+) => coreLib.createMapTileKey(layerType, mapId, layerId, tileId, Number(stage || 0));
 
 describe("URL state v2 codec", () => {
     it("round-trips adjacent prefix and suffix compressed map names", () => {
@@ -78,7 +87,7 @@ describe("URL state v2 codec", () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: "Features:MapA:Lane:21fa0777000d:0",
+                    mapTileKey: "Features:MapA:Lane:606830446:0",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
                 }],
                 locked: false,
@@ -90,7 +99,7 @@ describe("URL state v2 codec", () => {
                 id: 3,
                 features: [],
                 sourceData: {
-                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:21fa0777000d:0",
+                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446:0",
                     address: 783783249845n,
                 },
                 locked: false,
@@ -103,16 +112,21 @@ describe("URL state v2 codec", () => {
 
         const encoded = encodeSelectionsV2(panels, layerNames, layerEncoding.mapNames, defaultColors);
 
-        expect(encoded).toContain("F:0:21fa0777000d");
+        expect(encoded).toContain("F:0:606830446");
         expect(encoded).toContain("Lane.545379780.24%3Aattribute%231%2Cvalidity%230");
-        expect(encoded).toContain("SD:1:LaneGeometryLayer-1:21fa0777000d");
+        expect(encoded).toContain("SD:1:LaneGeometryLayer-1:606830446");
 
-        const decoded = decodeSelectionsV2(encoded ?? "", layerNames, layerEncoding.mapNames, defaultColors);
+        const decoded = decodeSelectionsV2(
+            encoded ?? "",
+            layerNames,
+            layerEncoding.mapNames,
+            defaultColors,
+            testMapTileKeyFactory);
         expect(decoded).toEqual([
             {
                 id: 0,
                 features: [{
-                    mapTileKey: "Features:MapA:Lane:21fa0777000d:0",
+                    mapTileKey: "Features:MapA:Lane:606830446:0",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
                 }],
                 locked: true,
@@ -124,7 +138,7 @@ describe("URL state v2 codec", () => {
                 id: 3,
                 features: [],
                 sourceData: {
-                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:21fa0777000d:0",
+                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446:0",
                     address: 783783249845n,
                 },
                 locked: true,
@@ -164,7 +178,12 @@ describe("URL state v2 codec", () => {
         expect(encoded).toContain("F:0:545666604");
         expect(encoded).toContain("F:1:545666604");
         expect(decodeLayerNamesV2(layerEncoding.map ?? "", layerEncoding.l ?? "")).toEqual(layerNames);
-        expect(decodeSelectionsV2(encoded ?? "", layerNames, layerEncoding.mapNames, defaultColors)).toEqual([{
+        expect(decodeSelectionsV2(
+            encoded ?? "",
+            layerNames,
+            layerEncoding.mapNames,
+            defaultColors,
+            testMapTileKeyFactory)).toEqual([{
             id: 0,
             features: [
                 {
@@ -172,7 +191,7 @@ describe("URL state v2 codec", () => {
                     featureId: "DisplayMesh.545666604.8",
                 },
                 {
-                    mapTileKey: "Features:Provider/Sample Munich:Landmark:545666604:0",
+                    mapTileKey: "Features:Provider%2FSample Munich:Landmark:545666604:0",
                     featureId: "Landmark.545666604.12",
                 },
             ],
@@ -223,11 +242,16 @@ describe("URL state v2 codec", () => {
             "Island-3D/Display3D",
             "Provider/Sample Munich/Lane",
         ]);
-        expect(decodeSelectionsV2(encoded ?? "", urlLayerNames, layerEncoding.mapNames, defaultColors)).toEqual([{
+        expect(decodeSelectionsV2(
+            encoded ?? "",
+            urlLayerNames,
+            layerEncoding.mapNames,
+            defaultColors,
+            testMapTileKeyFactory)).toEqual([{
             id: 0,
             features: [
                 {
-                    mapTileKey: "Features:Provider/Sample Munich:Lane:545555209:0",
+                    mapTileKey: "Features:Provider%2FSample Munich:Lane:545555209:0",
                     featureId: "Lane.545555209.16803",
                 },
                 {

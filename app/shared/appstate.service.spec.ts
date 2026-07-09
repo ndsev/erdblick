@@ -5,6 +5,7 @@ import { Subject } from 'rxjs';
 import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
+
 import { AppStateService } from './appstate.service';
 import {MapTreeNode} from "../mapdata/map.tree.model";
 
@@ -386,7 +387,7 @@ describe('AppStateService', () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: 'Features:MapA:Lane:545379780:0',
+                    mapTileKey: 'Features:MapA:Lane:606830446:0',
                     featureId: 'Lane.1:attribute#1'
                 }],
                 locked: true,
@@ -398,7 +399,7 @@ describe('AppStateService', () => {
                 id: 1,
                 features: [],
                 sourceData: {
-                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1451349444:0',
+                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1143701358:0',
                     address: 783783249845n
                 },
                 locked: true,
@@ -460,11 +461,31 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('keeps stored inspections and search state when stale empty URL params exist', async () => {
+    it('hydrates v2 selected feature MapTileKeys through the C++ serializer', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'Provider%2FSample%20Munich',
+            l: 'Road:0',
+            sel: '0~0~F:0:545555209~Road.545555209.387~30,20~n0',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection[0].features[0]).toEqual({
+            mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209:0',
+            featureId: 'Road.545555209.387',
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps stored inspections and feature-search state when stale empty URL params exist', async () => {
         localStorage.setItem('selected', JSON.stringify([
             '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
         ]));
-        localStorage.setItem('search', JSON.stringify(['features', '**.speed > 80']));
         localStorage.setItem('featureSearchState', JSON.stringify([
             {id: 'feature-search-1', query: '**.speed > 80'}
         ]));
@@ -483,11 +504,6 @@ describe('AppStateService', () => {
 
         expect(service.selection).toHaveLength(1);
         expect(service.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
-        expect(service.search).toEqual({
-            version: 2,
-            actionId: 'features',
-            input: '**.speed > 80'
-        });
         expect(service.featureSearches).toHaveLength(1);
         expect(service.featureSearches[0].query).toBe('**.speed > 80');
 
@@ -561,40 +577,97 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('serializes active search state URLs as compact action tuples', async () => {
+    it('drops retired omnibox search URL params while preserving unknown params', () => {
+        const routerStub = createRouterStub({
+            s: JSON.stringify(['features', '**.speed > 80']),
+            external: 'keep-me',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        const params = (service as any).serializeUrlV2();
+        expect(params.s).toBeUndefined();
+        expect(params.external).toBe('keep-me');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('serializes active and selected-feature layers against one URL layer order', async () => {
         const routerStub = createRouterStub();
-        const infoServiceStub = {
-            showError: vi.fn(),
-            showSuccess: vi.fn(),
-            showWarning: vi.fn(),
-            registerDefaultContainer: vi.fn(),
-            showAlertDialogDefault: vi.fn()
-        } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.layerNamesState.next(['MapA/Lane', 'MapC/POI']);
+        service.layerVisibilityState.next(0, [true, false]);
+        service.layerZoomLevelState.next(0, [12, 15]);
+        service.layerAutoZoomLevelState.next(0, [false, false]);
+        service.selection = [{
+            id: 0,
+            features: [{
+                mapTileKey: 'Features:MapB:Road:21:0',
+                featureId: 'Road.1',
+            }],
+            locked: true,
+            size: [30, 20],
+            color: '#fff314',
+            undocked: false,
+        }];
+
+        const params = (service as any).serializeUrlV2();
+        expect(params).toMatchObject({
+            v2: '1',
+            map: 'Map:A,B',
+            l: 'Lane:0~Road:1',
+            v: '1,0',
+            z: '12,13',
+            az: '0,1',
+            sel: '0~0~F:1:21~Road.1~30,20~n0',
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps layers omitted from a v2 URL inactive when the map tree discovers them later', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'MapA~MapB',
+            l: 'Lane:0~Road:1',
+            v: '1x2',
+            z: '13x2',
+            az: '1x2',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        // @ts-expect-error this is a call to mock router
-        routerStub.navigate.mockClear();
+        const config = service.mapLayerConfig('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
+        expect(config).toEqual([
+            {autoLevel: true, visible: false, level: 13},
+        ]);
+        expect(service.layerNamesState.getValue()).toEqual([
+            'MapA/Lane',
+            'MapB/Road',
+            'Classic-2.5.2-Sample/NDS.Classic-BMD',
+        ]);
+        expect(service.layerVisibilityState.getValue(0)).toEqual([true, true, false]);
 
-        service.searchState.next({
-            version: 2,
-            actionId: 'features',
-            input: '**.speed > 80',
-            actionName: 'Search Features and Attributes',
-            savedAt: 42,
-        });
-        await flushMicrotasks();
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
 
-        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({
-                v2: '1',
-                s: JSON.stringify(['features', '**.speed > 80']),
-            }),
-            queryParamsHandling: 'replace',
-            replaceUrl: true,
-        }));
+    it('serializes an empty active layer list as an authoritative v2 layer list', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.layerNamesState.next(['MapA/Lane']);
+        service.layerVisibilityState.next(0, [false]);
+
+        const params = (service as any).serializeUrlV2();
+        expect(params.l).toBe('');
+        expect(params.v).toBeUndefined();
+        expect(params.z).toBeUndefined();
+        expect(params.az).toBeUndefined();
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -982,6 +1055,7 @@ describe('AppStateService', () => {
 
         // Prepare one layer so style options can be encoded
         service.layerNamesState.next(['m1/layerA']);
+        service.layerVisibilityState.next(0, [true]);
 
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();

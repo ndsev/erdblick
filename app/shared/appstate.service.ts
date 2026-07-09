@@ -18,18 +18,6 @@ import {
     DEFAULT_BACKGROUND_OPACITY
 } from "./app-config.service";
 import {
-    historyEntryDedupeKey,
-    normalizeResolvedSearchHistoryEntry,
-    normalizeSearchHistoryEntry,
-    normalizeSearchStateValue,
-    SearchHistoryEntry,
-    SearchHistoryStateEntry,
-    SearchStateSchema,
-    SearchStateValue,
-    SearchHistoryStateEntrySchema,
-    serializeSearchStateValue
-} from "./search-history";
-import {
     createFeatureSearchStateEntry,
     FeatureSearchStateEntry,
     FeatureSearchStatePatch,
@@ -51,6 +39,7 @@ import {
     firstParamValue,
     sourceDataSelectionMapIds
 } from "./url-state-codec";
+import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -390,6 +379,7 @@ export class AppStateService implements OnDestroy {
     private isHydrating = false;
     private isSeedingConfigDefaults = false;
     private isSystemStateMutation = false;
+    private hasAuthoritativeUrlLayerList = false;
     private isReady = false;
     private subscriptionsSetup = false;
     private pendingUrlSyncStates = new Set<AppState<any>>;
@@ -401,10 +391,10 @@ export class AppStateService implements OnDestroy {
     private lastUrlSyncAt = 0;
     // One-shot guard used to keep inbound links stable during passive startup.
     private skipNextUrlSync = false;
-    private initialSearchStateReplayConsumed = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+    private readonly RETIRED_URL_PARAM_KEYS = new Set(["s"]);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
     private configDefaultStateMeta: ConfigDefaultStateMeta = {
         version: 1,
@@ -429,16 +419,6 @@ export class AppStateService implements OnDestroy {
         defaultValue: 1,
         schema: z.coerce.number().positive(),
         urlParamName: "n"
-    });
-
-    readonly searchState = this.createState<SearchStateValue>({
-        name: 'search',
-        defaultValue: [],
-        schema: SearchStateSchema,
-        toStorage: (value: SearchStateValue) => serializeSearchStateValue(value),
-        fromStorage: (payload: any): SearchStateValue => normalizeSearchStateValue(payload),
-        urlParamName: 's',
-        urlIncludeInVisualizationOnly: false
     });
 
     readonly locationSearchResultLimitState = this.createState<number>({
@@ -805,21 +785,6 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
-        name: 'lastSearchHistoryEntry',
-        defaultValue: null,
-        schema: z.union([
-            z.null(),
-            SearchHistoryStateEntrySchema,
-        ]),
-        fromStorage: (payload: any): SearchHistoryStateEntry | null => {
-            if (payload === null) {
-                return null;
-            }
-            return normalizeSearchHistoryEntry(payload);
-        }
-    });
-
     readonly mapsOpenState = this.createState<boolean>({
         name: 'mapsOpenState',
         defaultValue: false,
@@ -999,6 +964,9 @@ export class AppStateService implements OnDestroy {
     /** Hydrates persisted state once config defaults are known and marks the service ready. */
     initializePersistence(): void {
         if (this.isReady) {
+            return;
+        }
+        if (!coreLib) {
             return;
         }
         this.setupStateSubscriptions();
@@ -1286,8 +1254,13 @@ export class AppStateService implements OnDestroy {
         const params = this.preservedUnknownUrlParams();
         params["v2"] = "1";
 
+        const urlLayerNames = this.urlLayerNamesForSerialization();
+
         for (const state of this.statePool.values()) {
-            if (state === this.layerNamesState || state === this.selectionState || state === this.stylesState) {
+            if (state === this.layerNamesState
+                || state === this.selectionState
+                || state === this.stylesState
+                || this.isLayerIndexedMapViewState(state)) {
                 continue;
             }
             if (!state.isUrlState()) {
@@ -1304,13 +1277,6 @@ export class AppStateService implements OnDestroy {
             }
         }
 
-        const urlLayerNames = [...this.layerNames];
-        for (const layerName of featureSelectionLayerNames(this.selection)) {
-            if (!urlLayerNames.includes(layerName)) {
-                urlLayerNames.push(layerName);
-            }
-        }
-
         const layerEncoding = encodeLayerNamesV2(
             urlLayerNames,
             sourceDataSelectionMapIds(this.selection)
@@ -1318,9 +1284,14 @@ export class AppStateService implements OnDestroy {
         if (layerEncoding.map) {
             params["map"] = layerEncoding.map;
         }
-        if (layerEncoding.l) {
+        if (layerEncoding.l !== null) {
             params["l"] = layerEncoding.l;
+        } else if (!urlLayerNames.length) {
+            params["l"] = "";
         }
+        this.serializeLayerIndexedMapViewParam(params, "v", this.layerVisibilityState, urlLayerNames, false, value => value ? "1" : "0");
+        this.serializeLayerIndexedMapViewParam(params, "z", this.layerZoomLevelState, urlLayerNames, 13, value => String(value));
+        this.serializeLayerIndexedMapViewParam(params, "az", this.layerAutoZoomLevelState, urlLayerNames, true, value => value ? "1" : "0");
 
         const selection = encodeSelectionsV2(
             this.selection,
@@ -1343,6 +1314,69 @@ export class AppStateService implements OnDestroy {
         return params;
     }
 
+    /** Returns URL layers that are currently visible or required by feature selections. */
+    private urlLayerNamesForSerialization(): string[] {
+        const selectedLayerNames = new Set(featureSelectionLayerNames(this.selection));
+        const urlLayerNames: string[] = [];
+        const addLayerName = (layerName: string) => {
+            if (!urlLayerNames.includes(layerName)) {
+                urlLayerNames.push(layerName);
+            }
+        };
+
+        this.layerNames.forEach((layerName, layerIndex) => {
+            if (selectedLayerNames.has(layerName) || this.isLayerVisibleInAnyView(layerIndex)) {
+                addLayerName(layerName);
+            }
+        });
+        selectedLayerNames.forEach(addLayerName);
+        return urlLayerNames;
+    }
+
+    /** Returns whether a layer slot is active in at least one configured map view. */
+    private isLayerVisibleInAnyView(layerIndex: number): boolean {
+        for (let viewIndex = 0; viewIndex < Math.max(1, this.numViews); viewIndex++) {
+            if (this.layerVisibilityState.getValue(viewIndex)[layerIndex]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Returns true for per-view arrays whose entries are indexed by `layerNames`. */
+    private isLayerIndexedMapViewState(state: unknown): boolean {
+        return state === this.layerVisibilityState.appState
+            || state === this.layerZoomLevelState.appState
+            || state === this.layerAutoZoomLevelState.appState;
+    }
+
+    /** Serializes one layer-indexed per-view state against the finalized v2 URL layer order. */
+    private serializeLayerIndexedMapViewParam<T>(
+        params: Record<string, string | string[]>,
+        key: string,
+        state: MapViewState<T[]>,
+        urlLayerNames: readonly string[],
+        fallback: T,
+        encode: (value: T) => string
+    ): void {
+        if (!urlLayerNames.length) {
+            return;
+        }
+        const currentLayerIndexByName = new Map(this.layerNames.map((layerName, index) => [layerName, index]));
+        const groups: string[] = [];
+        for (let viewIndex = 0; viewIndex < Math.max(1, this.numViews); viewIndex++) {
+            const currentValues = state.getValue(viewIndex);
+            groups.push(urlLayerNames.map(layerName => {
+                const currentIndex = currentLayerIndexByName.get(layerName);
+                const value = currentIndex !== undefined && currentIndex < currentValues.length
+                    ? currentValues[currentIndex]
+                    : fallback;
+                return encode(value);
+            }).join(","));
+        }
+        params[key] = compressUrlCsvRuns(groups.join(":"));
+    }
+
     /** Keeps non-Erdblick query params while dropping stale v1 and v2 state params. */
     private preservedUnknownUrlParams(): Record<string, string | string[]> {
         const managedKeys = this.managedUrlParamKeys();
@@ -1361,6 +1395,7 @@ export class AppStateService implements OnDestroy {
     /** Returns query-param keys owned by Erdblick URL state. */
     private managedUrlParamKeys(): Set<string> {
         const keys = new Set<string>(["v2", "map", "osm"]);
+        this.RETIRED_URL_PARAM_KEYS.forEach(key => keys.add(key));
         for (const state of this.statePool.values()) {
             if (state === this.stylesState || !state.isUrlState()) {
                 continue;
@@ -1458,10 +1493,28 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Creates persisted selection MapTileKeys exclusively through mapget's C++ serializer. */
+    private readonly createMapTileKeyFromUrlComponents: UrlV2MapTileKeyFactory = (
+        layerType,
+        mapId,
+        layerId,
+        tileId,
+        stage
+    ) => {
+        const parsedStage = Number(stage || 0);
+        return coreLib.createMapTileKey(
+            layerType,
+            mapId,
+            layerId,
+            tileId,
+            Number.isFinite(parsedStage) ? parsedStage : 0);
+    };
+
     /** Restores v2 URL params through a coordinated layer-indexed decode path. */
     private hydrateFromUrlV2(params: Params): void {
         const mapParam = firstParamValue(params, "map");
         const layerParam = firstParamValue(params, "l");
+        this.hasAuthoritativeUrlLayerList = layerParam !== undefined;
         const decodedLayerNames = decodeLayerNamesV2(mapParam, layerParam);
         if (decodedLayerNames.length) {
             this.layerNamesState.next(decodedLayerNames);
@@ -1496,7 +1549,8 @@ export class AppStateService implements OnDestroy {
                     selectionParam,
                     this.layerNames,
                     mapNames,
-                    DEFAULT_HIGHLIGHT_COLORS
+                    DEFAULT_HIGHLIGHT_COLORS,
+                    this.createMapTileKeyFromUrlComponents
                 );
                 if (panels.length || !this.looksLikeLegacySelectionParam(selectionParam)) {
                     this.selectionState.next(panels);
@@ -2009,15 +2063,6 @@ export class AppStateService implements OnDestroy {
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
     set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
-    get search() {return this.searchState.getValue();}
-    set search(val: SearchStateValue) {this.searchState.next(val);};
-    consumeInitialSearchStateReplay(): boolean {
-        if (this.initialSearchStateReplayConsumed) {
-            return false;
-        }
-        this.initialSearchStateReplayConsumed = true;
-        return true;
-    }
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
@@ -2083,8 +2128,6 @@ export class AppStateService implements OnDestroy {
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get featureSearches() {return this.featureSearchState.getValue();}
     set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
-    get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
-    set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -3057,6 +3100,7 @@ export class AppStateService implements OnDestroy {
         const mapLayerId = `${mapId}/${layerId}`;
         const names = this.layerNames;
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
+        const missingFromAuthoritativeUrl = layerIndex === -1 && this.hasAuthoritativeUrlLayerList;
         if (layerIndex === -1) {
             layerIndex = names.length;
             this.layerNamesState.next([...names, mapLayerId]);
@@ -3074,7 +3118,10 @@ export class AppStateService implements OnDestroy {
         for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
             result.push({
                 autoLevel: layerStateValue(this.layerAutoZoomLevelState, viewIndex, true),
-                visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
+                visible: layerStateValue(
+                    this.layerVisibilityState,
+                    viewIndex,
+                    missingFromAuthoritativeUrl ? false : fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
             });
         }
@@ -3190,17 +3237,6 @@ export class AppStateService implements OnDestroy {
         this.styleVisibilityState.next(this.styleVisibility);
     }
 
-    /** Updates the active search-history selection and optionally persists the query. */
-    setSearchHistoryState(value: SearchHistoryEntry | null, saveHistory: boolean = true) {
-        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
-        if (trimmed && saveHistory) {
-            this.saveHistoryStateValue(trimmed);
-        }
-        this.lastSearchHistoryEntryState.next(trimmed);
-        this.searchState.next(trimmed ? trimmed : []);
-        this._replaceUrl = false;
-    }
-
     /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
     addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
         const entry = createFeatureSearchStateEntry(value);
@@ -3235,50 +3271,6 @@ export class AppStateService implements OnDestroy {
         if (next.length !== this.featureSearches.length) {
             this.featureSearchState.next(next);
         }
-    }
-
-    /** Rewrites search state during legacy migration without saving another history row. */
-    migrateSearchStateValue(value: SearchHistoryEntry | null) {
-        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
-        this.searchState.next(trimmed ? trimmed : []);
-        this._replaceUrl = false;
-    }
-
-    /** Rewrites the last search entry during legacy migration. Callers decide whether to suppress replay. */
-    migrateLastSearchHistoryEntry(value: SearchHistoryEntry | null) {
-        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
-        this.lastSearchHistoryEntryState.next(trimmed);
-    }
-
-    /** Persists one search-history entry into the bounded stored history list. */
-    private saveHistoryStateValue(value: SearchHistoryEntry) {
-        const searchHistoryString = localStorage.getItem("searchHistory");
-        let searchHistory: Array<SearchHistoryEntry> = [];
-        if (searchHistoryString) {
-            const parsed = JSON.parse(searchHistoryString) as unknown;
-            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
-                ? parsed
-                : [parsed];
-            const seen = new Set<string>();
-            for (const rawEntry of rawEntries) {
-                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
-                if (!entry) {
-                    continue;
-                }
-                const key = historyEntryDedupeKey(entry);
-                if (seen.has(key)) {
-                    continue;
-                }
-                seen.add(key);
-                searchHistory.push(entry);
-            }
-        }
-        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
-        searchHistory.unshift(value);
-        while (searchHistory.length > 100) {
-            searchHistory.pop();
-        }
-        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
     }
 
     /** Clears persisted app state from local storage and resets URL-backed state. */
@@ -3425,21 +3417,14 @@ export class AppStateService implements OnDestroy {
         const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
         let selectionChanged = false;
 
-        const normalizeTileKeyComponent = (component: string): string => {
-            try {
-                return decodeURIComponent(component);
-            } catch {
-                return component;
-            }
-        };
-
         const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
-            const parts = tileKey.split(":");
-            if (parts.length < 3 || !parts[1] || !parts[2]) {
+            let parsed: [string, string, number];
+            try {
+                parsed = coreLib.parseMapTileKey(tileKey) as [string, string, number];
+            } catch {
                 return undefined;
             }
-            const mapId = normalizeTileKeyComponent(parts[1]);
-            const layerId = normalizeTileKeyComponent(parts[2]);
+            const [mapId, layerId] = parsed;
             return {mapId, mapLayerId: `${mapId}/${layerId}`};
         };
 

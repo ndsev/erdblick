@@ -29,6 +29,14 @@ export interface UrlV2LayerEncoding {
     mapNames: string[];
 }
 
+export type UrlV2MapTileKeyFactory = (
+    layerType: string,
+    mapId: string,
+    layerId: string,
+    tileId: string,
+    stage: string
+) => string;
+
 interface ParsedLayerName {
     mapId: string;
     layerId: string;
@@ -67,8 +75,8 @@ function decodeToken(value: string): string {
     }
 }
 
-/** Normalizes MapTileKey components whose textual form escapes delimiters such as slashes. */
-function normalizeMapTileKeyComponent(value: string): string {
+/** Decodes MapTileKey components whose serialized form escapes delimiters such as slashes. */
+function decodeMapTileKeyComponent(value: string): string {
     return decodeToken(value);
 }
 
@@ -353,11 +361,6 @@ function parseMapTileKey(mapTileKey: string): ParsedMapTileKey | null {
     };
 }
 
-/** Builds the existing MapTileKey string representation. */
-function buildMapTileKey(layerType: string, mapId: string, layerId: string, tileId: string, stage: string): string {
-    return `${layerType}:${mapId}:${layerId}:${tileId}:${stage || "0"}`;
-}
-
 /** Encodes stage zero compactly while preserving non-zero stages. */
 function encodeTileAndStage(tileId: string, stage: string): string {
     return stage && stage !== "0" ? `${tileId}.${stage}` : tileId;
@@ -427,7 +430,7 @@ export function sourceDataSelectionMapIds(panels: readonly UrlV2InspectionPanel[
             continue;
         }
         const parsed = parseMapTileKey(panel.sourceData.mapTileKey);
-        const mapId = parsed ? normalizeMapTileKeyComponent(parsed.mapId) : null;
+        const mapId = parsed ? decodeMapTileKeyComponent(parsed.mapId) : null;
         if (mapId && !result.includes(mapId)) {
             result.push(mapId);
         }
@@ -444,8 +447,8 @@ export function featureSelectionLayerNames(panels: readonly UrlV2InspectionPanel
             if (!parsed) {
                 continue;
             }
-            const mapId = normalizeMapTileKeyComponent(parsed.mapId);
-            const layerId = normalizeMapTileKeyComponent(parsed.layerId);
+            const mapId = decodeMapTileKeyComponent(parsed.mapId);
+            const layerId = decodeMapTileKeyComponent(parsed.layerId);
             const layerName = `${mapId}/${layerId}`;
             if (!result.includes(layerName)) {
                 result.push(layerName);
@@ -470,7 +473,7 @@ export function encodeSelectionsV2(
             if (!parsed) {
                 continue;
             }
-            const mapId = normalizeMapTileKeyComponent(parsed.mapId);
+            const mapId = decodeMapTileKeyComponent(parsed.mapId);
             const mapIndex = mapNames.indexOf(mapId);
             if (mapIndex < 0) {
                 continue;
@@ -491,8 +494,8 @@ export function encodeSelectionsV2(
             if (!parsed) {
                 continue;
             }
-            const mapId = normalizeMapTileKeyComponent(parsed.mapId);
-            const layerId = normalizeMapTileKeyComponent(parsed.layerId);
+            const mapId = decodeMapTileKeyComponent(parsed.mapId);
+            const layerId = decodeMapTileKeyComponent(parsed.layerId);
             const layerIndex = layerNames.indexOf(`${mapId}/${layerId}`);
             if (layerIndex < 0) {
                 continue;
@@ -515,7 +518,8 @@ export function decodeSelectionsV2(
     raw: string | undefined,
     layerNames: readonly string[],
     mapNames: readonly string[],
-    defaultColors: readonly string[]
+    defaultColors: readonly string[],
+    mapTileKeyFactory: UrlV2MapTileKeyFactory
 ): UrlV2InspectionPanel[] {
     if (!raw) {
         return [];
@@ -533,13 +537,13 @@ export function decodeSelectionsV2(
         const undocked = parts[1] === "1";
         const payload = parts[2];
         if (payload.startsWith("SD:")) {
-            const panel = decodeSourceDataPanel(parts, id, undocked, mapNames, defaultColors);
+            const panel = decodeSourceDataPanel(parts, id, undocked, mapNames, defaultColors, mapTileKeyFactory);
             if (panel) {
                 result.push(panel);
             }
             continue;
         }
-        const panel = decodeFeaturePanel(parts, id, undocked, layerNames, defaultColors);
+        const panel = decodeFeaturePanel(parts, id, undocked, layerNames, defaultColors, mapTileKeyFactory);
         if (panel) {
             result.push(panel);
         }
@@ -553,7 +557,8 @@ function decodeFeaturePanel(
     id: number,
     undocked: boolean,
     layerNames: readonly string[],
-    defaultColors: readonly string[]
+    defaultColors: readonly string[],
+    mapTileKeyFactory: UrlV2MapTileKeyFactory
 ): UrlV2InspectionPanel | null {
     const color = decodeColor(parts[parts.length - 1], id, defaultColors);
     const size = decodeLayout(parts[parts.length - 2]);
@@ -579,7 +584,7 @@ function decodeFeaturePanel(
         }
         const tile = decodeTileAndStage(payloadParts[2] ?? "");
         features.push({
-            mapTileKey: buildMapTileKey("Features", parsedLayer.mapId, parsedLayer.layerId, tile.tileId, tile.stage),
+            mapTileKey: mapTileKeyFactory("Features", parsedLayer.mapId, parsedLayer.layerId, tile.tileId, tile.stage),
             featureId: decodeToken(parts[index + 1] ?? ""),
         });
         index += 2;
@@ -603,7 +608,8 @@ function decodeSourceDataPanel(
     id: number,
     undocked: boolean,
     mapNames: readonly string[],
-    defaultColors: readonly string[]
+    defaultColors: readonly string[],
+    mapTileKeyFactory: UrlV2MapTileKeyFactory
 ): UrlV2InspectionPanel | null {
     const payloadParts = parts[2].split(":");
     if (payloadParts.length < 4) {
@@ -623,7 +629,7 @@ function decodeSourceDataPanel(
         id,
         features: [],
         sourceData: {
-            mapTileKey: buildMapTileKey("SourceData", mapNames[mapIndex], layerId, tile.tileId, tile.stage),
+            mapTileKey: mapTileKeyFactory("SourceData", mapNames[mapIndex], layerId, tile.tileId, tile.stage),
             address: addressToken.length ? BigInt(addressToken) : undefined,
         },
         locked: true,

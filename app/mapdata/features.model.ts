@@ -98,7 +98,7 @@ export class FeatureTile implements RenderableTileLayer {
 
     /**
      * Updates the tile metadata and per-stage blob cache from a serialized layer payload.
-     * The highest loaded stage becomes the canonical blob for stats and placeholder metadata.
+     * The highest loaded stage becomes the blob used for stats and placeholder metadata.
      */
     hydrateFromBlob(tileFeatureLayerBlob: Uint8Array, stageOverride?: number) {
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
@@ -122,7 +122,10 @@ export class FeatureTile implements RenderableTileLayer {
         const stage = Number.isInteger(stageOverride)
             ? Math.max(0, Number(stageOverride))
             : Math.max(0, parsedStage);
-        const canonicalMapTileKey = this.canonicalMapTileKeyForMetadata(mapTileMetadata);
+        const mapTileKey = coreLib.getTileFeatureLayerKey(
+            mapTileMetadata.mapName,
+            mapTileMetadata.layerName,
+            Number(mapTileMetadata.tileId));
 
         this.tileFeatureLayerBlobsByStage.set(stage, tileFeatureLayerBlob);
         this.tileFeatureLayerBlob = this.highestStageBlob();
@@ -133,9 +136,9 @@ export class FeatureTile implements RenderableTileLayer {
         this.dataVersion += 1;
 
         if (this.mapTileKey === "undefined") {
-            this.mapTileKey = canonicalMapTileKey;
-        } else if (this.mapTileKey !== canonicalMapTileKey) {
-            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${canonicalMapTileKey}`);
+            this.mapTileKey = mapTileKey;
+        } else if (this.mapTileKey !== mapTileKey) {
+            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${mapTileKey}`);
         }
         this.nodeId = mapTileMetadata.nodeId as string;
         this.mapName = mapTileMetadata.mapName as string;
@@ -347,34 +350,6 @@ export class FeatureTile implements RenderableTileLayer {
         this.glbAttachmentCacheVersion = this.dataVersion;
         this.glbAttachmentCache = snapshot;
         return snapshot;
-    }
-
-    /**
-     * Reconstructs the canonical map tile key from parser metadata.
-     * This defends against placeholder keys and older payloads that omit the composed id.
-     */
-    private canonicalMapTileKeyForMetadata(metadata: {
-        id?: string;
-        mapName?: string;
-        layerName?: string;
-        tileId?: number;
-    }): string {
-        if (metadata.id) {
-            try {
-                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(metadata.id);
-                const numericTileId = Number(tileId);
-                if (!Number.isFinite(numericTileId)) {
-                    return metadata.id;
-                }
-                return coreLib.getTileFeatureLayerKey(mapId, layerId, Math.trunc(numericTileId));
-            } catch (_error) {
-                return metadata.id;
-            }
-        }
-        if (metadata.mapName && metadata.layerName && metadata.tileId !== undefined) {
-            return coreLib.getTileFeatureLayerKey(metadata.mapName, metadata.layerName, metadata.tileId);
-        }
-        return this.mapTileKey;
     }
 
     /** Returns the highest-stage blob, which is the payload most callers want as the tile summary. */

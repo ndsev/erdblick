@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <cxxabi.h>
+#include <algorithm>
 #include <optional>
 
 #include <sanitizer/lsan_interface.h>
@@ -446,7 +447,27 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
 
 /** Get the full string key of a map SourceData layer. */
 std::string getSourceDataLayerKey(std::string const& mapId, std::string const& layerId, int32_t tileId) {
-    return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, mapget::TileId::fromValue(tileId)).toString();
+    const auto packedTileId = tileId == 0
+        ? mapget::TileId()
+        : mapget::TileId::fromValue(tileId);
+    return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, packedTileId).toString();
+}
+
+/** Create a MapTileKey string through mapget's serializer from URL/state components. */
+std::string createMapTileKey(
+    std::string const& layerType,
+    std::string const& mapId,
+    std::string const& layerId,
+    std::string const& tileId,
+    int32_t stage)
+{
+    auto const escapedKey =
+        layerType + ":" +
+        mapget::escapeIdentifierComponent(mapId) + ":" +
+        mapget::escapeIdentifierComponent(layerId) + ":" +
+        tileId + ":" +
+        std::to_string(std::max(0, stage));
+    return mapget::MapTileKey(escapedKey).toString();
 }
 
 /** Get mapId, layerId, tileId and stage of a MapTileKey. */
@@ -861,6 +882,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
     em::function("getSourceDataLayerKey", &getSourceDataLayerKey);
+    em::function("createMapTileKey", &createMapTileKey);
     em::function("parseMapTileKey", &parseMapTileKey);
 
     ////////// Get tile id with vertical/horizontal offset

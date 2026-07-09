@@ -244,6 +244,13 @@ describe('JumpTargetService', () => {
         expect(menuNextSpy).not.toHaveBeenCalled();
     });
 
+    it('creates SourceData metadata keys using the tile-zero sentinel', () => {
+        const key = coreLib.getSourceDataLayerKey('m1', 'Metadata-RegistryMetadata', 0);
+
+        expect(key).toBe('SourceData:m1:Metadata-RegistryMetadata:0:0');
+        expect(coreLib.parseMapTileKey(key)).toEqual(['m1', 'Metadata-RegistryMetadata', 0, 0]);
+    });
+
     it('forwards markedPosition to AppStateService using Cartographic.fromDegrees', () => {
         const {service, stateService} = createService();
 

@@ -578,10 +578,9 @@ export class MapTileStreamService {
         return tile.isComplete(this.mapInfo.getLayerStageCount(tile.mapName, tile.layerName));
     }
 
-    /** Returns a loaded feature tile by key, accepting legacy and canonical key forms. */
+    /** Returns a loaded feature tile by its serialized mapget tile key. */
     getFeatureTile(tileKey: string): FeatureTile | null {
-        const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
-        const tile = this.loadedTileLayers.get(canonicalTileKey);
+        const tile = this.loadedTileLayers.get(tileKey);
         if (!tile || !tile.hasData()) {
             return null;
         }
@@ -593,8 +592,7 @@ export class MapTileStreamService {
         if (!Number.isInteger(featureAddress) || featureAddress < 0) {
             return null;
         }
-        const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
-        const tile = this.loadedTileLayers.get(canonicalTileKey);
+        const tile = this.loadedTileLayers.get(tileKey);
         if (!tile || !tile.hasData()) {
             return null;
         }
@@ -603,7 +601,7 @@ export class MapTileStreamService {
         }
         const featureId = tile.featureIdByAddress(featureAddress);
         return featureId ? {
-            mapTileKey: canonicalTileKey,
+            mapTileKey: tile.mapTileKey,
             featureId
         } : null;
     }
@@ -621,17 +619,15 @@ export class MapTileStreamService {
                 continue;
             }
 
-            const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
-            const parsedTileKey = this.parseMapTileKeySafe(canonicalTileKey);
+            const parsedTileKey = this.parseMapTileKeySafe(tileKey);
             if (!parsedTileKey) {
                 continue;
             }
             const [mapId, layerId, tileId] = parsedTileKey;
 
-            let tile = this.loadedTileLayers.get(canonicalTileKey);
+            let tile = this.loadedTileLayers.get(tileKey);
             if (tile && tile.hasData() && (!requireAllStages || this.isTileInspectionDataComplete(tile))) {
                 result.set(tileKey, tile);
-                result.set(canonicalTileKey, tile);
                 continue;
             }
 
@@ -646,7 +642,7 @@ export class MapTileStreamService {
                     layerId: layerId,
                     tileIds: [tileId],
                 },
-                tileKey: canonicalTileKey,
+                tileKey,
                 resolveWhenInspectionComplete: requireAllStages,
                 resolve: null,
                 reject: null
@@ -661,7 +657,6 @@ export class MapTileStreamService {
             this.scheduleUpdate();
             tile = await selectionTilePromise;
             result.set(tileKey, tile);
-            result.set(canonicalTileKey, tile);
         }
 
         return result;
@@ -735,14 +730,13 @@ export class MapTileStreamService {
             const features: FeatureWrapper[] = [];
 
             for (const id of normalizedIds) {
-                const canonicalTileKey = this.canonicalizeMapTileKey(id.mapTileKey);
-                const parsedTileKey = this.parseMapTileKeySafe(canonicalTileKey);
-                let tile = this.loadedTileLayers.get(canonicalTileKey) ?? this.loadedTileLayers.get(id.mapTileKey);
+                const parsedTileKey = this.parseMapTileKeySafe(id.mapTileKey);
+                let tile = this.loadedTileLayers.get(id.mapTileKey);
 
                 if (!tile && parsedTileKey) {
                     const [mapId, layerId, tileId] = parsedTileKey;
-                    this.ensureTilePlaceholder(mapId, layerId, tileId, true);
-                    tile = this.loadedTileLayers.get(canonicalTileKey);
+                    this.ensureTilePlaceholder(mapId, layerId, tileId, true, id.mapTileKey);
+                    tile = this.loadedTileLayers.get(id.mapTileKey);
                 }
 
                 if (!tile) {
@@ -761,7 +755,7 @@ export class MapTileStreamService {
                 if (!inspectionDataComplete) {
                     if (parsedTileKey) {
                         const [mapId, layerId, tileId] = parsedTileKey;
-                        this.pinTileForSelectionInspection(mapId, layerId, tileId, canonicalTileKey);
+                        this.pinTileForSelectionInspection(mapId, layerId, tileId, id.mapTileKey);
                     }
                     features.push(new FeatureWrapper(resolvedFeatureId, tile));
                     continue;
@@ -821,13 +815,11 @@ export class MapTileStreamService {
             stage?: number;
         };
         const tileStage = Number.isInteger(mapTileMetadata.stage) ? Number(mapTileMetadata.stage) : 0;
-        const canonicalMapTileKey = mapTileMetadata.id
-            ? this.canonicalizeMapTileKey(mapTileMetadata.id)
-            : coreLib.getTileFeatureLayerKey(
-                mapTileMetadata.mapName,
-                mapTileMetadata.layerName,
-                mapTileMetadata.tileId);
-        const existingTile = this.loadedTileLayers.get(canonicalMapTileKey);
+        const mapTileKey = coreLib.getTileFeatureLayerKey(
+            mapTileMetadata.mapName,
+            mapTileMetadata.layerName,
+            mapTileMetadata.tileId);
+        const existingTile = this.loadedTileLayers.get(mapTileKey);
         let tileLayer: FeatureTile;
         if (existingTile) {
             tileLayer = existingTile;
@@ -835,11 +827,11 @@ export class MapTileStreamService {
             tileLayer.hydrateFromBlob(tileLayerBlob, tileStage);
         } else {
             tileLayer = new FeatureTile(this.mapInfo.tileLayerParser, tileLayerBlob, preventCulling);
-            this.loadedTileLayers.set(canonicalMapTileKey, tileLayer);
+            this.loadedTileLayers.set(mapTileKey, tileLayer);
         }
         this.mapInfo.trackObservedLayerStage(mapTileMetadata.mapName, mapTileMetadata.layerName, tileStage);
         this.expandRequestedStageProgressForObservedStage(mapTileMetadata.mapName, mapTileMetadata.layerName);
-        this.markRequestedStageAsReceived(canonicalMapTileKey, tileStage);
+        this.markRequestedStageAsReceived(mapTileKey, tileStage);
 
         this.resolveWaitingSelectionTileRequests(tileLayer);
         this.tileDataChanged.next({tileKey: tileLayer.mapTileKey, tile: tileLayer, reason: "loaded"});
@@ -1004,14 +996,12 @@ export class MapTileStreamService {
             : (offset, limit) => searchResultLayer.resultEntryRangeCompact(offset, limit);
     }
 
-    /** Converts untyped native entry objects to canonical frontend entries for one source tile. */
+    /** Converts untyped native entry objects to frontend entries for one source tile. */
     private normalizeSearchResultEntries(value: unknown, sourceTileKey: string): SearchResultTileEntry[] {
         const rawEntries = Array.isArray(value) ? value as SearchResultTileEntry[] : [];
         return rawEntries.map(entry => ({
             ...entry,
-            mapTileKey: entry.mapTileKey
-                ? this.canonicalizeMapTileKey(entry.mapTileKey)
-                : sourceTileKey
+            mapTileKey: entry.mapTileKey || sourceTileKey
         }));
     }
 
@@ -1440,31 +1430,13 @@ export class MapTileStreamService {
         return tiles.map(val => val.tile);
     }
 
-    /** Normalizes tile keys so legacy and canonical string forms map to the same cache entry. */
-    canonicalizeMapTileKey(tileKey: string): string {
-        const parsed = this.parseMapTileKeySafe(tileKey);
-        if (!parsed) {
-            return tileKey;
-        }
-        const [mapId, layerId, tileId] = parsed;
-        return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
-    }
-
-    /** Parses tile keys defensively, including a fallback for older slash-separated forms. */
+    /** Parses a serialized mapget tile key and returns `null` for malformed inputs. */
     parseMapTileKeySafe(tileKey: string): [string, string, number] | null {
         try {
             const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
             return [mapId, layerId, this.tileIdFromUnknown(tileId)];
         } catch (_error) {
-            const parts = tileKey.split('/');
-            if (parts.length < 3) {
-                return null;
-            }
-            try {
-                return [parts[0], parts[1], this.tileIdFromUnknown(parts[2])];
-            } catch (_parseError) {
-                return null;
-            }
+            return null;
         }
     }
 
@@ -1515,14 +1487,14 @@ export class MapTileStreamService {
     }
 
     /** Pins a tile until inspection has seen every advertised stage, without exposing a caller-visible promise. */
-    private pinTileForSelectionInspection(mapId: string, layerId: string, tileId: number, canonicalTileKey: string): void {
-        if (this.selectionTileRequests.some(request => request.tileKey === canonicalTileKey)) {
+    private pinTileForSelectionInspection(mapId: string, layerId: string, tileId: number, tileKey: string): void {
+        if (this.selectionTileRequests.some(request => request.tileKey === tileKey)) {
             return;
         }
 
         this.selectionTileRequests.push({
             remoteRequest: {mapId, layerId, tileIds: [tileId]},
-            tileKey: canonicalTileKey,
+            tileKey,
             resolveWhenInspectionComplete: true,
             resolve: () => {},
             reject: () => {}

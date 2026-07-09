@@ -1,11 +1,11 @@
 import {AfterViewInit, Component, ElementRef, HostListener, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
-import {FEATURE_SEARCH_TARGET_ID, SearchTarget, JumpTargetService} from "./jump.service";
+import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounce, debounceTime, distinctUntilChanged, skip, Subject, switchMap, timer, filter, take, Subscription} from "rxjs";
+import {debounce, debounceTime, distinctUntilChanged, Subject, switchMap, timer, Subscription} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {
     FeatureSearchService,
@@ -24,9 +24,7 @@ import {
     normalizeResolvedSearchHistoryEntry,
     normalizeSearchHistoryEntry,
     normalizeSearchHistoryPayload,
-    sameSearchHistoryEntry,
     SearchHistoryEntry,
-    SearchHistoryStateEntry,
     withSearchHistoryActionName
 } from "../shared/search-history";
 import {
@@ -179,11 +177,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     searchInputValue: string = "";
     searchHistory: Array<SearchHistoryViewEntry> = [];
     visibleSearchHistory: Array<SearchHistoryViewEntry> = [];
-    private suppressHistoryExecution = false;
     private readonly subscriptions = new Subscription();
     private readonly searchShortcutHandler = (_event: KeyboardEvent) => this.clickOnSearchToStart();
-    private initialSearchReplayFrameFirst?: number;
-    private initialSearchReplayFrameSecond?: number;
 
     /* Autocompletion */
     private searchInputChanged: Subject<void> = new Subject<void>();
@@ -429,54 +424,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.mapSelectionVisible = true;
         }));
 
-        this.subscriptions.add(this.stateService.searchState.subscribe(search => {
-            const entry = this.resolveStateEntry(search);
-            if (!entry) {
-                return;
-            }
-            if (isLegacySearchHistoryEntry(entry)) {
-                this.searchInputValue = entry[1];
-                const migrated = this.migrateLegacySearchHistoryEntry(entry);
-                if (migrated) {
-                    this.withSuppressedHistoryExecution(() => {
-                        this.stateService.migrateSearchStateValue(migrated);
-                        this.stateService.migrateLastSearchHistoryEntry(migrated);
-                    });
-                }
-                return;
-            }
-
-            this.searchInputValue = entry.input;
-            this.mirrorSearchStateToLastEntry(entry, this.shouldSkipRestoredFeatureSearchEntry(entry));
-        }));
-
-        this.subscriptions.add(this.stateService.lastSearchHistoryEntryState.pipe(skip(1)).subscribe(entry => {
-            if (!this.stateService.ready.getValue()) {
-                return;
-            }
-            const resolvedEntry = this.resolveStateEntry(entry);
-            if (isLegacySearchHistoryEntry(resolvedEntry)) {
-                const migrated = this.migrateLegacySearchHistoryEntry(resolvedEntry);
-                if (migrated) {
-                    this.withSuppressedHistoryExecution(() => this.stateService.migrateLastSearchHistoryEntry(migrated));
-                }
-                this.reloadSearchHistory();
-                return;
-            }
-            if (resolvedEntry && !this.suppressHistoryExecution) {
-                this.executeSearchHistoryEntry(resolvedEntry);
-            }
-            this.reloadSearchHistory();
-        }));
-        this.subscriptions.add(this.stateService.ready.pipe(
-            filter((ready): ready is true => ready),
-            take(1)
-        ).subscribe(() => this.executeCurrentSearchStateOnReady()));
-
         this.subscriptions.add(this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
                 const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
-                this.stateService.setSearchHistoryState({
+                this.executeAndRememberSearchEntry({
                     version: 2,
                     actionId: "source-data",
                     input: value,
@@ -564,126 +515,14 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
     ngOnDestroy() {
         this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
-        this.cancelScheduledInitialSearchReplay();
         this.subscriptions.unsubscribe();
         this.searchInputChanged.complete();
         this.locationSearchQueryChanged.complete();
     }
 
-    /** Normalizes a raw persisted search entry from state. */
-    private resolveStateEntry(raw: unknown): SearchHistoryStateEntry | null {
-        return normalizeSearchHistoryEntry(raw);
-    }
-
-    /** Returns whether an omnibox entry would create a feature-search session. */
-    private isFeatureSearchEntry(entry: SearchHistoryEntry): boolean {
-        return entry.actionId === FEATURE_SEARCH_TARGET_ID;
-    }
-
-    /** Suppresses restored feature-search actions that are already represented by feature-search state. */
-    private shouldSkipRestoredFeatureSearchEntry(entry: SearchHistoryEntry): boolean {
-        return this.isFeatureSearchEntry(entry) && this.searchService.hasPersistedSearchForQuery(entry.input);
-    }
-
-    /** Mirrors URL/restored search state into the last-entry state without necessarily replaying it. */
-    private mirrorSearchStateToLastEntry(entry: SearchHistoryEntry, suppressExecution: boolean): void {
-        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
-        if (sameSearchHistoryEntry(lastEntry, entry)) {
-            return;
-        }
-        const setLastEntry = () => {
-            this.stateService.lastSearchHistoryEntry = entry;
-        };
-        if (suppressExecution) {
-            this.withSuppressedHistoryExecution(setLastEntry);
-            return;
-        }
-        setLastEntry();
-    }
-
-    /** Runs an action without triggering search history execution side effects. */
-    private withSuppressedHistoryExecution(action: () => void) {
-        this.suppressHistoryExecution = true;
-        try {
-            action();
-        } finally {
-            this.suppressHistoryExecution = false;
-        }
-    }
-
-    /** Executes the URL/restored search state once startup finished. */
-    private executeCurrentSearchStateOnReady(): void {
-        const entry = this.resolveStateEntry(this.stateService.search);
-        if (!entry || isLegacySearchHistoryEntry(entry)) {
-            return;
-        }
-        const executableEntry = this.restoredEntryWithPayload(entry);
-        if (!this.stateService.consumeInitialSearchStateReplay()) {
-            return;
-        }
-        this.scheduleInitialSearchStateReplay(executableEntry);
-    }
-
-    /** Defers startup replay until map views have finished subscribing to jump/label topics. */
-    private scheduleInitialSearchStateReplay(entry: SearchHistoryEntry): void {
-        const replay = () => this.executeRestoredSearchStateEntry(entry);
-        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-            replay();
-            return;
-        }
-        this.cancelScheduledInitialSearchReplay();
-        this.initialSearchReplayFrameFirst = window.requestAnimationFrame(() => {
-            this.initialSearchReplayFrameFirst = undefined;
-            this.initialSearchReplayFrameSecond = window.requestAnimationFrame(() => {
-                this.initialSearchReplayFrameSecond = undefined;
-                replay();
-            });
-        });
-    }
-
-    /** Cancels any pending startup replay callback. */
-    private cancelScheduledInitialSearchReplay(): void {
-        if (this.initialSearchReplayFrameFirst !== undefined) {
-            window.cancelAnimationFrame(this.initialSearchReplayFrameFirst);
-            this.initialSearchReplayFrameFirst = undefined;
-        }
-        if (this.initialSearchReplayFrameSecond !== undefined) {
-            window.cancelAnimationFrame(this.initialSearchReplayFrameSecond);
-            this.initialSearchReplayFrameSecond = undefined;
-        }
-    }
-
-    /** Executes one restored search-state entry if it is still the current persisted action. */
-    private executeRestoredSearchStateEntry(entry: SearchHistoryEntry): void {
-        const currentEntry = this.resolveStateEntry(this.stateService.search);
-        if (!currentEntry || isLegacySearchHistoryEntry(currentEntry) || !sameSearchHistoryEntry(currentEntry, entry)) {
-            return;
-        }
-        this.mirrorSearchStateToLastEntry(entry, true);
-        if (this.shouldSkipRestoredFeatureSearchEntry(entry)) {
-            this.reloadSearchHistory();
-            return;
-        }
-        this.executeSearchHistoryEntry(entry);
-        this.reloadSearchHistory();
-    }
-
-    /** Prefers the local full history entry over compact URL/search state when both identify the same action. */
-    private restoredEntryWithPayload(entry: SearchHistoryEntry): SearchHistoryEntry {
-        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
-        return lastEntry && sameSearchHistoryEntry(lastEntry, entry)
-            ? lastEntry
-            : entry;
-    }
-
     /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */
     private executeSearchHistoryEntry(entry: SearchHistoryEntry): void {
         this.searchInputValue = entry.input;
-        // Feature searches have their own persisted panel state. Omnibox history
-        // only restores the query text and must not create another search on reload.
-        if (entry.actionId === "features") {
-            return;
-        }
         this.runTarget(entry);
         this.dialog?.close(new Event("close-on-execute"));
     }
@@ -798,6 +637,44 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         localStorage.setItem("searchHistory", JSON.stringify(entries));
     }
 
+    /** Executes one omnibox action and records it in the bounded local history. */
+    private executeAndRememberSearchEntry(entry: SearchHistoryEntry): void {
+        this.saveSearchHistoryEntry(entry);
+        this.executeSearchHistoryEntry(entry);
+        this.reloadSearchHistory();
+    }
+
+    /** Inserts one history entry at the top while preserving bounded, deduplicated history. */
+    private saveSearchHistoryEntry(value: SearchHistoryEntry): void {
+        const searchHistoryString = localStorage.getItem("searchHistory");
+        let searchHistory: Array<SearchHistoryEntry> = [];
+        if (searchHistoryString) {
+            const parsed = JSON.parse(searchHistoryString) as unknown;
+            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
+                ? parsed
+                : [parsed];
+            const seen = new Set<string>();
+            for (const rawEntry of rawEntries) {
+                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
+                if (!entry) {
+                    continue;
+                }
+                const key = historyEntryDedupeKey(entry);
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                searchHistory.push(entry);
+            }
+        }
+        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
+        searchHistory.unshift(value);
+        while (searchHistory.length > 100) {
+            searchHistory.pop();
+        }
+        this.writeSearchHistory(searchHistory);
+    }
+
     /**
      * Reloads persisted search history and drops entries that no longer point at valid actions.
      */
@@ -865,9 +742,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
     }
 
-    /**
-     * Removes one persisted history entry and mirrors the change back to app state.
-     */
+    /** Removes one persisted history entry. */
     removeSearchHistoryEntry(entry: SearchHistoryEntry, event?: Event) {
         event?.preventDefault();
         event?.stopPropagation();
@@ -883,10 +758,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             ...(historyEntry.savedAt !== undefined ? {savedAt: historyEntry.savedAt} : {})
         })));
         this.reloadSearchHistory();
-        const activeSearch = normalizeResolvedSearchHistoryEntry(this.stateService.search);
-        if (activeSearch && historyEntryKey(activeSearch) === key) {
-            this.stateService.search = [];
-        }
     }
 
     /**
@@ -1220,7 +1091,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.acceptedCompletionCandidate = null;
         }
         if (!value) {
-            this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
             this.updateLocationSearchQuery(value);
             this.refreshSearchMenu();
@@ -1301,13 +1171,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     targetToHistory(target: SearchTarget) {
         const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
         if (entry) {
-            if (target.id === "features") {
-                this.withSuppressedHistoryExecution(() => this.stateService.setSearchHistoryState(entry));
-                this.runTarget(entry);
-                this.dialog?.close(new Event("close-on-execute"));
-                return;
-            }
-            this.stateService.setSearchHistoryState(entry);
+            this.executeAndRememberSearchEntry(entry);
         }
     }
 
@@ -1468,8 +1332,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
             if (this.searchInputValue.trim() && this.activeSearchItems.length) {
                 this.targetToHistory(this.activeSearchItems[0]);
-            } else {
-                this.stateService.setSearchHistoryState(null);
             }
 
             this.resetCompletion();
@@ -1561,10 +1423,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Replays one persisted search history entry through the shared search-state channel.
+     * Executes one persisted search history entry directly.
      */
     selectHistoryEntry(entry: SearchHistoryEntry) {
-        this.stateService.setSearchHistoryState({
+        this.executeAndRememberSearchEntry({
             version: 2,
             actionId: entry.actionId,
             input: entry.input,

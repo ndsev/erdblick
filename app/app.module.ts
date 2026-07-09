@@ -177,9 +177,9 @@ export const initializeServices = () => {
             configService.snapshot.state,
             configService.snapshot.configStateHash
         );
-        stateService.initializePersistence();
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
+        stateService.initializePersistence();
         updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
