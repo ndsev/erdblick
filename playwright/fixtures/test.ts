@@ -1,7 +1,7 @@
 import { test as base } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_STATE_SNAPSHOT } from '../utils/test-params';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_STATE_SNAPSHOT, TEST_VIEW_POSITIONS } from '../utils/test-params';
 import { loadStateSnapshotLocalStorageEntries } from '../utils/state-snapshots';
 
 const DARK_MODE_KEY = 'ui.darkMode';
@@ -86,6 +86,14 @@ type SnapshotFixtures = {
     stateSnapshot: string | null;
 };
 
+/** Computes the packed tile id that contains one deterministic test viewport position. */
+async function packedTileIdForTestPosition(locationIndex = 0): Promise<number> {
+    const { MortonCode, PackedTileId, Wgs84 } = await import('@ndsev/ndslive-math');
+    const [lon, lat, level] = TEST_VIEW_POSITIONS[locationIndex];
+    const [x, y] = new Wgs84(lon, lat).toNdsCoordinates();
+    return PackedTileId.fromMortonAndLevel(MortonCode.fromNdsCoordinates(x, y), level).value;
+}
+
 export const test = base.extend<SnapshotFixtures>({
     stateSnapshot: [TEST_STATE_SNAPSHOT, { option: true }],
     context: async ({ context, stateSnapshot }, use) => {
@@ -146,18 +154,16 @@ export const test = base.extend<SnapshotFixtures>({
                     return;
                 }
 
+                const tileId = await packedTileIdForTestPosition();
                 const responses = requests.map((req: any) => {
                     const mapId = typeof req.mapId === 'string' ? req.mapId : TEST_MAP_NAMES[0];
                     const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
                     const featureId = Array.isArray(req.featureId) ? req.featureId : [];
 
-                    // Use a fixed tile id for all located features. The Python
-                    // datasource generates the same synthetic grid of roads in
-                    // every tile, so any tile id is acceptable as long as the
-                    // key matches coreLib.getTileFeatureLayerKey(mapId, layerId, tileId).
-                    const numericTileId = 1;
-                    const hexTileId = numericTileId.toString(16);
-                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAMES[0]}:${hexTileId}`;
+                    // Use a valid packed tile id for all located features. The
+                    // Python datasource generates the same synthetic grid in
+                    // every tile, but mapget now rejects non-packed legacy ids.
+                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAMES[0]}:${tileId}:0`;
 
                     // Each locate request yields a single synthetic location result.
                     return [{
