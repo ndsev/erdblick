@@ -157,7 +157,7 @@ simfil-expression-input {
   display: grid;
   flex: 0 0 auto;
   gap: 0.5em;
-  grid-template-columns: minmax(0, 1fr) 7.5em 8.5em;
+  grid-template-columns: minmax(0, 1fr) 10em 7.5em 8.5em;
   margin: 0 0 0.35em 0;
   font-size: 0.9em;
   max-width: 100%;
@@ -165,11 +165,12 @@ simfil-expression-input {
   width: 100%;
 
   &.feature-search-layer-control-with-view {
-    grid-template-columns: minmax(0, 1fr) 7.5em 8.5em 8.5em;
+    grid-template-columns: minmax(0, 1fr) 10em 7.5em 8.5em 8.5em;
   }
 
   p-iftalabel,
   .feature-search-layer-select,
+  .feature-search-feature-type-select,
   .feature-search-level-select,
   .feature-search-scope-select,
   .feature-search-view-select {
@@ -186,6 +187,10 @@ simfil-expression-input {
 
   .feature-search-level-select {
     width: 7.5em;
+  }
+
+  .feature-search-feature-type-select {
+    width: 10em;
   }
 
   .feature-search-scope-select,
@@ -1261,4 +1266,3 @@ simfil-expression-input {
     border-radius: 50%;
   }
 }
-

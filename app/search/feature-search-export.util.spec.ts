@@ -24,6 +24,7 @@ describe("feature search JSON export helpers", () => {
             showResultsOnMap: true,
             pinColor: "#ea4336",
             selectedMapLayers: [{mapId: "MapA", layerId: "LayerA"}],
+            selectedFeatureTypes: ["Road"],
             selectedTileLevels: [13],
             selectedViewIndices: [0, 1],
             searchStyleRules: [],
@@ -52,6 +53,7 @@ describe("feature search JSON export helpers", () => {
             "pinColor",
             "selectedMapLayers",
             "selectedMapLayersManual",
+            "selectedFeatureTypes",
             "selectedTileLevels",
             "selectedViewIndices",
             "searchStyleRules",
@@ -59,6 +61,7 @@ describe("feature search JSON export helpers", () => {
         ]);
         expect(exported.selectedMapLayers).toEqual([{mapId: "MapA", layerId: "LayerA"}]);
         expect(exported.selectedMapLayersManual).toBe(false);
+        expect(exported.selectedFeatureTypes).toEqual(["Road"]);
         expect(exported.selectedTileLevels).toEqual([13]);
         expect(exported.selectedViewIndices).toEqual([0, 1]);
     });
@@ -222,6 +225,7 @@ describe("feature search JSON export helpers", () => {
         expect(imported.definition.query).toBe("**.speed > 80");
         expect(imported.definition.selectedMapLayers).toEqual([{mapId: "MapA", layerId: "LayerA"}]);
         expect(imported.definition.selectedMapLayersManual).toBe(false);
+        expect(imported.definition.selectedFeatureTypes).toEqual(["Road"]);
         expect(imported.definition.selectedViewIndices).toEqual([0, 1]);
     });
 
@@ -265,6 +269,7 @@ function searchDefinition(): FeatureSearchStateEntry {
         showResultsOnMap: true,
         pinColor: "#ea4336",
         selectedMapLayers: [{mapId: "MapA", layerId: "LayerA"}],
+        selectedFeatureTypes: ["Road"],
         selectedTileLevels: [13],
         selectedViewIndices: [0, 1],
         searchStyleRules: [],

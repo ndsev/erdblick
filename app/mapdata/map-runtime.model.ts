@@ -44,7 +44,7 @@ export interface TileLoadingHudStats {
     viewportRenderSeconds: number;
 }
 
-/** Canonical map-tile cache key produced by the native TileLayerParser/core helpers. */
+/** Serialized mapget tile key produced by native TileLayerParser/core helpers. */
 export type MapTileKey = string;
 
 /** Fine-grained tile-data lifecycle event for consumers that need the concrete tile instance. */
@@ -148,6 +148,7 @@ export interface FeatureSearchTileRequest {
     refresh: number;
     searchQuery: string;
     searchScope: "feature" | "attribute";
+    featureTypes: string[];
     withFields?: string[];
 }
 

@@ -40,7 +40,8 @@ import {
     FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
     FeatureSearchScope,
-    FeatureSearchStateEntry
+    FeatureSearchStateEntry,
+    normalizeFeatureSearchFeatureTypes
 } from "../shared/feature-search-state";
 import {MapTileStreamSearchStatusPayload} from "../mapdata/tilestream";
 import {
@@ -286,7 +287,7 @@ export interface FeatureSearchExportDialogOptions {
 
 export type FeatureSearchRunOptions = Partial<Pick<
     FeatureSearchStateEntry,
-    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual"
+    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes"
 >>;
 
 @Injectable({providedIn: 'root'})
@@ -407,13 +408,6 @@ export class FeatureSearchService {
     /** Returns one live session by runtime id. */
     getSession(id: string): FeatureSearchSession | undefined {
         return this.getInternalSession(id);
-    }
-
-    /** Returns whether a saved feature-search panel already represents this query. */
-    hasPersistedSearchForQuery(query: string): boolean {
-        const normalizedQuery = query.trim();
-        return normalizedQuery.length > 0
-            && this.stateService.featureSearches.some(entry => entry.query.trim() === normalizedQuery);
     }
 
     /** Starts lazy native aggregation of withFields and trace values for the Diagnostics tab. */
@@ -562,6 +556,8 @@ export class FeatureSearchService {
             !== JSON.stringify(definition.selectedMapLayers);
         const selectedTileLevelsChanged = JSON.stringify(previous.selectedTileLevels)
             !== JSON.stringify(definition.selectedTileLevels);
+        const selectedFeatureTypesChanged = JSON.stringify(previous.selectedFeatureTypes)
+            !== JSON.stringify(definition.selectedFeatureTypes);
         const selectedViewsChanged = JSON.stringify(previous.selectedViewIndices)
             !== JSON.stringify(definition.selectedViewIndices);
 
@@ -593,6 +589,7 @@ export class FeatureSearchService {
             || previous.scope !== definition.scope
             || selectedLayersChanged
             || selectedTileLevelsChanged
+            || selectedFeatureTypesChanged
             || JSON.stringify(previousFields) !== JSON.stringify(nextFields);
 
         if (searchGenerationChanged) {
@@ -626,6 +623,7 @@ export class FeatureSearchService {
             || previous.enabled !== definition.enabled
             || selectedLayersChanged
             || selectedTileLevelsChanged
+            || selectedFeatureTypesChanged
             || selectedViewsChanged) {
             this.progress.next(session);
         }
@@ -742,6 +740,7 @@ export class FeatureSearchService {
             pinColor: this.nextDefaultSearchColor(),
             selectedMapLayers,
             selectedMapLayersManual: options.selectedMapLayersManual ?? false,
+            selectedFeatureTypes: options.selectedFeatureTypes ?? [],
             selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
             selectedViewIndices
         });
@@ -769,6 +768,7 @@ export class FeatureSearchService {
             pinColor: imported.pinColor,
             selectedMapLayers,
             selectedMapLayersManual: imported.selectedMapLayersManual ?? false,
+            selectedFeatureTypes: [...imported.selectedFeatureTypes],
             selectedTileLevels: [...imported.selectedTileLevels],
             selectedViewIndices: [...imported.selectedViewIndices],
             searchStyleRules: this.cloneJsonCompatible(imported.searchStyleRules),
@@ -1013,6 +1013,23 @@ export class FeatureSearchService {
         }
     }
 
+    /** Replaces the feature-type filter for one search; an empty list means all feature types. */
+    setSearchFeatureTypes(sessionId: string, selectedFeatureTypes: string[]): void {
+        const session = this.getInternalSession(sessionId);
+        if (!session) {
+            return;
+        }
+        const normalizedTypes = normalizeFeatureSearchFeatureTypes(selectedFeatureTypes);
+        if (JSON.stringify(session.definition.selectedFeatureTypes) === JSON.stringify(normalizedTypes)) {
+            return;
+        }
+        if (!this.stateService.patchFeatureSearch(sessionId, {selectedFeatureTypes: normalizedTypes})) {
+            session.definition = {...session.definition, selectedFeatureTypes: normalizedTypes};
+            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+            this.progress.next(session);
+        }
+    }
+
     /** Replaces the map views that render one search's visualizations. */
     setSearchViewIndices(sessionId: string, selectedViewIndices: number[]): void {
         const session = this.getInternalSession(sessionId);
@@ -1063,6 +1080,7 @@ export class FeatureSearchService {
             pinColor: definition.pinColor,
             selectedMapLayers: definition.selectedMapLayers.map(ref => ({...ref})),
             selectedMapLayersManual: definition.selectedMapLayersManual ?? false,
+            selectedFeatureTypes: [...definition.selectedFeatureTypes],
             selectedTileLevels: [...definition.selectedTileLevels],
             selectedViewIndices: [...definition.selectedViewIndices],
             searchStyleRules: this.cloneJsonCompatible(definition.searchStyleRules),

@@ -88,6 +88,7 @@ export type FeatureSearchDefinitionExport = Pick<FeatureSearchStateEntry,
     | "pinColor"
     | "selectedMapLayers"
     | "selectedMapLayersManual"
+    | "selectedFeatureTypes"
     | "selectedTileLevels"
     | "selectedViewIndices"
     | "searchStyleRules"
@@ -130,6 +131,7 @@ export function featureSearchDefinitionExport(definition: FeatureSearchStateEntr
         pinColor: definition.pinColor,
         selectedMapLayers: definition.selectedMapLayers.map(ref => ({mapId: ref.mapId, layerId: ref.layerId})),
         selectedMapLayersManual: definition.selectedMapLayersManual ?? false,
+        selectedFeatureTypes: [...definition.selectedFeatureTypes],
         selectedTileLevels: [...definition.selectedTileLevels],
         selectedViewIndices: [...definition.selectedViewIndices],
         searchStyleRules: definition.searchStyleRules,

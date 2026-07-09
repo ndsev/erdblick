@@ -31,6 +31,7 @@ function searchDefinition(
         showResultsOnMap: true,
         pinColor: "#ea4336",
         selectedMapLayers: [],
+        selectedFeatureTypes: [],
         selectedTileLevels: [13],
         selectedViewIndices: [0, 1],
         searchStyleRules: [],
@@ -117,8 +118,22 @@ describe("FeatureSearchRuntimeState", () => {
             tileIds: [tile],
             searchId: "search-1",
             searchQuery: "$name == \"WARNING_SIGN\"",
-            searchScope: "attribute"
+            searchScope: "attribute",
+            featureTypes: []
         });
+    });
+
+    it("passes selected feature types to backend search requests", () => {
+        const runtime = new FeatureSearchRuntimeState(
+            searchDefinition({selectedFeatureTypes: ["Road"]}),
+            {} as TileLayerParser
+        );
+        const tile = sampleTileId(0);
+        runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [tile]));
+
+        const requests = runtime.buildPendingRequests();
+
+        expect(requests[0].featureTypes).toEqual(["Road"]);
     });
 
     it("treats query changes as a new search generation", () => {

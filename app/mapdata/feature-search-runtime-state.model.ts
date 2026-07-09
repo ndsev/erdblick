@@ -330,6 +330,7 @@ export class FeatureSearchRuntimeState {
             query: this.definition.query,
             backendQuery: this.definition.backendQuery,
             scope: this.definition.concreteScope,
+            featureTypes: this.definition.selectedFeatureTypes,
             selectedMapLayers: normalizedSelectedLayerRefs(this.definition),
             selectedTileLevels: this.definition.selectedTileLevels,
             withFields: this.definition.resultFields
@@ -353,6 +354,7 @@ export class FeatureSearchRuntimeState {
             refresh,
             searchQuery: request.backendQuery,
             searchScope: request.concreteScope,
+            featureTypes: [...request.selectedFeatureTypes],
         };
         if (priorityTileIds.length) {
             result.priorityTileIds = priorityTileIds;

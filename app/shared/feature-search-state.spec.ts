@@ -24,6 +24,15 @@ describe("FeatureSearchState", () => {
         expect(entry.selectedMapLayersManual).toBe(true);
     });
 
+    it("normalizes selected feature types as a sorted unique filter list", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "typeId == 'Road'",
+            selectedFeatureTypes: ["Lane", "", "Road", "Lane"]
+        }]);
+
+        expect(entry.selectedFeatureTypes).toEqual(["Lane", "Road"]);
+    });
+
     it("defaults selected views from visible selected map layers", () => {
         const selectedMapLayers = [
             {mapId: "Classic", layerId: "Road"},

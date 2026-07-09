@@ -113,6 +113,11 @@ interface FeatureSearchTileLevelOption {
     value: number;
 }
 
+interface FeatureSearchFeatureTypeOption {
+    label: string;
+    value: string;
+}
+
 interface FeatureSearchResultTreeItem {
     label: string;
     mapId: string;
@@ -273,6 +278,18 @@ interface FeatureSearchStyleRuleDraft {
                         </ng-template>
                     </p-treeselect>
                     <label for="feature-search-map-layers">Map Layers</label>
+                </p-iftalabel>
+                <p-iftalabel class="feature-search-feature-type-select">
+                    <p-select inputId="feature-search-feature-type"
+                              [options]="featureSearchFeatureTypeOptions"
+                              [(ngModel)]="selectedFeatureType"
+                              optionLabel="label"
+                              optionValue="value"
+                              [disabled]="!searchEnabled()"
+                              appendTo="body"
+                              (ngModelChange)="onSearchFeatureTypeChange($event)">
+                    </p-select>
+                    <label for="feature-search-feature-type">Feature Type</label>
                 </p-iftalabel>
                 <p-iftalabel class="feature-search-level-select">
                     <p-multiSelect inputId="feature-search-levels"
@@ -969,6 +986,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     styleAttributeOptionsLoading = false;
     mapLayerTreeOptions: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
     selectedMapLayerTreeNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+    featureSearchFeatureTypeOptions: FeatureSearchFeatureTypeOption[] = [{label: "Any", value: ""}];
+    selectedFeatureType = "";
     featureSearchTileLevelOptions: FeatureSearchTileLevelOption[] = [];
     selectedTileLevels: number[] = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
     featureSearchViewOptions: FeatureSearchViewOption[] = [];
@@ -1053,6 +1072,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private mapLayerTreeExpansionInitialized = false;
     private selectedMapLayersSignature = "";
     private initializedMapLayerSelectionSessionId = "";
+    private featureSearchFeatureTypeOptionsSignature = "";
+    private selectedFeatureTypeSignature = "";
     private searchTileLevelOptionsSignature = "";
     private selectedTileLevelsSignature = "";
     private searchViewOptionsSignature = "";
@@ -1108,12 +1129,14 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
             this.refreshMapLayerTreeOptions();
+            this.refreshSearchFeatureTypeOptions(this.session);
             this.refreshSearchTileLevelOptions(this.session);
             if (this.session) {
                 this.refreshFeatureSearchScopeSummary(this.session);
                 this.refreshStyleAttributeOptionsIfNeeded(this.session);
                 this.requestQueryDiagnosticsIfVisible(this.session);
                 this.syncMapLayerTreeSelection(this.session);
+                this.syncSelectedFeatureTypeFromSession(this.session);
                 this.syncSelectedTileLevelsFromSession(this.session);
             }
         }));
@@ -2384,7 +2407,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const layerKeys: string[] = [];
         for (const [mapId, mapInfo] of this.mapService.maps.maps) {
             for (const layer of mapInfo.allFeatureLayers()) {
-                layerKeys.push(`${mapId}:${layer.id}`);
+                const featureTypeSignature = (layer.info.featureTypes ?? [])
+                    .map(featureType => featureType.name)
+                    .sort()
+                    .join(",");
+                layerKeys.push(`${mapId}:${layer.id}:${featureTypeSignature}`);
             }
         }
         return layerKeys.sort().join("|");
@@ -2723,6 +2750,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         this.setSelectedMapLayerTreeLeafKeys(selectedKeys, expandedKeys);
         this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
+        this.refreshSearchFeatureTypeOptions(session);
         this.refreshSearchTileLevelOptions(session);
         this.styleAttributeOptionsSessionSignature = "";
         this.updateDraftFeatureSearchScopeSummary(this.featureSearchScope);
@@ -2756,6 +2784,83 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return treeRefs;
         }
         return this.session?.definition.selectedMapLayers ?? [];
+    }
+
+    /** Rebuilds the feature-type selector from the currently selected map/layer scope. */
+    private refreshSearchFeatureTypeOptions(session?: FeatureSearchSession): void {
+        const featureTypes = new Set<string>();
+        const selectedRefs = this.selectedMapLayerRefsForFeatureTypeOptions(session);
+        const layers = selectedRefs.length
+            ? selectedRefs.flatMap(ref => {
+                const layer = this.mapService.maps.maps.get(ref.mapId)?.layers.get(ref.layerId);
+                return layer ? [layer] : [];
+            })
+            : Array.from(this.mapService.maps.allFeatureLayers());
+        for (const layer of layers) {
+            for (const featureType of layer.info.featureTypes ?? []) {
+                if (featureType.name) {
+                    featureTypes.add(featureType.name);
+                }
+            }
+        }
+        if (this.selectedFeatureType) {
+            featureTypes.add(this.selectedFeatureType);
+        }
+        for (const persistedType of session?.definition.selectedFeatureTypes ?? []) {
+            if (persistedType) {
+                featureTypes.add(persistedType);
+            }
+        }
+        const options = [
+            {label: "Any", value: ""},
+            ...Array.from(featureTypes)
+                .sort((lhs, rhs) => lhs.localeCompare(rhs))
+                .map(featureType => ({label: featureType, value: featureType}))
+        ];
+        const signature = JSON.stringify(options.map(option => option.value));
+        if (signature === this.featureSearchFeatureTypeOptionsSignature) {
+            return;
+        }
+        this.featureSearchFeatureTypeOptionsSignature = signature;
+        this.featureSearchFeatureTypeOptions = options;
+    }
+
+    /** Uses tree state when initialized, otherwise falls back to the persisted search scope. */
+    private selectedMapLayerRefsForFeatureTypeOptions(session?: FeatureSearchSession): FeatureSearchMapLayerRef[] {
+        const treeRefs = this.selectedMapLayerRefsFromTreeNodes(this.selectedMapLayerTreeNodes);
+        if (treeRefs.length > 0 || this.selectedMapLayersSignature === this.emptyMapLayerSignature()) {
+            return treeRefs;
+        }
+        return session?.definition.selectedMapLayers ?? [];
+    }
+
+    /** Copies the persisted feature-type filter into the single-select control. */
+    private syncSelectedFeatureTypeFromSession(session: FeatureSearchSession): void {
+        this.refreshSearchFeatureTypeOptions(session);
+        const nextType = session.definition.selectedFeatureTypes[0] ?? "";
+        if (nextType === this.selectedFeatureTypeSignature) {
+            return;
+        }
+        this.selectedFeatureTypeSignature = nextType;
+        this.selectedFeatureType = nextType;
+        this.refreshSearchFeatureTypeOptions(session);
+    }
+
+    /** Stores a selected feature type; the empty option intentionally serializes to an empty list. */
+    protected onSearchFeatureTypeChange(featureType: string | null | undefined): void {
+        const session = this.session;
+        if (!session || !this.searchEnabled()) {
+            return;
+        }
+        const nextType = typeof featureType === "string" ? featureType : "";
+        const nextTypes = nextType ? [nextType] : [];
+        if (JSON.stringify(session.definition.selectedFeatureTypes) === JSON.stringify(nextTypes)) {
+            return;
+        }
+        this.selectedFeatureType = nextType;
+        this.selectedFeatureTypeSignature = nextType;
+        this.refreshSearchFeatureTypeOptions(session);
+        this.searchService.setSearchFeatureTypes(session.id, nextTypes);
     }
 
     /** Builds a stable signature for selected search map/layer references. */
@@ -3025,16 +3130,18 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.lastSearchQuery = session.definition.query;
             this.featureSearchScope = session.definition.scope;
             this.syncMapLayerTreeSelection(session);
+            this.syncSelectedFeatureTypeFromSession(session);
             this.syncSelectedTileLevelsFromSession(session);
-        this.syncSelectedViewIndicesFromSession(session);
-        this.refreshFeatureSearchScopeSummary(session);
-        this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
-        const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
-        const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
-        if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
-            this.onStyleRulesChanged();
-        } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
-            this.tryCreateAutoStyleRule(session);}
+            this.syncSelectedViewIndicesFromSession(session);
+            this.refreshFeatureSearchScopeSummary(session);
+            this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
+            const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
+            const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
+            if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
+                this.onStyleRulesChanged();
+            } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
+                this.tryCreateAutoStyleRule(session);
+            }
         }
         if (this.activeSearchGroupId !== session.runId) {
             this.activeSearchGroupId = session.runId;
@@ -3084,6 +3191,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             session.definition.query,
             session.definition.scope,
             this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers),
+            JSON.stringify(session.definition.selectedFeatureTypes ?? []),
             JSON.stringify(session.definition.selectedViewIndices ?? []),
             JSON.stringify(session.definition.searchStyleRules ?? []),
             JSON.stringify(session.definition.renderStrategy),
@@ -3722,6 +3830,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.mapLayerTreeSelectionState.clear();
         this.mapLayerTreeExpandedKeys.clear();
         this.mapLayerTreeExpansionInitialized = false;
+        this.featureSearchFeatureTypeOptions = [{label: "Any", value: ""}];
+        this.selectedFeatureType = "";
         this.featureSearchTileLevelOptions = [];
         this.selectedTileLevels = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
         this.featureSearchViewOptions = [];
@@ -3729,6 +3839,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.mapLayerTreeOptionsSignature = "";
         this.selectedMapLayersSignature = "";
         this.initializedMapLayerSelectionSessionId = "";
+        this.featureSearchFeatureTypeOptionsSignature = "";
+        this.selectedFeatureTypeSignature = "";
         this.searchTileLevelOptionsSignature = "";
         this.selectedTileLevelsSignature = "";
         this.searchViewOptionsSignature = "";
