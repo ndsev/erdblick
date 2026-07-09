@@ -286,6 +286,19 @@ export async function clickSearchResultLeaf(page: Page, index: number): Promise<
     await resultButton.click();
 }
 
+/** Derives the packed tile id used by the deterministic test viewport. */
+async function packedTileIdForTestPosition(page: Page, locationIndex: number = 0): Promise<number> {
+    const [lon, lat, level] = TEST_VIEW_POSITIONS[locationIndex];
+    return page.evaluate(({lon, lat, level}) => {
+        const debugApi = window.ebDebug as any;
+        const core = debugApi?.coreLib?.();
+        if (!core || typeof core.getTileIdFromPosition !== 'function') {
+            throw new Error('window.ebDebug.coreLib().getTileIdFromPosition is not available');
+        }
+        return core.getTileIdFromPosition(lon, lat, level) as number;
+    }, {lon, lat, level});
+}
+
 /**
  * Loads a deterministic test tile and selects one of its features through the
  * same AppState selection path used by result clicks and map picking.
@@ -295,14 +308,15 @@ export async function selectFeatureForInspection(
     mapId: string,
     layerId: string,
     featureId: string,
-    tileId: number = 1
+    tileId?: number
 ): Promise<void> {
+    const resolvedTileId = tileId ?? await packedTileIdForTestPosition(page);
     await page.evaluate(async ({ mapId, layerId, tileId, featureId }) => {
         const debugApi = window.ebDebug as any;
         const mapTileKey = debugApi.mapTileKey(mapId, layerId, tileId);
         await debugApi.ensureTileLoaded(mapTileKey);
         debugApi.stateService.setSelection([{ mapTileKey, featureId }]);
-    }, { mapId, layerId, tileId, featureId });
+    }, { mapId, layerId, tileId: resolvedTileId, featureId });
 }
 
 /**
