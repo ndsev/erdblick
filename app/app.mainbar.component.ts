@@ -235,7 +235,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the external user guide. */
     openHelp() {
-        window.open('https://developer.nds.live/tools/mapviewer/user-guide', '_blank');
+        window.open('https://developer.nds.live/tools/mapviewer/', '_blank');
     }
 
     /** Opens the About dialog. */
