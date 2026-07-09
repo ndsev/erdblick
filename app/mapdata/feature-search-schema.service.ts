@@ -10,26 +10,20 @@ import type {
     SearchCompletionRequestMessage,
     SearchCompletionResultMessage,
     SearchCompletionWorkerOutboundMessage,
-    SearchQueryDiagnosticsRequestMessage,
-    SearchQueryDiagnosticsResultMessage,
     SearchScopeAnalysisRequestMessage,
     SearchScopeAnalysisResultMessage,
     SearchStyleFieldsRequestMessage,
     SearchStyleFieldsResultMessage
 } from "../search/search-completion.worker.protocol";
 
-export interface FeatureSearchDiagnosticMessage {
-    query: string;
-    message: string;
-    location?: {offset: number, size: number};
-    fix: null | string;
-}
-
 export interface FeatureSearchScopeAnalysis {
     signature: string;
     concreteScope: "feature" | "attribute";
     normalizedQuery: string;
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    attributeScopeCandidateCount: number;
+    rewriteSuppressed: boolean;
+    rewriteSuppressionReason: string;
     inferredMapLayers: FeatureSearchMapLayerRef[];
     matchedFieldNames: string[];
     matchedEnumValues: string[];
@@ -54,7 +48,6 @@ interface SchemaWorkerState {
 @Injectable({providedIn: "root"})
 export class FeatureSearchSchemaService {
     private searchStyleFieldsByQueryCache = new Map<string, FeatureSearchStyleFieldCandidate[]>();
-    private searchAstDiagnosticsByQueryCache = new Map<string, FeatureSearchDiagnosticMessage[]>();
     private readonly pendingCompletionHandlers = new Map<string, (message: SearchCompletionResultMessage) => void>();
     private readonly pendingScopeAnalysis = new Map<number, {
         resolve: (value: FeatureSearchScopeAnalysis) => void;
@@ -62,10 +55,6 @@ export class FeatureSearchSchemaService {
     }>();
     private readonly pendingStyleFields = new Map<number, {
         resolve: (value: FeatureSearchStyleFieldCandidate[]) => void;
-        cacheKey: string;
-    }>();
-    private readonly pendingQueryDiagnostics = new Map<number, {
-        resolve: (value: FeatureSearchDiagnosticMessage[]) => void;
         cacheKey: string;
     }>();
     private scopeAnalysisByQueryCache = new Map<string, Promise<FeatureSearchScopeAnalysis>>();
@@ -162,36 +151,6 @@ export class FeatureSearchSchemaService {
         });
     }
 
-    /** Requests schema-AST diagnostics for the Diagnostics tab off the UI thread. */
-    requestSearchQueryAstDiagnostics(
-        query: string,
-        scope: FeatureSearchScope,
-        selectedMapLayers?: FeatureSearchMapLayerRef[]
-    ): Promise<FeatureSearchDiagnosticMessage[]> {
-        const cacheKey = `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
-        const cached = this.searchAstDiagnosticsByQueryCache.get(cacheKey);
-        if (cached) {
-            return Promise.resolve(cached);
-        }
-        const worker = this.schemaWorker("analysis");
-        if (!worker) {
-            return Promise.resolve([]);
-        }
-
-        this.syncWorkerDataSourceInfo("analysis");
-        const requestId = ++this.workerRequestSerial;
-        return new Promise(resolve => {
-            this.pendingQueryDiagnostics.set(requestId, {resolve, cacheKey});
-            worker.postMessage({
-                type: "SearchQueryDiagnosticsRequest",
-                requestId,
-                query,
-                scope,
-                ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
-            } satisfies SearchQueryDiagnosticsRequestMessage);
-        });
-    }
-
     /** Sends one completion request through the dedicated completion worker. */
     requestCompletion(
         message: SearchCompletionRequestMessage,
@@ -218,6 +177,9 @@ export class FeatureSearchSchemaService {
             concreteScope: scope === "attribute" ? "attribute" : "feature",
             normalizedQuery: "",
             attributeScopes: [],
+            attributeScopeCandidateCount: 0,
+            rewriteSuppressed: false,
+            rewriteSuppressionReason: "",
             inferredMapLayers: [],
             matchedFieldNames: [],
             matchedEnumValues: [],
@@ -240,7 +202,6 @@ export class FeatureSearchSchemaService {
     /** Clears cached schema query results after datasource metadata changes. */
     private clearCaches(): void {
         this.searchStyleFieldsByQueryCache.clear();
-        this.searchAstDiagnosticsByQueryCache.clear();
         this.scopeAnalysisByQueryCache.clear();
     }
 
@@ -324,11 +285,6 @@ export class FeatureSearchSchemaService {
             if (this.isNativeAbortError(message.error)) {
                 this.resetWorker("analysis", message.error);
             }
-            return;
-        }
-        this.handleQueryDiagnosticsResult(message);
-        if (this.isNativeAbortError(message.error)) {
-            this.resetWorker("analysis", message.error);
         }
     }
 
@@ -344,6 +300,9 @@ export class FeatureSearchSchemaService {
             concreteScope: message.concreteScope,
             normalizedQuery: message.normalizedQuery,
             attributeScopes: message.attributeScopes,
+            attributeScopeCandidateCount: message.attributeScopeCandidateCount,
+            rewriteSuppressed: message.rewriteSuppressed,
+            rewriteSuppressionReason: message.rewriteSuppressionReason,
             inferredMapLayers: message.inferredMapLayers,
             matchedFieldNames: message.matchedFieldNames,
             matchedEnumValues: message.matchedEnumValues,
@@ -365,21 +324,6 @@ export class FeatureSearchSchemaService {
             console.warn("Failed to enumerate feature-search style fields from schema worker.", message.error);
         }
         pending.resolve(message.fields);
-    }
-
-    /** Resolves one pending schema-AST diagnostics request. */
-    private handleQueryDiagnosticsResult(message: SearchQueryDiagnosticsResultMessage): void {
-        const pending = this.pendingQueryDiagnostics.get(message.requestId);
-        if (!pending) {
-            return;
-        }
-        this.pendingQueryDiagnostics.delete(message.requestId);
-        if (!message.error) {
-            this.searchAstDiagnosticsByQueryCache.set(pending.cacheKey, message.diagnostics);
-        } else {
-            console.warn("Failed to build schema AST diagnostics from schema worker.", message.error);
-        }
-        pending.resolve(message.diagnostics);
     }
 
     /** Returns the unique key for one completion owner/serial pair. */
@@ -426,6 +370,9 @@ export class FeatureSearchSchemaService {
                 concreteScope: "feature",
                 normalizedQuery: "",
                 attributeScopes: [],
+                attributeScopeCandidateCount: 0,
+                rewriteSuppressed: false,
+                rewriteSuppressionReason: "",
                 inferredMapLayers: [],
                 matchedFieldNames: [],
                 matchedEnumValues: [],
@@ -435,10 +382,6 @@ export class FeatureSearchSchemaService {
         }
         for (const [requestId, pending] of this.pendingStyleFields) {
             this.pendingStyleFields.delete(requestId);
-            pending.resolve([]);
-        }
-        for (const [requestId, pending] of this.pendingQueryDiagnostics) {
-            this.pendingQueryDiagnostics.delete(requestId);
             pending.resolve([]);
         }
     }

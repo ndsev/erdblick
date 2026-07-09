@@ -167,13 +167,16 @@ export class MapInfoService {
             this.publishSourceCatalogTree(catalog);
             const readyEntries = catalog.filter(isDataSourceCatalogEntryReady);
             const jsonString = JSON.stringify(readyEntries);
+            const dataSourceInfoChanged = jsonString !== this.dataSourceInfoJson;
             this.dataSourceInfoJson = jsonString;
-            uint8ArrayToWasm(wasmBuffer => {
-                this.tileLayerParser.setDataSourceInfo(wasmBuffer);
-            }, new TextEncoder().encode(jsonString));
-            FeatureTile.clearDataSourceInfoBlobCache();
-            SearchResultTile.clearDataSourceInfoBlobCache();
-            this.dataSourceInfoChanged.next();
+            if (dataSourceInfoChanged) {
+                uint8ArrayToWasm(wasmBuffer => {
+                    this.tileLayerParser.setDataSourceInfo(wasmBuffer);
+                }, new TextEncoder().encode(jsonString));
+                FeatureTile.clearDataSourceInfoBlobCache();
+                SearchResultTile.clearDataSourceInfoBlobCache();
+                this.dataSourceInfoChanged.next();
+            }
             this.layerStateChanged.next("datasources");
             return true;
         } catch (err) {

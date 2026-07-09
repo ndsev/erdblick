@@ -5,6 +5,7 @@
   min-width: 15em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
+  z-index: 130000;
 
   &.shifted {
     left: 0.5em !important;
@@ -208,6 +209,27 @@
 
   min-width: 150px;
   min-height: 1em;
+
+  .completion-popup-close {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    color: var(--p-content-color);
+    cursor: pointer;
+    display: flex;
+    height: 1.35em;
+    justify-content: center;
+    margin-left: auto;
+    opacity: 0.7;
+    padding: 0;
+    width: 1.35em;
+
+    &:hover {
+      background: var(--p-surface-700);
+      opacity: 1;
+    }
+  }
 
   div {
     width: 100%;

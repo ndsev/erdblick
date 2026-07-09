@@ -14,7 +14,6 @@ import {
 import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.model";
 import {coreLib} from "../integrations/wasm";
-import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {
     historyEntryDedupeKey,
@@ -67,9 +66,9 @@ interface ParsedNdsCoordinateLabel {
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
                           data-testid="search-input"
-                          [(ngModel)]="searchInputValue"
+                          [ngModel]="searchInputValue"
                           (click)="showSearchOverlay()"
-                          (ngModelChange)="setSearchValue(searchInputValue)"
+                          (ngModelChange)="setSearchValue($event)"
                           (keydown)="onKeydown($event)"
                           (keyup)="onKeyup($event)"
                           (blur)="onBlur()"
@@ -87,13 +86,14 @@ interface ParsedNdsCoordinateLabel {
                     [left]="completion.left"
                     [zIndex]="completion.zIndex"
                     (popupMouseDown)="onCompletionPopupDown($event)"
-                    (candidateSelected)="applyCompletion($event)">
+                    (candidateSelected)="applyCompletion($event)"
+                    (closeRequested)="dismissCompletionForCurrentInput()">
                 </search-completion-popup>
             </div>
 
             <div class="resizable-container" #searchcontrols>
                 <app-dialog #actionsdialog class="search-menu-dialog" data-testid="search-menu-dialog" [showHeader]="false" [(visible)]="searchService.showFeatureSearchDialog"
-                          [baseZIndex]="30040"
+                          [baseZIndex]="searchActionsBaseZIndex"
                           [focusOnShow]="false"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div data-testid="search-menu-panel">
@@ -166,7 +166,8 @@ interface ParsedNdsCoordinateLabel {
  * Implements the omnibox-style search panel used for jumping, searching loaded features, and query completion.
  */
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
-    private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
+    private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
+    readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
 
     searchItems: Array<SearchTarget> = [];
     private locationSearchItems: Array<SearchTarget> = [];
@@ -200,6 +201,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000,
     };
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
+    private dismissedCompletionSignature: string | null = null;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
@@ -382,7 +384,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
-                private dialogStack: DialogStackService,
                 private locationSearchService: LocationSearchService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
@@ -439,6 +440,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.reloadSearchHistory();
 
         this.subscriptions.add(this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
+            if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+                this.completionItems = [];
+                this.completion.visible = false;
+                return;
+            }
             this.completionItems = value.filter((item, index, array) => {
                 // Discard any candidate that is equal to the current input
                 // or does not relate to the current input (e.g. delayed results).
@@ -470,6 +476,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }));
 
         this.subscriptions.add(this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
+            if (pending && this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+                this.completion.pending = false;
+                this.completion.visible = false;
+                return;
+            }
             const textarea = this.textarea?.nativeElement;
             const focusValid =
                 this.completion.visible ||
@@ -1086,6 +1097,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      * Updates the omnibox value and recomputes active targets, inactive targets, and matching history entries.
      */
     setSearchValue(value: string) {
+        if (value !== this.searchInputValue) {
+            this.dismissedCompletionSignature = null;
+        }
         this.searchInputValue = value;
         if (this.acceptedCompletionCandidate?.query.trim() !== value.trim()) {
             this.acceptedCompletionCandidate = null;
@@ -1294,6 +1308,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
         ]
         if (ignoredKeys.indexOf(event.key) == -1) {
+            this.dismissedCompletionSignature = null;
             this.searchInputChanged.next();
         }
     }
@@ -1311,7 +1326,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         if (dismissCompletionKeys.indexOf(event.key) >= 0) {
             if (this.completion.visible)
                 event.preventDefault();
-            this.completion.visible = false;
+            this.hideCompletionPopup();
             textarea.focus();
         }
 
@@ -1338,8 +1353,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             textarea.blur();
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            if (this.completion.visible) {
-                this.resetCompletion();
+            if (this.completion.visible || this.completion.pending || this.completionItems.length > 0) {
+                this.dismissCompletionForCurrentInput();
                 return;
             } else if (this.searchInputValue) {
                 this.setSearchValue("");
@@ -1350,7 +1365,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 return;
             }
         } else if (event.key === 'Tab') {
-            if (this.completion.visible) {
+            if (this.shouldApplyCompletionOnEnter()) {
                 this.applyCompletion();
             }
         } else if (event.key === 'ArrowDown') {
@@ -1374,7 +1389,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 this.textarea.nativeElement.focus();
             } else {
                 const item = completion ?? this.completionItems[this.completion.selectionIndex];
-                if (!item) {
+                if (!item || (!completion && !this.shouldApplyCompletionOnEnter())) {
                     return;
                 }
                 this.setSearchValue(item.query);
@@ -1390,6 +1405,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.completionItems = [];
             this.completion.visible = false;
             this.completion.pending = false;
+            this.dismissedCompletionSignature = null;
         }
     }
 
@@ -1397,6 +1413,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private shouldApplyCompletionOnEnter(): boolean {
         return this.completion.visible
             && this.completionItems.length > 0
+            && !this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)
             && !this.searchService.hasExactCompletionCandidate(this.searchInputValue);
     }
 
@@ -1406,6 +1423,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     selectNextCompletion(next: boolean = true) {
         const direction = next && +1 || -1
         const count = this.completionItems.length || 0;
+        if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+            this.completion.selectionIndex = 0;
+            this.completion.visible = false;
+            return;
+        }
 
         let index = this.completion.selectionIndex
         if (count == 0)
@@ -1485,34 +1507,27 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.handleGlobalDown(event);
     }
 
-    /**
-     * Central outside-click filter that ignores interactive controls and map-view interactions.
-     */
+    /** Central outside-click filter that treats every non-omnibox target as a dismissal. */
     private handleGlobalDown(event: Event): void {
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        const clickedInsideComponent = target ? this.elRef.nativeElement.contains(target as Node) : false;
-        const clickedInsideMapView = !!target?.closest('.mapviewer-renderlayer');
-        const clickedInsideResizablePanel = !!target?.closest('.resizable-container');
-
-        // Check if the clicked element is a form control or other interactive element we should ignore.
-        const clickedOnInteractiveElement = !!target && (
-            target.tagName === 'BUTTON' ||
-            target.tagName === 'INPUT' ||
-            target.tagName === 'TEXTAREA' ||
-            target.tagName === 'SELECT' ||
-            target.isContentEditable ||
-            !!target.closest('p-checkbox') ||
-            !!target.closest('p-dropdown') ||
-            !!target.closest('p-multiselect') ||
-            !!target.closest('p-calendar') ||
-            !!target.closest('p-inputnumber') ||
-            (!!target.closest('.p-component') && !clickedInsideMapView) ||
-            clickedInsideResizablePanel
-        );
-
-        if (!clickedInsideComponent && !clickedOnInteractiveElement) {
-            this.dialog.close(new MouseEvent(event.type));
+        if (!this.searchService.showFeatureSearchDialog && !this.completion.visible && !this.completion.pending) {
+            return;
         }
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target) {
+            return;
+        }
+        const clickedInsideComponent = this.elRef.nativeElement.contains(target as Node);
+        const clickedInsideCompletionPopup = !!target.closest('.search-completion-popup');
+        if (!clickedInsideComponent && !clickedInsideCompletionPopup) {
+            this.closeSearchOverlay(event);
+        }
+    }
+
+    /** Closes the action dialog and detached completion popup together. */
+    private closeSearchOverlay(event: Event): void {
+        this.completion.visible = false;
+        this.completion.pending = false;
+        this.dialog?.close(new MouseEvent(event.type));
     }
 
     /**
@@ -1526,8 +1541,13 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.searchService.clearCurrentCompletion();
             return;
         }
+        if (this.isCompletionDismissedFor(query, point ?? query.length)) {
+            this.hideCompletionPopup();
+            this.searchService.clearCurrentCompletion();
+            return;
+        }
 
-        this.searchService.completeQuery(query, point || query.length);
+        this.searchService.completeQuery(query, point ?? query.length);
         this.completion.selectionIndex = 0;
     }
 
@@ -1540,5 +1560,34 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.completionItems = [];
         this.completion.visible = false;
         this.completion.pending = false;
+        this.dismissedCompletionSignature = null;
+    }
+
+    /** Hides the popup locally without invalidating typed text or suppressing future completion requests. */
+    private hideCompletionPopup(): void {
+        this.completion.visible = false;
+        this.completion.pending = false;
+    }
+
+    /** Dismisses the current completion generation until the query text or caret changes. */
+    dismissCompletionForCurrentInput(): void {
+        this.dismissedCompletionSignature = this.completionSignature(
+            this.searchInputValue,
+            this.cursorPosition || this.searchInputValue.length
+        );
+        this.searchService.clearCurrentCompletion();
+        this.completion.selectionIndex = 0;
+        this.completionItems = [];
+        this.hideCompletionPopup();
+    }
+
+    /** Returns whether completion has been explicitly dismissed for this exact query/caret pair. */
+    private isCompletionDismissedFor(query: string, point: number): boolean {
+        return this.dismissedCompletionSignature === this.completionSignature(query, point);
+    }
+
+    /** Builds the completion identity suppressed by Esc/close until text or caret changes. */
+    private completionSignature(query: string, point: number): string {
+        return `${query}\u0000${point}`;
     }
 }

@@ -34,32 +34,33 @@ const option = (partial: Partial<FeatureSearchAutoStyleOption>): FeatureSearchAu
 });
 
 describe("feature search auto-style helpers", () => {
-    it("keeps single-scope attribute auto-rules inside the resolved attribute", () => {
-        const warningSignEnum = option({
+    it("generates one first scalar field per resolved attribute scope", () => {
+        const warningSignField = option({
             value: "warningSign",
             attrName: "WARNING_SIGN",
-            attrLayerName: "Routing",
-            valueKind: "enum",
-            enumValues: ["PEDESTRIAN_WAY"]
+            attrLayerName: "Routing"
         });
-        const pedestrianWayField = option({
+        const pedestrianWayFirstField = option({
             value: "pedestrianKind",
+            attrName: "PEDESTRIAN_WAY",
+            attrLayerName: "Routing"
+        });
+        const pedestrianWaySecondField = option({
+            value: "pedestrianSubtype",
             attrName: "PEDESTRIAN_WAY",
             attrLayerName: "Routing"
         });
 
         expect(searchAutoStyleFieldOptions(
-            [warningSignEnum, pedestrianWayField],
+            [warningSignField, pedestrianWayFirstField, pedestrianWaySecondField],
             readyAttributeAnalysis
-        )).toEqual([pedestrianWayField]);
+        )).toEqual([pedestrianWayFirstField]);
     });
 
     it("uses resolved attribute scopes for default style candidates", () => {
-        const warningSignEnum = option({
+        const warningSignField = option({
             value: "warningSign",
-            attrName: "WARNING_SIGN",
-            valueKind: "enum",
-            enumValues: ["PEDESTRIAN_WAY"]
+            attrName: "WARNING_SIGN"
         });
         const pedestrianWayField = option({
             value: "pedestrianKind",
@@ -67,53 +68,64 @@ describe("feature search auto-style helpers", () => {
         });
 
         expect(defaultSearchStyleFieldOptionsForAnalysis(
-            [warningSignEnum, pedestrianWayField],
+            [warningSignField, pedestrianWayField],
             readyAttributeAnalysis
         )).toEqual([pedestrianWayField]);
     });
 
-    it("prefers matched fields over enum matches within the same scope", () => {
-        const enumField = option({
-            value: "kind",
-            attrName: "PEDESTRIAN_WAY",
-            valueKind: "enum",
-            enumValues: ["PEDESTRIAN_WAY"]
+    it("does not guess automatic style fields for feature-scope searches", () => {
+        const roadReasonType = option({
+            value: "attributes.layer.RoadRulesLayer.SPEED_LIMIT_METRIC.properties.reason.type",
+            featureType: "Road"
         });
-        const namedField = option({
-            value: "pedestrianWay",
-            attrName: "PEDESTRIAN_WAY"
+        const laneRegulationType = option({
+            value: "attributes.layer.LaneRulesLayer.LANE_RIGHT_OF_WAY_REGULATION.attributeValue.laneRightOfWayRegulation.type",
+            featureType: "Lane"
         });
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "feature",
+            attributeScopes: [],
+            matchedFieldNames: ["type"],
+            matchedEnumValues: []
+        };
 
-        expect(preferredSearchAutoStyleField(
-            [enumField, namedField],
-            {
-                ...readyAttributeAnalysis,
-                matchedFieldNames: ["pedestrianWay"]
-            }
-        )).toBe(namedField);
+        expect(searchAutoStyleFieldOptions([laneRegulationType, roadReasonType], analysis)).toEqual([]);
+        expect(preferredSearchAutoStyleField([laneRegulationType, roadReasonType], analysis)).toBeUndefined();
     });
 
-    it("still uses enum matches when no field name was matched", () => {
+    it("does not guess automatic style fields without a resolved attribute scope", () => {
         const enumField = option({
             value: "transitionType",
             attrName: "PROHIBITED_TRANSITION",
             valueKind: "enum",
             enumValues: ["SPEED_LIMIT_END"]
         });
-        const fallbackField = option({
-            value: "note",
-            attrName: "PROHIBITED_TRANSITION"
-        });
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "attribute",
+            attributeScopes: [],
+            matchedFieldNames: [],
+            matchedEnumValues: ["SPEED_LIMIT_END"]
+        };
 
-        expect(preferredSearchAutoStyleField(
-            [fallbackField, enumField],
-            {
-                status: "ready",
-                concreteScope: "attribute",
-                attributeScopes: [],
-                matchedFieldNames: [],
-                matchedEnumValues: ["SPEED_LIMIT_END"]
-            }
-        )).toBe(enumField);
+        expect(preferredSearchAutoStyleField([enumField], analysis)).toBeUndefined();
+        expect(searchAutoStyleFieldOptions([enumField], analysis)).toEqual([]);
+    });
+
+    it("suppresses schema-field auto-styling when query rewriting was suppressed", () => {
+        const broadEnumField = option({
+            value: "propertyTypeCode",
+            attrName: "ATTRIBUTE_PROPERTY",
+            valueKind: "enum",
+            enumValues: ["WEEKDAY_IN_MONTH"]
+        });
+        const analysis = {
+            ...readyAttributeAnalysis,
+            rewriteSuppressed: true
+        };
+
+        expect(searchAutoStyleFieldOptions([broadEnumField], analysis)).toEqual([]);
+        expect(defaultSearchStyleFieldOptionsForAnalysis([broadEnumField], analysis)).toEqual([]);
     });
 });

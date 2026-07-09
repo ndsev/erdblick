@@ -13,6 +13,12 @@ import {CompletionCandidate} from "./search.model";
              [style.top.px]="top"
              [style.left.px]="left"
              [style.z-index]="zIndex">
+            <button type="button"
+                    class="completion-popup-close"
+                    aria-label="Close completion suggestions"
+                    (click)="closeRequested.emit()">
+                <i class="pi pi-times"></i>
+            </button>
             @for (item of items; track $index) {
                 <div [ngClass]="{'selected': $index === selectionIndex}"
                      (click)="candidateSelected.emit(item)">
@@ -49,6 +55,7 @@ export class SearchCompletionPopupComponent implements AfterViewInit, OnDestroy 
 
     @Output() popupMouseDown = new EventEmitter<MouseEvent>();
     @Output() candidateSelected = new EventEmitter<CompletionCandidate>();
+    @Output() closeRequested = new EventEmitter<void>();
 
     /** Moves the fixed-position popup out of floating dialogs so z-index and clipping are predictable. */
     ngAfterViewInit(): void {

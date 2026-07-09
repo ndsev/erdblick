@@ -849,7 +849,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("getAttributeScopeForQuery", &TileLayerParser::getAttributeScopeForQuery)
         .function("getMapLayersForQuery", &TileLayerParser::getMapLayersForQuery)
         .function("normalizeSearchQuery", &TileLayerParser::normalizeSearchQuery)
-        .function("searchQueryAstDiagnostics", &TileLayerParser::searchQueryAstDiagnostics)
         .function("searchStyleFieldsForQuery", &TileLayerParser::searchStyleFieldsForQuery)
         .function(
             "filterFeatureJumpTargets",

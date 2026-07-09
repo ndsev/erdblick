@@ -33,6 +33,15 @@ describe("FeatureSearchState", () => {
         expect(entry.selectedFeatureTypes).toEqual(["Lane", "Road"]);
     });
 
+    it("normalizes selected tile levels to the NDS search level domain", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "typeId == 'Road'",
+            selectedTileLevels: [13, 15, 16, 22]
+        }]);
+
+        expect(entry.selectedTileLevels).toEqual([13, 15]);
+    });
+
     it("defaults selected views from visible selected map layers", () => {
         const selectedMapLayers = [
             {mapId: "Classic", layerId: "Road"},

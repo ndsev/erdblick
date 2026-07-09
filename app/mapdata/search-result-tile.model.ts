@@ -19,6 +19,7 @@ export class SearchResultTile implements RenderableTileLayer {
     readonly sourceMapId: string;
     readonly sourceLayerId: string;
     readonly sourceTileId: number;
+    readonly featureTypes: string[];
     mapTileKey: string;
     nodeId: string;
     mapName: string;
@@ -47,6 +48,7 @@ export class SearchResultTile implements RenderableTileLayer {
         sourceMapId: string,
         sourceLayerId: string,
         sourceTileId: number,
+        featureTypes: string[],
         refresh: number,
         priority: boolean,
         requestOrder: number
@@ -57,6 +59,7 @@ export class SearchResultTile implements RenderableTileLayer {
         this.sourceMapId = sourceMapId;
         this.sourceLayerId = sourceLayerId;
         this.sourceTileId = sourceTileId;
+        this.featureTypes = [...featureTypes];
         this.mapTileKey = sourceTileKey;
         this.mapName = sourceMapId;
         this.layerName = sourceLayerId;

@@ -38,7 +38,8 @@ import {simfilHighlightStyle, simfilLanguage} from "./simfil-language";
                 [left]="completion.left"
                 [zIndex]="completionZIndex"
                 (popupMouseDown)="onCompletionPopupDown($event)"
-                (candidateSelected)="applyCompletion($event)">
+                (candidateSelected)="applyCompletion($event)"
+                (closeRequested)="dismissCompletionForCurrentInput()">
             </search-completion-popup>
         </div>
     `,
@@ -83,6 +84,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     private viewReady = false;
     private applyingExternalValue = false;
     private completionMapLayersSignature = "";
+    private dismissedCompletionSignature: string | null = null;
 
     completionItems: CompletionCandidate[] = [];
     completion = {
@@ -247,7 +249,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     /** Accepts a visible completion with Tab while leaving normal tab behavior alone. */
     private handleTabKey(): boolean {
-        if (!this.completion.visible) {
+        if (!this.shouldApplyCompletionOnEnter()) {
             return false;
         }
         this.applyCompletion();
@@ -265,8 +267,8 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     /** Dismisses completion first, then delegates Escape to the owning panel. */
     private handleEscapeKey(): boolean {
-        if (this.completion.visible) {
-            this.resetCompletion();
+        if (this.completion.visible || this.completion.pending || this.completionItems.length > 0) {
+            this.dismissCompletionForCurrentInput();
             return true;
         }
         this.escaped.emit();
@@ -278,6 +280,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         if (update.docChanged && !this.applyingExternalValue) {
             this.value = update.state.doc.toString();
             this.valueChange.emit(this.value);
+            this.dismissedCompletionSignature = null;
             this.scheduleCompletion();
         }
         if (update.docChanged || update.selectionSet || update.geometryChanged) {
@@ -289,7 +292,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     private onEditorKeydown(event: KeyboardEvent): boolean {
         const dismissCompletionKeys = ["Home", "End", "PageUp", "PageDown", "ArrowLeft", "ArrowRight", "Delete"];
         if (dismissCompletionKeys.includes(event.key)) {
-            this.completion.visible = false;
+            this.hideCompletionPopup();
         }
 
         if (this.completion.visible) {
@@ -302,7 +305,9 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             if (event.key === "Tab") {
                 event.preventDefault();
                 event.stopPropagation();
-                this.applyCompletion();
+                if (this.shouldApplyCompletionOnEnter()) {
+                    this.applyCompletion();
+                }
                 return true;
             }
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -325,7 +330,11 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
-            this.escaped.emit();
+            if (this.completion.visible || this.completion.pending || this.completionItems.length > 0) {
+                this.dismissCompletionForCurrentInput();
+            } else {
+                this.escaped.emit();
+            }
             return true;
         }
 
@@ -336,6 +345,8 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     private shouldApplyCompletionOnEnter(): boolean {
         const currentValue = this.editorView?.state.doc.toString() ?? this.value ?? "";
         return this.completion.visible
+            && this.completionItems.length > 0
+            && !this.isCompletionDismissedFor(currentValue, this.cursorPosition())
             && !this.searchService.hasExactCompletionCandidate(currentValue, this.ownerId());
     }
 
@@ -347,7 +358,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     /** Applies either the selected completion item or an explicitly clicked candidate. */
     protected applyCompletion(candidate?: CompletionCandidate): void {
         const item = candidate ?? this.completionItems[this.completion.selectionIndex];
-        if (!item) {
+        if (!item || (!candidate && !this.shouldApplyCompletionOnEnter())) {
             return;
         }
         this.setEditorValue(item.query, item.begin + item.text.length);
@@ -357,13 +368,15 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.completionItems = [];
         this.completion.visible = false;
         this.completion.pending = false;
+        this.dismissedCompletionSignature = null;
         this.focus();
     }
 
     /** Rotates completion selection while preserving popup visibility. */
     private selectNextCompletion(next: boolean): void {
         const count = this.completionItems.length;
-        if (count === 0) {
+        const currentValue = this.editorView?.state.doc.toString() ?? this.value ?? "";
+        if (count === 0 || this.isCompletionDismissedFor(currentValue, this.cursorPosition())) {
             this.completion.selectionIndex = 0;
             this.completion.visible = false;
             return;
@@ -389,6 +402,11 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             this.resetCompletion();
             return;
         }
+        if (this.isCompletionDismissedFor(query, this.cursorPosition())) {
+            this.searchService.clearCurrentCompletion(this.ownerId());
+            this.hideCompletionPopup();
+            return;
+        }
         this.searchService.completeQueryForOwner(
             this.ownerId(),
             query,
@@ -405,6 +423,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.completion.selectionIndex = 0;
         this.completion.visible = false;
         this.completion.pending = false;
+        this.dismissedCompletionSignature = null;
     }
 
     /** Rebinds the completion stream when the owner id changes. */
@@ -417,6 +436,11 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         const state = this.searchService.completionStateForOwner(this.ownerId());
         this.completionSubscriptions.add(state.candidates.pipe(distinctUntilChanged()).subscribe(value => {
             const currentValue = this.editorView?.state.doc.toString() ?? this.value ?? "";
+            if (this.isCompletionDismissedFor(currentValue, this.cursorPosition())) {
+                this.completionItems = [];
+                this.completion.visible = false;
+                return;
+            }
             this.completionItems = value.filter(item => item.query !== currentValue && item.source === currentValue);
             if (this.completion.selectionIndex >= this.completionItems.length) {
                 this.completion.selectionIndex = Math.max(0, this.completionItems.length - 1);
@@ -428,6 +452,12 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             }
         }));
         this.completionSubscriptions.add(state.pending.pipe(distinctUntilChanged()).subscribe(pending => {
+            const currentValue = this.editorView?.state.doc.toString() ?? this.value ?? "";
+            if (pending && this.isCompletionDismissedFor(currentValue, this.cursorPosition())) {
+                this.completion.pending = false;
+                this.completion.visible = false;
+                return;
+            }
             const focusValid = this.completion.visible || pending || !!this.editorView?.hasFocus;
             this.completion.pending = pending && focusValid;
             if (this.completion.pending) {
@@ -441,6 +471,33 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     /** Returns the completion owner id used to isolate pending backend requests. */
     private ownerId(): string {
         return this.completionOwnerId || this.generatedOwnerId;
+    }
+
+    /** Hides the popup locally without changing the editor text. */
+    private hideCompletionPopup(): void {
+        this.completion.visible = false;
+        this.completion.pending = false;
+    }
+
+    /** Dismisses the current completion generation until text or caret changes. */
+    protected dismissCompletionForCurrentInput(): void {
+        const query = this.editorView?.state.doc.toString() ?? this.value ?? "";
+        this.dismissedCompletionSignature = this.completionSignature(query, this.cursorPosition());
+        this.searchService.clearCurrentCompletion(this.ownerId());
+        this.completionItems = [];
+        this.completion.selectionIndex = 0;
+        this.hideCompletionPopup();
+        this.focus();
+    }
+
+    /** Returns whether completion has been explicitly dismissed for this exact query/caret pair. */
+    private isCompletionDismissedFor(query: string, point: number): boolean {
+        return this.dismissedCompletionSignature === this.completionSignature(query, point);
+    }
+
+    /** Builds the completion identity suppressed by Escape/close until text or caret changes. */
+    private completionSignature(query: string, point: number): string {
+        return `${query}\u0000${point}`;
     }
 
     /** Replaces the editor document while preserving or applying a cursor position. */

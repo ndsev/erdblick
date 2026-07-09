@@ -54,13 +54,15 @@ function visibleLayerTiles(
     layerId: string,
     tileIds: number[],
     priorityTileIds = new Set<number>(),
-    requestOrderOffset = 0
+    requestOrderOffset = 0,
+    featureTypes: string[] = []
 ): Map<string, SearchLayerTileSet> {
     return new Map([[
         FeatureSearchRuntimeState.layerKey(mapId, layerId),
         {
             mapId,
             layerId,
+            featureTypes,
             tiles: new Map(tileIds.map((tileId, index) => [
                 tileId,
                 {
@@ -75,14 +77,19 @@ function visibleLayerTiles(
 
 /** Creates multi-layer visible coverage while keeping the caller-provided first-seen order. */
 function visibleLayerTilePlan(
-    entries: Array<{mapId: string; layerId: string; tileId: number; priority?: boolean}>
+    entries: Array<{mapId: string; layerId: string; tileId: number; priority?: boolean; featureTypes?: string[]}>
 ): Map<string, SearchLayerTileSet> {
     const result = new Map<string, SearchLayerTileSet>();
     entries.forEach((entry, requestOrder) => {
         const key = FeatureSearchRuntimeState.layerKey(entry.mapId, entry.layerId);
         let layerTiles = result.get(key);
         if (!layerTiles) {
-            layerTiles = {mapId: entry.mapId, layerId: entry.layerId, tiles: new Map()};
+            layerTiles = {
+                mapId: entry.mapId,
+                layerId: entry.layerId,
+                featureTypes: entry.featureTypes ?? [],
+                tiles: new Map()
+            };
             result.set(key, layerTiles);
         }
         if (!layerTiles.tiles.has(entry.tileId)) {
@@ -129,11 +136,30 @@ describe("FeatureSearchRuntimeState", () => {
             {} as TileLayerParser
         );
         const tile = sampleTileId(0);
-        runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [tile]));
+        runtime.adoptVisibleTiles(visibleLayerTiles("m1", "layerA", [tile], new Set<number>(), 0, ["Road"]));
 
         const requests = runtime.buildPendingRequests();
 
         expect(requests[0].featureTypes).toEqual(["Road"]);
+    });
+
+    it("passes only the source layer's supported selected feature types to backend search requests", () => {
+        const runtime = new FeatureSearchRuntimeState(
+            searchDefinition({selectedFeatureTypes: ["Lane", "Road"]}),
+            {} as TileLayerParser
+        );
+        const roadTile = sampleTileId(0);
+        const laneTile = sampleTileId(1);
+        runtime.adoptVisibleTiles(visibleLayerTilePlan([
+            {mapId: "m1", layerId: "Road", tileId: roadTile, featureTypes: ["Road"]},
+            {mapId: "m1", layerId: "Lane", tileId: laneTile, featureTypes: ["Lane"]}
+        ]));
+
+        const requests = runtime.buildPendingRequests();
+
+        expect(requests).toHaveLength(2);
+        expect(requests.find(request => request.layerId === "Road")?.featureTypes).toEqual(["Road"]);
+        expect(requests.find(request => request.layerId === "Lane")?.featureTypes).toEqual(["Lane"]);
     });
 
     it("treats query changes as a new search generation", () => {

@@ -371,6 +371,7 @@ export class MapTileStreamClient {
 
     /** Invalidates in-flight payloads after datasource dictionaries have been replaced. */
     resetAfterDataSourceInfoChange() {
+        this.close(1000, "datasource info changed");
         this.clearPendingFrames();
         this.awaitingCompletion = false;
         this.lastRequestPromise = null;
@@ -1050,9 +1051,11 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
-                if (!this.acceptsCurrentPayloadFrame()) {
-                    return;
-                }
+                // Field dictionaries are node-keyed prerequisites for feature/search payloads.
+                // They can legitimately arrive after a newer request context has superseded
+                // their original request, while the already-accepted feature payload still
+                // remains cached. Keep them additive across request churn; datasource reloads
+                // close/reset the stream so dictionaries cannot leak across metadata epochs.
                 uint8ArrayToWasm((wasmBuffer: any) => {
                     this.parser.readFieldDictUpdate(wasmBuffer);
                 }, bytes);

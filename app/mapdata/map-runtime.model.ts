@@ -135,6 +135,7 @@ export interface SearchLayerTileEntry {
 export interface SearchLayerTileSet {
     mapId: string;
     layerId: string;
+    featureTypes: string[];
     tiles: Map<number, SearchLayerTileEntry>;
 }
 

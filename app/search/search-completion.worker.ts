@@ -10,8 +10,6 @@ import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import type {
     SearchCompletionRequestMessage,
     SearchCompletionResultMessage,
-    SearchQueryDiagnosticsRequestMessage,
-    SearchQueryDiagnosticsResultMessage,
     SearchScopeAnalysisRequestMessage,
     SearchScopeAnalysisResultMessage,
     SearchCompletionWorkerInboundMessage,
@@ -38,6 +36,9 @@ interface SearchQueryNormalizationNativeResult {
     concreteScope?: unknown;
     normalizedQuery?: unknown;
     attributeScopes?: unknown;
+    attributeScopeCandidateCount?: unknown;
+    rewriteSuppressed?: unknown;
+    rewriteSuppressionReason?: unknown;
     matchedFeatureTypes?: unknown;
     error?: unknown;
 }
@@ -270,7 +271,8 @@ function normalizeSearchQueryNormalization(
     value: unknown
 ): Pick<
     SearchScopeAnalysisResultMessage,
-    "concreteScope" | "normalizedQuery" | "attributeScopes" | "matchedFeatureTypes" | "error"
+    "concreteScope" | "normalizedQuery" | "attributeScopes" | "attributeScopeCandidateCount"
+        | "rewriteSuppressed" | "rewriteSuppressionReason" | "matchedFeatureTypes" | "error"
 > {
     const raw = recordFromUnknown(value) as SearchQueryNormalizationNativeResult | null;
     const concreteScope = raw?.concreteScope === "attribute" || raw?.concreteScope === "feature"
@@ -286,6 +288,11 @@ function normalizeSearchQueryNormalization(
         concreteScope,
         normalizedQuery,
         attributeScopes: normalizeAttributeScopeCandidates(raw?.attributeScopes),
+        attributeScopeCandidateCount: Math.max(0, Number(raw?.attributeScopeCandidateCount) || 0),
+        rewriteSuppressed: raw?.rewriteSuppressed === true,
+        rewriteSuppressionReason: typeof raw?.rewriteSuppressionReason === "string"
+            ? raw.rewriteSuppressionReason
+            : "",
         matchedFeatureTypes: normalizeStringList(raw?.matchedFeatureTypes),
         ...(error ? {error} : {})
     };
@@ -324,35 +331,6 @@ function normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyle
             valueKind: normalizeStyleFieldValueKind(raw["valueKind"]),
             enumValues,
             ...(numericRange ? {numericRange} : {})
-        }];
-    });
-}
-
-/** Converts native AST diagnostic records into the UI diagnostics model. */
-function normalizeQueryDiagnostics(query: string, value: unknown): SearchQueryDiagnosticsResultMessage["diagnostics"] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    return value.flatMap(item => {
-        const raw = recordFromUnknown(item);
-        if (!raw) {
-            return [];
-        }
-        const message = typeof raw["message"] === "string" ? raw["message"] : "";
-        if (!message) {
-            return [];
-        }
-        const locationValue = recordFromUnknown(raw["location"]);
-        const offset = Number(locationValue?.["offset"]);
-        const size = Number(locationValue?.["size"]);
-        const location = Number.isFinite(offset) && Number.isFinite(size)
-            ? {offset, size}
-            : undefined;
-        return [{
-            query,
-            message,
-            ...(location ? {location} : {}),
-            fix: typeof raw["fix"] === "string" ? raw["fix"] : null
         }];
     });
 }
@@ -473,6 +451,9 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
             concreteScope: message.scope === "attribute" ? "attribute" : "feature",
             normalizedQuery: message.query,
             attributeScopes: [],
+            attributeScopeCandidateCount: 0,
+            rewriteSuppressed: false,
+            rewriteSuppressionReason: "",
             inferredMapLayers: [],
             matchedFieldNames: [],
             matchedEnumValues: [],
@@ -518,23 +499,6 @@ async function enumerateSearchStyleFields(message: SearchStyleFieldsRequestMessa
     } satisfies SearchStyleFieldsResultMessage);
 }
 
-/** Computes schema-AST diagnostics in the worker-local parser. */
-async function computeSearchQueryDiagnostics(message: SearchQueryDiagnosticsRequestMessage): Promise<void> {
-    const activeParser = await currentParser();
-    const diagnostics = activeParser
-        ? normalizeQueryDiagnostics(message.query, activeParser.searchQueryAstDiagnostics(
-            message.query,
-            message.scope,
-            schemaOptions(message.selectedMapLayers)
-        ))
-        : [];
-    postMessage({
-        type: "SearchQueryDiagnosticsResult",
-        requestId: message.requestId,
-        diagnostics
-    } satisfies SearchQueryDiagnosticsResultMessage);
-}
-
 /** Handles one inbound worker message and posts completion results back to the UI thread. */
 async function handleMessage(message: SearchCompletionWorkerInboundMessage): Promise<void> {
     try {
@@ -554,7 +518,6 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
             await enumerateSearchStyleFields(message);
             return;
         }
-        await computeSearchQueryDiagnostics(message);
     } catch (error) {
         if (message.type === "SearchCompletionDataSourceInfo") {
             console.error("Failed to configure schema completion worker.", error);
@@ -574,6 +537,9 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
                 concreteScope: message.scope === "attribute" ? "attribute" : "feature",
                 normalizedQuery: message.query,
                 attributeScopes: [],
+                attributeScopeCandidateCount: 0,
+                rewriteSuppressed: false,
+                rewriteSuppressionReason: "",
                 inferredMapLayers: [],
                 matchedFieldNames: [],
                 matchedEnumValues: [],
@@ -587,13 +553,6 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
                 fields: [],
                 error: error instanceof Error ? error.message : String(error)
             } satisfies SearchStyleFieldsResultMessage);
-        } else {
-            postMessage({
-                type: "SearchQueryDiagnosticsResult",
-                requestId: message.requestId,
-                diagnostics: [],
-                error: error instanceof Error ? error.message : String(error)
-            } satisfies SearchQueryDiagnosticsResultMessage);
         }
     }
 }

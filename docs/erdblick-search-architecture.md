@@ -413,17 +413,12 @@ Important details:
 
 ## Diagnostics Flow
 
-The Diagnostics tab combines three different sources. They should not be conflated.
+The Diagnostics tab combines backend execution diagnostics and lazy value summaries. They should not be conflated.
 
 ```mermaid
 flowchart TD
-  Tab[Diagnostics tab visible] --> QueryDiag[Schema AST diagnostics]
-  Tab --> ExecDiag[Backend execution diagnostics]
+  Tab[Diagnostics tab visible] --> ExecDiag[Backend execution diagnostics]
   Tab --> Values[Lazy value summaries]
-
-  QueryDiag --> SchemaSvc[FeatureSearchSchemaService<br/>analysis worker]
-  SchemaSvc --> Parser[TileLayerParser.searchQueryAstDiagnostics]
-  Parser --> SchemaAsts[Compiled schema-analysis AST strings]
 
   ExecDiag --> ResultLayers[TileSearchResultLayer.copyDiagnostics]
   ResultLayers --> SimfilDiag[coreLib.simfilGetDiagnostics<br/>merge serialized simfil::Diagnostics]
@@ -436,10 +431,9 @@ flowchart TD
 
 Diagnostics responsibilities:
 
-- Schema AST diagnostics are developer/debug diagnostics. They show how Erdblick's schema-analysis passes compile the query for feature and attribute roots.
 - Execution diagnostics come from mapget's actual search evaluation and are serialized into `TileSearchResultLayer`. They are authoritative for what happened during backend execution, but they currently do not expose mapget's compiled AST string.
 - Value summaries are lazy post-processing over completed search-result tiles. They summarize result fields and `trace()` output; they are not compile diagnostics.
-- Erdblick schema-analysis ASTs can differ from mapget execution ASTs because Erdblick uses synthetic roots, `/sources` metadata, and usually `any=false`, while mapget evaluates real tile nodes with `any=true`.
+- Erdblick deliberately does not display schema-analysis AST dumps. Query normalization is mapget-owned, and the UI surfaces only the original query, backend query, concrete scope, rewrite status, candidate count, execution diagnostics, and value summaries.
 
 ## Known Non-Identical Paths
 

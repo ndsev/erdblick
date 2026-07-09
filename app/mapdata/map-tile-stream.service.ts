@@ -259,6 +259,29 @@ export class MapTileStreamService {
         return Array.from(this.activeFeatureSearches.values()).map(runtime => runtime.definition);
     }
 
+    /** Returns a structured, read-only snapshot for diagnosing restored feature-search request races. */
+    featureSearchDiagnosticsSnapshot(): unknown {
+        return {
+            updatePending: this.updatePending,
+            updateInProgress: this.updateInProgress,
+            transport: this.tileStream?.getDebugState() ?? null,
+            backendRequestProgress: {...this.backendRequestProgress},
+            visibleFeatureLayers: this.visibleFeatureLayerDiagnostics(),
+            activeFeatureSearches: Array.from(this.activeFeatureSearches.values()).map(runtime => {
+                const coverage = this.featureSearchCoverageTiles(runtime.definition);
+                return {
+                    searchId: runtime.searchId,
+                    refresh: runtime.refresh,
+                    shouldAdoptVisibleTiles: runtime.shouldAdoptVisibleTiles(),
+                    progress: runtime.progressSnapshot(),
+                    definition: this.searchDefinitionDiagnostics(runtime.definition),
+                    currentCoverage: this.searchCoverageDiagnostics(coverage),
+                    adoptedTiles: this.searchResultTileDiagnostics(runtime.tilesBySourceKey.values())
+                };
+            })
+        };
+    }
+
     /** Iterates the current search-result source-tile states. */
     *searchResultTiles(): Iterable<SearchResultTile> {
         for (const runtime of this.activeFeatureSearches.values()) {
@@ -1617,6 +1640,7 @@ export class MapTileStreamService {
         visibleLayerTiles: Map<string, SearchLayerTileSet>,
         mapId: string,
         layerId: string,
+        featureTypes: string[],
         tileId: number,
         requestOrder: number,
         priority: boolean
@@ -1624,7 +1648,12 @@ export class MapTileStreamService {
         const key = FeatureSearchRuntimeState.layerKey(mapId, layerId);
         let entry = visibleLayerTiles.get(key);
         if (!entry) {
-            entry = {mapId, layerId, tiles: new Map<number, {tileId: number; requestOrder: number; priority: boolean}>()};
+            entry = {
+                mapId,
+                layerId,
+                featureTypes,
+                tiles: new Map<number, {tileId: number; requestOrder: number; priority: boolean}>()
+            };
             visibleLayerTiles.set(key, entry);
         }
         const existing = entry.tiles.get(tileId);
@@ -1704,6 +1733,10 @@ export class MapTileStreamService {
         const coverage = new Map<string, SearchLayerTileSet>();
         let requestOrder = 0;
         for (const ref of this.availableFeatureSearchLayerRefs(definition.selectedMapLayers)) {
+            const featureTypes = this.searchFeatureTypesForLayer(definition, ref.mapId, ref.layerId);
+            if (!featureTypes) {
+                continue;
+            }
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                 if (!featureSearchVisibleInView(definition, viewIndex)) {
                     continue;
@@ -1716,6 +1749,7 @@ export class MapTileStreamService {
                             coverage,
                             ref.mapId,
                             ref.layerId,
+                            featureTypes,
                             tileId,
                             requestOrder++,
                             this.selectedTileKeys.has(tileMapLayerKey)
@@ -1725,6 +1759,24 @@ export class MapTileStreamService {
             }
         }
         return coverage;
+    }
+
+    /** Returns the per-layer feature-type request filter, or null if selected types do not overlap this layer. */
+    private searchFeatureTypesForLayer(
+        definition: FeatureSearchStateEntry,
+        mapId: string,
+        layerId: string
+    ): string[] | null {
+        const selectedFeatureTypes = definition.selectedFeatureTypes ?? [];
+        if (!selectedFeatureTypes.length) {
+            return [];
+        }
+        const layer = this.mapInfo.maps.maps.get(mapId)?.layers.get(layerId);
+        const layerTypes = new Set((layer?.info.featureTypes ?? [])
+            .map(featureType => featureType.name)
+            .filter((name): name is string => !!name));
+        const supportedTypes = selectedFeatureTypes.filter(type => layerTypes.has(type));
+        return supportedTypes.length ? supportedTypes : null;
     }
 
     /** Returns explicit search levels, or the current viewport-derived auto level when the selection is empty. */
@@ -1761,6 +1813,107 @@ export class MapTileStreamService {
     private hasFeatureLayer(mapId: string, layerId: string): boolean {
         const map = this.mapInfo.maps.maps.get(mapId);
         return !!map?.allFeatureLayers().some(layer => layer.id === layerId);
+    }
+
+    /** Summarizes a feature-search definition without large style payloads. */
+    private searchDefinitionDiagnostics(definition: FeatureSearchResolvedDefinition): Record<string, unknown> {
+        return {
+            id: definition.id,
+            query: definition.query,
+            backendQuery: definition.backendQuery,
+            scope: definition.scope,
+            concreteScope: definition.concreteScope,
+            enabled: definition.enabled,
+            paused: definition.paused,
+            autoUpdate: definition.autoUpdate,
+            selectedMapLayers: definition.selectedMapLayers,
+            selectedTileLevels: definition.selectedTileLevels,
+            selectedViewIndices: definition.selectedViewIndices,
+            selectedFeatureTypes: definition.selectedFeatureTypes,
+            resultFields: definition.resultFields
+        };
+    }
+
+    /** Summarizes current viewport-derived search coverage by source layer. */
+    private searchCoverageDiagnostics(coverage: Map<string, SearchLayerTileSet>): unknown[] {
+        return Array.from(coverage.values()).map(entry => {
+            const tileIds = Array.from(entry.tiles.keys()).sort((lhs, rhs) => lhs - rhs);
+            return {
+                mapId: entry.mapId,
+                layerId: entry.layerId,
+                featureTypes: entry.featureTypes,
+                tileCount: tileIds.length,
+                sampleTileIds: tileIds.slice(0, 20)
+            };
+        });
+    }
+
+    /** Summarizes adopted search-result source tiles without materializing result payloads. */
+    private searchResultTileDiagnostics(tiles: Iterable<SearchResultTile>): Record<string, unknown> {
+        const byLayer = new Map<string, {
+            mapId: string;
+            layerId: string;
+            featureTypes: string[];
+            tileCount: number;
+            requested: number;
+            completed: number;
+            resultTiles: number;
+            resultCount: number;
+            sampleTileIds: number[];
+        }>();
+        for (const tile of tiles) {
+            const key = FeatureSearchRuntimeState.layerKey(tile.sourceMapId, tile.sourceLayerId);
+            let entry = byLayer.get(key);
+            if (!entry) {
+                entry = {
+                    mapId: tile.sourceMapId,
+                    layerId: tile.sourceLayerId,
+                    featureTypes: tile.featureTypes,
+                    tileCount: 0,
+                    requested: 0,
+                    completed: 0,
+                    resultTiles: 0,
+                    resultCount: 0,
+                    sampleTileIds: []
+                };
+                byLayer.set(key, entry);
+            }
+            entry.tileCount += 1;
+            entry.requested += tile.requested ? 1 : 0;
+            entry.completed += tile.completed ? 1 : 0;
+            entry.resultTiles += tile.hasResultLayer() ? 1 : 0;
+            entry.resultCount += tile.resultCount;
+            if (entry.sampleTileIds.length < 20) {
+                entry.sampleTileIds.push(tile.sourceTileId);
+            }
+        }
+        return {
+            totalTileCount: Array.from(byLayer.values()).reduce((sum, entry) => sum + entry.tileCount, 0),
+            byLayer: Array.from(byLayer.values())
+        };
+    }
+
+    /** Lists ready visible feature layers and their effective source levels per view. */
+    private visibleFeatureLayerDiagnostics(): unknown[] {
+        const result: unknown[] = [];
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+            for (const [mapId, map] of this.mapInfo.maps.maps) {
+                for (const layer of map.allFeatureLayers()) {
+                    if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
+                        continue;
+                    }
+                    result.push({
+                        viewIndex,
+                        mapId,
+                        layerId: layer.id,
+                        ready: this.mapInfo.isMapLayerReady(mapId, layer.id),
+                        effectiveLevel: this.viewState.getEffectiveMapLayerLevel(viewIndex, mapId, layer.id),
+                        autoSearchLevel: this.viewState.autoSearchTileLevel(viewIndex, mapId, layer.id)
+                    });
+                }
+            }
+        }
+        return result;
     }
 
     /** Closes the viewport render timer once backend requests finished. */

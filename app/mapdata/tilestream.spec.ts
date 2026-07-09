@@ -3,6 +3,7 @@ import {
     MAP_TILE_STREAM_HEADER_SIZE,
     MAP_TILE_STREAM_PROTOCOL_MAJOR,
     MAP_TILE_STREAM_PROTOCOL_MINOR,
+    MAP_TILE_STREAM_TYPE_FIELDS,
     MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
     MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
     MapTileStreamClient
@@ -187,6 +188,33 @@ describe('MapTileStreamClient', () => {
             }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
 
             expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('accepts field dictionaries after request supersession', async () => {
+        const parser = {
+            readFieldDictUpdate: vi.fn(),
+        };
+        const client = new MapTileStreamClient('/interactive', parser as any);
+        const tileStream = client as any;
+        const fieldsCallback = vi.fn();
+        try {
+            client.withFieldsCallback(fieldsCallback);
+            tileStream.latestRequestedRequestId = 5;
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+
+            const frame = jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {nodeId: "stale-but-required"});
+            await tileStream.handleFrame(frame, MAP_TILE_STREAM_TYPE_FIELDS);
+
+            expect(parser.readFieldDictUpdate).toHaveBeenCalledOnce();
+            expect(fieldsCallback).toHaveBeenCalledWith(frame);
         } finally {
             client.destroy();
         }

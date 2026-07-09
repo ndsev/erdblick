@@ -131,11 +131,6 @@ public:
     NativeJsValue normalizeSearchQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
-     * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
-     */
-    NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
-
-    /**
      * Enumerate schema-backed result fields usable by search-result style rules.
      *
      * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through

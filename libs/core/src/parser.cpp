@@ -583,318 +583,6 @@ bool literalsMatchName(std::set<std::string> const& literals, std::string const&
     });
 }
 
-std::string attributeScopeKey(AttributeScopeInfo const& scope)
-{
-    return scope.mapId + "\n" + scope.layerId + "\n" + scope.featureType + "\n"
-        + scope.attrLayerName + "\n" + scope.attrName;
-}
-
-std::optional<std::vector<std::string>> schemaPathFieldNames(
-    simfil::Environment& env,
-    simfil::SchemaPath const& path)
-{
-    std::vector<std::string> fieldNames;
-    for (auto const& segment : path) {
-        if (segment.kind != simfil::SchemaPathSegment::Kind::Field) {
-            continue;
-        }
-        auto fieldName = env.strings()->resolve(segment.field);
-        if (!fieldName) {
-            return std::nullopt;
-        }
-        fieldNames.emplace_back(*fieldName);
-    }
-    return fieldNames;
-}
-
-/** Convert a mapget registry path into the compile-local SIMFIL string pool. */
-std::optional<simfil::SchemaPath> schemaPathFromNamedPath(
-    std::shared_ptr<simfil::StringPool> const& strings,
-    mapget::LayerSchema::NamedSchemaPath const& namedPath)
-{
-    simfil::SchemaPath path;
-    path.reserve(namedPath.size());
-    for (auto const& segment : namedPath) {
-        if (segment.kind_ == simfil::SchemaPathSegment::Kind::ArrayElement) {
-            path.push_back({simfil::SchemaPathSegment::Kind::ArrayElement, 0});
-            continue;
-        }
-        auto fieldId = strings->emplace(segment.field_);
-        if (!fieldId) {
-            return std::nullopt;
-        }
-        path.push_back({simfil::SchemaPathSegment::Kind::Field, *fieldId});
-    }
-    return path;
-}
-
-constexpr simfil::SchemaId kAttributeSearchRootSchema = simfil::MaxSchemaId;
-
-class AttributeSearchRootSchema final : public simfil::ObjectSchema
-{
-public:
-    AttributeSearchRootSchema(
-        std::shared_ptr<simfil::StringPool> strings,
-        std::string attributeName,
-        std::vector<simfil::SchemaPath> scalarFieldPaths)
-        : strings_(std::move(strings))
-        , attributeName_(std::move(attributeName))
-        , scalarFieldPaths_(std::move(scalarFieldPaths))
-    {
-    }
-
-    auto symbolEqualityPaths(
-        simfil::StringId symbolId,
-        const std::function<const simfil::Schema*(simfil::SchemaId)>&) const -> std::vector<simfil::SchemaPath> override
-    {
-        if (!matchesAttributeName(symbolId)) {
-            return {};
-        }
-        return {simfil::SchemaPath{{simfil::SchemaPathSegment::Kind::Field, mapget::StringPool::OverlayNameStr}}};
-    }
-
-    auto scalarFieldPathsForSymbol(
-        simfil::StringId symbolId,
-        const std::function<const simfil::Schema*(simfil::SchemaId)>&) const -> std::vector<simfil::SchemaPath> override
-    {
-        if (!matchesAttributeName(symbolId)) {
-            return {};
-        }
-        return scalarFieldPaths_;
-    }
-
-private:
-    bool matchesAttributeName(simfil::StringId symbolId) const
-    {
-        auto symbol = strings_ ? strings_->resolve(symbolId) : std::nullopt;
-        return symbol && *symbol == attributeName_;
-    }
-
-    std::shared_ptr<simfil::StringPool> strings_;
-    std::string attributeName_;
-    std::vector<simfil::SchemaPath> scalarFieldPaths_;
-};
-
-std::shared_ptr<simfil::ObjectSchema> makeAttributeSearchRootSchema(
-    std::shared_ptr<mapget::LayerSchema const> const& registry,
-    std::shared_ptr<simfil::StringPool> const& strings,
-    std::string const& attributeName,
-    simfil::SchemaId attributeSchema,
-    simfil::SchemaId featureSchema)
-{
-    std::vector<simfil::SchemaPath> scalarFieldPaths;
-    auto const attributeTypeCode = registry->attributeTypeCode(attributeSchema);
-    auto const namedPaths = registry->scalarFieldPathsForAttribute(
-        attributeSchema,
-        attributeTypeCode.empty() ? attributeName : attributeTypeCode);
-    scalarFieldPaths.reserve(namedPaths.size());
-    for (auto const& namedPath : namedPaths) {
-        if (auto path = schemaPathFromNamedPath(strings, namedPath)) {
-            scalarFieldPaths.push_back(std::move(*path));
-        }
-    }
-
-    auto root = std::make_shared<AttributeSearchRootSchema>(
-        strings,
-        attributeName,
-        std::move(scalarFieldPaths));
-    for (auto const& fieldName : registry->directFields(attributeSchema)) {
-        auto fieldId = strings->emplace(fieldName);
-        if (!fieldId) {
-            continue;
-        }
-
-        auto childSchema = registry->childSchema(attributeSchema, fieldName);
-        if (childSchema == simfil::NoSchemaId) {
-            root->addField(*fieldId);
-        }
-        else {
-            root->addField(*fieldId, {childSchema});
-        }
-    }
-
-    root->addField(mapget::StringPool::OverlayNameStr);
-    root->addField(mapget::StringPool::OverlayLayerStr);
-    root->addField(mapget::StringPool::OverlayValidityIndexStr);
-    root->addField(mapget::StringPool::OverlayValidityCountStr);
-    if (featureSchema == simfil::NoSchemaId) {
-        root->addField(mapget::StringPool::OverlayFeatureStr);
-    }
-    else {
-        root->addField(mapget::StringPool::OverlayFeatureStr, {featureSchema});
-    }
-    return root;
-}
-
-void installAttributeSearchRootSchema(
-    simfil::Environment& env,
-    std::shared_ptr<simfil::Schema> schema)
-{
-    auto registrySchemaLookup = std::move(env.querySchemaCallback);
-    env.querySchemaCallback = [
-        registrySchemaLookup = std::move(registrySchemaLookup),
-        schema = std::move(schema)
-    ](simfil::SchemaId schemaId) -> const simfil::Schema* {
-        if (schemaId == kAttributeSearchRootSchema) {
-            return schema.get();
-        }
-        return registrySchemaLookup ? registrySchemaLookup(schemaId) : nullptr;
-    };
-}
-
-struct FeatureScopeAstDebug
-{
-    std::string ast;
-    std::vector<AttributeScopeInfo> attributeScopes;
-};
-
-/** Compile a query against one feature root and keep the referenced attribute paths. */
-tl::expected<FeatureScopeAstDebug, simfil::Error> compileFeatureScopeQueryAstDebug(
-    FeatureSchemaInfo const& featureScope,
-    std::string const& query)
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchScopeAnalysis");
-    auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionLayerSchema(*env, featureScope.registry, strings);
-    auto ast = simfil::compile(*env, query, simfil::CompileOptions{
-        .any = false,
-        .rewriteMode = simfil::RewriteMode::Schema,
-        .rootSchema = featureScope.featureSchema});
-    if (!ast) {
-        return tl::unexpected(ast.error());
-    }
-
-    FeatureScopeAstDebug result;
-    result.ast = (*ast)->expr().toString();
-    auto references = simfil::referencedSchemaPaths(*env, **ast, featureScope.featureSchema);
-    if (!references) {
-        return result;
-    }
-
-    std::set<std::string> seen;
-    for (auto const& reference : references->paths) {
-        auto fieldNames = schemaPathFieldNames(*env, reference.path);
-        if (!fieldNames) {
-            continue;
-        }
-        auto owner = featureScope.registry->ownerForPath(
-            featureScope.featureType,
-            featureScope.featureSchema,
-            *fieldNames);
-        if (owner.kind_ != mapget::LayerSchema::PathOwnerKind::Attribute) {
-            continue;
-        }
-
-        AttributeScopeInfo scope{
-            owner.attribute_.attributeName_,
-            owner.attribute_.attributeLayerName_,
-            owner.attribute_.featureType_,
-            featureScope.mapId,
-            featureScope.layerId,
-            featureScope.layerInfo,
-            featureScope.registry,
-            owner.attribute_.attributeSchema_,
-            featureScope.featureSchema};
-        auto key = attributeScopeKey(scope);
-        if (seen.insert(key).second) {
-            result.attributeScopes.push_back(std::move(scope));
-        }
-    }
-    return result;
-}
-
-/** Compile a query against one synthetic attribute root exactly as scope inference does. */
-tl::expected<simfil::ASTPtr, simfil::Error> compileAttributeScopeQueryAst(
-    AttributeScopeInfo const& scope,
-    std::string const& query)
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchScopeAnalysis");
-    auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionLayerSchema(*env, scope.registry, strings);
-    installAttributeSearchRootSchema(
-        *env,
-        makeAttributeSearchRootSchema(scope.registry, strings, scope.attrName, scope.attributeSchema, scope.featureSchema));
-    return simfil::compile(*env, query, simfil::CompileOptions{
-        .any = false,
-        .rewriteMode = simfil::RewriteMode::Schema,
-        .rootSchema = kAttributeSearchRootSchema});
-}
-
-/** Format the source context for a schema-AST diagnostics line. */
-std::string schemaAstContext(AttributeScopeInfo const& scope)
-{
-    return scope.mapId + "/" + scope.layerId + "/" + scope.featureType
-        + "." + scope.attrLayerName + "." + scope.attrName;
-}
-
-/** Format the source context for a feature-root schema-AST diagnostics line. */
-std::string schemaAstContext(FeatureSchemaInfo const& scope)
-{
-    return scope.mapId + "/" + scope.layerId + "/" + scope.featureType;
-}
-
-/** Record one compiled AST together with every schema context that produced it. */
-void recordSchemaAstDiagnostic(
-    std::map<std::string, std::set<std::string>>& astContexts,
-    std::string const& context,
-    std::string const& ast)
-{
-    if (ast.empty()) {
-        return;
-    }
-    astContexts[ast].insert(context);
-}
-
-/** Append unique compiled-query diagnostics in the same shape as simfil diagnostics. */
-void appendSchemaAstDiagnostics(
-    JsValue& result,
-    std::string const& query,
-    std::map<std::string, std::set<std::string>> const& astContexts)
-{
-    constexpr uint32_t kMaxSchemaAstMessages = 8;
-    constexpr size_t kMaxContextLabels = 3;
-    for (auto const& [ast, contexts] : astContexts) {
-        if (result.size() >= kMaxSchemaAstMessages) {
-            return;
-        }
-
-        std::vector<std::string> contextLabels;
-        contextLabels.reserve(std::min(contexts.size(), kMaxContextLabels));
-        for (auto const& context : contexts) {
-            if (contextLabels.size() >= kMaxContextLabels) {
-                break;
-            }
-            contextLabels.push_back(context);
-        }
-
-        std::ostringstream message;
-        message << "Compiled query";
-        if (!contextLabels.empty()) {
-            message << " for ";
-            for (size_t i = 0; i < contextLabels.size(); ++i) {
-                if (i > 0) {
-                    message << ", ";
-                }
-                message << contextLabels[i];
-            }
-            if (contexts.size() > contextLabels.size()) {
-                message << ", +" << (contexts.size() - contextLabels.size()) << " more";
-            }
-        }
-        message << ": " << ast;
-
-        result.push(JsValue::Dict({
-            {"query", JsValue(query)},
-            {"message", JsValue(message.str())},
-            {"location", JsValue::Dict({
-                {"offset", JsValue(0)},
-                {"size", JsValue(static_cast<int>(query.size()))},
-            })},
-            {"fix", JsValue()},
-        }));
-    }
-}
-
 std::vector<AttributeScopeInfo> filterScopesByAttributeLiterals(
     std::vector<AttributeScopeInfo> scopes,
     QueryLayerTerms const& terms)
@@ -2086,6 +1774,9 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
     std::set<std::string> matchedFeatureTypesSet;
     std::vector<std::string> normalizedAttributeQueries;
     bool anyAttributeScope = false;
+    bool rewriteSuppressed = false;
+    size_t attributeScopeCandidateCount = 0;
+    std::string rewriteSuppressionReason;
     std::optional<std::string> firstError;
 
     for (auto const& [_, dataSource] : info_) {
@@ -2112,6 +1803,19 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
             if (!normalized) {
                 if (!firstError) {
                     firstError = normalized.error().message;
+                }
+                continue;
+            }
+
+            attributeScopeCandidateCount += normalized->attributeScopeCandidateCount_;
+            if (normalized->rewriteSuppressed_) {
+                rewriteSuppressed = true;
+                if (normalized->concreteScope_ == mapget::LayerSchema::SearchQueryConcreteScope::Attribute) {
+                    anyAttributeScope = true;
+                    normalizedAttributeQueries.push_back(normalized->normalizedQuery_);
+                }
+                if (rewriteSuppressionReason.empty()) {
+                    rewriteSuppressionReason = normalized->rewriteSuppressionReason_;
                 }
                 continue;
             }
@@ -2154,78 +1858,14 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
         {"concreteScope", JsValue(concreteScope)},
         {"normalizedQuery", JsValue(normalizedQuery)},
         {"attributeScopes", attributeScopes},
+        {"attributeScopeCandidateCount", JsValue(static_cast<int>(attributeScopeCandidateCount))},
+        {"rewriteSuppressed", JsValue(rewriteSuppressed)},
+        {"rewriteSuppressionReason", JsValue(rewriteSuppressionReason)},
         {"matchedFeatureTypes", matchedFeatureTypes}
     });
     if (firstError) {
         result.set("error", JsValue(*firstError));
     }
-    return *result;
-}
-
-/** Returns schema-AST diagnostics generated by the same parser passes that infer search scope. */
-NativeJsValue TileLayerParser::searchQueryAstDiagnostics(
-    std::string const& query,
-    std::string const& scope,
-    NativeJsValue const& options_) const
-{
-    auto result = JsValue::List();
-    if (query.empty()) {
-        return *result;
-    }
-    auto const selectedLayers = selectedLayerFilterFromOptions(JsValue(options_));
-
-    auto const discoveredAttributeScopes = resolveAttributeScopesForQuery(info_, query, selectedLayers);
-    std::set<std::string> discoveredAttributeScopeKeys;
-    for (auto const& attrScope : discoveredAttributeScopes) {
-        discoveredAttributeScopeKeys.insert(attributeScopeKey(attrScope));
-    }
-
-    std::map<std::string, std::set<std::string>> astContexts;
-    auto const concreteScope = scope == "auto"
-        ? (!discoveredAttributeScopes.empty() ? "attribute" : "feature")
-        : scope;
-
-    for (auto const& featureScope : collectFeatureSchemaScopes(info_, selectedLayers)) {
-        auto astDebug = compileFeatureScopeQueryAstDebug(featureScope, query);
-        if (!astDebug) {
-            continue;
-        }
-
-        if (concreteScope == "feature" || discoveredAttributeScopes.empty()) {
-            recordSchemaAstDiagnostic(
-                astContexts,
-                schemaAstContext(featureScope),
-                astDebug->ast);
-            continue;
-        }
-
-        for (auto const& attrScope : astDebug->attributeScopes) {
-            if (!discoveredAttributeScopeKeys.contains(attributeScopeKey(attrScope))) {
-                continue;
-            }
-            recordSchemaAstDiagnostic(
-                astContexts,
-                schemaAstContext(attrScope),
-                astDebug->ast);
-        }
-    }
-
-    if (concreteScope == "attribute") {
-        auto const allScopes = collectAttributeScopes(info_, selectedLayers);
-        auto const& scopes = discoveredAttributeScopes.empty() ? allScopes : discoveredAttributeScopes;
-        for (auto const& attrScope : scopes) {
-            auto ast = compileAttributeScopeQueryAst(attrScope, query);
-            if (!ast) {
-                continue;
-            }
-            recordSchemaAstDiagnostic(
-                astContexts,
-                schemaAstContext(attrScope),
-                (*ast)->expr().toString());
-        }
-    }
-
-    appendSchemaAstDiagnostics(result, query, astContexts);
     return *result;
 }
 

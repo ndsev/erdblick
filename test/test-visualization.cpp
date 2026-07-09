@@ -1521,36 +1521,6 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
 }
 
-TEST_CASE("Feature search diagnostics expose schema ASTs used by scope inference", "[erdblick.search]")
-{
-    auto datasource = nlohmann::json{
-        {"nodeId", "WarningSignAstNode"},
-        {"mapId", "WarningSignAstMap"},
-        {"layers", {
-            {"Road", warningSignLayerInfoJson()}
-        }}
-    };
-
-    TileLayerParser parser;
-    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
-
-    auto diagnostics = parser.searchQueryAstDiagnostics("WARNING_SIGN", "auto", nlohmann::json::object());
-    REQUIRE(diagnostics.is_array());
-
-    bool hasCompiledAst = false;
-    bool hasLegacyAttributeScopeLabel = false;
-    for (auto const& diagnostic : diagnostics) {
-        auto const message = diagnostic.value("message", std::string{});
-        hasCompiledAst = hasCompiledAst
-            || (message.find("Compiled query for WarningSignAstMap/Road/Road.RoadRulesLayer.WARNING_SIGN") != std::string::npos
-                && message.find("WARNING_SIGN") != std::string::npos);
-        hasLegacyAttributeScopeLabel = hasLegacyAttributeScopeLabel
-            || message.find("Schema AST for attribute scope") != std::string::npos;
-    }
-    REQUIRE(hasCompiledAst);
-    REQUIRE_FALSE(hasLegacyAttributeScopeLabel);
-}
-
 TEST_CASE("FeatureStyleRuleLodFilterParsing", "[erdblick.style]")
 {
     auto yamlWithLod = YAML::Load(R"(

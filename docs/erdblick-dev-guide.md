@@ -758,8 +758,8 @@ A few implementation details matter for contributors:
 - `FeatureSearchService` aggregates session state, result lists, diagnostics, server progress, low-fidelity pin clusters, and resolved backend request definitions. It no longer parses or searches feature tile blobs in the browser.
 - `FeatureSearchSchemaService` runs completion and analysis through isolated workers when available, with main-thread parser fallback for supported operations.
 - `MapTileStreamService` composes resolved searches into the `/tiles` WebSocket request, tracks refresh ids to ignore stale result frames, batches large result-entry extraction, and owns the streamed `TileSearchResultLayer` cache used for high-fidelity rendering.
-- `TileLayerParser.completeSearchQuery()`, `getAttributeScopeForQuery()`, `searchQueryAstDiagnostics()`, and `searchStyleFieldsForQuery()` build lightweight schema-backed SIMFIL roots from `LayerInfo.featureModelSchema`. Datasources without schema metadata intentionally provide no schema candidates.
-- SIMFIL schema-aware compilation uses `RewriteMode::Schema` and a root schema id to rewrite shorthand and prune wildcard traversal. Mapget's actual search predicate path differs from Erdblick's metadata-only diagnostics path; see the architecture doc before changing either side.
+- `TileLayerParser.completeSearchQuery()`, `getAttributeScopeForQuery()`, `normalizeSearchQuery()`, and `searchStyleFieldsForQuery()` build lightweight schema-backed SIMFIL roots from `LayerInfo.featureModelSchema`. Datasources without schema metadata intentionally provide no schema candidates.
+- SIMFIL schema-aware compilation uses `RewriteMode::Schema` and a root schema id to rewrite shorthand and prune wildcard traversal. Mapget owns the backend query normalization semantics; Erdblick consumes those normalized queries rather than maintaining a second diagnostics-only rewrite path.
 - High-fidelity result geometry uses `DeckTileSearchVisualization` / `DeckTileSearchResultLayerVisualization` and the same deck render queue as normal map tiles. Low-fidelity pins remain in the search service cluster overlay.
 
 ## Feature and SourceData Layer Selection

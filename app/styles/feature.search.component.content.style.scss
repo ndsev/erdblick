@@ -1071,6 +1071,11 @@ simfil-expression-input {
   }
 
   #searchDiagnosticsPanel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 0.25em;
+
     & > * {
       padding-top: 0.5em;
     }
@@ -1153,6 +1158,19 @@ simfil-expression-input {
       display: flex;
       flex-direction: column;
       gap: 0.45em;
+
+      summary {
+        color: var(--p-text-muted-color);
+        cursor: pointer;
+        font-size: 0.9em;
+      }
+    }
+
+    .feature-search-query-diagnostics-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45em;
+      margin-top: 0.45em;
     }
 
     .feature-search-query-diagnostic,

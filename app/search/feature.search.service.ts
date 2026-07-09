@@ -98,6 +98,8 @@ export interface FeatureSearchSession {
     valueSummaries: SearchValueSummariesState;
     valueSummaryRevision: number;
     schemaAnalysis: FeatureSearchSessionSchemaAnalysis;
+    lastResolvedDefinition?: FeatureSearchResolvedDefinition;
+    lastResolvedDefinitionSignature?: string;
     errors: Set<string>;
     progressByRequestKey: Map<string, SearchRequestProgress>;
     searchResultTilesBySourceKey: Map<string, SearchResultTileContribution>;
@@ -116,6 +118,9 @@ export interface FeatureSearchSessionSchemaAnalysis {
     concreteScope: "feature" | "attribute";
     normalizedQuery: string;
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    attributeScopeCandidateCount: number;
+    rewriteSuppressed: boolean;
+    rewriteSuppressionReason: string;
     matchedFieldNames: string[];
     matchedEnumValues: string[];
     matchedFeatureTypes: string[];
@@ -385,6 +390,71 @@ export class FeatureSearchService {
                 this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
             }
         });
+        this.installFeatureSearchDiagnostics();
+    }
+
+    /** Installs a console helper for capturing restored-search state without mutating the application. */
+    private installFeatureSearchDiagnostics(): void {
+        const host = globalThis as typeof globalThis & {
+            erdblickFeatureSearchDiagnostics?: () => unknown;
+            erdblickFeatureSearchDiagnosticsJson?: () => string;
+        };
+        host.erdblickFeatureSearchDiagnostics = () => this.featureSearchDiagnosticsSnapshot();
+        host.erdblickFeatureSearchDiagnosticsJson = () => JSON.stringify(this.featureSearchDiagnosticsSnapshot(), null, 2);
+    }
+
+    /** Returns the UI/service side of the feature-search diagnostic snapshot. */
+    private featureSearchDiagnosticsSnapshot(): unknown {
+        return {
+            timestamp: new Date().toISOString(),
+            url: typeof location === "undefined" ? "" : location.href,
+            appReady: this.stateService.ready.getValue(),
+            numViews: this.stateService.numViews,
+            persistedFeatureSearches: this.stateService.featureSearches.map(entry => this.searchDefinitionDiagnostics(entry)),
+            sessions: this.searchSessions.map(session => ({
+                id: session.id,
+                refresh: session.refresh,
+                runId: session.runId,
+                complete: session.complete,
+                paused: session.paused,
+                backendComplete: session.backendComplete,
+                progressDone: session.progressDone,
+                progressTotal: session.progressTotal,
+                resultTileIngressDone: session.resultTileIngressDone,
+                resultTileIngressTotal: session.resultTileIngressTotal,
+                totalFeatureCount: session.totalFeatureCount,
+                searchResultCount: session.searchResults.length,
+                contributionCount: session.searchResultTilesBySourceKey.size,
+                schemaAnalysis: session.schemaAnalysis,
+                hasLastResolvedDefinition: !!session.lastResolvedDefinition,
+                lastResolvedDefinitionSignature: session.lastResolvedDefinitionSignature ?? null,
+                definition: this.searchDefinitionDiagnostics(session.definition),
+                progressByRequestKey: Array.from(session.progressByRequestKey.entries()).map(([key, value]) => ({
+                    key,
+                    ...value
+                })),
+                errors: Array.from(session.errors)
+            })),
+            tileStream: this.tileStream.featureSearchDiagnosticsSnapshot()
+        };
+    }
+
+    /** Summarizes a feature-search definition without carrying large style payloads. */
+    private searchDefinitionDiagnostics(definition: FeatureSearchStateEntry): Record<string, unknown> {
+        return {
+            id: definition.id,
+            query: definition.query,
+            scope: definition.scope,
+            enabled: definition.enabled,
+            paused: definition.paused,
+            autoUpdate: definition.autoUpdate,
+            selectedMapLayers: definition.selectedMapLayers,
+            selectedMapLayersManual: definition.selectedMapLayersManual,
+            selectedTileLevels: definition.selectedTileLevels,
+            selectedViewIndices: definition.selectedViewIndices,
+            selectedFeatureTypes: definition.selectedFeatureTypes,
+            searchStyleRuleCount: definition.searchStyleRules.length
+        };
     }
 
     /** Removes persisted dock chrome for searches that cannot survive a page reload. */
@@ -993,8 +1063,16 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {selectedMapLayers, selectedMapLayersManual: true})) {
-            session.definition = {...session.definition, selectedMapLayers, selectedMapLayersManual: true};
+        const selectedFeatureTypes = this.availableFeatureTypesForLayers(
+            session.definition.selectedFeatureTypes,
+            selectedMapLayers
+        );
+        if (!this.stateService.patchFeatureSearch(sessionId, {
+            selectedMapLayers,
+            selectedMapLayersManual: true,
+            selectedFeatureTypes
+        })) {
+            session.definition = {...session.definition, selectedMapLayers, selectedMapLayersManual: true, selectedFeatureTypes};
             this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
             this.progress.next(session);
         }
@@ -1019,7 +1097,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        const normalizedTypes = normalizeFeatureSearchFeatureTypes(selectedFeatureTypes);
+        const normalizedTypes = this.availableFeatureTypesForLayers(selectedFeatureTypes, session.definition.selectedMapLayers);
         if (JSON.stringify(session.definition.selectedFeatureTypes) === JSON.stringify(normalizedTypes)) {
             return;
         }
@@ -1028,6 +1106,27 @@ export class FeatureSearchService {
             this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
             this.progress.next(session);
         }
+    }
+
+    /** Keeps a feature-type filter within the union of currently selected source-layer schemas. */
+    private availableFeatureTypesForLayers(
+        selectedFeatureTypes: string[],
+        selectedMapLayers: FeatureSearchMapLayerRef[]
+    ): string[] {
+        const normalizedTypes = normalizeFeatureSearchFeatureTypes(selectedFeatureTypes);
+        if (!normalizedTypes.length) {
+            return [];
+        }
+        const availableTypes = new Set<string>();
+        for (const ref of selectedMapLayers) {
+            const layer = this.mapInfo.maps.maps.get(ref.mapId)?.layers.get(ref.layerId);
+            for (const featureType of layer?.info.featureTypes ?? []) {
+                if (featureType.name) {
+                    availableTypes.add(featureType.name);
+                }
+            }
+        }
+        return normalizedTypes.filter(type => availableTypes.has(type));
     }
 
     /** Replaces the map views that render one search's visualizations. */
@@ -1318,6 +1417,8 @@ export class FeatureSearchService {
     private resetSessionSearch(session: FeatureSearchSession, definition: FeatureSearchStateEntry): void {
         session.definition = definition;
         session.schemaAnalysis = this.initialSchemaAnalysis(definition);
+        session.lastResolvedDefinition = undefined;
+        session.lastResolvedDefinitionSignature = undefined;
         this.clearSessionResultData(session);
         session.refresh = 0;
         session.paused = definition.paused;
@@ -1347,17 +1448,16 @@ export class FeatureSearchService {
 
     /** Builds conservative initial analysis without native schema work. */
     private initialSchemaAnalysis(definition: FeatureSearchStateEntry): FeatureSearchSessionSchemaAnalysis {
-        const signature = this.searchSchema.searchScopeAnalysisSignature(
-            definition.query,
-            definition.scope,
-            definition.selectedMapLayers
-        );
+        const signature = this.searchScopeAnalysisSignature(definition);
         return {
             signature,
             status: "pending",
             concreteScope: definition.scope === "attribute" ? "attribute" : "feature",
             normalizedQuery: definition.query,
             attributeScopes: [],
+            attributeScopeCandidateCount: 0,
+            rewriteSuppressed: false,
+            rewriteSuppressionReason: "",
             matchedFieldNames: [],
             matchedEnumValues: [],
             matchedFeatureTypes: []
@@ -1372,27 +1472,35 @@ export class FeatureSearchService {
         }
     }
 
-    /** Returns the resolved definition consumed by MapTileStreamService, or null while auto-scope analysis is pending. */
+    /** Returns the resolved definition consumed by MapTileStreamService, keeping the previous one during same-signature re-analysis. */
     private resolvedDefinitionForSession(session: FeatureSearchSession): FeatureSearchResolvedDefinition | null {
-        if (!this.ensureSessionSchemaAnalysis(session)) {
-            return null;
+        const signature = this.searchScopeAnalysisSignature(session.definition);
+        if (!this.ensureSessionSchemaAnalysis(session, signature)) {
+            if (session.lastResolvedDefinitionSignature !== signature || !session.lastResolvedDefinition) {
+                return null;
+            }
+            const concreteScope = session.lastResolvedDefinition.concreteScope;
+            return {
+                ...session.definition,
+                concreteScope,
+                backendQuery: session.lastResolvedDefinition.backendQuery,
+                resultFields: featureSearchResultFields(session.definition, concreteScope)
+            };
         }
         const concreteScope = session.schemaAnalysis.concreteScope;
-        return {
+        const resolved = {
             ...session.definition,
             concreteScope,
             backendQuery: session.schemaAnalysis.normalizedQuery || session.definition.query,
             resultFields: featureSearchResultFields(session.definition, concreteScope)
         };
+        session.lastResolvedDefinition = resolved;
+        session.lastResolvedDefinitionSignature = signature;
+        return resolved;
     }
 
     /** Ensures a session has async schema analysis for the current definition. */
-    private ensureSessionSchemaAnalysis(session: FeatureSearchSession): boolean {
-        const signature = this.searchSchema.searchScopeAnalysisSignature(
-            session.definition.query,
-            session.definition.scope,
-            session.definition.selectedMapLayers
-        );
+    private ensureSessionSchemaAnalysis(session: FeatureSearchSession, signature: string): boolean {
         if (session.schemaAnalysis.signature === signature && session.schemaAnalysis.status === "ready") {
             return true;
         }
@@ -1430,11 +1538,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        const currentSignature = this.searchSchema.searchScopeAnalysisSignature(
-            session.definition.query,
-            session.definition.scope,
-            session.definition.selectedMapLayers
-        );
+        const currentSignature = this.searchScopeAnalysisSignature(session.definition);
         if (analysis.signature !== currentSignature) {
             return;
         }
@@ -1452,6 +1556,9 @@ export class FeatureSearchService {
             concreteScope: analysis.concreteScope,
             normalizedQuery: analysis.normalizedQuery || session.definition.query,
             attributeScopes: analysis.attributeScopes,
+            attributeScopeCandidateCount: analysis.attributeScopeCandidateCount,
+            rewriteSuppressed: analysis.rewriteSuppressed,
+            rewriteSuppressionReason: analysis.rewriteSuppressionReason,
             matchedFieldNames: analysis.matchedFieldNames,
             matchedEnumValues: analysis.matchedEnumValues,
             matchedFeatureTypes: analysis.matchedFeatureTypes,
@@ -1459,6 +1566,15 @@ export class FeatureSearchService {
         };
         this.progress.next(session);
         this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+    }
+
+    /** Returns the schema-analysis identity used to guard resolved-definition reuse. */
+    private searchScopeAnalysisSignature(definition: FeatureSearchStateEntry): string {
+        return this.searchSchema.searchScopeAnalysisSignature(
+            definition.query,
+            definition.scope,
+            definition.selectedMapLayers
+        );
     }
 
     /** Narrows source layers to the query-compatible subset inferred from all known schemas. */
