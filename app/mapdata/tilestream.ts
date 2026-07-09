@@ -205,6 +205,7 @@ export class MapTileStreamClient {
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
     onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
     onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
+    onSourcesRevisionChanged: ((revision: number) => void) | null = null;
     onOpen: (() => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
@@ -256,6 +257,12 @@ export class MapTileStreamClient {
     /** Registers the callback that receives datasource-catalog invalidation control frames. */
     withSourceCatalogChangedCallback(callback: (change: MapTileStreamSourceCatalogChangePayload) => void) {
         this.onSourceCatalogChanged = callback;
+        return this;
+    }
+
+    /** Registers the callback that receives datasource-catalog revision updates from request-context frames. */
+    withSourcesRevisionChangedCallback(callback: (revision: number) => void) {
+        this.onSourcesRevisionChanged = callback;
         return this;
     }
 
@@ -407,6 +414,18 @@ export class MapTileStreamClient {
     /** Returns the latest datasource catalog revision announced by request-context frames. */
     getSourcesRevision(): number | null {
         return this.sourcesRevision;
+    }
+
+    /** Stores the newest datasource-catalog revision and optionally notifies consumers. */
+    private updateSourcesRevision(revision: number, notify: boolean): void {
+        const nextRevision = Math.max(0, Math.floor(revision));
+        const previousRevision = this.sourcesRevision;
+        this.sourcesRevision = previousRevision === null
+            ? nextRevision
+            : Math.max(previousRevision, nextRevision);
+        if (notify && (previousRevision === null || nextRevision > previousRevision)) {
+            this.onSourcesRevisionChanged?.(nextRevision);
+        }
     }
 
     /** Returns aggregated compression metrics for `/interactive/payload` responses. */
@@ -990,7 +1009,7 @@ export class MapTileStreamClient {
                         this.supportsRequestContextFrames = true;
                         this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
                         if (Number.isFinite(payload.sourcesRevision)) {
-                            this.sourcesRevision = Math.max(0, Math.floor(Number(payload.sourcesRevision)));
+                            this.updateSourcesRevision(Number(payload.sourcesRevision), true);
                         }
                         if (Number.isFinite(payload.clientId)) {
                             const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
@@ -1015,7 +1034,7 @@ export class MapTileStreamClient {
                     const payload = JSON.parse(payloadText) as MapTileStreamSourceCatalogChangePayload;
                     if (payload.type === "mapget.sources.changed" && Number.isFinite(payload.revision)) {
                         const revision = Math.max(0, Math.floor(Number(payload.revision)));
-                        this.sourcesRevision = revision;
+                        this.updateSourcesRevision(revision, false);
                         const source = this.parseSourceCatalogChangeSource(payload.source);
                         this.onSourceCatalogChanged?.({
                             type: "mapget.sources.changed",

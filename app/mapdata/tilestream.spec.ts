@@ -142,7 +142,12 @@ describe('MapTileStreamClient', () => {
     it('stores sourcesRevision from request-context frames', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
+        const observedRevisions: number[] = [];
         try {
+            client.withSourcesRevisionChangedCallback(revision => {
+                observedRevisions.push(revision);
+            });
+
             await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
                 type: 'mapget.tiles.request-context',
                 requestId: 3,
@@ -150,6 +155,15 @@ describe('MapTileStreamClient', () => {
             }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
 
             expect(client.getSourcesRevision()).toBe(43);
+            expect(observedRevisions).toEqual([43]);
+
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4,
+                sourcesRevision: 43
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(observedRevisions).toEqual([43]);
         } finally {
             client.destroy();
         }
@@ -182,9 +196,13 @@ describe('MapTileStreamClient', () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
         let change: unknown = null;
+        const observedRevisions: number[] = [];
         try {
             client.withSourceCatalogChangedCallback(payload => {
                 change = payload;
+            });
+            client.withSourcesRevisionChangedCallback(revision => {
+                observedRevisions.push(revision);
             });
 
             await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE, {
@@ -211,6 +229,7 @@ describe('MapTileStreamClient', () => {
                 }
             });
             expect(client.getSourcesRevision()).toBe(44);
+            expect(observedRevisions).toEqual([]);
         } finally {
             client.destroy();
         }

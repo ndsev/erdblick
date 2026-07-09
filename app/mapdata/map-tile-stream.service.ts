@@ -121,6 +121,7 @@ export class MapTileStreamService {
     private readonly searchResultEntryBatchSize = 5000;
     private readonly searchResultEntryFrameBudgetMs = 12;
     private sourceCatalogReloadPromise: Promise<void> | null = null;
+    private sourceCatalogRefreshTargetRevision: number | null = null;
     private backendProtocolMismatchActive = false;
 
     constructor(
@@ -158,6 +159,9 @@ export class MapTileStreamService {
         };
         this.tileStream.onSourceCatalogChanged = (change) => {
             this.ngZone.runOutsideAngular(() => this.handleSourceCatalogChanged(change));
+        };
+        this.tileStream.onSourcesRevisionChanged = (revision) => {
+            this.ngZone.runOutsideAngular(() => this.handleSourcesRevisionChanged(revision));
         };
         this.tileStream.onOpen = () => {
             this.ngZone.run(() => {
@@ -478,16 +482,63 @@ export class MapTileStreamService {
                 }
             }
         }
-        if (!this.sourceCatalogReloadPromise) {
-            this.sourceCatalogReloadPromise = this.mapInfo.reloadDataSources()
-                .then(() => undefined)
-                .finally(() => {
-                    this.sourceCatalogReloadPromise = null;
-                });
+        this.requestSourceCatalogRefresh(change.revision);
+    }
+
+    /** Refreshes `/sources` when request-context frames prove our catalog snapshot is stale. */
+    private handleSourcesRevisionChanged(revision: number): void {
+        const currentRevision = this.mapInfo.sourceCatalogRevision;
+        if (currentRevision !== null && currentRevision >= revision) {
+            return;
         }
-        this.sourceCatalogReloadPromise
+        this.requestSourceCatalogRefresh(revision);
+    }
+
+    /** Coalesces heavyweight `/sources` refreshes and retries once when the first snapshot was too early. */
+    private requestSourceCatalogRefresh(targetRevision: number | null = null): void {
+        if (targetRevision !== null && Number.isFinite(targetRevision)) {
+            const normalizedRevision = Math.max(0, Math.floor(targetRevision));
+            this.sourceCatalogRefreshTargetRevision = this.sourceCatalogRefreshTargetRevision === null
+                ? normalizedRevision
+                : Math.max(this.sourceCatalogRefreshTargetRevision, normalizedRevision);
+        }
+        if (this.sourceCatalogReloadPromise) {
+            return;
+        }
+        this.sourceCatalogReloadPromise = this.reloadSourceCatalogUntilCaughtUp()
             .then(() => this.scheduleUpdate())
-            .catch(err => console.error("Failed to refresh datasource catalog.", err));
+            .catch(err => console.error("Failed to refresh datasource catalog.", err))
+            .finally(() => {
+                this.sourceCatalogReloadPromise = null;
+                const pendingRevision = this.sourceCatalogRefreshTargetRevision;
+                if (pendingRevision !== null) {
+                    const currentRevision = this.mapInfo.sourceCatalogRevision;
+                    if (currentRevision === null || currentRevision < pendingRevision) {
+                        this.requestSourceCatalogRefresh(pendingRevision);
+                    } else {
+                        this.sourceCatalogRefreshTargetRevision = null;
+                    }
+                }
+            });
+    }
+
+    /** Performs at most one follow-up refresh if a nonblocking `/sources` snapshot lagged the stream revision. */
+    private async reloadSourceCatalogUntilCaughtUp(): Promise<void> {
+        const maxAttempts = 2;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const requestedRevision = this.sourceCatalogRefreshTargetRevision;
+            this.sourceCatalogRefreshTargetRevision = null;
+            await this.mapInfo.reloadDataSources();
+
+            const streamRevision = this.tileStream?.getSourcesRevision() ?? null;
+            const targetRevision = Math.max(requestedRevision ?? -1, streamRevision ?? -1);
+            const currentRevision = this.mapInfo.sourceCatalogRevision;
+            if (targetRevision < 0 || (currentRevision !== null && currentRevision >= targetRevision)) {
+                return;
+            }
+            this.sourceCatalogRefreshTargetRevision = targetRevision;
+        }
+        this.sourceCatalogRefreshTargetRevision = null;
     }
 
     /** Returns true for catalog-change reasons that may add/remove/rebuild datasource entries or layers. */
