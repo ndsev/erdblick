@@ -60,6 +60,8 @@ export interface FeatureSearchStateEntry {
     showResultsOnMap: boolean;
     pinColor: string;
     selectedMapLayers: FeatureSearchMapLayerRef[];
+    selectedMapLayersManual?: boolean;
+    selectedFeatureTypes: string[];
     selectedTileLevels: number[];
     selectedViewIndices: number[];
     searchStyleRules: FeatureSearchStyleRule[];
@@ -77,9 +79,10 @@ const MAX_STYLE_RULES_PER_SEARCH = 50;
 const MAX_FILTERS_PER_RULE = 25;
 const MAX_COLOR_STOPS_PER_RULE = 512;
 const MAX_SELECTED_SEARCH_LAYERS = 500;
+const MAX_SELECTED_FEATURE_TYPES = 100;
 const MAX_SUPPORTED_FEATURE_SEARCH_VIEWS = 2;
 export const MIN_FEATURE_SEARCH_TILE_LEVEL = 0;
-export const MAX_FEATURE_SEARCH_TILE_LEVEL = 22;
+export const MAX_FEATURE_SEARCH_TILE_LEVEL = 15;
 const VALID_GEOMETRIES = new Set<FeatureSearchGeometryKind>(["any", "point", "line", "surface", "polygon", "mesh", "label"]);
 const VALID_COLOR_MODES = new Set(["solid", "gradient", "categories"]);
 const MIN_HIGH_FIDELITY_VISIBLE_TILES = 1;
@@ -275,6 +278,27 @@ export function normalizeFeatureSearchTileLevels(value: unknown): number[] {
     return levels.sort((lhs, rhs) => lhs - rhs);
 }
 
+/** Normalizes the optional feature-type filter list; an empty list means any feature type. */
+export function normalizeFeatureSearchFeatureTypes(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seen = new Set<string>();
+    const types: string[] = [];
+    for (const item of value) {
+        const type = normalizeString(item);
+        if (!type || seen.has(type)) {
+            continue;
+        }
+        seen.add(type);
+        types.push(type);
+        if (types.length >= MAX_SELECTED_FEATURE_TYPES) {
+            break;
+        }
+    }
+    return types.sort((lhs, rhs) => lhs.localeCompare(rhs));
+}
+
 function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchColorMode {
     const nested = raw["color"];
     if (nested && typeof nested === "object" && !Array.isArray(nested)) {
@@ -429,6 +453,8 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         showResultsOnMap: normalizeBoolean(raw["showResultsOnMap"], true),
         pinColor: normalizeHexColor(raw["pinColor"]),
         selectedMapLayers,
+        selectedMapLayersManual: normalizeBoolean(raw["selectedMapLayersManual"], false),
+        selectedFeatureTypes: normalizeFeatureSearchFeatureTypes(raw["selectedFeatureTypes"]),
         selectedTileLevels: normalizeFeatureSearchTileLevels(raw["selectedTileLevels"]),
         selectedViewIndices: normalizeSearchViewIndices(raw["selectedViewIndices"]),
         searchStyleRules: styleRules,
@@ -466,6 +492,36 @@ export function featureSearchVisibleInView(
     return selectedViewIndices.includes(viewIndex);
 }
 
+/**
+ * Derives the default result views for a search from the selected map/layers.
+ * Falls back to every currently supported view when no selected layer is enabled in any view.
+ */
+export function defaultFeatureSearchViewIndicesForMapLayers(
+    selectedMapLayers: FeatureSearchMapLayerRef[],
+    numViews: number,
+    layerVisibleInView: (viewIndex: number, ref: FeatureSearchMapLayerRef) => boolean
+): number[] {
+    const supportedViewCount = Math.max(
+        0,
+        Math.min(MAX_SUPPORTED_FEATURE_SEARCH_VIEWS, Math.floor(numViews))
+    );
+    const fallback = DEFAULT_FEATURE_SEARCH_VIEW_INDICES
+        .filter(viewIndex => viewIndex < supportedViewCount);
+    if (!selectedMapLayers.length) {
+        return fallback;
+    }
+
+    const viewIndices = new Set<number>();
+    for (let viewIndex = 0; viewIndex < supportedViewCount; ++viewIndex) {
+        if (selectedMapLayers.some(ref => layerVisibleInView(viewIndex, ref))) {
+            viewIndices.add(viewIndex);
+        }
+    }
+    return viewIndices.size
+        ? Array.from(viewIndices).sort((lhs, rhs) => lhs - rhs)
+        : fallback;
+}
+
 export function createFeatureSearchStateEntry(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
     return normalizeFeatureSearchStateEntry({
         id: createFeatureSearchId(),
@@ -477,6 +533,8 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
         showResultsOnMap: true,
         pinColor: DEFAULT_PIN_COLOR,
         selectedMapLayers: [],
+        selectedMapLayersManual: false,
+        selectedFeatureTypes: [],
         selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
         selectedViewIndices: [...DEFAULT_FEATURE_SEARCH_VIEW_INDICES],
         searchStyleRules: [],

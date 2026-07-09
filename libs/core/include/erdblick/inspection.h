@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <optional>
+#include <string_view>
 #include <unordered_map>
 #include "interop/js-object.h"
 #include "mapget/model/feature.h"
@@ -52,15 +54,27 @@ public:
         std::deque<InspectionNode> children_;
         JsValue direction_;
         std::string geoJsonPath_;
+        std::string nodeId_;
 
         /** Source-data backlink attached to an inspection node. */
         struct SourceDataReference {
-            uint64_t tileId_;
+            int32_t tileId_;
             uint64_t address_;
             std::string layerId_;
             std::string qualifier_;
         };
         sfl::small_vector<SourceDataReference, 1> sourceDataRefs_; // Most nodes have a single source-data reference.
+
+        /** Clickable scalar summary shown in a parent node's value column. */
+        struct ValueBubble {
+            std::string label_;
+            std::string targetNodeId_;
+            std::string hoverTargetNodeId_;
+            std::string kind_;
+            std::string colorKey_;
+            std::deque<ValueBubble> children_;
+        };
+        std::deque<ValueBubble> valueBubbles_;
 
         /** Materialize this node and its metadata as a JS object for the UI. */
         [[nodiscard]] JsValue toJsValue(std::string_view const& mapId) const;
@@ -94,12 +108,15 @@ public:
         InspectionConverter* converter_ = nullptr;
     };
 
-    using OptionalValueAndType = std::optional<std::pair<JsValue, ValueType>>;
     /** Marker for a pre-rendered GeoJSON path segment that should not be escaped again. */
     struct RawPath {
         std::string_view value_;
     };
-    using FieldOrIndex = std::variant<uint32_t, std::string_view, RawPath>;
+    /** Marker for a complete pre-rendered search path that must not inherit the parent path. */
+    struct AbsolutePath {
+        std::string_view value_;
+    };
+    using FieldOrIndex = std::variant<uint32_t, std::string_view, RawPath, AbsolutePath>;
 
     /** Convert a feature, including identifiers, attributes, relations, and geometry. */
     JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
@@ -118,10 +135,22 @@ public:
         std::string_view const& name,
         mapget::model_ptr<mapget::AttributeLayer> const& l,
         size_t& attributeIndex);
+    /** Pick the canonical relation index used by relation hover ids. */
+    uint32_t relationIndexFor(mapget::model_ptr<mapget::Relation> const& r);
+    /** Convert one relation row/reference through the same representation everywhere it appears. */
+    void convertRelation(
+        JsValue const& key,
+        FieldOrIndex const& path,
+        mapget::model_ptr<mapget::Relation> const& r,
+        uint32_t relationIndex,
+        std::optional<std::string> targetGeoJsonPath = std::nullopt);
     /** Convert one relation and attach hover metadata if applicable. */
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     /** Convert one geometry node, including stage/name metadata and points. */
-    void convertGeometry(JsValue const& key, mapget::model_ptr<mapget::Geometry> const& r);
+    void convertGeometry(
+        JsValue const& key,
+        mapget::model_ptr<mapget::Geometry> const& r,
+        std::optional<std::string_view> geometryObjectPath = std::nullopt);
     /** Convert a validity collection and optionally namespace the emitted hover ids. */
     void convertValidity(
         JsValue const& key,
@@ -129,19 +158,16 @@ public:
         std::string const* hoverIdPrefix = nullptr);
 
     /** Convert a field value while resolving the field id through the current string pool. */
-    OptionalValueAndType convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
+    void convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     /** Convert a named field value into its inspection representation. */
-    OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
+    void convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
     /** Convert a field using an already translated key. */
-    OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
+    void convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
     /** Convert a field using independent display and path metadata. */
-    OptionalValueAndType convertField(
+    void convertField(
         JsValue const& fieldName,
         FieldOrIndex const& path,
         simfil::ModelNode::Ptr const& value);
-
-    /** Copy display/search metadata from a flattened child node to its visible parent. */
-    static void inheritFlattenedChild(InspectionNode& parent, InspectionNode const& child);
 
     /**
      * Store one referenced feature id as inspection node payload.
@@ -163,12 +189,17 @@ public:
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
+    /** Tracks one relation-name group and the next local index copied as `select(group, n)`. */
+    struct RelationTypeState {
+        InspectionNode* node_ = nullptr;
+        uint32_t nextLocalIndex_ = 0;
+    };
     InspectionNode root_;
     std::vector<InspectionNode*> stack_ = {&root_};
     InspectionNode* current_ = &root_;
     std::shared_ptr<simfil::StringPool> stringPool_;
     std::unordered_map<std::string_view, JsValue> translatedFieldNames_;
-    std::unordered_map<std::string_view, InspectionNode*> relationsByType_;
+    std::unordered_map<std::string_view, RelationTypeState> relationsByType_;
     mapget::TileFeatureLayer* tile_ = nullptr;
 };
 

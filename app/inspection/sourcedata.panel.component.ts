@@ -31,7 +31,6 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
             </inspection-tree>
         }
     `,
-    styles: [``],
     standalone: false
 })
 /** Loads one source-data tile on demand and renders it through the shared inspection tree. */
@@ -96,6 +95,12 @@ export class SourceDataPanelComponent {
     /** Fetches and parses one source-data layer over the WebSocket source-data endpoint. */
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        if (!this.mapService.isMapLayerReady(mapId, layerId)) {
+            const map = this.mapService.maps.maps.get(mapId);
+            throw new Error(map
+                ? this.mapService.dataSourceStatusText(map.info)
+                : "Map layer is not available.");
+        }
         const requestBody = {
             requests: [{
                 mapId: mapId,
@@ -106,7 +111,7 @@ export class SourceDataPanelComponent {
 
         let layer: TileSourceDataLayer | null = null;
         let sourceDataParseError: Error | null = null;
-        const socket = new MapTileStreamClient("/tiles");
+        const socket = new MapTileStreamClient("/interactive");
         const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
         if (dataSourceInfoJson) {
             socket.setDataSourceInfoJson(dataSourceInfoJson);

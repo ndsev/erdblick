@@ -32,7 +32,13 @@ import {OverlayOptions, TreeNode} from "primeng/api";
 import type {MeterItem} from "primeng/types/metergroup";
 import {InfoMessageService} from "../shared/info.service";
 import {AppConfirmPopupService} from "../shared/app-confirm-popup.service";
-import {CompletionCandidate, DiagnosticsMessage, SearchValueSummariesState, SearchValueSummary} from "./search.model";
+import {
+    CompletionCandidate,
+    DiagnosticsMessage,
+    SearchResultFieldValueSummary,
+    SearchValueSummariesState,
+    SearchValueSummary
+} from "./search.model";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SEARCH_DOCK_TAB_ID} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
@@ -47,7 +53,8 @@ import {
     DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
     DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
     MAX_FEATURE_SEARCH_TILE_LEVEL,
-    MIN_FEATURE_SEARCH_TILE_LEVEL
+    MIN_FEATURE_SEARCH_TILE_LEVEL,
+    normalizeFeatureSearchFeatureTypes
 } from "../shared/feature-search-state";
 import type {
     FeatureSearchColorMode,
@@ -67,24 +74,25 @@ import {
     normalizeHexColor,
     SearchStyleCategoryStopDraft,
     SearchStyleColorDraft,
-    SearchStyleFieldOption,
     serializableCategoryStops,
     serializableGradientStops
 } from "./search-style-color.util";
 import {SimfilExpressionInputComponent} from "./simfil-expression-input.component";
+import {
+    defaultSearchStyleFieldOptionsForAnalysis,
+    preferredSearchAutoStyleField,
+    searchAutoStyleFieldOptions
+} from "./feature-search-auto-style.util";
+import type {FeatureSearchAutoStyleOption} from "./feature-search-auto-style.util";
 
 interface FeatureSearchGroupingOption {
     name: string;
     value: number;
 }
 
-interface FeatureSearchStyleOption extends SearchStyleFieldOption {
-    mapId?: string;
-    layerId?: string;
-    attrName?: string;
-    attrLayerName?: string;
-    featureType?: string;
-}
+type FeatureSearchStyleOption = FeatureSearchAutoStyleOption;
+
+const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCount", "$validityIndex"]);
 
 interface FeatureSearchScopeOption {
     label: string;
@@ -112,6 +120,11 @@ interface FeatureSearchViewOption {
 interface FeatureSearchTileLevelOption {
     label: string;
     value: number;
+}
+
+interface FeatureSearchFeatureTypeOption {
+    label: string;
+    value: string;
 }
 
 interface FeatureSearchResultTreeItem {
@@ -274,6 +287,23 @@ interface FeatureSearchStyleRuleDraft {
                         </ng-template>
                     </p-treeselect>
                     <label for="feature-search-map-layers">Map Layers</label>
+                </p-iftalabel>
+                <p-iftalabel class="feature-search-feature-type-select">
+                    <p-multiSelect inputId="feature-search-feature-type"
+                                   [options]="featureSearchFeatureTypeOptions"
+                                   [(ngModel)]="selectedFeatureTypes"
+                                   optionLabel="label"
+                                   optionValue="value"
+                                   [filter]="true"
+                                   [showToggleAll]="false"
+                                   [maxSelectedLabels]="1"
+                                   placeholder="Any"
+                                   selectedItemsLabel="{0} types"
+                                   [disabled]="!searchEnabled()"
+                                   appendTo="body"
+                                   (ngModelChange)="onSearchFeatureTypesChange($event)">
+                    </p-multiSelect>
+                    <label for="feature-search-feature-type">Feature Type</label>
                 </p-iftalabel>
                 <p-iftalabel class="feature-search-level-select">
                     <p-multiSelect inputId="feature-search-levels"
@@ -500,7 +530,7 @@ interface FeatureSearchStyleRuleDraft {
                                 </div>
                             </section>
                             <p-accordion class="feature-search-style-accordion"
-                                         [multiple]="false"
+                                         [multiple]="true"
                                          [(value)]="styleRuleAccordionValue">
                                 @for (rule of styleRuleDrafts; track rule.id; let ruleIndex = $index) {
                                     <p-accordion-panel class="feature-search-style-panel"
@@ -791,14 +821,14 @@ interface FeatureSearchStyleRuleDraft {
                                 <div class="feature-search-query-diagnostics-grid">
                                     <span>Query</span>
                                     <code>{{ session?.definition?.query ?? '' }}</code>
-                                    @if (session?.schemaAnalysis?.normalizedQuery && session?.schemaAnalysis?.normalizedQuery !== session?.definition?.query) {
-                                        <span>Normalized</span>
-                                        <code>{{ session?.schemaAnalysis?.normalizedQuery }}</code>
-                                    }
+                                    <span>Backend query</span>
+                                    <code>{{ session?.schemaAnalysis?.normalizedQuery || session?.definition?.query || '' }}</code>
                                     <span>Scope</span>
                                     <span [title]="featureSearchScopeSummaryTitle">
                                         {{ featureSearchScopeSummary || 'Unknown' }}
                                     </span>
+                                    <span>Attribute candidates</span>
+                                    <span>{{ session?.schemaAnalysis?.attributeScopeCandidateCount ?? 0 }}</span>
                                     <span>Elapsed</span>
                                     <span>{{ session?.timeElapsed ?? '0ms' }}</span>
                                     <span>Features</span>
@@ -806,18 +836,6 @@ interface FeatureSearchStyleRuleDraft {
                                     <span>Matched</span>
                                     <span>{{ session?.searchResults?.length ?? 0 }}</span>
                                 </div>
-                                @if (queryDiagnostics.length > 0) {
-                                    <div class="feature-search-query-diagnostics">
-                                        @for (message of queryDiagnostics; track message) {
-                                            <article class="feature-search-query-diagnostic">
-                                                <span>{{ message.message }}</span>
-                                                <div *ngIf="message.query.length > 0">
-                                                    <code [innerHTML]="message.query | highlightRegion: message.location?.offset:message.location?.size:25"></code>
-                                                </div>
-                                            </article>
-                                        }
-                                    </div>
-                                }
                             </section>
 
                             <section class="feature-search-diagnostics-section">
@@ -844,30 +862,34 @@ interface FeatureSearchStyleRuleDraft {
                                 } @else if (valueSummaries.status === 'empty') {
                                     <div class="feature-search-values-empty">No withFields or trace values available.</div>
                                 } @else if (valueSummaries.status === 'ready') {
-                                    <div class="feature-search-value-card-grid">
-                                        @for (field of valueSummaries.resultFields; track field.index + ':' + field.expression) {
-                                            <article class="feature-search-value-card">
-                                                <header>
-                                                    <span>Field</span>
-                                                    <code>{{ field.expression }}</code>
-                                                </header>
-                                                <ng-container *ngTemplateOutlet="valueSummaryTemplate; context: {$implicit: field.summary}"/>
-                                            </article>
-                                        }
-                                        @for (trace of valueSummaries.traces; track trace.name) {
-                                            <article class="feature-search-value-card">
-                                                <header>
-                                                    <span>Trace</span>
-                                                    <code>{{ trace.name }}</code>
-                                                </header>
-                                                <div class="feature-search-value-card-meta">
-                                                    <span>{{ trace.calls }} calls</span>
-                                                    <span>{{ trace.totalus }} &mu;s</span>
-                                                </div>
-                                                <ng-container *ngTemplateOutlet="valueSummaryTemplate; context: {$implicit: trace.summary}"/>
-                                            </article>
-                                        }
-                                    </div>
+                                    @if (diagnosticsVisibleResultFields().length === 0 && valueSummaries.traces.length === 0) {
+                                        <div class="feature-search-values-empty">No user-visible style or trace values available.</div>
+                                    } @else {
+                                        <div class="feature-search-value-card-grid">
+                                            @for (field of diagnosticsVisibleResultFields(); track field.index + ':' + field.expression) {
+                                                <article class="feature-search-value-card">
+                                                    <header>
+                                                        <span>Field</span>
+                                                        <code>{{ field.expression }}</code>
+                                                    </header>
+                                                    <ng-container *ngTemplateOutlet="valueSummaryTemplate; context: {$implicit: field.summary}"/>
+                                                </article>
+                                            }
+                                            @for (trace of valueSummaries.traces; track trace.name) {
+                                                <article class="feature-search-value-card">
+                                                    <header>
+                                                        <span>Trace</span>
+                                                        <code>{{ trace.name }}</code>
+                                                    </header>
+                                                    <div class="feature-search-value-card-meta">
+                                                        <span>{{ trace.calls }} calls</span>
+                                                        <span>{{ trace.totalus }} &mu;s</span>
+                                                    </div>
+                                                    <ng-container *ngTemplateOutlet="valueSummaryTemplate; context: {$implicit: trace.summary}"/>
+                                                </article>
+                                            }
+                                        </div>
+                                    }
                                 }
                             </section>
                         </div>
@@ -925,7 +947,6 @@ interface FeatureSearchStyleRuleDraft {
         </app-confirm-popup>
         <div #alert></div>
     `,
-    styles: [``],
     standalone: false
 })
 /**
@@ -940,8 +961,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private readonly subscriptions = new Subscription();
     featureSearchDialogVisible = true;
     diagnostics: Array<DiagnosticsMessage> = [];
-    queryDiagnostics: Array<DiagnosticsMessage> = [];
-    queryDiagnosticsLoading = false;
     valueSummaries: SearchValueSummariesState = this.emptyValueSummariesState();
     percentDone: number = 0;
     resultTileIngressPercent: number = 0;
@@ -971,6 +990,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     styleAttributeOptionsLoading = false;
     mapLayerTreeOptions: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
     selectedMapLayerTreeNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
+    featureSearchFeatureTypeOptions: FeatureSearchFeatureTypeOption[] = [];
+    selectedFeatureTypes: string[] = [];
     featureSearchTileLevelOptions: FeatureSearchTileLevelOption[] = [];
     selectedTileLevels: number[] = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
     featureSearchViewOptions: FeatureSearchViewOption[] = [];
@@ -996,7 +1017,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private nextStyleConditionId = 1;
     private nextStyleColorStopId = 1;
     styleRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
-    styleRuleAccordionValue: string | null = null;
+    styleRuleAccordionValue: string[] = [];
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
     };
@@ -1045,7 +1066,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private styleAttributeOptionsSessionSignature = "";
     private styleAttributeOptionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private styleAttributeOptionsRefreshPatchMissing = false;
-    private queryDiagnosticsSessionSignature = "";
     private readonly autoStyleRuleAttemptSignatures = new Set<string>();
     private mapLayerTreeOptionsSignature = "";
     // PrimeNG supports null at runtime to disable tree selection, but its TreeSelect type excludes it.
@@ -1055,6 +1075,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private mapLayerTreeExpansionInitialized = false;
     private selectedMapLayersSignature = "";
     private initializedMapLayerSelectionSessionId = "";
+    private featureSearchFeatureTypeOptionsSignature = "";
+    private selectedFeatureTypesSignature = "";
     private searchTileLevelOptionsSignature = "";
     private selectedTileLevelsSignature = "";
     private searchViewOptionsSignature = "";
@@ -1110,12 +1132,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
             this.refreshMapLayerTreeOptions();
+            this.refreshSearchFeatureTypeOptions(this.session);
             this.refreshSearchTileLevelOptions(this.session);
             if (this.session) {
                 this.refreshFeatureSearchScopeSummary(this.session);
                 this.refreshStyleAttributeOptionsIfNeeded(this.session);
-                this.requestQueryDiagnosticsIfVisible(this.session);
                 this.syncMapLayerTreeSelection(this.session);
+                this.syncSelectedFeatureTypesFromSession(this.session);
                 this.syncSelectedTileLevelsFromSession(this.session);
             }
         }));
@@ -1151,32 +1174,33 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
     }
 
-    /** Requests schema-AST diagnostics only while the Diagnostics tab can display them. */
-    private requestQueryDiagnosticsIfVisible(session: FeatureSearchSession): void {
-        if (this.resultPanelIndex !== "diagnostics") {
-            return;
+    /** Returns value-summary fields that represent user-facing style/trace expressions, not internal selectors. */
+    protected diagnosticsVisibleResultFields(): SearchResultFieldValueSummary[] {
+        if (this.valueSummaries.status !== "ready") {
+            return [];
         }
-        const signature = [
-            session.id,
-            session.definition.query,
-            session.definition.scope,
-            this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers)
-        ].join("\n");
-        if (signature === this.queryDiagnosticsSessionSignature && !this.queryDiagnosticsLoading) {
-            return;
-        }
-        this.queryDiagnosticsSessionSignature = signature;
-        this.queryDiagnosticsLoading = true;
-        this.searchSchema.requestSearchQueryAstDiagnostics(
-            session.definition.query,
-            session.definition.scope,
-            session.definition.selectedMapLayers
-        ).then(diagnostics => {
-            if (signature !== this.queryDiagnosticsSessionSignature) {
-                return;
+        return this.valueSummaries.resultFields.filter(field =>
+            !this.isInternalSearchResultField(field.expression) || this.userStyleRulesReferenceField(field.expression));
+    }
+
+    /** Internal attribute-overlay fields are useful for search transport but noisy in the diagnostics UI. */
+    private isInternalSearchResultField(expression: string): boolean {
+        return INTERNAL_SEARCH_RESULT_FIELDS.has(expression.trim());
+    }
+
+    /** Keep an internal field visible if the user explicitly referenced it in a non-generated style rule. */
+    private userStyleRulesReferenceField(expression: string): boolean {
+        const trimmedExpression = expression.trim();
+        return (this.session?.definition.searchStyleRules ?? []).some(rule => {
+            if (rule.autoGenerated) {
+                return false;
             }
-            this.queryDiagnostics = diagnostics;
-            this.queryDiagnosticsLoading = false;
+            const colorField = rule.color.mode === "gradient" || rule.color.mode === "categories"
+                ? rule.color.field.trim()
+                : "";
+            const labelField = rule.geometry === "label" ? (rule.labelExpression ?? "").trim() : "";
+            const filterFields = (rule.filter ?? []).map(filter => filter.field.trim());
+            return [colorField, labelField, ...filterFields].includes(trimmedExpression);
         });
     }
 
@@ -1343,7 +1367,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Creates the editor draft for a new search-result style rule. */
     private createStyleRule(
         id: number,
-        fieldOption: FeatureSearchStyleOption | undefined = this.defaultStyleFieldOption()
+        fieldOption: FeatureSearchStyleOption | null | undefined = this.defaultStyleFieldOption()
     ): FeatureSearchStyleRuleDraft {
         return {
             id,
@@ -1367,13 +1391,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Returns the preferred schema field for initial style rules and new filter conditions. */
     private defaultStyleFieldOption(session = this.session): FeatureSearchStyleOption | undefined {
         const options = this.defaultStyleFieldOptionsForSession(session);
-        return this.preferredAutoStyleField(options, session)
+        return preferredSearchAutoStyleField(options, session?.schemaAnalysis)
             ?? options[0]
-            ?? this.styleScalarAttributeOptions[0];
+            ?? (session?.schemaAnalysis.status === "ready" ? undefined : this.styleScalarAttributeOptions[0]);
     }
 
     /** Creates a schema-initialized color draft for a new rule when possible. */
-    private createDefaultStyleColorDraft(fieldOption: FeatureSearchStyleOption | undefined): SearchStyleColorDraft {
+    private createDefaultStyleColorDraft(fieldOption: FeatureSearchStyleOption | null | undefined): SearchStyleColorDraft {
         const field = fieldOption?.value ?? "";
         const mode = this.defaultColorModeForField(fieldOption);
         const draft: SearchStyleColorDraft = {
@@ -1385,13 +1409,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         return autoInitializeSearchStyleColorDraft(
             draft,
-            fieldOption,
+            fieldOption ?? undefined,
             () => this.nextStyleColorStopId++
         ).draft;
     }
 
     /** Chooses the initial color mode from schema metadata. */
-    private defaultColorModeForField(fieldOption: FeatureSearchStyleOption | undefined): "solid" | "gradient" | "categories" {
+    private defaultColorModeForField(fieldOption: FeatureSearchStyleOption | null | undefined): "solid" | "gradient" | "categories" {
         if (fieldOption?.valueKind === "enum") {
             return "categories";
         }
@@ -1401,63 +1425,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return "solid";
     }
 
-    /** Prefers feature type in feature scope and native attribute fields in attribute scope. */
-    private preferredAutoStyleField(
-        options: FeatureSearchStyleOption[],
-        session: FeatureSearchSession | undefined
-    ): FeatureSearchStyleOption | undefined {
-        const nativeScalarOptions = options.filter(option => !option.value.startsWith("$"));
-        const matchedFieldNames = new Set(session?.schemaAnalysis.matchedFieldNames ?? []);
-        const matchedEnumValues = new Set(session?.schemaAnalysis.matchedEnumValues ?? []);
-        const mentionedOptions = nativeScalarOptions.filter(option =>
-            this.optionMatchesAnalyzedFieldNames(option, matchedFieldNames)
-            || this.optionMatchesAnalyzedEnumValues(option, matchedEnumValues));
-        const mentionedAttributeOption = mentionedOptions.find(option => !!option.attrName);
-        if (mentionedAttributeOption) {
-            return mentionedAttributeOption;
-        }
-        if (mentionedOptions.length > 0) {
-            return mentionedOptions[0];
-        }
-        const typeIdOption = nativeScalarOptions.find(option => option.value === "typeId");
-        if (typeIdOption && session?.schemaAnalysis.concreteScope !== "attribute") {
-            return typeIdOption;
-        }
-        return nativeScalarOptions.find(option => !!option.attrName)
-            ?? typeIdOption
-            ?? nativeScalarOptions[0];
-    }
-
     /** Limits automatic defaults to fields that belong to the resolved query scope. */
     private defaultStyleFieldOptionsForSession(session: FeatureSearchSession | undefined): FeatureSearchStyleOption[] {
-        const nativeOptions = this.styleScalarAttributeOptions.filter(option => !option.value.startsWith("$"));
-        if (session?.schemaAnalysis.status !== "ready") {
-            return nativeOptions;
-        }
-        if (session.schemaAnalysis.concreteScope === "feature") {
-            return nativeOptions.filter(option => !option.attrName);
-        }
-        return nativeOptions.filter(option => !!option.attrName);
-    }
-
-    /** Matches an option's leaf field against schema-analysis terms such as `length`. */
-    private optionMatchesAnalyzedFieldNames(option: FeatureSearchStyleOption, fieldNames: Set<string>): boolean {
-        if (fieldNames.size === 0) {
-            return false;
-        }
-        return this.styleFieldLeafName(option.value)
-            .some(leafName => fieldNames.has(leafName));
-    }
-
-    /** Matches enum queries such as `SPEED_LIMIT_END` to their concrete enum field. */
-    private optionMatchesAnalyzedEnumValues(option: FeatureSearchStyleOption, enumValues: Set<string>): boolean {
-        return enumValues.size > 0 && (option.enumValues ?? []).some(value => enumValues.has(value));
-    }
-
-    /** Returns candidate terminal identifiers for a style field expression. */
-    private styleFieldLeafName(field: string): string[] {
-        const leafName = field.match(/([A-Za-z_][A-Za-z0-9_]*)$/)?.[1];
-        return leafName ? [leafName] : [];
+        return defaultSearchStyleFieldOptionsForAnalysis(
+            this.styleScalarAttributeOptions,
+            session?.schemaAnalysis);
     }
 
     /** Returns a non-destructive default filter value for the selected field type. */
@@ -1632,6 +1604,17 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.featureSearchScopeSummaryTitle = "Schema analysis is running in the background.";
             return;
         }
+        if (analysis.rewriteSuppressed) {
+            const scopeLabel = analysis.concreteScope === "attribute"
+                ? "attribute scope"
+                : "feature scope";
+            this.featureSearchScopeSummary = session.definition.scope === "auto"
+                ? `Auto: ${scopeLabel}, generic query`
+                : `${scopeLabel[0].toUpperCase()}${scopeLabel.slice(1)}, generic query`;
+            this.featureSearchScopeSummaryTitle = analysis.rewriteSuppressionReason
+                || "Schema analysis found too many attribute contexts for a specific guarded rewrite.";
+            return;
+        }
         if (analysis.attributeScopes.length > 0) {
             this.featureSearchScopeSummary = this.attributeScopeSummaryLabel(
                 session.definition.scope,
@@ -1720,7 +1703,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const rule = this.createStyleRule(this.nextStyleRuleId++);
         const panelValue = this.styleRulePanelValue(rule);
         this.styleRuleDrafts = [rule, ...this.styleRuleDrafts];
-        this.styleRuleAccordionValue = panelValue;
+        this.styleRuleAccordionValue = [panelValue];
         this.onStyleRulesChanged();
     }
 
@@ -1728,9 +1711,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     protected deleteStyleRule(rule: FeatureSearchStyleRuleDraft): void {
         const panelValue = this.styleRulePanelValue(rule);
         this.styleRuleDrafts = this.styleRuleDrafts.filter(candidate => candidate.id !== rule.id);
-        if (this.styleRuleAccordionValue === panelValue) {
-            this.styleRuleAccordionValue = null;
-        }
+        this.styleRuleAccordionValue = this.styleRuleAccordionValue.filter(value => value !== panelValue);
         this.onStyleRulesChanged();
     }
 
@@ -1779,7 +1760,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.nextStyleColorStopId = 1;
         const rule = this.createStyleRule(this.nextStyleRuleId++);
         this.styleRuleDrafts = [rule];
-        this.styleRuleAccordionValue = this.styleRulePanelValue(rule);
+        this.styleRuleAccordionValue = [this.styleRulePanelValue(rule)];
         this.onStyleRulesChanged();
     }
 
@@ -1859,16 +1840,14 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (signature === this.styleRulesStateSignature) {
             return;
         }
-        const previousPanelValue = this.styleRuleAccordionValue;
+        const previousPanelValues = this.styleRuleAccordionValue;
         this.styleRulesStateSignature = signature;
         this.nextStyleRuleId = 1;
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
         this.styleRuleDrafts = rules.map(rule => this.styleRuleToDraft(rule));
         const availablePanels = new Set(this.styleRuleDrafts.map(rule => this.styleRulePanelValue(rule)));
-        this.styleRuleAccordionValue = previousPanelValue && availablePanels.has(previousPanelValue)
-            ? previousPanelValue
-            : null;
+        this.styleRuleAccordionValue = previousPanelValues.filter(value => availablePanels.has(value));
     }
 
     /** Converts one editor draft into the persisted/search-request style-rule shape. */
@@ -2211,6 +2190,30 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Refreshes schema-backed style fields only when the style editor can consume them. */
     private refreshStyleAttributeOptionsIfNeeded(session: FeatureSearchSession, patchMissingFields = true): boolean {
+        if (session.schemaAnalysis.status !== "ready") {
+            return false;
+        }
+        if (session.schemaAnalysis.rewriteSuppressed) {
+            this.styleAttributeOptionsSessionSignature = [
+                session.definition.query,
+                session.definition.scope,
+                "rewrite-suppressed",
+                session.schemaAnalysis.rewriteSuppressionReason,
+                this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers)
+            ].join("\n");
+            if (this.styleAttributeOptionsRefreshTimer) {
+                clearTimeout(this.styleAttributeOptionsRefreshTimer);
+                this.styleAttributeOptionsRefreshTimer = null;
+            }
+            this.styleAttributeOptionsRefreshPatchMissing = false;
+            this.styleAttributeOptionsLoading = false;
+            this.styleAttributeOptions = [];
+            this.styleScalarAttributeOptions = [];
+            if (this.shouldRefreshAutoStyleRule()) {
+                this.refreshAutoStyleRule(session);
+            }
+            return false;
+        }
         if (this.resultPanelIndex !== "style"
             && this.styleAttributeOptions.length === 0
             && !this.shouldAttemptAutoStyleRule(session)) {
@@ -2251,6 +2254,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Rebuilds automatic rules after the query or selected layer context changes. */
     private refreshAutoStyleRule(session: FeatureSearchSession): boolean {
+        if (this.shouldUseSolidAutoStyleRule(session)) {
+            const existingId = this.styleRuleDrafts[0]?.id ?? this.nextStyleRuleId++;
+            this.styleRuleDrafts = [this.createSolidAutoStyleRule(existingId)];
+            this.styleRuleAccordionValue = [];
+            this.onStyleRulesChanged();
+            return true;
+        }
         const fieldOptions = this.autoStyleFieldOptions(session);
         if (fieldOptions.length === 0 || !this.shouldRefreshAutoStyleRule()) {
             return false;
@@ -2258,7 +2268,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const existingIds = this.styleRuleDrafts.map(rule => rule.id);
         this.styleRuleDrafts = fieldOptions.map((fieldOption, index) =>
             this.createAutoStyleRule(existingIds[index] ?? this.nextStyleRuleId++, fieldOption));
-        this.styleRuleAccordionValue = null;
+        this.styleRuleAccordionValue = [];
         this.onStyleRulesChanged();
         return true;
     }
@@ -2285,6 +2295,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (!this.shouldAttemptAutoStyleRule(session)) {
             return false;
         }
+        if (this.shouldUseSolidAutoStyleRule(session)) {
+            this.autoStyleRuleAttemptSignatures.add(this.autoStyleRuleAttemptSignature(session));
+            this.styleRuleDrafts = [this.createSolidAutoStyleRule(this.nextStyleRuleId++)];
+            this.styleRuleAccordionValue = [];
+            this.onStyleRulesChanged();
+            return true;
+        }
         const fieldOptions = this.autoStyleFieldOptions(session);
         if (fieldOptions.length === 0) {
             return false;
@@ -2292,9 +2309,22 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.autoStyleRuleAttemptSignatures.add(this.autoStyleRuleAttemptSignature(session));
         this.styleRuleDrafts = fieldOptions.map(fieldOption =>
             this.createAutoStyleRule(this.nextStyleRuleId++, fieldOption));
-        this.styleRuleAccordionValue = null;
+        this.styleRuleAccordionValue = [];
         this.onStyleRulesChanged();
         return true;
+    }
+
+    /** Broad schema matches deliberately get a cheap generic visualization instead of per-attribute rules. */
+    private shouldUseSolidAutoStyleRule(session: FeatureSearchSession): boolean {
+        return session.schemaAnalysis.status === "ready" && session.schemaAnalysis.rewriteSuppressed === true;
+    }
+
+    /** Creates one generic auto-generated rule that does not depend on schema field enumeration. */
+    private createSolidAutoStyleRule(id: number): FeatureSearchStyleRuleDraft {
+        const rule = this.createStyleRule(id, null);
+        rule.name = "Auto: solid";
+        rule.autoGenerated = true;
+        return rule;
     }
 
     /** Creates one collapsed automatic style rule for the selected schema field. */
@@ -2324,70 +2354,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Selects all schema fields that should get an automatically generated style rule. */
     private autoStyleFieldOptions(session: FeatureSearchSession): FeatureSearchStyleOption[] {
-        if (session.schemaAnalysis.status !== "ready") {
-            return [];
-        }
-        if (session.schemaAnalysis.concreteScope !== "attribute") {
-            const fieldOption = this.defaultStyleFieldOption(session);
-            return fieldOption ? [fieldOption] : [];
-        }
-
-        const uniqueScopes = this.uniqueAutoStyleAttributeScopes(session.schemaAnalysis.attributeScopes);
-        if (uniqueScopes.length <= 1) {
-            const fieldOption = this.defaultStyleFieldOption(session);
-            return fieldOption ? [fieldOption] : [];
-        }
-
-        const result: FeatureSearchStyleOption[] = [];
-        const seen = new Set<string>();
-        for (const scope of uniqueScopes) {
-            const scopeOptions = this.defaultStyleFieldOptionsForSession(session)
-                .filter(option => this.styleOptionMatchesAttributeScope(option, scope));
-            const fieldOption = this.preferredAutoStyleField(scopeOptions, session)
-                ?? scopeOptions[0];
-            if (!fieldOption) {
-                continue;
-            }
-            const key = this.autoStyleFieldOptionKey(fieldOption);
-            if (!seen.has(key)) {
-                seen.add(key);
-                result.push(fieldOption);
-            }
-        }
-        return result;
+        return searchAutoStyleFieldOptions(this.styleScalarAttributeOptions, session.schemaAnalysis);
     }
 
-    /** Dedupe attribute scopes across maps/layers while preserving distinct attributes. */
-    private uniqueAutoStyleAttributeScopes(
-        scopes: FeatureSearchAttributeScopeCandidate[]
-    ): FeatureSearchAttributeScopeCandidate[] {
-        const result: FeatureSearchAttributeScopeCandidate[] = [];
-        const seen = new Set<string>();
-        for (const scope of scopes) {
-            const key = scope.attrName;
-            if (!seen.has(key)) {
-                seen.add(key);
-                result.push(scope);
-            }
-        }
-        return result;
-    }
-
-    /** Matches a schema field option to an inferred attribute scope, ignoring map/layer duplicates. */
-    private styleOptionMatchesAttributeScope(
-        option: FeatureSearchStyleOption,
-        scope: FeatureSearchAttributeScopeCandidate
-    ): boolean {
-        return option.attrName === scope.attrName;
-    }
-
-    /** Stable dedupe key for auto-generated style fields. */
-    private autoStyleFieldOptionKey(option: FeatureSearchStyleOption): string {
-        return [
-            option.attrName ?? "",
-            option.value
-        ].join("\n");
-    }
 
     /** Defers expensive WASM-backed field enumeration until the browser can paint the style tab. */
     private scheduleStyleAttributeOptionsRefresh(sessionId: string, patchMissingFields: boolean): void {
@@ -2504,7 +2473,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const layerKeys: string[] = [];
         for (const [mapId, mapInfo] of this.mapService.maps.maps) {
             for (const layer of mapInfo.allFeatureLayers()) {
-                layerKeys.push(`${mapId}:${layer.id}`);
+                const featureTypeSignature = (layer.info.featureTypes ?? [])
+                    .map(featureType => featureType.name)
+                    .sort()
+                    .join(",");
+                layerKeys.push(`${mapId}:${layer.id}:${featureTypeSignature}`);
             }
         }
         return layerKeys.sort().join("|");
@@ -2843,6 +2816,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         this.setSelectedMapLayerTreeLeafKeys(selectedKeys, expandedKeys);
         this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
+        this.refreshSearchFeatureTypeOptions(session);
+        this.syncSelectedFeatureTypesFromSession(session);
         this.refreshSearchTileLevelOptions(session);
         this.styleAttributeOptionsSessionSignature = "";
         this.updateDraftFeatureSearchScopeSummary(this.featureSearchScope);
@@ -2876,6 +2851,86 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return treeRefs;
         }
         return this.session?.definition.selectedMapLayers ?? [];
+    }
+
+    /** Rebuilds the feature-type selector from the currently selected map/layer scope. */
+    private refreshSearchFeatureTypeOptions(session?: FeatureSearchSession): void {
+        const options = this.availableSearchFeatureTypes(session)
+            .map(featureType => ({label: featureType, value: featureType}));
+        const signature = JSON.stringify(options.map(option => option.value));
+        if (signature === this.featureSearchFeatureTypeOptionsSignature) {
+            return;
+        }
+        this.featureSearchFeatureTypeOptionsSignature = signature;
+        this.featureSearchFeatureTypeOptions = options;
+    }
+
+    /** Returns feature types available in the currently selected source-layer scope. */
+    private availableSearchFeatureTypes(session?: FeatureSearchSession): string[] {
+        const featureTypes = new Set<string>();
+        const selectedRefs = this.selectedMapLayerRefsForFeatureTypeOptions(session);
+        const layers = selectedRefs.length
+            ? selectedRefs.flatMap(ref => {
+                const layer = this.mapService.maps.maps.get(ref.mapId)?.layers.get(ref.layerId);
+                return layer ? [layer] : [];
+            })
+            : Array.from(this.mapService.maps.allFeatureLayers());
+        for (const layer of layers) {
+            for (const featureType of layer.info.featureTypes ?? []) {
+                if (featureType.name) {
+                    featureTypes.add(featureType.name);
+                }
+            }
+        }
+        return Array.from(featureTypes).sort((lhs, rhs) => lhs.localeCompare(rhs));
+    }
+
+    /** Uses tree state when initialized, otherwise falls back to the persisted search scope. */
+    private selectedMapLayerRefsForFeatureTypeOptions(session?: FeatureSearchSession): FeatureSearchMapLayerRef[] {
+        const treeRefs = this.selectedMapLayerRefsFromTreeNodes(this.selectedMapLayerTreeNodes);
+        if (treeRefs.length > 0 || this.selectedMapLayersSignature === this.emptyMapLayerSignature()) {
+            return treeRefs;
+        }
+        return session?.definition.selectedMapLayers ?? [];
+    }
+
+    /** Copies the persisted feature-type filter into the multi-select control, dropping no-longer-available types. */
+    private syncSelectedFeatureTypesFromSession(session: FeatureSearchSession): void {
+        this.refreshSearchFeatureTypeOptions(session);
+        const availableTypes = new Set(this.featureSearchFeatureTypeOptions.map(option => option.value));
+        const persistedTypes = normalizeFeatureSearchFeatureTypes(session.definition.selectedFeatureTypes);
+        const persistedSignature = JSON.stringify(persistedTypes);
+        const nextTypes = persistedTypes
+            .filter(type => availableTypes.has(type));
+        const signature = JSON.stringify(nextTypes);
+        if (signature === this.selectedFeatureTypesSignature) {
+            if (persistedSignature !== signature) {
+                this.searchService.setSearchFeatureTypes(session.id, nextTypes);
+            }
+            return;
+        }
+        this.selectedFeatureTypesSignature = signature;
+        this.selectedFeatureTypes = nextTypes;
+        if (persistedSignature !== signature) {
+            this.searchService.setSearchFeatureTypes(session.id, nextTypes);
+        }
+    }
+
+    /** Stores selected feature types; an empty list intentionally means any type. */
+    protected onSearchFeatureTypesChange(featureTypes: unknown): void {
+        const session = this.session;
+        if (!session || !this.searchEnabled()) {
+            return;
+        }
+        const availableTypes = new Set(this.featureSearchFeatureTypeOptions.map(option => option.value));
+        const nextTypes = normalizeFeatureSearchFeatureTypes(featureTypes)
+            .filter(type => availableTypes.has(type));
+        if (JSON.stringify(session.definition.selectedFeatureTypes) === JSON.stringify(nextTypes)) {
+            return;
+        }
+        this.selectedFeatureTypes = nextTypes;
+        this.selectedFeatureTypesSignature = JSON.stringify(nextTypes);
+        this.searchService.setSearchFeatureTypes(session.id, nextTypes);
     }
 
     /** Builds a stable signature for selected search map/layer references. */
@@ -3001,10 +3056,16 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const nextLevels = this.normalizedSearchTileLevels(session.definition.selectedTileLevels);
         const signature = JSON.stringify(nextLevels);
         if (signature === this.selectedTileLevelsSignature) {
+            if (JSON.stringify(session.definition.selectedTileLevels) !== signature) {
+                this.searchService.setSearchTileLevels(session.id, nextLevels);
+            }
             return;
         }
         this.selectedTileLevelsSignature = signature;
         this.selectedTileLevels = nextLevels;
+        if (JSON.stringify(session.definition.selectedTileLevels) !== signature) {
+            this.searchService.setSearchTileLevels(session.id, nextLevels);
+        }
         this.refreshSearchTileLevelOptions(session);
     }
 
@@ -3145,16 +3206,18 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.lastSearchQuery = session.definition.query;
             this.featureSearchScope = session.definition.scope;
             this.syncMapLayerTreeSelection(session);
+            this.syncSelectedFeatureTypesFromSession(session);
             this.syncSelectedTileLevelsFromSession(session);
-        this.syncSelectedViewIndicesFromSession(session);
-        this.refreshFeatureSearchScopeSummary(session);
-        this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
-        const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
-        const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
-        if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
-            this.onStyleRulesChanged();
-        } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
-            this.tryCreateAutoStyleRule(session);}
+            this.syncSelectedViewIndicesFromSession(session);
+            this.refreshFeatureSearchScopeSummary(session);
+            this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
+            const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
+            const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
+            if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
+                this.onStyleRulesChanged();
+            } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
+                this.tryCreateAutoStyleRule(session);
+            }
         }
         if (this.activeSearchGroupId !== session.runId) {
             this.activeSearchGroupId = session.runId;
@@ -3176,7 +3239,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.updateFeatureSearchQueryDirty();
         this.refreshProgressDisplay(session);
         this.diagnostics = session.diagnostics;
-        this.requestQueryDiagnosticsIfVisible(session);
         this.valueSummaries = session.valueSummaries;
         if (this.resultPanelIndex === "diagnostics" && session.complete) {
             this.requestDiagnosticsValueSummaries();
@@ -3204,6 +3266,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             session.definition.query,
             session.definition.scope,
             this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers),
+            JSON.stringify(session.definition.selectedFeatureTypes ?? []),
             JSON.stringify(session.definition.selectedViewIndices ?? []),
             JSON.stringify(session.definition.searchStyleRules ?? []),
             JSON.stringify(session.definition.renderStrategy),
@@ -3211,6 +3274,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             analysis.status,
             analysis.concreteScope,
             analysis.normalizedQuery,
+            String(analysis.attributeScopeCandidateCount ?? 0),
+            String(analysis.rewriteSuppressed ?? false),
+            analysis.rewriteSuppressionReason ?? "",
             analysis.error ?? "",
             this.attributeScopeSyncSignature(analysis.attributeScopes),
             JSON.stringify(analysis.matchedFieldNames),
@@ -3444,7 +3510,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.refreshStyleAttributeOptionsIfNeeded(this.session);
         }
         if (this.resultPanelIndex === "diagnostics" && this.session) {
-            this.requestQueryDiagnosticsIfVisible(this.session);
             if (this.session.complete) {
                 this.requestDiagnosticsValueSummaries();
             }
@@ -3710,7 +3775,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             if (lockSelection && panelId !== undefined) {
                 this.stateService.setInspectionPanelLockedState(panelId, true);
             }
-            this.inspectionSelection.focusOnFeature(this.stateService.focusedView, {
+            this.inspectionSelection.focusOnFeature(undefined, {
                 mapTileKey,
                 featureId: selectedFeatureId
             }).then();
@@ -3782,9 +3847,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Clears local rendering state after the owning session disappears. */
     private resetLocalState(): void {
         this.diagnostics = [];
-        this.queryDiagnostics = [];
-        this.queryDiagnosticsLoading = false;
-        this.queryDiagnosticsSessionSignature = "";
         this.valueSummaries = this.emptyValueSummariesState();
         this.canStopSearch = false;
         this.percentDone = 0;
@@ -3826,7 +3888,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.nextStyleConditionId = 1;
         this.nextStyleColorStopId = 1;
         this.styleRuleDrafts = [];
-        this.styleRuleAccordionValue = null;
+        this.styleRuleAccordionValue = [];
         this.activeSearchGroupId = "";
         this.completedSearchGroupId = "";
         this.resultTreeInputLength = 0;
@@ -3842,6 +3904,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.mapLayerTreeSelectionState.clear();
         this.mapLayerTreeExpandedKeys.clear();
         this.mapLayerTreeExpansionInitialized = false;
+        this.featureSearchFeatureTypeOptions = [];
+        this.selectedFeatureTypes = [];
         this.featureSearchTileLevelOptions = [];
         this.selectedTileLevels = [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS];
         this.featureSearchViewOptions = [];
@@ -3849,6 +3913,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.mapLayerTreeOptionsSignature = "";
         this.selectedMapLayersSignature = "";
         this.initializedMapLayerSelectionSessionId = "";
+        this.featureSearchFeatureTypeOptionsSignature = "";
+        this.selectedFeatureTypesSignature = "";
         this.searchTileLevelOptionsSignature = "";
         this.selectedTileLevelsSignature = "";
         this.searchViewOptionsSignature = "";

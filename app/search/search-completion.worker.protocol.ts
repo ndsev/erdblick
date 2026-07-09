@@ -55,6 +55,9 @@ export interface SearchScopeAnalysisResultMessage {
     concreteScope: "feature" | "attribute";
     normalizedQuery: string;
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
+    attributeScopeCandidateCount: number;
+    rewriteSuppressed: boolean;
+    rewriteSuppressionReason: string;
     inferredMapLayers: FeatureSearchMapLayerRef[];
     matchedFieldNames: string[];
     matchedEnumValues: string[];
@@ -79,40 +82,13 @@ export interface SearchStyleFieldsResultMessage {
     error?: string;
 }
 
-/** Schema-AST diagnostic shown in the feature-search Diagnostics tab. */
-export interface SearchQueryDiagnosticMessage {
-    query: string;
-    message: string;
-    location?: {offset: number, size: number};
-    fix: null | string;
-}
-
-/** Requests schema-AST diagnostics for the Diagnostics tab. */
-export interface SearchQueryDiagnosticsRequestMessage {
-    type: "SearchQueryDiagnosticsRequest";
-    requestId: number;
-    query: string;
-    scope: FeatureSearchScope;
-    selectedMapLayers?: FeatureSearchMapLayerRef[];
-}
-
-/** Schema-AST diagnostics produced by the worker. */
-export interface SearchQueryDiagnosticsResultMessage {
-    type: "SearchQueryDiagnosticsResult";
-    requestId: number;
-    diagnostics: SearchQueryDiagnosticMessage[];
-    error?: string;
-}
-
 export type SearchCompletionWorkerInboundMessage =
     SearchCompletionDataSourceInfoMessage |
     SearchCompletionRequestMessage |
     SearchScopeAnalysisRequestMessage |
-    SearchStyleFieldsRequestMessage |
-    SearchQueryDiagnosticsRequestMessage;
+    SearchStyleFieldsRequestMessage;
 
 export type SearchCompletionWorkerOutboundMessage =
     SearchCompletionResultMessage |
     SearchScopeAnalysisResultMessage |
-    SearchStyleFieldsResultMessage |
-    SearchQueryDiagnosticsResultMessage;
+    SearchStyleFieldsResultMessage;

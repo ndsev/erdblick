@@ -25,11 +25,8 @@ struct TileFeatureLayer
      */
     std::string id() const;
 
-    /**
-     * Retrieves the tile ID as a 64-bit unsigned integer.
-     * @return The tile ID.
-     */
-    uint64_t tileId() const;
+    /** Retrieves the signed packed NDS.Live tile ID. */
+    int32_t tileId() const;
 
     /**
      * Retrieves the staged-loading index for the tile layer.
@@ -174,8 +171,8 @@ struct TileSearchResultLayer
     /** Retrieves the source layer id. */
     std::string layerId() const;
 
-    /** Retrieves the source tile id. */
-    uint64_t tileId() const;
+    /** Retrieves the signed packed NDS.Live source tile id. */
+    int32_t tileId() const;
 
     /** Retrieves the staged-loading index of the source feature tile. */
     uint32_t stage() const;

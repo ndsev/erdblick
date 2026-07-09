@@ -343,82 +343,6 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
             </div>
         </app-dialog>
     `,
-    styles: [`
-        .disabled {
-            pointer-events: none;
-            opacity: 0.5;
-        }
-
-        .additional-style-tag,
-        .modified-style-tag {
-            margin-left: 0.5em;
-        }
-
-        .style-validation-error-icon {
-            color: var(--p-message-error-color, var(--p-button-danger-background));
-            cursor: pointer;
-            font-size: 1.15em;
-            margin-left: 0.35em;
-            vertical-align: middle;
-        }
-
-        .additional-style-tag.clickable-style-tag,
-        .modified-style-tag {
-            cursor: pointer;
-        }
-
-        .updated-modified-style-chip {
-            cursor: pointer;
-        }
-
-        .style-errors-toolbar {
-            display: flex;
-            align-items: center;
-            gap: 0.5em;
-        }
-
-        .style-errors-filter {
-            flex: 1;
-        }
-
-        .style-errors-filter input {
-            width: 100%;
-        }
-
-        .style-issue-error {
-            color: var(--p-message-error-color, var(--p-button-danger-background));
-        }
-
-        .style-issue-warning {
-            color: var(--yellow-300, #fde68a);
-        }
-
-        .style-error-row {
-            cursor: pointer;
-        }
-
-        .style-error-row:hover {
-            background: var(--p-highlight-background);
-        }
-
-        .style-validation-details {
-            display: flex;
-            flex-direction: column;
-            gap: 0.35em;
-            margin-top: 0.75em;
-        }
-
-        .style-validation-issue {
-            display: grid;
-            grid-template-columns: 4em minmax(6em, 1fr) 2fr;
-            gap: 0.5em;
-        }
-
-        .style-validation-location,
-        .style-validation-path {
-            color: silver;
-        }
-    `],
     standalone: false
 })
 /**
@@ -622,7 +546,8 @@ export class StyleComponent implements OnDestroy {
         if (event.files && event.files.length > 0) {
             const file: File = event.files[0];
             let styleId = file.name;
-            this.styleService.importStyleYamlFile(event, file, this.styleUploader)
+            event.xhr = new XMLHttpRequest();
+            this.styleService.importStyleYamlFile(file)
                 .then((ok) => {
                     if (!ok) {
                         if (this.styleService.lastValidationReport && !this.styleService.lastValidationReport.valid) {
@@ -635,6 +560,9 @@ export class StyleComponent implements OnDestroy {
                 .catch((error) => {
                     this.messageService.showError(`Error occurred while trying to import style: ${styleId}`);
                     console.error(error);
+                })
+                .finally(() => {
+                    this.styleUploader?.clear();
                 });
         }
     }

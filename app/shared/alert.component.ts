@@ -19,7 +19,6 @@ import {AppDialogComponent} from "./app-dialog.component";
             </ng-template>
         </app-dialog>
     `,
-    styles: [``],
     standalone: true,
     imports: [AppDialogComponent, ButtonModule, Textarea, FormsModule]
 })

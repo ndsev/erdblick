@@ -5,7 +5,9 @@ import { Subject } from 'rxjs';
 import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
+
 import { AppStateService } from './appstate.service';
+import {MapTreeNode} from "../mapdata/map.tree.model";
 
 // @ts-expect-error this is a mock router
 interface RouterStub extends Partial<Router> {
@@ -43,6 +45,24 @@ const createRouterStub = (queryParams: Record<string, unknown> = {}): RouterStub
 
 const feature = (id: string, mapTileKey = 'map/layer/tile') => ({ featureId: id, mapTileKey });
 const sourceData = (mapTileKey = 'SourceData:m1:SourceData-LAYER:1', address?: bigint) => ({ mapTileKey, address });
+const infoServiceStub = () => ({
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
+    showWarning: vi.fn(),
+    registerDefaultContainer: vi.fn(),
+    showAlertDialogDefault: vi.fn()
+}) as any;
+
+const layerInfo = (layerId: string, type = "Feature") => ({
+    layerId,
+    type,
+    canRead: true,
+    canWrite: false,
+    coverage: [],
+    featureTypes: [],
+    version: {major: 1, minor: 0, patch: 0},
+    zoomLevels: [],
+});
 
 describe('AppStateService', () => {
     beforeEach(() => {
@@ -76,8 +96,8 @@ describe('AppStateService', () => {
 
         expect(localStorage.getItem('marker')).toBe('0');
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({ m: '0' }),
-            queryParamsHandling: 'merge',
+            queryParams: expect.objectContaining({ m: '0', v2: '1' }),
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -101,6 +121,177 @@ describe('AppStateService', () => {
 
         expect(service.markerState.getValue()).toBe(true);
         expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps selected features with packed tile ids during datasource pruning', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [feature(
+                "Intersection.545554858.3348",
+                "Features:Very-Large-Map:Road:22100770000d:0"
+            )],
+            locked: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Very-Large-Map", new MapTreeNode({
+                mapId: "Very-Large-Map",
+                nodeId: "Very-Large-Map",
+                maxParallelJobs: 1,
+                addOn: false,
+                extraJsonAttachment: {},
+                layers: {Road: layerInfo("Road")},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d:0");
+    });
+
+
+    it('keeps selected features while datasource layers are still initializing', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [feature(
+                "Intersection.545554858.3348",
+                "Features:Very-Large-Map:Road:545554858:0"
+            )],
+            locked: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Very-Large-Map", new MapTreeNode({
+                mapId: "Very-Large-Map",
+                nodeId: "Very-Large-Map",
+                maxParallelJobs: 0,
+                addOn: false,
+                status: "initializing",
+                extraJsonAttachment: {},
+                layers: {},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858:0");
+    });
+
+    it('preserves focused selection metadata while pruning unavailable selections', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [
+                feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
+                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858:0"),
+            ],
+            locked: true,
+            focused: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Very-Large-Map", new MapTreeNode({
+                mapId: "Very-Large-Map",
+                nodeId: "Very-Large-Map",
+                maxParallelJobs: 1,
+                addOn: false,
+                extraJsonAttachment: {},
+                layers: {Road: layerInfo("Road")},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].focused).toBe(true);
+        expect(service.selection[0].features).toEqual([
+            feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
+        ]);
+    });
+
+    it('keeps selections whose MapTileKey encodes slashes in the map id', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 0,
+            features: [feature(
+                "Landmark.545666604.12",
+                "Features:Provider%2FSample Munich:Landmark:545666604:0"
+            )],
+            locked: true,
+            focused: true,
+            size: [30, 20],
+            color: "#fff314",
+            undocked: false,
+        }];
+
+        service.prune(new Map([
+            ["Provider/Sample Munich", new MapTreeNode({
+                mapId: "Provider/Sample Munich",
+                nodeId: "Provider/Sample Munich",
+                maxParallelJobs: 1,
+                addOn: false,
+                extraJsonAttachment: {},
+                layers: {Landmark: layerInfo("Landmark")},
+            } as any)]
+        ]), new Map());
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].focused).toBe(true);
+        expect(service.selection[0].features[0]).toEqual(feature(
+            "Landmark.545666604.12",
+            "Features:Provider%2FSample Munich:Landmark:545666604:0"
+        ));
+    });
+
+    it('clamps the low-fi tile threshold', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.lowFiTileThreshold).toBe(128);
+
+        service.lowFiTileThreshold = 1024;
+        expect(service.lowFiTileThreshold).toBe(1024);
+
+        service.lowFiTileThreshold = 9999;
+        expect(service.lowFiTileThreshold).toBe(4096);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('enables deck antialiasing by default', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        expect(service.deckAntialiasingEnabled).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -155,11 +346,146 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('keeps stored inspections and search state when stale empty URL params exist', async () => {
+    it('hydrates coordinated v2 layer-indexed URL state', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            n: '2',
+            map: 'MapA~MapB',
+            l: 'Lane:0~Road:1',
+            v: '1,0:0,1',
+            z: '12,13:14,15',
+            az: '1x2:0x2',
+            'T93C~0-1~.CenterLines': '1x2:0x2',
+            sel: [
+                `0~0~F:0:21fa0777000d~${encodeURIComponent('Lane.1:attribute#1')}~30,20~n0`,
+                '1~1~SD:1:LaneGeometryLayer-1:21fa0777000e~783783249845~45,32~n3',
+            ].join(';'),
+        });
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            showWarning: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.numViews).toBe(2);
+        expect(service.layerNamesState.getValue()).toEqual(['MapA/Lane', 'MapB/Road']);
+        expect(service.layerVisibilityState.getValue(0)).toEqual([true, false]);
+        expect(service.layerVisibilityState.getValue(1)).toEqual([false, true]);
+        expect(service.layerZoomLevelState.getValue(0)).toEqual([12, 13]);
+        expect(service.layerZoomLevelState.getValue(1)).toEqual([14, 15]);
+        expect(service.layerAutoZoomLevelState.getValue(0)).toEqual([true, true]);
+        expect(service.layerAutoZoomLevelState.getValue(1)).toEqual([false, false]);
+        expect(service.stylesState.getValue().get('MapA/Lane/T93C/showCenterLines')).toEqual(['1', '0']);
+        expect(service.stylesState.getValue().get('MapB/Road/T93C/showCenterLines')).toEqual(['1', '0']);
+        expect(service.selection).toEqual([
+            {
+                id: 0,
+                features: [{
+                    mapTileKey: 'Features:MapA:Lane:606830446:0',
+                    featureId: 'Lane.1:attribute#1'
+                }],
+                locked: true,
+                size: [30, 20],
+                color: '#fff314',
+                undocked: false
+            },
+            {
+                id: 1,
+                features: [],
+                sourceData: {
+                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1143701358:0',
+                    address: 783783249845n
+                },
+                locked: true,
+                focused: true,
+                size: [45, 32],
+                color: '#ff1212',
+                undocked: true
+            },
+        ]);
+        expect(service.focusedInspectionPanelId).toBe(1);
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('clears stored inspections when a v2 URL does not contain a selection', async () => {
         localStorage.setItem('selected', JSON.stringify([
             '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
         ]));
-        localStorage.setItem('search', JSON.stringify(['features', '**.speed > 80']));
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'Very-Large-Map',
+            l: 'Road:0',
+            s: JSON.stringify(['features', '"PROHIBITED"']),
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates legacy selection payloads even when a v2 URL marker is present', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'MapA',
+            l: 'Road:0',
+            sel: '5~1f~Features:MapA:Road:tile-1:0~Road.1:attribute#0:validity#0~30:20~abc123~0',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection).toHaveLength(1);
+        expect(service.selection[0].id).toBe(5);
+        expect(service.selection[0].focused).toBe(true);
+        expect(service.selection[0].features[0]).toEqual({
+            mapTileKey: 'Features:MapA:Road:tile-1:0',
+            featureId: 'Road.1:attribute#0:validity#0',
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates v2 selected feature MapTileKeys through the C++ serializer', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'Provider%2FSample%20Munich',
+            l: 'Road:0',
+            sel: '0~0~F:0:545555209~Road.545555209.387~30,20~n0',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.selection[0].features[0]).toEqual({
+            mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209:0',
+            featureId: 'Road.545555209.387',
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps stored inspections and feature-search state when stale empty URL params exist', async () => {
+        localStorage.setItem('selected', JSON.stringify([
+            '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
+        ]));
         localStorage.setItem('featureSearchState', JSON.stringify([
             {id: 'feature-search-1', query: '**.speed > 80'}
         ]));
@@ -178,11 +504,6 @@ describe('AppStateService', () => {
 
         expect(service.selection).toHaveLength(1);
         expect(service.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
-        expect(service.search).toEqual({
-            version: 2,
-            actionId: 'features',
-            input: '**.speed > 80'
-        });
         expect(service.featureSearches).toHaveLength(1);
         expect(service.featureSearches[0].query).toBe('**.speed > 80');
 
@@ -256,39 +577,97 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('serializes active search state URLs as compact action tuples', async () => {
+    it('drops retired omnibox search URL params while preserving unknown params', () => {
+        const routerStub = createRouterStub({
+            s: JSON.stringify(['features', '**.speed > 80']),
+            external: 'keep-me',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        const params = (service as any).serializeUrlV2();
+        expect(params.s).toBeUndefined();
+        expect(params.external).toBe('keep-me');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('serializes active and selected-feature layers against one URL layer order', async () => {
         const routerStub = createRouterStub();
-        const infoServiceStub = {
-            showError: vi.fn(),
-            showSuccess: vi.fn(),
-            showWarning: vi.fn(),
-            registerDefaultContainer: vi.fn(),
-            showAlertDialogDefault: vi.fn()
-        } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.layerNamesState.next(['MapA/Lane', 'MapC/POI']);
+        service.layerVisibilityState.next(0, [true, false]);
+        service.layerZoomLevelState.next(0, [12, 15]);
+        service.layerAutoZoomLevelState.next(0, [false, false]);
+        service.selection = [{
+            id: 0,
+            features: [{
+                mapTileKey: 'Features:MapB:Road:21:0',
+                featureId: 'Road.1',
+            }],
+            locked: true,
+            size: [30, 20],
+            color: '#fff314',
+            undocked: false,
+        }];
+
+        const params = (service as any).serializeUrlV2();
+        expect(params).toMatchObject({
+            v2: '1',
+            map: 'Map:A,B',
+            l: 'Lane:0~Road:1',
+            v: '1,0',
+            z: '12,13',
+            az: '0,1',
+            sel: '0~0~F:1:21~Road.1~30,20~n0',
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps layers omitted from a v2 URL inactive when the map tree discovers them later', async () => {
+        const routerStub = createRouterStub({
+            v2: '1',
+            map: 'MapA~MapB',
+            l: 'Lane:0~Road:1',
+            v: '1x2',
+            z: '13x2',
+            az: '1x2',
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        // @ts-expect-error this is a call to mock router
-        routerStub.navigate.mockClear();
+        const config = service.mapLayerConfig('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
+        expect(config).toEqual([
+            {autoLevel: true, visible: false, level: 13},
+        ]);
+        expect(service.layerNamesState.getValue()).toEqual([
+            'MapA/Lane',
+            'MapB/Road',
+            'Classic-2.5.2-Sample/NDS.Classic-BMD',
+        ]);
+        expect(service.layerVisibilityState.getValue(0)).toEqual([true, true, false]);
 
-        service.searchState.next({
-            version: 2,
-            actionId: 'features',
-            input: '**.speed > 80',
-            actionName: 'Search Features and Attributes',
-            savedAt: 42,
-        });
-        await flushMicrotasks();
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
 
-        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({
-                s: JSON.stringify(['features', '**.speed > 80']),
-            }),
-            queryParamsHandling: 'merge',
-            replaceUrl: true,
-        }));
+    it('serializes an empty active layer list as an authoritative v2 layer list', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.layerNamesState.next(['MapA/Lane']);
+        service.layerVisibilityState.next(0, [false]);
+
+        const params = (service as any).serializeUrlV2();
+        expect(params.l).toBe('');
+        expect(params.v).toBeUndefined();
+        expect(params.z).toBeUndefined();
+        expect(params.az).toBeUndefined();
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -311,7 +690,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        (service as any).lastMergedUrlSyncAt = Date.now();
+        (service as any).lastUrlSyncAt = Date.now();
         service.markerState.next(true);
         await flushMicrotasks();
         expect((service as any).urlSyncHandle).not.toBeNull();
@@ -364,9 +743,10 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 mp: '11.14198571,48.00237573',
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -405,9 +785,10 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 bg: 'osm~50',
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -637,8 +1018,8 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(1);
         expect(routerStub.navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({ m: '1' }),
-            queryParamsHandling: 'merge',
+            queryParams: expect.objectContaining({ m: '1', v2: '1' }),
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -654,8 +1035,8 @@ describe('AppStateService', () => {
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(2);
         expect(routerStub.navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
-            queryParams: expect.objectContaining({ m: '1' }),
-            queryParamsHandling: 'merge',
+            queryParams: expect.objectContaining({ m: '1', v2: '1' }),
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -674,6 +1055,7 @@ describe('AppStateService', () => {
 
         // Prepare one layer so style options can be encoded
         service.layerNamesState.next(['m1/layerA']);
+        service.layerVisibilityState.next(0, [true]);
 
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
@@ -693,9 +1075,10 @@ describe('AppStateService', () => {
         // Expect URL sync to use compact style option encoding
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
+                v2: '1',
                 'overlay~0~opacity~debug': '0.5~0',
             }),
-            queryParamsHandling: 'merge',
+            queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
@@ -974,6 +1357,39 @@ describe('AppStateService', () => {
 
         service.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
         expect(service.selection[0].features[0].featureId).toBe('Road.1');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('preserves transient inspection tree header expansion state defensively', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const expandedNodes = new Map<string, boolean | undefined>([['root', true], ['child', false]]);
+        const restoreSnapshot = new Map<string, boolean | undefined>([['root', false]]);
+
+        service.setInspectionTreeExpansionState(7, {
+            expandedNodes,
+            fullExpansionActive: true,
+            expansionSnapshotBeforeFullExpand: restoreSnapshot,
+            fullCollapseActive: false
+        });
+        expandedNodes.set('root', false);
+        restoreSnapshot.set('root', true);
+
+        const firstRead = service.getInspectionTreeExpansionState(7)!;
+        expect(firstRead.expandedNodes.get('root')).toBe(true);
+        expect(firstRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
+        expect(firstRead.fullExpansionActive).toBe(true);
+        expect(firstRead.fullCollapseActive).toBe(false);
+
+        firstRead.expandedNodes.set('root', false);
+        firstRead.expansionSnapshotBeforeFullExpand?.set('root', true);
+
+        const secondRead = service.getInspectionTreeExpansionState(7)!;
+        expect(secondRead.expandedNodes.get('root')).toBe(true);
+        expect(secondRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();

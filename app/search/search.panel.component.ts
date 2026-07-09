@@ -1,11 +1,11 @@
 import {AfterViewInit, Component, ElementRef, HostListener, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
-import {FEATURE_SEARCH_TARGET_ID, SearchTarget, JumpTargetService} from "./jump.service";
+import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounce, debounceTime, distinctUntilChanged, skip, Subject, switchMap, timer, filter, take, Subscription} from "rxjs";
+import {debounce, debounceTime, distinctUntilChanged, Subject, switchMap, timer, Subscription} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {
     FeatureSearchService,
@@ -14,7 +14,6 @@ import {
 import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.model";
 import {coreLib} from "../integrations/wasm";
-import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {
     historyEntryDedupeKey,
@@ -24,9 +23,7 @@ import {
     normalizeResolvedSearchHistoryEntry,
     normalizeSearchHistoryEntry,
     normalizeSearchHistoryPayload,
-    sameSearchHistoryEntry,
     SearchHistoryEntry,
-    SearchHistoryStateEntry,
     withSearchHistoryActionName
 } from "../shared/search-history";
 import {
@@ -34,9 +31,31 @@ import {
     LocationSearchService,
     normalizeLocationSearchPayload
 } from "./location.search.service";
+import {
+    packedTileIdFromMortonString,
+    packedTileIdFromParsedNdsCoordinates,
+    parseMortonCoordinateString,
+    parseNdsCoordinateString,
+    parsePackedTileId as parsePackedTileIdValue
+} from "../coords/nds-coordinate.util";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
+}
+
+interface ParsedCoordinateJump {
+    target: Rectangle | number[];
+    label: string;
+    coords: number[];
+    x?: number;
+    y?: number;
+    level?: number;
+}
+
+interface ParsedNdsCoordinateLabel {
+    x: number;
+    y: number;
+    level?: number;
 }
 
 @Component({
@@ -47,9 +66,9 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
                           data-testid="search-input"
-                          [(ngModel)]="searchInputValue"
+                          [ngModel]="searchInputValue"
                           (click)="showSearchOverlay()"
-                          (ngModelChange)="setSearchValue(searchInputValue)"
+                          (ngModelChange)="setSearchValue($event)"
                           (keydown)="onKeydown($event)"
                           (keyup)="onKeyup($event)"
                           (blur)="onBlur()"
@@ -67,13 +86,14 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
                     [left]="completion.left"
                     [zIndex]="completion.zIndex"
                     (popupMouseDown)="onCompletionPopupDown($event)"
-                    (candidateSelected)="applyCompletion($event)">
+                    (candidateSelected)="applyCompletion($event)"
+                    (closeRequested)="dismissCompletionForCurrentInput()">
                 </search-completion-popup>
             </div>
 
             <div class="resizable-container" #searchcontrols>
                 <app-dialog #actionsdialog class="search-menu-dialog" data-testid="search-menu-dialog" [showHeader]="false" [(visible)]="searchService.showFeatureSearchDialog"
-                          [baseZIndex]="30040"
+                          [baseZIndex]="searchActionsBaseZIndex"
                           [focusOnShow]="false"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div data-testid="search-menu-panel">
@@ -140,19 +160,14 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </app-dialog>
     `,
-    styles: [`
-        .item-disabled {
-            color: darkgrey;
-            pointer-events: none;
-        }
-    `],
     standalone: false
 })
 /**
  * Implements the omnibox-style search panel used for jumping, searching loaded features, and query completion.
  */
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
-    private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 30040;
+    private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
+    readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
 
     searchItems: Array<SearchTarget> = [];
     private locationSearchItems: Array<SearchTarget> = [];
@@ -163,11 +178,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     searchInputValue: string = "";
     searchHistory: Array<SearchHistoryViewEntry> = [];
     visibleSearchHistory: Array<SearchHistoryViewEntry> = [];
-    private suppressHistoryExecution = false;
     private readonly subscriptions = new Subscription();
     private readonly searchShortcutHandler = (_event: KeyboardEvent) => this.clickOnSearchToStart();
-    private initialSearchReplayFrameFirst?: number;
-    private initialSearchReplayFrameSecond?: number;
 
     /* Autocompletion */
     private searchInputChanged: Subject<void> = new Subject<void>();
@@ -189,6 +201,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000,
     };
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
+    private dismissedCompletionSignature: string | null = null;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
@@ -215,23 +228,80 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         const targetsArray: Array<SearchTarget> = [];
         const value = inputValue.trim();
 
-        /////////// Jump to mapget tile id
-        let label = "tileId = ?";
-        const mapgetTileIdValid = this.jumpService.validateMapgetTileId(value);
-        if (mapgetTileIdValid) {
-            label = `tileId = ${value}`;
+        /////////// Jump to packed tile id
+        let label = "packedTileId = ?";
+        const packedTileIdValid = this.jumpService.validatePackedTileId(value);
+        if (packedTileIdValid) {
+            label = `packedTileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
-            id: "j:mapget-tile-id",
+            id: "j:packed-tile-id",
             icon: "pi-table",
             color: "green",
-            name: "Mapget Tile ID",
+            name: "PackedTileId",
             label: label,
-            enabled: mapgetTileIdValid,
-            jump: (value: string) => { return this.parseMapgetTileId(value) },
-            validate: (value: string) => { return this.jumpService.validateMapgetTileId(value) }
+            enabled: packedTileIdValid,
+            jump: (value: string) => { return this.parsePackedTileId(value) },
+            validate: (value: string) => { return this.jumpService.validatePackedTileId(value) }
+        });
+
+        /////////// Jump to NDS x-y
+        label = "x = ? | y = ? | (level = ?)";
+        const ndsXyValid = this.validateNdsCoordinates(value, true);
+        if (ndsXyValid) {
+            label = this.parseNdsCoordinates(value, true)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:nds-x-y",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "NDS X-Y Coordinates",
+            label: label,
+            enabled: ndsXyValid,
+            jump: (value: string) => { return this.parseNdsCoordinates(value, true)?.target },
+            validate: (value: string) => { return this.validateNdsCoordinates(value, true) }
+        });
+
+        /////////// Jump to NDS y-x
+        label = "y = ? | x = ? | (level = ?)";
+        const ndsYxValid = this.validateNdsCoordinates(value, false);
+        if (ndsYxValid) {
+            label = this.parseNdsCoordinates(value, false)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:nds-y-x",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "NDS Y-X Coordinates",
+            label: label,
+            enabled: ndsYxValid,
+            jump: (value: string) => { return this.parseNdsCoordinates(value, false)?.target },
+            validate: (value: string) => { return this.validateNdsCoordinates(value, false) }
+        });
+
+        /////////// Jump to Morton code
+        label = "mortonCode = ? | (level = ?)";
+        const mortonValid = this.validateMortonCoordinates(value);
+        if (mortonValid) {
+            label = this.parseMortonCoordinates(value)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:morton-code",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "Morton Code Coordinates",
+            label: label,
+            enabled: mortonValid,
+            jump: (value: string) => { return this.parseMortonCoordinates(value)?.target },
+            validate: (value: string) => { return this.validateMortonCoordinates(value) }
         });
 
         /////////// Jump to lon-lat
@@ -314,7 +384,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
-                private dialogStack: DialogStackService,
                 private locationSearchService: LocationSearchService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
@@ -356,54 +425,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.mapSelectionVisible = true;
         }));
 
-        this.subscriptions.add(this.stateService.searchState.subscribe(search => {
-            const entry = this.resolveStateEntry(search);
-            if (!entry) {
-                return;
-            }
-            if (isLegacySearchHistoryEntry(entry)) {
-                this.searchInputValue = entry[1];
-                const migrated = this.migrateLegacySearchHistoryEntry(entry);
-                if (migrated) {
-                    this.withSuppressedHistoryExecution(() => {
-                        this.stateService.migrateSearchStateValue(migrated);
-                        this.stateService.migrateLastSearchHistoryEntry(migrated);
-                    });
-                }
-                return;
-            }
-
-            this.searchInputValue = entry.input;
-            this.mirrorSearchStateToLastEntry(entry, this.shouldSkipRestoredFeatureSearchEntry(entry));
-        }));
-
-        this.subscriptions.add(this.stateService.lastSearchHistoryEntryState.pipe(skip(1)).subscribe(entry => {
-            if (!this.stateService.ready.getValue()) {
-                return;
-            }
-            const resolvedEntry = this.resolveStateEntry(entry);
-            if (isLegacySearchHistoryEntry(resolvedEntry)) {
-                const migrated = this.migrateLegacySearchHistoryEntry(resolvedEntry);
-                if (migrated) {
-                    this.withSuppressedHistoryExecution(() => this.stateService.migrateLastSearchHistoryEntry(migrated));
-                }
-                this.reloadSearchHistory();
-                return;
-            }
-            if (resolvedEntry && !this.suppressHistoryExecution) {
-                this.executeSearchHistoryEntry(resolvedEntry);
-            }
-            this.reloadSearchHistory();
-        }));
-        this.subscriptions.add(this.stateService.ready.pipe(
-            filter((ready): ready is true => ready),
-            take(1)
-        ).subscribe(() => this.executeCurrentSearchStateOnReady()));
-
         this.subscriptions.add(this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
                 const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
-                this.stateService.setSearchHistoryState({
+                this.executeAndRememberSearchEntry({
                     version: 2,
                     actionId: "source-data",
                     input: value,
@@ -415,6 +440,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.reloadSearchHistory();
 
         this.subscriptions.add(this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
+            if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+                this.completionItems = [];
+                this.completion.visible = false;
+                return;
+            }
             this.completionItems = value.filter((item, index, array) => {
                 // Discard any candidate that is equal to the current input
                 // or does not relate to the current input (e.g. delayed results).
@@ -446,6 +476,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }));
 
         this.subscriptions.add(this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
+            if (pending && this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+                this.completion.pending = false;
+                this.completion.visible = false;
+                return;
+            }
             const textarea = this.textarea?.nativeElement;
             const focusValid =
                 this.completion.visible ||
@@ -491,126 +526,14 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
     ngOnDestroy() {
         this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
-        this.cancelScheduledInitialSearchReplay();
         this.subscriptions.unsubscribe();
         this.searchInputChanged.complete();
         this.locationSearchQueryChanged.complete();
     }
 
-    /** Normalizes a raw persisted search entry from state. */
-    private resolveStateEntry(raw: unknown): SearchHistoryStateEntry | null {
-        return normalizeSearchHistoryEntry(raw);
-    }
-
-    /** Returns whether an omnibox entry would create a feature-search session. */
-    private isFeatureSearchEntry(entry: SearchHistoryEntry): boolean {
-        return entry.actionId === FEATURE_SEARCH_TARGET_ID;
-    }
-
-    /** Suppresses restored feature-search actions that are already represented by feature-search state. */
-    private shouldSkipRestoredFeatureSearchEntry(entry: SearchHistoryEntry): boolean {
-        return this.isFeatureSearchEntry(entry) && this.searchService.hasPersistedSearchForQuery(entry.input);
-    }
-
-    /** Mirrors URL/restored search state into the last-entry state without necessarily replaying it. */
-    private mirrorSearchStateToLastEntry(entry: SearchHistoryEntry, suppressExecution: boolean): void {
-        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
-        if (sameSearchHistoryEntry(lastEntry, entry)) {
-            return;
-        }
-        const setLastEntry = () => {
-            this.stateService.lastSearchHistoryEntry = entry;
-        };
-        if (suppressExecution) {
-            this.withSuppressedHistoryExecution(setLastEntry);
-            return;
-        }
-        setLastEntry();
-    }
-
-    /** Runs an action without triggering search history execution side effects. */
-    private withSuppressedHistoryExecution(action: () => void) {
-        this.suppressHistoryExecution = true;
-        try {
-            action();
-        } finally {
-            this.suppressHistoryExecution = false;
-        }
-    }
-
-    /** Executes the URL/restored search state once startup finished. */
-    private executeCurrentSearchStateOnReady(): void {
-        const entry = this.resolveStateEntry(this.stateService.search);
-        if (!entry || isLegacySearchHistoryEntry(entry)) {
-            return;
-        }
-        const executableEntry = this.restoredEntryWithPayload(entry);
-        if (!this.stateService.consumeInitialSearchStateReplay()) {
-            return;
-        }
-        this.scheduleInitialSearchStateReplay(executableEntry);
-    }
-
-    /** Defers startup replay until map views have finished subscribing to jump/label topics. */
-    private scheduleInitialSearchStateReplay(entry: SearchHistoryEntry): void {
-        const replay = () => this.executeRestoredSearchStateEntry(entry);
-        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-            replay();
-            return;
-        }
-        this.cancelScheduledInitialSearchReplay();
-        this.initialSearchReplayFrameFirst = window.requestAnimationFrame(() => {
-            this.initialSearchReplayFrameFirst = undefined;
-            this.initialSearchReplayFrameSecond = window.requestAnimationFrame(() => {
-                this.initialSearchReplayFrameSecond = undefined;
-                replay();
-            });
-        });
-    }
-
-    /** Cancels any pending startup replay callback. */
-    private cancelScheduledInitialSearchReplay(): void {
-        if (this.initialSearchReplayFrameFirst !== undefined) {
-            window.cancelAnimationFrame(this.initialSearchReplayFrameFirst);
-            this.initialSearchReplayFrameFirst = undefined;
-        }
-        if (this.initialSearchReplayFrameSecond !== undefined) {
-            window.cancelAnimationFrame(this.initialSearchReplayFrameSecond);
-            this.initialSearchReplayFrameSecond = undefined;
-        }
-    }
-
-    /** Executes one restored search-state entry if it is still the current persisted action. */
-    private executeRestoredSearchStateEntry(entry: SearchHistoryEntry): void {
-        const currentEntry = this.resolveStateEntry(this.stateService.search);
-        if (!currentEntry || isLegacySearchHistoryEntry(currentEntry) || !sameSearchHistoryEntry(currentEntry, entry)) {
-            return;
-        }
-        this.mirrorSearchStateToLastEntry(entry, true);
-        if (this.shouldSkipRestoredFeatureSearchEntry(entry)) {
-            this.reloadSearchHistory();
-            return;
-        }
-        this.executeSearchHistoryEntry(entry);
-        this.reloadSearchHistory();
-    }
-
-    /** Prefers the local full history entry over compact URL/search state when both identify the same action. */
-    private restoredEntryWithPayload(entry: SearchHistoryEntry): SearchHistoryEntry {
-        const lastEntry = normalizeResolvedSearchHistoryEntry(this.stateService.lastSearchHistoryEntry);
-        return lastEntry && sameSearchHistoryEntry(lastEntry, entry)
-            ? lastEntry
-            : entry;
-    }
-
     /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */
     private executeSearchHistoryEntry(entry: SearchHistoryEntry): void {
         this.searchInputValue = entry.input;
-        // Feature searches have their own persisted panel state. Omnibox history
-        // only restores the query text and must not create another search on reload.
-        if (entry.actionId === "features") {
-            return;
-        }
         this.runTarget(entry);
         this.dialog?.close(new Event("close-on-execute"));
     }
@@ -725,6 +648,44 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         localStorage.setItem("searchHistory", JSON.stringify(entries));
     }
 
+    /** Executes one omnibox action and records it in the bounded local history. */
+    private executeAndRememberSearchEntry(entry: SearchHistoryEntry): void {
+        this.saveSearchHistoryEntry(entry);
+        this.executeSearchHistoryEntry(entry);
+        this.reloadSearchHistory();
+    }
+
+    /** Inserts one history entry at the top while preserving bounded, deduplicated history. */
+    private saveSearchHistoryEntry(value: SearchHistoryEntry): void {
+        const searchHistoryString = localStorage.getItem("searchHistory");
+        let searchHistory: Array<SearchHistoryEntry> = [];
+        if (searchHistoryString) {
+            const parsed = JSON.parse(searchHistoryString) as unknown;
+            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
+                ? parsed
+                : [parsed];
+            const seen = new Set<string>();
+            for (const rawEntry of rawEntries) {
+                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
+                if (!entry) {
+                    continue;
+                }
+                const key = historyEntryDedupeKey(entry);
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                searchHistory.push(entry);
+            }
+        }
+        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
+        searchHistory.unshift(value);
+        while (searchHistory.length > 100) {
+            searchHistory.pop();
+        }
+        this.writeSearchHistory(searchHistory);
+    }
+
     /**
      * Reloads persisted search history and drops entries that no longer point at valid actions.
      */
@@ -792,9 +753,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
     }
 
-    /**
-     * Removes one persisted history entry and mirrors the change back to app state.
-     */
+    /** Removes one persisted history entry. */
     removeSearchHistoryEntry(entry: SearchHistoryEntry, event?: Event) {
         event?.preventDefault();
         event?.stopPropagation();
@@ -810,16 +769,12 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             ...(historyEntry.savedAt !== undefined ? {savedAt: historyEntry.savedAt} : {})
         })));
         this.reloadSearchHistory();
-        const activeSearch = normalizeResolvedSearchHistoryEntry(this.stateService.search);
-        if (activeSearch && historyEntryKey(activeSearch) === key) {
-            this.stateService.search = [];
-        }
     }
 
     /**
      * Parses decimal or degree-minute-second WGS84 coordinate strings, optionally with a tile level.
      */
-    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): {target: Rectangle | number[], label: string, coords: number[]} | undefined {
+    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): ParsedCoordinateJump | undefined {
         let lon = 0;
         let lat = 0;
         let level = 0;
@@ -904,21 +859,96 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         return undefined;
     }
 
-    /**
-     * Converts a numeric mapget tile id into a WGS84 rectangle for camera jumps.
-     */
-    parseMapgetTileId(value: string): Rectangle | undefined {
+    /** Converts a signed NDS.Live packed tile id into a WGS84 rectangle for camera jumps. */
+    parsePackedTileId(value: string): Rectangle | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
             return;
         }
         try {
-            const wgs84TileId = BigInt(value);
-            return Rectangle.fromDegrees(...coreLib.getTileBox(wgs84TileId));
+            const packedTileId = parsePackedTileIdValue(value);
+            if (!packedTileId) {
+                throw new Error("TileId is not a valid PackedTileId.");
+            }
+            return Rectangle.fromDegrees(...coreLib.getTileBox(packedTileId.value));
         } catch (e) {
-            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+            this.messageService.showError("Possibly malformed PackedTileId: " + (e as Error).message.toString());
         }
         return undefined;
+    }
+
+    /** Parses NDS coordinate pairs into either a point jump or a tile-extent jump when a level is present. */
+    parseNdsCoordinates(value: string, isXyOrder: boolean): ParsedCoordinateJump | undefined {
+        const parsed = parseNdsCoordinateString(value, isXyOrder);
+        if (!parsed) {
+            return undefined;
+        }
+        const label = this.ndsCoordinateLabel(parsed, isXyOrder);
+        if (parsed.level !== undefined) {
+            const tileId = packedTileIdFromParsedNdsCoordinates(parsed);
+            if (tileId === undefined) {
+                return undefined;
+            }
+            return {
+                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                label,
+                coords: [parsed.lat, parsed.lon],
+                x: parsed.x,
+                y: parsed.y,
+                level: parsed.level
+            };
+        }
+        return {
+            target: [parsed.lat, parsed.lon, 0],
+            label,
+            coords: [parsed.lat, parsed.lon],
+            x: parsed.x,
+            y: parsed.y
+        };
+    }
+
+    /** Parses a Morton code into either a point jump or a tile-extent jump when a level is present. */
+    parseMortonCoordinates(value: string): ParsedCoordinateJump | undefined {
+        const parsed = parseMortonCoordinateString(value);
+        if (!parsed) {
+            return undefined;
+        }
+        const label = this.mortonCoordinateLabel(parsed);
+        if (parsed.level !== undefined) {
+            const tileId = packedTileIdFromMortonString(value);
+            if (tileId === undefined) {
+                return undefined;
+            }
+            return {
+                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                label,
+                coords: [parsed.lat, parsed.lon],
+                x: parsed.x,
+                y: parsed.y,
+                level: parsed.level
+            };
+        }
+        return {
+            target: [parsed.lat, parsed.lon, 0],
+            label,
+            coords: [parsed.lat, parsed.lon],
+            x: parsed.x,
+            y: parsed.y
+        };
+    }
+
+    /** Builds the search-action label for parsed NDS coordinate input. */
+    private ndsCoordinateLabel(parsed: ParsedNdsCoordinateLabel, isXyOrder: boolean): string {
+        const ordered = isXyOrder
+            ? `x = ${parsed.x} | y = ${parsed.y}`
+            : `y = ${parsed.y} | x = ${parsed.x}`;
+        return parsed.level === undefined ? ordered : `${ordered} | level = ${parsed.level}`;
+    }
+
+    /** Builds the search-action label for parsed Morton-code input. */
+    private mortonCoordinateLabel(parsed: ParsedNdsCoordinateLabel): string {
+        const base = `x = ${parsed.x} | y = ${parsed.y}`;
+        return parsed.level === undefined ? base : `${base} | level = ${parsed.level}`;
     }
 
     /**
@@ -1023,6 +1053,16 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         return false;
     }
 
+    /** Validates integer NDS coordinate input accepted by the built-in NDS jump targets. */
+    validateNdsCoordinates(value: string, isXyOrder: boolean) {
+        return this.parseNdsCoordinates(value, isXyOrder) !== undefined;
+    }
+
+    /** Validates Morton-code input accepted by the built-in Morton jump target. */
+    validateMortonCoordinates(value: string) {
+        return this.parseMortonCoordinates(value) !== undefined;
+    }
+
     /**
      * Opens the action dialog and repositions the completion popup relative to the caret.
      */
@@ -1057,12 +1097,14 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      * Updates the omnibox value and recomputes active targets, inactive targets, and matching history entries.
      */
     setSearchValue(value: string) {
+        if (value !== this.searchInputValue) {
+            this.dismissedCompletionSignature = null;
+        }
         this.searchInputValue = value;
         if (this.acceptedCompletionCandidate?.query.trim() !== value.trim()) {
             this.acceptedCompletionCandidate = null;
         }
         if (!value) {
-            this.stateService.setSearchHistoryState(null);
             this.jumpService.targetValueSubject.next(value);
             this.updateLocationSearchQuery(value);
             this.refreshSearchMenu();
@@ -1143,13 +1185,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     targetToHistory(target: SearchTarget) {
         const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
         if (entry) {
-            if (target.id === "features") {
-                this.withSuppressedHistoryExecution(() => this.stateService.setSearchHistoryState(entry));
-                this.runTarget(entry);
-                this.dialog?.close(new Event("close-on-execute"));
-                return;
-            }
-            this.stateService.setSearchHistoryState(entry);
+            this.executeAndRememberSearchEntry(entry);
         }
     }
 
@@ -1272,6 +1308,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
         ]
         if (ignoredKeys.indexOf(event.key) == -1) {
+            this.dismissedCompletionSignature = null;
             this.searchInputChanged.next();
         }
     }
@@ -1289,7 +1326,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         if (dismissCompletionKeys.indexOf(event.key) >= 0) {
             if (this.completion.visible)
                 event.preventDefault();
-            this.completion.visible = false;
+            this.hideCompletionPopup();
             textarea.focus();
         }
 
@@ -1310,16 +1347,14 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
             if (this.searchInputValue.trim() && this.activeSearchItems.length) {
                 this.targetToHistory(this.activeSearchItems[0]);
-            } else {
-                this.stateService.setSearchHistoryState(null);
             }
 
             this.resetCompletion();
             textarea.blur();
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            if (this.completion.visible) {
-                this.resetCompletion();
+            if (this.completion.visible || this.completion.pending || this.completionItems.length > 0) {
+                this.dismissCompletionForCurrentInput();
                 return;
             } else if (this.searchInputValue) {
                 this.setSearchValue("");
@@ -1330,7 +1365,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 return;
             }
         } else if (event.key === 'Tab') {
-            if (this.completion.visible) {
+            if (this.shouldApplyCompletionOnEnter()) {
                 this.applyCompletion();
             }
         } else if (event.key === 'ArrowDown') {
@@ -1354,7 +1389,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 this.textarea.nativeElement.focus();
             } else {
                 const item = completion ?? this.completionItems[this.completion.selectionIndex];
-                if (!item) {
+                if (!item || (!completion && !this.shouldApplyCompletionOnEnter())) {
                     return;
                 }
                 this.setSearchValue(item.query);
@@ -1370,6 +1405,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.completionItems = [];
             this.completion.visible = false;
             this.completion.pending = false;
+            this.dismissedCompletionSignature = null;
         }
     }
 
@@ -1377,6 +1413,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private shouldApplyCompletionOnEnter(): boolean {
         return this.completion.visible
             && this.completionItems.length > 0
+            && !this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)
             && !this.searchService.hasExactCompletionCandidate(this.searchInputValue);
     }
 
@@ -1386,6 +1423,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     selectNextCompletion(next: boolean = true) {
         const direction = next && +1 || -1
         const count = this.completionItems.length || 0;
+        if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+            this.completion.selectionIndex = 0;
+            this.completion.visible = false;
+            return;
+        }
 
         let index = this.completion.selectionIndex
         if (count == 0)
@@ -1403,10 +1445,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Replays one persisted search history entry through the shared search-state channel.
+     * Executes one persisted search history entry directly.
      */
     selectHistoryEntry(entry: SearchHistoryEntry) {
-        this.stateService.setSearchHistoryState({
+        this.executeAndRememberSearchEntry({
             version: 2,
             actionId: entry.actionId,
             input: entry.input,
@@ -1465,34 +1507,27 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.handleGlobalDown(event);
     }
 
-    /**
-     * Central outside-click filter that ignores interactive controls and map-view interactions.
-     */
+    /** Central outside-click filter that treats every non-omnibox target as a dismissal. */
     private handleGlobalDown(event: Event): void {
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        const clickedInsideComponent = target ? this.elRef.nativeElement.contains(target as Node) : false;
-        const clickedInsideMapView = !!target?.closest('.mapviewer-renderlayer');
-        const clickedInsideResizablePanel = !!target?.closest('.resizable-container');
-
-        // Check if the clicked element is a form control or other interactive element we should ignore.
-        const clickedOnInteractiveElement = !!target && (
-            target.tagName === 'BUTTON' ||
-            target.tagName === 'INPUT' ||
-            target.tagName === 'TEXTAREA' ||
-            target.tagName === 'SELECT' ||
-            target.isContentEditable ||
-            !!target.closest('p-checkbox') ||
-            !!target.closest('p-dropdown') ||
-            !!target.closest('p-multiselect') ||
-            !!target.closest('p-calendar') ||
-            !!target.closest('p-inputnumber') ||
-            (!!target.closest('.p-component') && !clickedInsideMapView) ||
-            clickedInsideResizablePanel
-        );
-
-        if (!clickedInsideComponent && !clickedOnInteractiveElement) {
-            this.dialog.close(new MouseEvent(event.type));
+        if (!this.searchService.showFeatureSearchDialog && !this.completion.visible && !this.completion.pending) {
+            return;
         }
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target) {
+            return;
+        }
+        const clickedInsideComponent = this.elRef.nativeElement.contains(target as Node);
+        const clickedInsideCompletionPopup = !!target.closest('.search-completion-popup');
+        if (!clickedInsideComponent && !clickedInsideCompletionPopup) {
+            this.closeSearchOverlay(event);
+        }
+    }
+
+    /** Closes the action dialog and detached completion popup together. */
+    private closeSearchOverlay(event: Event): void {
+        this.completion.visible = false;
+        this.completion.pending = false;
+        this.dialog?.close(new MouseEvent(event.type));
     }
 
     /**
@@ -1506,8 +1541,13 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.searchService.clearCurrentCompletion();
             return;
         }
+        if (this.isCompletionDismissedFor(query, point ?? query.length)) {
+            this.hideCompletionPopup();
+            this.searchService.clearCurrentCompletion();
+            return;
+        }
 
-        this.searchService.completeQuery(query, point || query.length);
+        this.searchService.completeQuery(query, point ?? query.length);
         this.completion.selectionIndex = 0;
     }
 
@@ -1520,5 +1560,34 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.completionItems = [];
         this.completion.visible = false;
         this.completion.pending = false;
+        this.dismissedCompletionSignature = null;
+    }
+
+    /** Hides the popup locally without invalidating typed text or suppressing future completion requests. */
+    private hideCompletionPopup(): void {
+        this.completion.visible = false;
+        this.completion.pending = false;
+    }
+
+    /** Dismisses the current completion generation until the query text or caret changes. */
+    dismissCompletionForCurrentInput(): void {
+        this.dismissedCompletionSignature = this.completionSignature(
+            this.searchInputValue,
+            this.cursorPosition || this.searchInputValue.length
+        );
+        this.searchService.clearCurrentCompletion();
+        this.completion.selectionIndex = 0;
+        this.completionItems = [];
+        this.hideCompletionPopup();
+    }
+
+    /** Returns whether completion has been explicitly dismissed for this exact query/caret pair. */
+    private isCompletionDismissedFor(query: string, point: number): boolean {
+        return this.dismissedCompletionSignature === this.completionSignature(query, point);
+    }
+
+    /** Builds the completion identity suppressed by Esc/close until text or caret changes. */
+    private completionSignature(query: string, point: number): string {
+        return `${query}\u0000${point}`;
     }
 }

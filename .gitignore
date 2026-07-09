@@ -21,3 +21,4 @@ venv/
 dev-screenshots/
 dev/
 .venv*/
+mapget-cache.db

@@ -18,12 +18,13 @@ import {InfoMessageService} from "../shared/info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData, type InspectionTreeExpansionState} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {inspectionSearchNumberLiteral} from "./inspection-search.util";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -87,7 +88,38 @@ export class FeatureFilterOptions {
                 <tr>
                     @for (col of columns(); track col.key) {
                         <th ttResizableColumn>
-                            {{ col.header }}
+                            <div class="inspection-header-content">
+                                <span class="inspection-header-label">{{ col.header }}</span>
+                                @if (col.key === "key") {
+                                    <p-buttonGroup class="table-header-buttons"
+                                                   (mousedown)="$event.stopPropagation()">
+                                        <p-button class="table-header-button"
+                                                  severity="secondary"
+                                                  (click)="toggleFullExpansion($event)"
+                                                  [disabled]="fullCollapseActive"
+                                                  [pTooltip]="fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="bottom"
+                                                  [attr.aria-label]="fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'">
+                                            <span class="material-symbols-outlined">
+                                                {{ fullExpansionActive ? 'settings_backup_restore' : 'unfold_more' }}
+                                            </span>
+                                        </p-button>
+                                        <p-button class="table-header-button"
+                                                  severity="secondary"
+                                                  (click)="toggleFullCollapse($event)"
+                                                  [disabled]="fullExpansionActive"
+                                                  [pTooltip]="fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="bottom"
+                                            [attr.aria-label]="fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'">
+                                            <span class="material-symbols-outlined">
+                                                {{ fullCollapseActive ? 'settings_backup_restore' : 'unfold_less' }}
+                                            </span>
+                                        </p-button>
+                                    </p-buttonGroup>
+                                }
+                            </div>
                         </th>
                     }
                 </tr>
@@ -96,20 +128,26 @@ export class FeatureFilterOptions {
             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                 @if (rowData) {
                     <tr [ttRow]="rowNode"
+                        [attr.data-inspection-node-id]="rowData['nodeId']"
                         (click)="onRowClick($event, rowNode)"
                         (mouseenter)="onRowHover(rowData)"
                         (mouseleave)="onRowHoverExit(rowData)"
                         [ngClass]="getRowClasses(rowData)">
                         @for (col of columns(); track $index) {
-                            <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap;"
-                                pTooltip="{{rowData[col.key]}}" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
+                            <td [class]="getStyleClassByType(rowData) + ' inspection-tree-cell'"
+                                [pTooltip]="valueCellUsesBubblePopover(rowNode, rowData, col.key) ? '' : cellTooltip(rowNode, rowData, col.key)"
+                                tooltipPosition="left"
+                                [tooltipOptions]="tooltipOptions"
+                                (mouseenter)="onValueCellMouseEnter($event, rowNode, rowData, col.key)"
+                                (mouseleave)="onValueCellMouseLeave(col.key)">
                                 <div [class.inspection-first-cell-content]="$index === 0"
-                                     style="display: flex; flex-direction: row; gap: 0.25em;">
+                                     [class.inspection-value-cell-content]="col.key === 'value'"
+                                     class="inspection-cell-content">
                                     @if ($index === 0) {
                                         @if (shouldShowRowActions(rowNode, rowData)) {
                                             <button type="button"
                                                     class="inspection-row-actions"
-                                                    (click)="onRowActionsClick($event, rowData)"
+                                                    (click)="onRowActionsClick($event, rowNode, rowData)"
                                                     pTooltip="Row actions"
                                                     tooltipPosition="top">...</button>
                                         }
@@ -117,7 +155,59 @@ export class FeatureFilterOptions {
                                             <p-treeTableToggler [rowNode]="rowNode"/>
                                         </span>
                                     }
-                                    @if (col.key === "value" && isFeatureIdValueRow(rowData)) {
+                                    @if (shouldShowValueCopyButton(rowNode, rowData, col.key)) {
+                                        <p-button class="inspection-value-copy-button"
+                                                  severity="secondary"
+                                                  (click)="copyNodeValue($event, rowData)"
+                                                  pTooltip="Copy"
+                                                  [tooltipOptions]="{appendTo: 'body'}"
+                                                  tooltipPosition="left">
+                                            <span class="material-symbols-outlined">content_copy</span>
+                                        </p-button>
+                                    }
+                                    @if (col.key === "value" && shouldShowValueBubbles(rowNode, rowData)) {
+                                        <span class="inspection-value-bubbles">
+                                            @for (bubble of rowData["valueBubbles"]; track bubble.targetNodeId + ':' + bubble.label + ':' + $index) {
+                                                @if (hasBubbleChildren(bubble)) {
+                                                    <span class="inspection-value-bubble-group">
+                                                        @for (child of bubble.children; track child.targetNodeId + ':' + child.label + ':' + $index) {
+                                                            <span class="inspection-value-bubble-frame"
+                                                                  (mouseenter)="onValueBubbleHover(child)"
+                                                                  (mouseleave)="onValueBubbleHoverExit(rowData)">
+                                                                <button type="button"
+                                                                        class="inspection-value-bubble"
+                                                                        [ngClass]="valueBubbleClasses(child)"
+                                                                        (click)="onValueBubbleClick($event, child)">
+                                                                    {{ child.label }}
+                                                                </button>
+                                                                <button type="button"
+                                                                        class="inspection-value-bubble-copy"
+                                                                        (click)="copyValueBubble($event, child)">
+                                                                    <span class="material-symbols-outlined">content_copy</span>
+                                                                </button>
+                                                            </span>
+                                                        }
+                                                    </span>
+                                                } @else {
+                                                    <span class="inspection-value-bubble-frame"
+                                                          (mouseenter)="onValueBubbleHover(bubble)"
+                                                          (mouseleave)="onValueBubbleHoverExit(rowData)">
+                                                        <button type="button"
+                                                                class="inspection-value-bubble"
+                                                                [ngClass]="valueBubbleClasses(bubble)"
+                                                                (click)="onValueBubbleClick($event, bubble)">
+                                                            {{ bubble.label }}
+                                                        </button>
+                                                        <button type="button"
+                                                                class="inspection-value-bubble-copy"
+                                                                (click)="copyValueBubble($event, bubble)">
+                                                            <span class="material-symbols-outlined">content_copy</span>
+                                                        </button>
+                                                    </span>
+                                                }
+                                            }
+                                        </span>
+                                    } @else if (col.key === "value" && isFeatureIdValueRow(rowData)) {
                                         <a href=""
                                            (click)="onFeatureIdLinkClick($event, rowData)"
                                            (mouseenter)="onNodeValueHover(rowData, col.key)"
@@ -143,6 +233,14 @@ export class FeatureFilterOptions {
                                     }
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
                                         <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    }
+                                    @if (rowData.hasOwnProperty("valueCount") && $index === 0) {
+                                        <p-tag class="inspection-node-count-tag"
+                                               severity="info"
+                                               [rounded]="true"
+                                               [value]="rowData['valueCount']"
+                                               [pTooltip]="'Value count: ' + rowData['valueCount']"
+                                               tooltipPosition="top"/>
                                     }
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
@@ -210,6 +308,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private activeSoftHoverGroupId?: string;
     private activeStrongHoverGroupId?: string;
     private activeFeatureIdNodeId?: string;
+    private activeValueBubbleTargetNodeId?: string;
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -227,6 +326,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     showFilter = input<boolean>(true);
     geoJson = input<string>();
     enableSourceDataNavigation = input<boolean>(true);
+    featureIds = input<string[]>([]);
 
     filterFields: string[] = [
         "key",
@@ -239,6 +339,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     filterString = "";
     private suppressFilterEmit = false;
     private lastEmittedFilterText = "";
+    protected fullExpansionActive = false;
+    private expansionSnapshotBeforeFullExpand?: Map<string, boolean | undefined>;
+    protected fullCollapseActive = false;
+    private expansionSnapshotBeforeFullCollapse?: Map<string, boolean | undefined>;
     private frozen = false;
     private manualFreezeRequested = false;
     private dockFreezeRequested = false;
@@ -246,6 +350,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private destroyed = false;
     private resizeObserver?: ResizeObserver;
     private scrollerRecalcFrame?: number;
+    private valueBubblePopoverHost?: HTMLElement;
+    private valueBubblePopoverElement?: HTMLDivElement;
+    private valueBubblePopoverFrame?: number;
+    private readonly valueBubblePopoverGapPx = 8;
+    private readonly valueBubblePopoverMarginPx = 4;
+    private readonly valueBubblePopoverMaxWidthPx = 736;
+    private readonly valueBubblePopoverPreferredWidthPx = 480;
     private readonly onWindowResize = () => this.scheduleScrollerRecalc();
     private readonly onDockResizePauseStart = () => {
         this.dockFreezeRequested = true;
@@ -265,14 +376,18 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 private clipboardService: ClipboardService,
                 public mapService: InspectionSelectionService,
                 private jumpService: JumpTargetService,
-                private stateService: AppStateService,
+                public stateService: AppStateService,
                 private messageService: InfoMessageService,
                 private featureSearchService: FeatureSearchService) {
         effect(() => {
+            this.savePanelExpansionState();
             this.data = this.treeData();
-            if (this.isFeatureInspectionTree(this.data)) {
-                this.expandTreeNodes(this.data);
-            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+            this.applyInitialExpansion(this.data);
+            this.restorePanelExpansionState(this.data);
 
             this.refreshLayout();
             this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
@@ -293,6 +408,27 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             this.scrollToHighlightedIndex(index);
         }));
+        this.subscriptions.push(this.stateService.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
+            if (!this.data.length) {
+                return;
+            }
+            if (expandByDefault) {
+                this.setTreeExpansion(this.data, true, true);
+            } else if (this.isFeatureInspectionTree(this.data)) {
+                this.expandTreeNodes(this.data);
+            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+            this.data = [...this.data];
+            this.savePanelExpansionState();
+            this.refreshLayout();
+            this.cdr.markForCheck();
+        }));
+        this.subscriptions.push(this.stateService.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.stateService.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.stateService.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck()));
     }
 
     /** Attaches resize observers and window listeners once the PrimeNG tree has been rendered. */
@@ -314,6 +450,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Releases resize listeners, pending frames, and reactive subscriptions. */
     ngOnDestroy() {
+        this.savePanelExpansionState();
         this.unfreeze();
         this.destroyed = true;
         this.resizeObserver?.disconnect();
@@ -325,6 +462,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             window.cancelAnimationFrame(this.scrollerRecalcFrame);
             this.scrollerRecalcFrame = undefined;
         }
+        if (this.valueBubblePopoverFrame !== undefined) {
+            window.cancelAnimationFrame(this.valueBubblePopoverFrame);
+            this.valueBubblePopoverFrame = undefined;
+        }
+        this.valueBubblePopoverHost?.remove();
+        this.valueBubblePopoverHost = undefined;
+        this.valueBubblePopoverElement = undefined;
         this.subscriptions.forEach(s => s.unsubscribe());
     }
 
@@ -409,6 +553,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
         const scroller = (this.table as any)?.scrollableViewChild?.scroller;
         if (!scroller) {
+            this.updateValueBubbleOverflowMarkers();
             return;
         }
 
@@ -417,6 +562,21 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         scroller.calculateOptions?.();
         scroller.setContentPosition?.();
         this.cdr.detectChanges();
+        this.updateValueBubbleOverflowMarkers();
+    }
+
+    /** Marks value-bubble rows whose content is clipped so CSS can show one terminal ellipsis. */
+    private updateValueBubbleOverflowMarkers(): void {
+        const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
+        if (!hostElement) {
+            return;
+        }
+        hostElement.querySelectorAll<HTMLElement>(".inspection-value-bubbles").forEach(element => {
+            element.classList.toggle(
+                "inspection-value-bubbles-overflowing",
+                element.scrollWidth > element.clientWidth + 1
+            );
+        });
     }
 
     /** Measures the current rendered content height so parent panels can auto-size around it. */
@@ -457,6 +617,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.filterString = "";
         this.table.filterGlobal("" , 'contains');
         this.data = this.treeData();
+        this.applyInitialExpansion(this.data);
         this.emitFilterChange("");
     }
 
@@ -472,12 +633,17 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Toggles row expansion unless the user clicked an explicit action control. */
     onRowClick(event: MouseEvent, rowNode: any) {
         const target = event.target as HTMLElement | null;
-        if (target?.closest(".inspection-row-actions") || target?.closest(".p-treetable-toggler") || target?.closest("a")) {
+        if (target?.closest(".inspection-row-actions")
+            || target?.closest(".inspection-value-bubble")
+            || target?.closest(".p-treetable-toggler")
+            || target?.closest("a")) {
             return;
         }
         const node: TreeNode = rowNode.node;
         node.expanded = !node.expanded;
         this.data = [...this.data];
+        this.refreshLayout();
+        this.cdr.markForCheck();
     }
 
     /** Opens feature-id navigation from the value column while preserving text-selection behavior. */
@@ -493,27 +659,376 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
     }
 
+    /** Returns whether C++ supplied propagated child-value pills for this row. */
+    protected hasValueBubbles(rowData: any): boolean {
+        return Array.isArray(rowData?.["valueBubbles"]) && rowData["valueBubbles"].length > 0;
+    }
+
+    /** Provides one cell-level tooltip, using bubble labels only when bubbles are visibly replacing the value text. */
+    protected cellTooltip(rowNode: any, rowData: any, colKey: string): string {
+        if (colKey === "value" && this.shouldShowValueBubbles(rowNode, rowData)) {
+            return this.valueBubbleTooltip(rowData["valueBubbles"]);
+        }
+        const value = rowData?.[colKey];
+        return value === null || value === undefined ? "" : String(value);
+    }
+
+    /** Joins the visible bubble labels for the single value-cell tooltip. */
+    private valueBubbleTooltip(bubbles: any[]): string {
+        const labels: string[] = [];
+        for (const bubble of bubbles) {
+            const label = this.valueBubbleText(bubble);
+            if (label) {
+                labels.push(label);
+            }
+        }
+        return labels.join(" ");
+    }
+
+    /** Returns the flattened visible text for one bubble. */
+    private valueBubbleText(bubble: any): string {
+        if (this.hasBubbleChildren(bubble)) {
+            return bubble.children
+                .map((child: any) => this.valueBubbleText(child))
+                .filter((label: string) => label.length > 0)
+                .join(" ");
+        }
+        return typeof bubble?.label === "string" ? bubble.label : "";
+    }
+
+    /** Returns whether a value cell should use the structured bubble popover instead of a plain tooltip. */
+    protected valueCellUsesBubblePopover(rowNode: any, rowData: any, colKey: string): boolean {
+        return colKey === "value" && this.shouldShowValueBubbles(rowNode, rowData);
+    }
+
+    /** Shows the structured bubble popover next to collapsed summary rows. */
+    protected onValueCellMouseEnter(event: MouseEvent, rowNode: any, rowData: any, colKey: string): void {
+        if (!this.valueCellUsesBubblePopover(rowNode, rowData, colKey)) {
+            return;
+        }
+        const cell = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined;
+        if (!cell) {
+            return;
+        }
+        this.showValueBubblePopover(cell, rowData["valueBubbles"]);
+    }
+
+    /** Hides the structured bubble popover when the pointer leaves a value cell. */
+    protected onValueCellMouseLeave(colKey: string): void {
+        if (colKey !== "value") {
+            return;
+        }
+        this.hideValueBubblePopover();
+    }
+
+
+    /** Builds the value-bubble popover in document.body so undocked dialogs cannot clip it. */
+    private showValueBubblePopover(cell: HTMLElement, bubbles: any[]): void {
+        const container = this.ensureValueBubblePopoverElement();
+        const content = document.createElement("div");
+        content.className = "inspection-value-bubble-popover-content";
+        for (const bubble of bubbles) {
+            content.appendChild(this.createValueBubblePopoverNode(bubble));
+        }
+        container.replaceChildren(content);
+        container.style.visibility = "hidden";
+        container.style.display = "block";
+        container.style.width = "";
+        container.style.maxWidth = `${this.valueBubblePopoverPreferredWidthPx}px`;
+        this.alignValueBubblePopover(cell);
+        if (this.valueBubblePopoverFrame !== undefined) {
+            window.cancelAnimationFrame(this.valueBubblePopoverFrame);
+        }
+        this.valueBubblePopoverFrame = window.requestAnimationFrame(() => {
+            this.valueBubblePopoverFrame = undefined;
+            this.alignValueBubblePopover(cell);
+        });
+    }
+
+    /** Returns the singleton body-level popover element used for structured value previews. */
+    private ensureValueBubblePopoverElement(): HTMLDivElement {
+        if (this.valueBubblePopoverElement) {
+            return this.valueBubblePopoverElement;
+        }
+        const element = document.createElement("div");
+        element.className = "inspection-value-bubble-popover";
+        element.style.display = "none";
+        const host = document.createElement("inspection-tree");
+        host.className = "inspection-value-bubble-popover-host";
+        host.appendChild(element);
+        document.body.appendChild(host);
+        this.valueBubblePopoverHost = host;
+        this.valueBubblePopoverElement = element;
+        return element;
+    }
+
+    /** Converts one bubble tree to non-interactive popover DOM while reusing normal bubble styling. */
+    private createValueBubblePopoverNode(bubble: any): HTMLElement {
+        if (this.hasBubbleChildren(bubble)) {
+            const group = document.createElement("span");
+            group.className = "inspection-value-bubble-group inspection-value-bubble-popover-group";
+            for (const child of bubble.children) {
+                group.appendChild(this.createValueBubblePopoverLeaf(child));
+            }
+            return group;
+        }
+        return this.createValueBubblePopoverLeaf(bubble);
+    }
+
+    /** Converts one leaf bubble to a styled non-interactive popover item. */
+    private createValueBubblePopoverLeaf(bubble: any): HTMLElement {
+        const item = document.createElement("span");
+        item.classList.add("inspection-value-bubble", "inspection-value-bubble-popover-item");
+        for (const [className, enabled] of Object.entries(this.valueBubbleClasses(bubble))) {
+            if (enabled) {
+                item.classList.add(className);
+            }
+        }
+        item.textContent = this.valueBubbleText(bubble);
+        return item;
+    }
+
+    /** Hides and detaches transient state for the body-level value-bubble popover. */
+    private hideValueBubblePopover(): void {
+        if (this.valueBubblePopoverFrame !== undefined) {
+            window.cancelAnimationFrame(this.valueBubblePopoverFrame);
+            this.valueBubblePopoverFrame = undefined;
+        }
+        if (this.valueBubblePopoverElement) {
+            this.valueBubblePopoverElement.style.display = "none";
+        }
+    }
+
+    /** Repositions the value popover to the left of the inspected value cell without covering it. */
+    private alignValueBubblePopover(cell: HTMLElement): void {
+        const container = this.valueBubblePopoverElement;
+        if (!container || container.style.display === "none") {
+            return;
+        }
+        const cellRect = cell.getBoundingClientRect();
+        const desiredWidth = Math.min(
+            container.scrollWidth || this.valueBubblePopoverPreferredWidthPx,
+            this.valueBubblePopoverMaxWidthPx
+        );
+        const placement = this.calculateValueBubblePopoverPlacement(cellRect, desiredWidth);
+        container.style.maxWidth = `${placement.maxWidth}px`;
+        if (placement.width === undefined) {
+            container.style.width = "";
+        } else {
+            container.style.width = `${placement.width}px`;
+        }
+        const top = Math.min(
+            Math.max(this.valueBubblePopoverMarginPx, cellRect.top + cellRect.height / 2 - container.offsetHeight / 2),
+            Math.max(this.valueBubblePopoverMarginPx, window.innerHeight - container.offsetHeight - this.valueBubblePopoverMarginPx)
+        );
+        container.style.left = `${placement.left}px`;
+        container.style.top = `${top}px`;
+        container.style.visibility = "visible";
+    }
+
+    /** Computes left-side placement and width for a value bubble popover without overlapping the source cell. */
+    private calculateValueBubblePopoverPlacement(cellRect: DOMRect, desiredWidth: number): {
+        left: number;
+        maxWidth: number;
+        width: number | undefined;
+    } {
+        const leftSpace = Math.max(1, cellRect.left - this.valueBubblePopoverGapPx - this.valueBubblePopoverMarginPx);
+        const maxWidth = Math.max(1, Math.min(this.valueBubblePopoverMaxWidthPx, leftSpace));
+        const width = desiredWidth > maxWidth ? maxWidth : undefined;
+        const renderedWidth = width ?? Math.min(desiredWidth, maxWidth);
+        const left = Math.max(
+            this.valueBubblePopoverMarginPx,
+            Math.min(
+                cellRect.left - renderedWidth - this.valueBubblePopoverGapPx,
+                window.innerWidth - renderedWidth - this.valueBubblePopoverMarginPx
+            )
+        );
+        return {
+            left,
+            maxWidth,
+            width
+        };
+    }
+
+    /** Shows summary bubbles only while their source children are collapsed. */
+    protected shouldShowValueBubbles(rowNode: any, rowData: any): boolean {
+        if (!this.hasValueBubbles(rowData)) {
+            return false;
+        }
+        const node = rowNode?.node as TreeNode | undefined;
+        return !(this.hasChildNodes(node) && node?.expanded);
+    }
+
+    /** Returns whether a propagated bubble is a one-level visual group emitted by C++. */
+    protected hasBubbleChildren(bubble: any): boolean {
+        return Array.isArray(bubble?.children) && bubble.children.length > 0;
+    }
+
+    /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
+    protected valueBubbleClasses(bubble: any): Record<string, boolean> {
+        const kind = typeof bubble?.kind === "string" && bubble.kind.length ? bubble.kind : "scalar";
+        const classes: Record<string, boolean> = {
+            [`inspection-value-bubble-${kind}`]: true
+        };
+        if (this.stateService.inspectionValueVaryColors) {
+            classes[`inspection-value-bubble-color-${this.valueBubbleColorIndex(bubble)}`] = true;
+        }
+        if (this.stateService.inspectionValueVaryOutlines) {
+            classes[`inspection-value-bubble-outline-${this.valueBubbleOutlineIndex(bubble)}`] = true;
+        }
+        if (this.stateService.inspectionValueVaryStriping) {
+            classes[`inspection-value-bubble-stripe-${this.valueBubbleStripeIndex(bubble)}`] = true;
+        }
+        return classes;
+    }
+
+    /** Hashes the source target/label so color and outline assignments survive regrouping. */
+    private valueBubbleHash(bubble: any): number {
+        const key = `${bubble?.colorKey ?? bubble?.label ?? ""}`;
+        let hash = 0;
+        for (let i = 0; i < key.length; ++i) {
+            hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+        }
+        return Math.abs(hash);
+    }
+
+    /** Maps a bubble's stable hash to the color palette. */
+    private valueBubbleColorIndex(bubble: any): number {
+        return this.valueBubbleHash(bubble) % 10;
+    }
+
+    /** Maps a bubble's stable hash to an additional non-color visual discriminator. */
+    private valueBubbleOutlineIndex(bubble: any): number {
+        if (this.isValidityBubble(bubble)) {
+            return 6;
+        }
+        const nonValidityOutlines = [0, 1, 2, 3, 4, 5, 7];
+        return nonValidityOutlines[Math.floor(this.valueBubbleHash(bubble) / 10) % nonValidityOutlines.length];
+    }
+
+    /** Maps a bubble's stable hash to a subtle background stripe discriminator. */
+    private valueBubbleStripeIndex(bubble: any): number {
+        return Math.floor(this.valueBubbleHash(bubble) / 80) % 5;
+    }
+
+    /** Returns whether a bubble should use the dedicated validity outline family. */
+    private isValidityBubble(bubble: any): boolean {
+        return typeof bubble?.kind === "string" && bubble.kind.startsWith("validity");
+    }
+
+    /** Expands and highlights the inspection row represented by one propagated value bubble. */
+    protected onValueBubbleClick(event: MouseEvent, bubble: any): void {
+        event.preventDefault();
+        event.stopPropagation();
+        const targetNodeId = bubble?.targetNodeId;
+        if (typeof targetNodeId !== "string" || !targetNodeId.length) {
+            return;
+        }
+        const targetRow = this.rowDataForNodeId(this.data, targetNodeId);
+        if (bubble?.kind === "feature-id" && targetRow) {
+            this.onValueClick(event, targetRow);
+            return;
+        }
+        if (!this.expandPathToNodeId(this.data, targetNodeId)) {
+            return;
+        }
+        this.activeValueBubbleTargetNodeId = targetNodeId;
+        this.data = [...this.data];
+        this.cdr.detectChanges();
+        if (!this.isNodeIdVisible(targetNodeId)) {
+            this.scrollToHighlightedIndex(this.visibleIndexForNodeId(this.data, targetNodeId));
+        }
+        this.cdr.markForCheck();
+    }
+
+    /** Copies a bubble label without also expanding/highlighting its source row. */
+    protected copyValueBubble(event: MouseEvent, bubble: any): void {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = this.valueBubbleText(bubble);
+        if (value) {
+            this.copyToClipboard(value);
+        }
+    }
+
+    /** Activates the same map hover behavior as the row represented by a bubble. */
+    protected onValueBubbleHover(bubble: any): void {
+        const hoverTargetNodeId = typeof bubble?.hoverTargetNodeId === "string" && bubble.hoverTargetNodeId.length
+            ? bubble.hoverTargetNodeId
+            : bubble?.targetNodeId;
+        const targetRow = this.rowDataForNodeId(this.data, hoverTargetNodeId);
+        if (!targetRow) {
+            return;
+        }
+        if (this.isFeatureIdValueRow(targetRow)) {
+            this.activeFeatureIdNodeId = typeof targetRow?.["nodeId"] === "string"
+                ? targetRow["nodeId"]
+                : undefined;
+            this.jumpService.highlightByJumpTargetFilter(
+                targetRow["mapId"],
+                targetRow["value"],
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            return;
+        }
+        this.highlightRowHoverTarget(targetRow);
+    }
+
+    /** Restores the owning row hover state after leaving a bubble. */
+    protected onValueBubbleHoverExit(rowData: any): void {
+        this.activeFeatureIdNodeId = undefined;
+        this.highlightRowHoverTarget(rowData);
+    }
+
+    /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
+    protected shouldShowValueCopyButton(rowNode: any, rowData: any, colKey: string): boolean {
+        if (colKey !== "value"
+            || this.hasValueBubbles(rowData)
+            || this.hasChildNodes(rowNode?.node)
+            || !rowData?.hasOwnProperty?.("value")) {
+            return false;
+        }
+        const value = rowData["value"];
+        return value !== null && value !== undefined && String(value).length > 0;
+    }
+
+    /** Copies the exact value-cell text without also toggling the row or following FeatureId links. */
+    protected copyNodeValue(event: MouseEvent, rowData: any): void {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = rowData?.["value"];
+        if (value === null || value === undefined || String(value).length === 0) {
+            return;
+        }
+        this.copyToClipboard(String(value));
+    }
+
     /** Opens the row action menu for copy/docs/search-path helpers. */
-    onRowActionsClick(event: MouseEvent, rowData: any) {
+    onRowActionsClick(event: MouseEvent, rowNode: any, rowData: any) {
         this.inspectionMenu.toggle(event);
         event.stopPropagation();
         const key = rowData["key"];
-        const value = rowData["value"];
-        this.inspectionMenuItems = [
-            {
-                label: 'Copy Key/Value',
-                command: () => {
-                    this.copyToClipboard(`{${key}: ${value}}`);
+        const value = this.copyableValueForRow(rowData);
+        const node = rowNode?.node as TreeNode | undefined;
+        const hasChildren = this.hasChildNodes(node);
+        const showScalarActions = this.shouldShowScalarRowActions(rowNode, rowData);
+        this.inspectionMenuItems = [];
+        if (showScalarActions) {
+            this.inspectionMenuItems.push(
+                {
+                    label: 'Copy Key/Value',
+                    command: () => {
+                        this.copyToClipboard(`{${key}: ${value}}`);
+                    }
+                },
+                {
+                    label: 'Open NDS.Live Docs',
+                    command: () => {
+                        window.open(`https://doc.nds.live/search?q=${key}`, "_blank");
+                    }
                 }
-            },
-            {
-                label: 'Open NDS.Live Docs',
-                command: () => {
-                    window.open(`https://doc.nds.live/search?q=${key}`, "_blank");
-                }
-            }
-        ];
-        if (rowData.hasOwnProperty("geoJsonPath")) {
+            );
+        }
+        if (showScalarActions && rowData.hasOwnProperty("geoJsonPath")) {
             const path = rowData["geoJsonPath"];
             this.inspectionMenuItems.push({
                 label: 'Copy Search Path',
@@ -537,19 +1052,47 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 });
             }
         }
+        if (hasChildren && node) {
+            if (this.inspectionMenuItems.length) {
+                this.inspectionMenuItems.push({separator: true});
+            }
+            this.inspectionMenuItems.push(
+                {
+                    label: 'Expand child nodes',
+                    command: () => this.expandChildNodes(node)
+                },
+                {
+                    label: 'Collapse child nodes',
+                    command: () => this.collapseChildNodes(node)
+                }
+            );
+        }
         const inspectionTarget = this.inspectionTargetForRow(rowData);
         const mapTileKey = typeof rowData?.["mapTileKey"] === "string" ? rowData["mapTileKey"] : "";
         if (inspectionTarget && mapTileKey) {
+            if (this.inspectionMenuItems.length) {
+                this.inspectionMenuItems.push({separator: true});
+            }
+            const targetLabel = inspectionTarget.includes(":relation#") ? "Relation/Validity" : "Attr/Validity";
             this.inspectionMenuItems.push({
                 label: this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
-                    ? 'Unhighlight Attr/Validity'
-                    : 'Highlight Attr/Validity',
+                    ? `Unhighlight ${targetLabel}`
+                    : `Highlight ${targetLabel}`,
                 icon: 'pi pi-bullseye',
                 command: () => {
                     this.stateService.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
                 }
             });
         }
+    }
+
+    /** Returns the display value used by row-level copy actions, including collapsed bubble summaries. */
+    private copyableValueForRow(rowData: any): string {
+        if (this.hasValueBubbles(rowData)) {
+            return this.valueBubbleTooltip(rowData["valueBubbles"]);
+        }
+        const value = rowData?.["value"];
+        return value === null || value === undefined ? "" : String(value);
     }
 
     /** Returns the attribute or validity pseudo-feature id represented by a row, preferring exact validities. */
@@ -560,7 +1103,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             rowData?.["softHoverGroupId"]
         ];
         return candidates.find((value): value is string =>
-            typeof value === "string" && value.includes(":attribute#"));
+            typeof value === "string" && (value.includes(":attribute#") || value.includes(":relation#")));
     }
 
     /** Checks whether this panel already highlights the requested attribute/validity target. */
@@ -622,7 +1165,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Falls back to the primitive JS value when nested inspection rows lack precise type metadata. */
     private searchLiteralForUntypedInspectionValue(value: unknown): string | undefined {
-        if (typeof value === "number") {
+        if (typeof value === "number" || typeof value === "bigint") {
             return this.searchNumberLiteral(value);
         }
         if (typeof value === "boolean") {
@@ -636,17 +1179,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Converts a rendered numeric inspection value without accepting malformed partial numbers. */
     private searchNumberLiteral(value: unknown): string | undefined {
-        if (typeof value === "number" && Number.isFinite(value)) {
-            return String(value);
-        }
-        if (typeof value !== "string") {
-            return undefined;
-        }
-        const trimmed = value.trim();
-        return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed) &&
-            Number.isFinite(Number(trimmed))
-            ? trimmed
-            : undefined;
+        return inspectionSearchNumberLiteral(value);
     }
 
     /** Converts boolean inspection values regardless of whether Angular received a boolean or rendered string. */
@@ -790,9 +1323,22 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return 0;
     }
 
-    /** Hides row actions for root sections where copy/docs helpers are not useful. */
+    /** Shows row actions when a row has useful scalar actions or subtree controls. */
     shouldShowRowActions(rowNode: any, rowData: any): boolean {
+        if (this.rowLevel(rowNode) <= 0) {
+            return false;
+        }
+        return this.shouldShowScalarRowActions(rowNode, rowData) || this.hasChildNodes(rowNode?.node);
+    }
+
+    /** Keeps copy/search/doc actions off root sections where only subtree controls are useful. */
+    private shouldShowScalarRowActions(rowNode: any, rowData: any): boolean {
         return this.rowLevel(rowNode) > 0 && rowData?.["type"] !== this.InspectionValueType.SECTION.value;
+    }
+
+    /** Returns whether a PrimeNG tree wrapper has expandable children. */
+    private hasChildNodes(node: TreeNode | undefined): boolean {
+        return Array.isArray(node?.children) && node.children.length > 0;
     }
 
     /** Builds the CSS class map for stage badges, hover groups, and special inspection rows. */
@@ -805,6 +1351,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             : undefined;
         return {
             [rowData?.styleClass ?? ""]: !!rowData?.styleClass,
+            "inspection-value-bubble-target": typeof rowData?.["nodeId"] === "string" &&
+                rowData["nodeId"] === this.activeValueBubbleTargetNodeId,
             "inspection-selection-soft": rowData?.["selectionHighlight"] === "soft",
             "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
             "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
@@ -848,6 +1396,78 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Thin wrapper so menus and template actions share one clipboard helper. */
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
+    }
+
+    /** Toggles between all nodes expanded and the expansion snapshot captured before that action. */
+    protected toggleFullExpansion(event: MouseEvent) {
+        event.stopPropagation();
+        if (this.fullExpansionActive) {
+            if (this.expansionSnapshotBeforeFullExpand) {
+                this.restoreExpansionState(this.data, this.expansionSnapshotBeforeFullExpand);
+            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+        } else {
+            this.expansionSnapshotBeforeFullExpand = this.captureExpansionState(this.data);
+            this.setTreeExpansion(this.data, true);
+            this.fullExpansionActive = true;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+        }
+        this.data = [...this.data];
+        this.savePanelExpansionState();
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Toggles between all nodes collapsed and the expansion snapshot captured before that action. */
+    protected toggleFullCollapse(event: MouseEvent) {
+        event.stopPropagation();
+        if (this.fullCollapseActive) {
+            if (this.expansionSnapshotBeforeFullCollapse) {
+                this.restoreExpansionState(this.data, this.expansionSnapshotBeforeFullCollapse);
+            }
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+        } else {
+            this.expansionSnapshotBeforeFullCollapse = this.captureExpansionState(this.data);
+            this.collapseTreeBelowRootSections(this.data);
+            this.fullCollapseActive = true;
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+        }
+        this.data = [...this.data];
+        this.savePanelExpansionState();
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Expands the selected row and every descendant below it. */
+    private expandChildNodes(node: TreeNode) {
+        node.expanded = true;
+        this.setDescendantExpansion(node, true);
+        this.data = [...this.data];
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Collapses the selected parent and every descendant below it. */
+    private collapseChildNodes(node: TreeNode) {
+        node.expanded = false;
+        this.setDescendantExpansion(node, false);
+        this.data = [...this.data];
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
+    /** Recursively applies expansion to descendants, excluding the supplied node itself. */
+    private setDescendantExpansion(node: TreeNode, expanded: boolean) {
+        for (const child of node.children ?? []) {
+            if (this.hasChildNodes(child)) {
+                child.expanded = expanded;
+                this.setDescendantExpansion(child, expanded);
+            }
+        }
     }
 
     /** Opens the GeoJSON actions menu for the current inspection payload. */
@@ -923,12 +1543,128 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Applies the global filter and restores default expansion when the filter is cleared. */
     filterTree(filterString: string) {
         if (!filterString) {
+            this.savePanelExpansionState();
             this.data = this.treeData();
-            this.expandTreeNodes(this.data);
+            this.applyInitialExpansion(this.data);
+            this.restorePanelExpansionState(this.data);
         }
 
         const query = filterString.toLowerCase();
         this.table.filterGlobal(query, "contains");
+    }
+
+    /** Applies either the global expand-by-default preference or the legacy feature-tree heuristic. */
+    private applyInitialExpansion(nodes: TreeTableNode[]): void {
+        if (this.stateService.inspectionTreeExpandByDefault) {
+            this.setTreeExpansion(nodes, true, true);
+            return;
+        }
+        if (this.isFeatureInspectionTree(nodes)) {
+            this.expandTreeNodes(nodes);
+        }
+    }
+
+    /** Sets expansion state throughout a tree, optionally preserving explicit user/restored states. */
+    private setTreeExpansion(nodes: TreeNode[], expanded: boolean, onlyUndefined = false): void {
+        nodes.forEach(node => {
+            if (this.hasChildNodes(node) && (!onlyUndefined || node.expanded === undefined)) {
+                node.expanded = expanded;
+            }
+            if (node.children) {
+                this.setTreeExpansion(node.children, expanded, onlyUndefined);
+            }
+        });
+    }
+
+    /** Collapses all expandable rows while keeping top-level inspection section rows open. */
+    private collapseTreeBelowRootSections(nodes: TreeNode[], depth = 0): void {
+        nodes.forEach(node => {
+            const isRootSection = depth === 0 && node.data?.["type"] === this.InspectionValueType.SECTION.value;
+            if (this.hasChildNodes(node)) {
+                node.expanded = isRootSection ? true : false;
+            }
+            if (node.children) {
+                this.collapseTreeBelowRootSections(node.children, depth + 1);
+            }
+        });
+    }
+
+    /** Captures current expansion values using stable node ids when available. */
+    private captureExpansionState(
+        nodes: TreeNode[],
+        result = new Map<string, boolean | undefined>(),
+        path: number[] = []
+    ): Map<string, boolean | undefined> {
+        nodes.forEach((node, index) => {
+            const nodePath = [...path, index];
+            result.set(this.expansionStateKey(node, nodePath), node.expanded);
+            if (node.children) {
+                this.captureExpansionState(node.children, result, nodePath);
+            }
+        });
+        return result;
+    }
+
+    /** Saves expansion state so dock/undock remounts keep the user's current tree shape. */
+    private savePanelExpansionState(): void {
+        if (!this.data.length) {
+            return;
+        }
+        const state: InspectionTreeExpansionState = {
+            expandedNodes: this.captureExpansionState(this.data),
+            fullExpansionActive: this.fullExpansionActive,
+            fullCollapseActive: this.fullCollapseActive
+        };
+        if (this.expansionSnapshotBeforeFullExpand) {
+            state.expansionSnapshotBeforeFullExpand = this.expansionSnapshotBeforeFullExpand;
+        }
+        if (this.expansionSnapshotBeforeFullCollapse) {
+            state.expansionSnapshotBeforeFullCollapse = this.expansionSnapshotBeforeFullCollapse;
+        }
+        this.stateService.setInspectionTreeExpansionState(this.panelId(), state);
+    }
+
+    /** Restores expansion state captured by a previous component instance for the same panel. */
+    private restorePanelExpansionState(nodes: TreeNode[]): void {
+        const state = this.stateService.getInspectionTreeExpansionState(this.panelId());
+        if (!state) {
+            return;
+        }
+        this.restoreExpansionState(nodes, state.expandedNodes, [], false);
+        this.fullExpansionActive = state.fullExpansionActive;
+        this.expansionSnapshotBeforeFullExpand = state.expansionSnapshotBeforeFullExpand;
+        this.fullCollapseActive = state.fullCollapseActive;
+        this.expansionSnapshotBeforeFullCollapse = state.expansionSnapshotBeforeFullCollapse;
+    }
+
+    /** Restores a previously captured expansion map, collapsing new expandable nodes by default. */
+    private restoreExpansionState(
+        nodes: TreeNode[],
+        snapshot: Map<string, boolean | undefined>,
+        path: number[] = [],
+        collapseMissing = true
+    ): void {
+        nodes.forEach((node, index) => {
+            const nodePath = [...path, index];
+            const key = this.expansionStateKey(node, nodePath);
+            if (snapshot.has(key)) {
+                node.expanded = snapshot.get(key);
+            } else if (collapseMissing) {
+                node.expanded = false;
+            }
+            if (node.children) {
+                this.restoreExpansionState(node.children, snapshot, nodePath, collapseMissing);
+            }
+        });
+    }
+
+    /** Returns the most stable available key for expansion snapshots. */
+    private expansionStateKey(node: TreeNode, path: number[]): string {
+        const nodeId = node.data?.["nodeId"];
+        if (typeof nodeId === "string" && nodeId.length > 0) {
+            return `node:${nodeId}`;
+        }
+        return `path:${path.join(".")}`;
     }
 
     /** Synchronizes the input field, tree filter state, and shared filter text binding. */
@@ -946,14 +1682,90 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             const isRelationTypeNode = parent && parent.data["key"] === "Relations";
             const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
+            const isAttributeLayerNode = parent?.data?.["key"] === "Attribute Layers";
+            const attributeCount = node.children?.length ?? 0;
             if (node.expanded === undefined) {
-                node.expanded = isTopLevelNode || isRelationTypeNode || isSection || hasSingleChild;
+                node.expanded = isTopLevelNode
+                    || isRelationTypeNode
+                    || isSection
+                    || hasSingleChild
+                    || (isAttributeLayerNode && attributeCount <= 10);
             }
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
             }
         });
+    }
+
+    /** Opens the ancestor chain for a node id emitted by the C++ inspection converter. */
+    private expandPathToNodeId(nodes: TreeNode[], targetNodeId: string): boolean {
+        for (const node of nodes) {
+            if (node.data?.["nodeId"] === targetNodeId) {
+                node.expanded = true;
+                return true;
+            }
+            if (node.children && this.expandPathToNodeId(node.children, targetNodeId)) {
+                node.expanded = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Computes the virtual-scroll row index for an already-expanded node id. */
+    private visibleIndexForNodeId(nodes: TreeNode[], targetNodeId: string): number | undefined {
+        let index = 0;
+        const visit = (nodeList: TreeNode[]): number | undefined => {
+            for (const node of nodeList) {
+                if (node.data?.["nodeId"] === targetNodeId) {
+                    return index;
+                }
+                index += 1;
+                if (node.expanded && node.children?.length) {
+                    const childIndex = visit(node.children);
+                    if (childIndex !== undefined) {
+                        return childIndex;
+                    }
+                }
+            }
+            return undefined;
+        };
+        return visit(nodes);
+    }
+
+    /** Finds the rendered row data for a C++ node id. */
+    private rowDataForNodeId(nodes: TreeNode[], targetNodeId: unknown): any | undefined {
+        if (typeof targetNodeId !== "string" || !targetNodeId.length) {
+            return undefined;
+        }
+        for (const node of nodes) {
+            if (node.data?.["nodeId"] === targetNodeId) {
+                return node.data;
+            }
+            const childResult = this.rowDataForNodeId(node.children ?? [], targetNodeId);
+            if (childResult) {
+                return childResult;
+            }
+        }
+        return undefined;
+    }
+
+    /** Checks whether the highlighted row is already rendered inside the scroll viewport. */
+    private isNodeIdVisible(targetNodeId: string): boolean {
+        const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
+        if (!hostElement) {
+            return false;
+        }
+        const targetRow = Array.from(hostElement.querySelectorAll<HTMLElement>("[data-inspection-node-id]"))
+            .find(element => element.dataset["inspectionNodeId"] === targetNodeId);
+        const viewport = hostElement.querySelector<HTMLElement>(".p-scroller-viewport, .p-treetable-scrollable-body");
+        if (!targetRow || !viewport) {
+            return false;
+        }
+        const rowBounds = targetRow.getBoundingClientRect();
+        const viewportBounds = viewport.getBoundingClientRect();
+        return rowBounds.top >= viewportBounds.top && rowBounds.bottom <= viewportBounds.bottom;
     }
 
     /** Scrolls virtual inspection trees to selected attr/validity rows after PrimeNG has applied data changes. */

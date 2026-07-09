@@ -17,6 +17,40 @@ export class InfoMessageService {
         this.messageService.add({ key: 'tc', severity: 'error', summary: 'Error', detail: message });
     }
 
+    /** Shows one sticky backend connection error, replacing any previous connection-status toast. */
+    showBackendConnectionError(message: string) {
+        this.messageService.clear('backend-connection');
+        this.messageService.add({
+            key: 'backend-connection',
+            severity: 'error',
+            summary: 'Backend Error',
+            detail: message,
+            sticky: true
+        });
+    }
+
+    /** Clears the sticky backend connection toast after the backend connection recovers. */
+    clearBackendConnectionError() {
+        this.messageService.clear('backend-connection');
+    }
+
+    /** Shows one sticky backend protocol error, replacing any previous protocol-status toast. */
+    showBackendProtocolError(message: string) {
+        this.messageService.clear('backend-protocol');
+        this.messageService.add({
+            key: 'backend-protocol',
+            severity: 'error',
+            summary: 'Backend Protocol Mismatch',
+            detail: message,
+            sticky: true
+        });
+    }
+
+    /** Clears the sticky backend protocol toast after a compatible connection is established. */
+    clearBackendProtocolError() {
+        this.messageService.clear('backend-protocol');
+    }
+
     /** Emits a warning toast through PrimeNG's global message service. */
     showWarning(message: string) {
         this.messageService.add({ key: 'tc', severity: 'warn', summary: 'Warning', detail: message });

@@ -293,7 +293,7 @@ describe('StyleService', () => {
         const saveImportedSpy = vi.spyOn(service, 'saveImportedStyles');
         const reapplySpy = vi.spyOn(service, 'reapplyStyle');
 
-        const result = await service.importStyleYamlFile({} as any, file, undefined);
+        const result = await service.importStyleYamlFile(file);
 
         (globalThis as any).FileReader = originalFileReader;
 
@@ -328,6 +328,7 @@ describe('StyleService', () => {
         } as any);
         service.importedStylesCount = 1;
         service.styleUrls = [{id: 'ImportStyle', url: 'bundle/styles/import.yaml'} as any];
+        service.styleGroups.next(service.computeStyleGroups());
 
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
         const exportSpy = vi.spyOn(service, 'exportStyleYamlFile').mockReturnValue(true);
@@ -338,6 +339,7 @@ describe('StyleService', () => {
         const reapplySpy = vi.spyOn(service, 'reapplyStyle');
 
         service.deleteStyle('ImportStyle');
+        expect(service.styleGroups.getValue().every((style: any) => style.id !== 'ImportStyle')).toBe(true);
         await Promise.resolve();
 
         expect(confirmSpy).toHaveBeenCalled();

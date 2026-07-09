@@ -170,15 +170,17 @@ describe('JumpTargetService', () => {
         ]);
     });
 
-    it('validates mapget tile IDs as numeric without whitespace', () => {
+    it('validates packed tile IDs as signed NDS.Live tile ids without whitespace', () => {
         const {service} = createService();
 
-        expect(service.validateMapgetTileId('123')).toBe(true);
-        expect(service.validateMapgetTileId(' 123 ')).toBe(true);
-        expect(service.validateMapgetTileId('')).toBe(false);
-        expect(service.validateMapgetTileId('   ')).toBe(false);
-        expect(service.validateMapgetTileId('12x')).toBe(false);
-        expect(service.validateMapgetTileId('1 2')).toBe(false);
+        expect(service.validatePackedTileId('65536')).toBe(true);
+        expect(service.validatePackedTileId(' 65536 ')).toBe(true);
+        expect(service.validatePackedTileId('-2147483648')).toBe(true);
+        expect(service.validatePackedTileId('123')).toBe(false);
+        expect(service.validatePackedTileId('')).toBe(false);
+        expect(service.validatePackedTileId('   ')).toBe(false);
+        expect(service.validatePackedTileId('12x')).toBe(false);
+        expect(service.validatePackedTileId('1 2')).toBe(false);
     });
 
     it('builds inspect-tile source-data target label and validity based on map and layer presence', () => {
@@ -189,31 +191,31 @@ describe('JumpTargetService', () => {
             name === 'layerA' ? 'LAYER-ID' : '',
         );
 
-        service.targetValueSubject.next('12345');
+        service.targetValueSubject.next('65536');
         let target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('tileId = 12345 | (mapId = ?) | (sourceLayerId = ?)');
+        expect(target.label).toBe('packedTileId = 65536 | (mapId = ?) | (sourceLayerId = ?)');
         expect(target.validate('any')).toBe(true);
 
-        service.targetValueSubject.next('12345 m1');
+        service.targetValueSubject.next('65536 m1');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('tileId = 12345 | mapId = m1 | (sourceLayerId = ?)');
+        expect(target.label).toBe('packedTileId = 65536 | mapId = m1 | (sourceLayerId = ?)');
         expect(target.validate('any')).toBe(true);
 
-        service.targetValueSubject.next('12345 m1 layerA');
+        service.targetValueSubject.next('65536 m1 layerA');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('tileId = 12345 | mapId = m1 | sourceLayerId = layerA');
+        expect(target.label).toBe('packedTileId = 65536 | mapId = m1 | sourceLayerId = layerA');
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('abc');
         target = service.getInspectTileSourceDataTarget();
         expect(target.validate('any')).toBe(false);
 
-        service.targetValueSubject.next('12345 unknownMap');
+        service.targetValueSubject.next('65536 unknownMap');
         target = service.getInspectTileSourceDataTarget();
         expect(target.label).toContain('Map ID not found');
         expect(target.validate('any')).toBe(false);
 
-        service.targetValueSubject.next('12345 m1 unknownLayer');
+        service.targetValueSubject.next('65536 m1 unknownLayer');
         target = service.getInspectTileSourceDataTarget();
         expect(target.label).toContain('SourceData layer ID not found');
         expect(target.validate('any')).toBe(false);
@@ -228,18 +230,25 @@ describe('JumpTargetService', () => {
         );
         const menuNextSpy = vi.spyOn(menuService.customTileAndMapId, 'next');
 
-        service.targetValueSubject.next('12345 m1 layerA');
+        service.targetValueSubject.next('65536 m1 layerA');
         const target = service.getInspectTileSourceDataTarget();
 
         if (target.execute) {
-            target.execute('12345 m1 layerA');
+            target.execute('65536 m1 layerA');
         }
 
-        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 12345n)).toBe("SourceData:m1:LAYER-ID:3039:0");
+        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 65536)).toBe("SourceData:m1:LAYER-ID:65536:0");
         expect(stateService.setSelection).toHaveBeenCalledWith({
-            mapTileKey: 'SourceData:m1:LAYER-ID:3039:0',
+            mapTileKey: 'SourceData:m1:LAYER-ID:65536:0',
         } as any);
         expect(menuNextSpy).not.toHaveBeenCalled();
+    });
+
+    it('creates SourceData metadata keys using the tile-zero sentinel', () => {
+        const key = coreLib.getSourceDataLayerKey('m1', 'Metadata-RegistryMetadata', 0);
+
+        expect(key).toBe('SourceData:m1:Metadata-RegistryMetadata:0:0');
+        expect(coreLib.parseMapTileKey(key)).toEqual(['m1', 'Metadata-RegistryMetadata', 0, 0]);
     });
 
     it('forwards markedPosition to AppStateService using Cartographic.fromDegrees', () => {

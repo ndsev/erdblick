@@ -4,15 +4,13 @@ import {MapInfoService} from "../mapdata/map-info.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
-import {
-    FeatureSearchService,
-    featureSearchSelectedMapLayersFromPayload
-} from "./feature.search.service";
+import {FeatureSearchService} from "./feature.search.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
 import {Cartographic, Rectangle} from "../integrations/geo";
 import {AppConfigService} from "../shared/app-config.service";
+import {parsePackedTileId} from "../coords/nds-coordinate.util";
 
 export const FEATURE_SEARCH_TARGET_ID = "features";
 
@@ -164,8 +162,7 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             execute: (value: string, payload?: unknown) => {
-                const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
-                this.searchService.run(value, selectedMapLayers ? {selectedMapLayers} : {});
+                this.searchService.runFromActionPayload(value, payload);
             },
             validate: (_: string) => {
                 return !simfilError;
@@ -173,11 +170,9 @@ export class JumpTargetService {
         }
     }
 
-    /**
-     * Accepts only plain numeric tile ids without embedded whitespace.
-     */
-    validateMapgetTileId(value: string) {
-        return value.trim().length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
+    /** Accepts only valid signed NDS.Live packed tile ids without embedded whitespace. */
+    validatePackedTileId(value: string) {
+        return parsePackedTileId(value) !== undefined;
     }
 
     /**
@@ -186,23 +181,23 @@ export class JumpTargetService {
      * The parser accepts quoted map and layer ids because both may contain spaces.
      */
     getInspectTileSourceDataTarget(searchString: string = this.targetValueSubject.getValue()) {
-        let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
+        let label = "packedTileId = ? | (mapId = ?) | (sourceLayerId = ?)";
         let valid = true;
 
-        const matchSourceDataElements = (value: string): [bigint, string, string]|null => {
-            const regex = /^\s*(\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
+        const matchSourceDataElements = (value: string): [number, string, string]|null => {
+            const regex = /^\s*(-?\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
-            let tileId: bigint;
+            let tileId: number;
             let mapId = "";
             let sourceLayerId = "";
 
             if (match) {
-                const [_, bigintStr, quoted1, unquoted1, quoted2, unquoted2] = match;
-                try {
-                    tileId = BigInt(bigintStr);
-                } catch {
+                const [_, tileIdStr, quoted1, unquoted1, quoted2, unquoted2] = match;
+                const packedTileId = parsePackedTileId(tileIdStr);
+                if (!packedTileId) {
                     return null;
                 }
+                tileId = packedTileId.value;
 
                 if (quoted1 || unquoted1) {
                     mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, ' ');
@@ -232,7 +227,7 @@ export class JumpTargetService {
         const matches = matchSourceDataElements(searchString);
         if (matches) {
             const [tileId, mapId, sourceLayerId] = matches;
-            label = `tileId = ${tileId}`;
+            label = `packedTileId = ${tileId}`;
             if (mapId) {
                 label = `${label} | mapId = ${mapId}`;
                 if (sourceLayerId) {
@@ -258,7 +253,7 @@ export class JumpTargetService {
                 }
             }
 
-            valid &&= this.validateMapgetTileId(matches[0].toString());
+            valid &&= this.validatePackedTileId(matches[0].toString());
         }
         else {
             valid = false;

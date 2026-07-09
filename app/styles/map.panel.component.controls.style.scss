@@ -1,0 +1,258 @@
+.maps-close-button {
+  position: absolute;
+  top: 3em;
+  left: 25em;
+
+  .p-button {
+    width: 1.75em;
+    height: 1.75em;
+
+    border-radius: 0 var(--p-button-border-radius) var(--p-button-border-radius) 0;
+  }
+}
+
+.map-layer-dialog {
+  .close-maps-button {
+    display: none;
+    margin: 0 0 0 auto;
+
+    .p-button {
+      width: 1.75em !important;
+      height: 1.75em !important;
+      margin: 0;
+    }
+  }
+
+  .p-dialog {
+    max-width: 25em;
+    min-width: 25em;
+    margin: 0 !important;
+    position: absolute;
+    bottom: 0;
+    left: 0.15em;
+    overflow: auto;
+    height: calc(100% - 2.5em);
+  }
+
+  .p-dialog-content {
+    padding: 0.25em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25em;
+
+    .search-wrapper {
+      position: relative;
+      top: 0;
+      left: 0;
+    }
+  }
+
+  .p-fieldset {
+    padding: 0;
+
+    .p-fieldset-toggle-button {
+      padding: 0 !important;
+    }
+
+    .p-accordionheader {
+      padding: 0.5em 1em 0.5em 1em;
+    }
+
+    .p-accordioncontent-content {
+      padding: 0;
+    }
+  }
+
+  .p-tree-node-label {
+    width: 100%;
+  }
+
+  .p-dialog-header {
+    display: none;
+  }
+
+  .p-dialog-content {
+    border-top-right-radius: 6px;
+    border-top-left-radius: 6px;
+
+    *:focus-visible {
+      outline: 2px solid var(--p-primary-500);
+    }
+  }
+
+  .p-tree {
+    padding: 0.25em;
+
+    .menu-toggler {
+      font-size: 1.5em;
+      cursor: pointer;
+      display: inline-block;
+      line-height: 1;
+      vertical-align: middle;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .p-tree-node-content {
+      padding: 0;
+      font-size: 0.95em;
+    }
+
+    .p-tree-node-toggle-button {
+      width: 1.25em;
+      height: 1.25em;
+    }
+
+    .oblique {
+      font-style: oblique
+    }
+
+    .checkbox-entry {
+      display: flex;
+      gap: 0.25em;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .p-tree-node-leaf {
+      padding-left: 0.33em;
+    }
+  }
+
+  .add-view-button {
+    margin: 0 auto;
+
+    button {
+      padding: 0.25em;
+      font-size: 0.9em;
+    }
+  }
+}
+
+.tile-grid-popover,
+.background-settings-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  min-width: 13rem;
+  padding: 0.25em;
+}
+
+.tile-grid-toggle-row,
+.tile-grid-mode-row,
+.background-toggle-row,
+.background-opacity-row,
+.background-details {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+}
+
+.tile-grid-toggle-row,
+.tile-grid-mode-row,
+.background-toggle-row {
+  justify-content: space-between;
+}
+
+.tile-grid-radio-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75em;
+}
+
+.tile-grid-radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
+.background-settings-popover {
+  width: 16rem;
+
+  .background-layer-select {
+    width: 100%;
+  }
+
+  .background-opacity-row {
+    align-items: center;
+  }
+
+  .background-opacity-value {
+    min-width: 2.75rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .background-opacity-slider {
+    flex: 1 1 auto;
+  }
+
+  .background-details {
+    align-items: flex-start;
+    color: var(--p-surface-500);
+    font-size: 0.8rem;
+    line-height: 1.3;
+  }
+}
+
+.background-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  width: 100%;
+  min-width: 0;
+}
+
+.background-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  flex-shrink: 0;
+}
+
+.background-info {
+  flex-shrink: 0;
+  font-size: 1rem;
+  cursor: help;
+}
+
+map-panel {
+  .disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .datasource-status {
+    align-items: center;
+    border-radius: 50%;
+    display: inline-flex;
+    flex: 0 0 auto;
+    height: 1.04rem;
+    justify-content: center;
+    margin: 0 0.04rem 0 0;
+    width: 1.04rem;
+
+    &.failed {
+      background: #ef4444;
+      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.5);
+    }
+
+    &.initializing {
+      background: conic-gradient(#60a5fa var(--datasource-progress, 0%), rgba(96, 165, 250, 0.2) 0);
+      box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.45);
+    }
+  }
+
+  .disabled-label {
+    opacity: 0.65;
+  }
+}

@@ -1,4 +1,5 @@
 #include "interop/js-object.h"
+#include "fmt/core.h"
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>
@@ -47,7 +48,7 @@ JsValue::JsValue()
 #ifdef EMSCRIPTEN
     : value_(emscripten::val::null())
 #else
-    : value_({})
+    : value_(nullptr)
 #endif
 {}
 
@@ -237,11 +238,23 @@ std::string JsValue::toString() const {
         case Type::Null:
             return "Null";
         case Type::Bool:
+#ifdef EMSCRIPTEN
+            return value_.call<std::string>("toString");
+#else
             return fmt::format("{}", as<bool>());
+#endif
         case Type::Number:
+#ifdef EMSCRIPTEN
+            return value_.call<std::string>("toString");
+#else
             return fmt::format("{}", as<double>());
+#endif
         case Type::String:
+#ifdef EMSCRIPTEN
+            return value_.call<std::string>("toString");
+#else
             return fmt::format("{}", as<std::string>());
+#endif
         case Type::ObjectOrList:
             return "Object";
         default:
@@ -252,9 +265,10 @@ std::string JsValue::toString() const {
 JsValue::Type JsValue::type() const
 {
 #ifdef EMSCRIPTEN
+    if (value_.isUndefined()) return Type::Undefined;
+    if (value_.isNull()) return Type::Null;
     std::string typeStr = value_.typeOf().as<std::string>(); // Convert emscripten::val to std::string
-    if (typeStr == "undefined") return Type::Undefined;
-    else if (typeStr == "object") return Type::ObjectOrList;
+    if (typeStr == "object") return Type::ObjectOrList;
     else if (typeStr == "boolean") return Type::Bool;
     else if (typeStr == "number" || typeStr == "bigint") return Type::Number;
     else if (typeStr == "string") return Type::String;

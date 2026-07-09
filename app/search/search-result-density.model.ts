@@ -7,12 +7,12 @@ export interface SearchResultPoint {
     coordinates: [number, number];
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     mapTileKey: string;
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
-    sourceTileId: bigint;
+    sourceTileId: number;
     featureId: string;
     resultIndex: number;
     resultKey: string;
@@ -25,7 +25,7 @@ export interface SearchResultPointBucket {
     sourceTileKey: string;
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     requestOrder: number;
     points: SearchResultPoint[];
 }
@@ -37,7 +37,7 @@ export interface SearchResultDensityMarker {
     count: number;
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     featureId: string;
     resultKey: string;
     featureKey: string;
@@ -56,7 +56,7 @@ interface SearchResultDensityNodeDelta {
     key: string;
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     level: number;
     count: number;
     samples: SearchResultPoint[];
@@ -210,11 +210,9 @@ export class SearchResultDensityIndex {
         };
     }
 
-    /** Computes the parent id for a mapget tile id at a known non-root level. */
-    private parentTileId(tileId: bigint, level: number): bigint {
-        const x = tileId >> 32n;
-        const y = (tileId >> 16n) & 0xffffn;
-        const parentLevel = BigInt(level - 1);
-        return ((x >> 1n) << 32n) | ((y >> 1n) << 16n) | parentLevel;
+    /** Computes the parent packed tile id at a known non-root level. */
+    private parentTileId(tileId: number, level: number): number {
+        const center = coreLib.getTilePosition(tileId);
+        return coreLib.getTileIdFromPosition(center.x, center.y, level - 1);
     }
 }

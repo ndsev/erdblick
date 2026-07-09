@@ -3,7 +3,6 @@ import {BrowserModule} from '@angular/platform-browser';
 import {AppRoutingModule} from './app.routing.module';
 import {AppComponent} from './app.component';
 import {provideHttpClient} from "@angular/common/http";
-import {SpeedDialModule} from "primeng/speeddial";
 import {DialogModule} from "primeng/dialog";
 import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
 import {AnimateOnScroll} from "primeng/animateonscroll";
@@ -178,9 +177,9 @@ export const initializeServices = () => {
             configService.snapshot.state,
             configService.snapshot.configStateHash
         );
-        stateService.initializePersistence();
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
+        stateService.initializePersistence();
         updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
@@ -249,7 +248,6 @@ export const initializeServices = () => {
         AppConfirmPopupComponent,
         SearchCompletionPopupComponent,
         SimfilExpressionInputComponent,
-        SpeedDialModule,
         DialogModule,
         DynamicDialogModule,
         FormsModule,

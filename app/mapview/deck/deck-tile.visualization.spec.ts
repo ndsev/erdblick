@@ -108,7 +108,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -182,7 +182,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -248,7 +248,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -349,7 +349,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Road/42",
             layerName: "Road",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -432,7 +432,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -505,7 +505,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 0,
             hasData: () => hasData,
             highestLoadedStage: () => 0,
@@ -554,7 +554,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 2,
             dataVersion: 10,
             hasData: () => true,
@@ -614,7 +614,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Road/42",
             layerName: "Road",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 2,
             hasData: () => true,
             highestLoadedStage: () => 0,
@@ -655,7 +655,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 2,
             hasData: () => true,
             highestLoadedStage: () => highestLoadedStage,
@@ -717,7 +717,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => false,
             numFeatures: 0,
             stats: new Map<string, number[]>()
@@ -761,7 +761,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -802,7 +802,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             highestLoadedStage: () => 1,
             peekAsync: async () => undefined,
@@ -852,7 +852,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             stats: new Map<string, number[]>()
         } as any;
@@ -913,7 +913,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             stats: new Map<string, number[]>()
         } as any;
@@ -976,7 +976,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             hasData: () => true,
             stats: new Map<string, number[]>()
         } as any;
@@ -1022,7 +1022,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 1,
             hasData: () => true,
             highestLoadedStage: () => 0,
@@ -1057,7 +1057,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 1,
             hasData: () => true,
             highestLoadedStage: () => 0,
@@ -1103,7 +1103,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 1,
             dataVersion: 1,
             hasData: () => true,
@@ -1147,7 +1147,7 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 1,
             dataVersion: 1,
             hasData: () => true,
@@ -1204,7 +1204,7 @@ describe("DeckTileVisualization", () => {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
             mapName: "Island-6-Local",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 1,
             hasData: () => true,
             highestLoadedStage: () => 1,
@@ -1279,7 +1279,7 @@ describe("DeckTileVisualization", () => {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
             mapName: "Island-6-Local",
-            tileId: 42n,
+            tileId: 42,
             numFeatures: 1,
             hasData: () => true,
             highestLoadedStage: () => 1,

@@ -1,4 +1,5 @@
 #include "visualization-deck.h"
+#include "mapget/model/point.h"
 
 #include <algorithm>
 #include <array>
@@ -973,7 +974,7 @@ mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
 {
     if (!hasPathCoordinateOriginWgs_) {
         if (tile_) {
-            auto const tileCenter = tile_->tileId().center();
+            auto const tileCenter = mapget::Point(tile_->tileId().centerWgs84());
             pathCoordinateOriginWgs_ = {tileCenter.x, tileCenter.y, 0.0};
         } else {
             pathCoordinateOriginWgs_ = {wgsPoint.x, wgsPoint.y, 0.0};

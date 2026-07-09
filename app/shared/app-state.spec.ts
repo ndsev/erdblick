@@ -427,6 +427,25 @@ describe('StyleState', () => {
         expect(styles.getValue().size).toBe(0);
     });
 
+    it('deserialize skips malformed compact style option values without throwing', () => {
+        const pool = new Map<string, AppState<unknown>>();
+        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
+        const styles = new StyleState(pool);
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        try {
+            expect(() => styles.deserialize({
+                'NY0X~0~opt': ['1'],
+                'NY0X~0~valid': '1'
+            })).not.toThrow();
+        } finally {
+            consoleWarnSpy.mockRestore();
+        }
+
+        const key = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'valid');
+        expect(styles.getValue().get(key)).toEqual(['1']);
+    });
+
     it('deserialize uses only in-range layer indices', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];

@@ -338,7 +338,7 @@ Mode differences:
 | Erdblick completion | completion mode | schema-aware environment | synthetic feature or attribute model root |
 | Style YAML and generic validation | usually `false` | `None` | none |
 
-Search query normalization is mapget-owned. Erdblick's schema worker calls `TileLayerParser.normalizeSearchQuery`, which delegates to each selected layer's `SchemaRegistry::normalizeSearchQuery` and merges the layer-local results. That normalizer performs AST-based post-processing:
+Search query normalization is mapget-owned. Erdblick's schema worker calls `TileLayerParser.normalizeSearchQuery`, which delegates to each selected layer's `LayerSchema::normalizeSearchQuery` and merges the layer-local results. That normalizer performs AST-based post-processing:
 
 - It first parses exact whole-query symbols through SIMFIL, then compiles against each feature root with `RewriteMode::Schema`.
 - It consumes SIMFIL `referencedSchemaPaths`, including generated `path == "ENUM"` comparisons, to classify feature-owned vs. attribute-owned references.
@@ -413,17 +413,12 @@ Important details:
 
 ## Diagnostics Flow
 
-The Diagnostics tab combines three different sources. They should not be conflated.
+The Diagnostics tab combines backend execution diagnostics and lazy value summaries. They should not be conflated.
 
 ```mermaid
 flowchart TD
-  Tab[Diagnostics tab visible] --> QueryDiag[Schema AST diagnostics]
-  Tab --> ExecDiag[Backend execution diagnostics]
+  Tab[Diagnostics tab visible] --> ExecDiag[Backend execution diagnostics]
   Tab --> Values[Lazy value summaries]
-
-  QueryDiag --> SchemaSvc[FeatureSearchSchemaService<br/>analysis worker]
-  SchemaSvc --> Parser[TileLayerParser.searchQueryAstDiagnostics]
-  Parser --> SchemaAsts[Compiled schema-analysis AST strings]
 
   ExecDiag --> ResultLayers[TileSearchResultLayer.copyDiagnostics]
   ResultLayers --> SimfilDiag[coreLib.simfilGetDiagnostics<br/>merge serialized simfil::Diagnostics]
@@ -436,10 +431,9 @@ flowchart TD
 
 Diagnostics responsibilities:
 
-- Schema AST diagnostics are developer/debug diagnostics. They show how Erdblick's schema-analysis passes compile the query for feature and attribute roots.
 - Execution diagnostics come from mapget's actual search evaluation and are serialized into `TileSearchResultLayer`. They are authoritative for what happened during backend execution, but they currently do not expose mapget's compiled AST string.
 - Value summaries are lazy post-processing over completed search-result tiles. They summarize result fields and `trace()` output; they are not compile diagnostics.
-- Erdblick schema-analysis ASTs can differ from mapget execution ASTs because Erdblick uses synthetic roots, `/sources` metadata, and usually `any=false`, while mapget evaluates real tile nodes with `any=true`.
+- Erdblick deliberately does not display schema-analysis AST dumps. Query normalization is mapget-owned, and the UI surfaces only the original query, backend query, concrete scope, rewrite status, candidate count, execution diagnostics, and value summaries.
 
 ## Known Non-Identical Paths
 
@@ -448,14 +442,14 @@ These differences are intentional and should be preserved unless a change explic
 - Completion never evaluates real feature data. It uses synthetic schema roots built from `/sources`.
 - Auto-scope inference is conservative and metadata-only. It should not require loading tiles.
 - Attribute search execution is backend-only. Erdblick does not scan feature tiles in the browser for server-side feature search.
-- Erdblick may send a normalized `backendQuery` instead of the visible UI query, but that query must come from mapget `SchemaRegistry::normalizeSearchQuery`.
+- Erdblick may send a normalized `backendQuery` instead of the visible UI query, but that query must come from mapget `LayerSchema::normalizeSearchQuery`.
 - Mapget compiles the main predicate with `any=true`; Erdblick schema diagnostics compile analysis ASTs with `any=false`.
 - Mapget `withFields` expressions intentionally bypass schema shorthand rewrites with `RewriteMode::None`.
 - The Diagnostics tab can show Erdblick schema-analysis ASTs, the normalized backend query, and backend execution diagnostics, but not yet the exact mapget execution AST.
 
 ## Extension Points
 
-- Add a new schema-backed shorthand in SIMFIL or `SchemaRegistry::normalizeSearchQuery` when the rewrite should be shared by Erdblick and mapget.
+- Add a new schema-backed shorthand in SIMFIL or `LayerSchema::normalizeSearchQuery` when the rewrite should be shared by Erdblick and mapget.
 - Add a new synthetic Erdblick-only search helper in `TileLayerParser` only when it is used for completion, scope analysis, or UI diagnostics and not sent directly to mapget.
 - Add a new backend-only search behavior in mapget when it depends on real tile contents or datasource execution state.
 - Add new result-style fields through `featureSearchResultFields` and `TileLayerParser.searchStyleFieldsForQuery`; remember that result-field expressions sent to mapget use `RewriteMode::None`.
@@ -472,6 +466,6 @@ These differences are intentional and should be preserved unless a change explic
 - `libs/core/src/layer.cpp`: WASM wrapper for `TileSearchResultLayer` result entries, info, result fields, diagnostics, summaries.
 - `libs/core/src/visualization-deck.cpp`: high-fidelity search-result geometry rendering.
 - `deps/mapget/libs/model/src/featurelayer-search.cpp`: backend feature/attribute search execution.
-- `deps/mapget/libs/model/src/schemaregistry.cpp`: schema registry bindings for SIMFIL schema rewrites and attribute scalar shorthand.
+- `deps/mapget/libs/model/src/layerschema.cpp`: layer schema bindings for SIMFIL schema rewrites and attribute scalar shorthand.
 - `deps/simfil/src/simfil.cpp`: centralized compile path and schema rewrite rules.
 - `deps/simfil/src/expressions.cpp`: wildcard field evaluation and schema-based pruning.

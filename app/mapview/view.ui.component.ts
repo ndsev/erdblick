@@ -62,7 +62,6 @@ import {filter} from "rxjs/operators";
             </div>
         }
     `,
-    styles: [``],
     standalone: false
 })
 /**

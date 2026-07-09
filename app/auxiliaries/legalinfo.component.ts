@@ -27,7 +27,6 @@ import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate
             </div>
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /** Dialog that aggregates map-level legal and copyright notices. */

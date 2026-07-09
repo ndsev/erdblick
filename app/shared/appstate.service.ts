@@ -18,18 +18,6 @@ import {
     DEFAULT_BACKGROUND_OPACITY
 } from "./app-config.service";
 import {
-    historyEntryDedupeKey,
-    normalizeResolvedSearchHistoryEntry,
-    normalizeSearchHistoryEntry,
-    normalizeSearchStateValue,
-    SearchHistoryEntry,
-    SearchHistoryStateEntry,
-    SearchStateSchema,
-    SearchStateValue,
-    SearchHistoryStateEntrySchema,
-    serializeSearchStateValue
-} from "./search-history";
-import {
     createFeatureSearchStateEntry,
     FeatureSearchStateEntry,
     FeatureSearchStatePatch,
@@ -38,6 +26,20 @@ import {
     serializeFeatureSearchState
 } from "./feature-search-state";
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
+import {
+    compressUrlCsvRuns,
+    decodeLayerNamesV2,
+    decodeMapNamesV2,
+    decodeSelectionsV2,
+    decodeStyleOptionsV2,
+    encodeLayerNamesV2,
+    encodeSelectionsV2,
+    encodeStyleOptionsV2,
+    featureSelectionLayerNames,
+    firstParamValue,
+    sourceDataSelectionMapIds
+} from "./url-state-codec";
+import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -61,6 +63,9 @@ export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const MAX_DECK_STYLE_WORKERS = 32;
 export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
+export const DEFAULT_LOW_FI_TILE_THRESHOLD = 128;
+export const MIN_LOW_FI_TILE_THRESHOLD = 1;
+export const MAX_LOW_FI_TILE_THRESHOLD = 4096;
 export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
 export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
 export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
@@ -89,6 +94,19 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
+
+/** Clamp one low-fi tile threshold to the supported integer preference range. */
+export function clampLowFiTileThreshold(
+    value: unknown,
+    fallback = DEFAULT_LOW_FI_TILE_THRESHOLD): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+    return Math.min(
+        MAX_LOW_FI_TILE_THRESHOLD,
+        Math.max(MIN_LOW_FI_TILE_THRESHOLD, Math.trunc(numeric)));
+}
 
 /** Normalizes feature search grouping values from persisted state. */
 function normalizeFeatureSearchGrouping(value: unknown): number[] {
@@ -145,6 +163,18 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
+}
+
+/** Transient expansion state for one mounted inspection tree. */
+export type InspectionTreeExpansionSnapshot = Map<string, boolean | undefined>;
+
+/** Transient inspection-tree UI state kept while moving panels between docked and floating hosts. */
+export interface InspectionTreeExpansionState {
+    expandedNodes: InspectionTreeExpansionSnapshot;
+    fullExpansionActive: boolean;
+    expansionSnapshotBeforeFullExpand?: InspectionTreeExpansionSnapshot;
+    fullCollapseActive: boolean;
+    expansionSnapshotBeforeFullCollapse?: InspectionTreeExpansionSnapshot;
 }
 
 /** Persisted top-left dialog position in viewport pixels. */
@@ -339,6 +369,7 @@ export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
+    private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -348,6 +379,7 @@ export class AppStateService implements OnDestroy {
     private isHydrating = false;
     private isSeedingConfigDefaults = false;
     private isSystemStateMutation = false;
+    private hasAuthoritativeUrlLayerList = false;
     private isReady = false;
     private subscriptionsSetup = false;
     private pendingUrlSyncStates = new Set<AppState<any>>;
@@ -356,13 +388,13 @@ export class AppStateService implements OnDestroy {
     private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
     private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
-    private lastMergedUrlSyncAt = 0;
-    // One-shot guard used to keep inbound v1 links stable during passive startup.
+    private lastUrlSyncAt = 0;
+    // One-shot guard used to keep inbound links stable during passive startup.
     private skipNextUrlSync = false;
-    private initialSearchStateReplayConsumed = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+    private readonly RETIRED_URL_PARAM_KEYS = new Set(["s"]);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
     private configDefaultStateMeta: ConfigDefaultStateMeta = {
         version: 1,
@@ -387,16 +419,6 @@ export class AppStateService implements OnDestroy {
         defaultValue: 1,
         schema: z.coerce.number().positive(),
         urlParamName: "n"
-    });
-
-    readonly searchState = this.createState<SearchStateValue>({
-        name: 'search',
-        defaultValue: [],
-        schema: SearchStateSchema,
-        toStorage: (value: SearchStateValue) => serializeSearchStateValue(value),
-        fromStorage: (payload: any): SearchStateValue => normalizeSearchStateValue(payload),
-        urlParamName: 's',
-        urlIncludeInVisualizationOnly: false
     });
 
     readonly locationSearchResultLimitState = this.createState<number>({
@@ -581,10 +603,24 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly deckAntialiasingEnabledState = this.createState<boolean>({
+        name: 'deckAntialiasingEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
     readonly pinLowFiToMaxLodState = this.createState<boolean>({
         name: 'pinLowFiToMaxLod',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly lowFiTileThresholdState = this.createState<number>({
+        name: 'lowFiTileThreshold',
+        defaultValue: DEFAULT_LOW_FI_TILE_THRESHOLD,
+        schema: z.coerce.number().int(),
+        toStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD),
+        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD)
     });
 
     readonly deckStyleWorkersCountState = this.createState<number>({
@@ -749,21 +785,6 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly lastSearchHistoryEntryState = this.createState<SearchHistoryStateEntry | null>({
-        name: 'lastSearchHistoryEntry',
-        defaultValue: null,
-        schema: z.union([
-            z.null(),
-            SearchHistoryStateEntrySchema,
-        ]),
-        fromStorage: (payload: any): SearchHistoryStateEntry | null => {
-            if (payload === null) {
-                return null;
-            }
-            return normalizeSearchHistoryEntry(payload);
-        }
-    });
-
     readonly mapsOpenState = this.createState<boolean>({
         name: 'mapsOpenState',
         defaultValue: false,
@@ -810,6 +831,30 @@ export class AppStateService implements OnDestroy {
         name: 'inspectionsLimitState',
         defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
+    });
+
+    readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
+        name: 'inspectionTreeExpandByDefault',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly inspectionValueVaryColorsState = this.createState<boolean>({
+        name: 'inspectionValueVaryColors',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly inspectionValueVaryOutlinesState = this.createState<boolean>({
+        name: 'inspectionValueVaryOutlines',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly inspectionValueVaryStripingState = this.createState<boolean>({
+        name: 'inspectionValueVaryStriping',
+        defaultValue: false,
+        schema: Boolish
     });
 
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
@@ -909,7 +954,9 @@ export class AppStateService implements OnDestroy {
         });
 
         this.selectionState.subscribe(panels => {
-            this.pruneInspectionDialogLayout(panels.map(panel => panel.id));
+            const panelIds = panels.map(panel => panel.id);
+            this.pruneInspectionDialogLayout(panelIds);
+            this.pruneInspectionTreeExpansionStates(panelIds);
             this.sanitizeFocusedInspectionPanel(panels);
         });
     }
@@ -917,6 +964,9 @@ export class AppStateService implements OnDestroy {
     /** Hydrates persisted state once config defaults are known and marks the service ready. */
     initializePersistence(): void {
         if (this.isReady) {
+            return;
+        }
+        if (!coreLib) {
             return;
         }
         this.setupStateSubscriptions();
@@ -1152,8 +1202,8 @@ export class AppStateService implements OnDestroy {
         if (this.urlSyncHandle !== null) {
             return;
         }
-        // Browsers can reject rapid History API updates; keep merge syncs below that threshold.
-        const elapsed = Date.now() - this.lastMergedUrlSyncAt;
+        // Browsers can reject rapid History API updates; keep URL writes below that threshold.
+        const elapsed = Date.now() - this.lastUrlSyncAt;
         const delay = Math.max(0, AppStateService.URL_SYNC_MIN_INTERVAL_MS - elapsed);
         if (delay === 0) {
             this.flushUrlSync();
@@ -1179,50 +1229,186 @@ export class AppStateService implements OnDestroy {
             this.pendingUrlSyncStates.clear();
             return;
         }
-        const queryParamsHandling = this.syncUrl();
-        if (queryParamsHandling === 'merge') {
-            this.lastMergedUrlSyncAt = Date.now();
-        }
+        this.syncUrl();
+        this.lastUrlSyncAt = Date.now();
         if (this.pendingUrlSyncStates.size) {
             this.scheduleUrlSync();
         }
     }
 
     /** Serializes URL-backed state and updates router query params accordingly. */
-    private syncUrl(): 'replace' | 'merge' {
-        // Incremental v1 sync: only changed URL states are merged unless this is a full-state flush.
-        const params: Record<string, string | string[] | null> = {};
-        for (const state of this.pendingUrlSyncStates) {
-            const serialized = state.serialize(true);
-            if (serialized === undefined) {
-                continue;
-            }
-            for (const [k, v] of Object.entries(serialized)) {
-                params[k] = v;
-            }
-        }
-        // The first URL sync will update the URL fully, with pruned state removed.
-        // Detect this case with the following collection equality check.
-        // In this case, use the "replace" handling to get rid of style options
-        // for removed styles.
-        const queryParamsHandling = this.pendingUrlSyncStates.size === [...this.statePool.values().filter(
-            state => state.isUrlState())].length ? "replace" : "merge";
+    private syncUrl(): void {
+        const params = this.serializeUrlV2();
         this.pendingUrlSyncStates.clear();
-        if (queryParamsHandling === "merge") {
-            for (const [key, value] of Object.entries(this.currentBrowserQueryParams())) {
-                if (params[key] === undefined) {
-                    params[key] = value as string | string[];
-                }
-            }
-        }
         this.router.navigate([], {
             queryParams: params,
-            queryParamsHandling: queryParamsHandling,
+            queryParamsHandling: "replace",
             replaceUrl: this.replaceUrl
         }).catch(error => {
             console.error('[AppStateService] Failed to sync URL parameters', error);
         });
-        return queryParamsHandling;
+    }
+
+    /** Builds a complete v2 query-param set so all layer-indexed params share one order. */
+    private serializeUrlV2(): Record<string, string | string[]> {
+        const params = this.preservedUnknownUrlParams();
+        params["v2"] = "1";
+
+        const urlLayerNames = this.urlLayerNamesForSerialization();
+
+        for (const state of this.statePool.values()) {
+            if (state === this.layerNamesState
+                || state === this.selectionState
+                || state === this.stylesState
+                || this.isLayerIndexedMapViewState(state)) {
+                continue;
+            }
+            if (!state.isUrlState()) {
+                continue;
+            }
+            const serialized = state.serialize(true);
+            if (serialized === undefined) {
+                continue;
+            }
+            for (const [key, value] of Object.entries(serialized)) {
+                if (value !== null) {
+                    params[key] = compressUrlCsvRuns(value);
+                }
+            }
+        }
+
+        const layerEncoding = encodeLayerNamesV2(
+            urlLayerNames,
+            sourceDataSelectionMapIds(this.selection)
+        );
+        if (layerEncoding.map) {
+            params["map"] = layerEncoding.map;
+        }
+        if (layerEncoding.l !== null) {
+            params["l"] = layerEncoding.l;
+        } else if (!urlLayerNames.length) {
+            params["l"] = "";
+        }
+        this.serializeLayerIndexedMapViewParam(params, "v", this.layerVisibilityState, urlLayerNames, false, value => value ? "1" : "0");
+        this.serializeLayerIndexedMapViewParam(params, "z", this.layerZoomLevelState, urlLayerNames, 13, value => String(value));
+        this.serializeLayerIndexedMapViewParam(params, "az", this.layerAutoZoomLevelState, urlLayerNames, true, value => value ? "1" : "0");
+
+        const selection = encodeSelectionsV2(
+            this.selection,
+            urlLayerNames,
+            layerEncoding.mapNames,
+            DEFAULT_HIGHLIGHT_COLORS
+        );
+        if (selection) {
+            params["sel"] = selection;
+        }
+
+        for (const [key, value] of Object.entries(encodeStyleOptionsV2(
+            this.styles,
+            urlLayerNames,
+            this.numViews
+        ))) {
+            params[key] = value;
+        }
+
+        return params;
+    }
+
+    /** Returns URL layers that are currently visible or required by feature selections. */
+    private urlLayerNamesForSerialization(): string[] {
+        const selectedLayerNames = new Set(featureSelectionLayerNames(this.selection));
+        const urlLayerNames: string[] = [];
+        const addLayerName = (layerName: string) => {
+            if (!urlLayerNames.includes(layerName)) {
+                urlLayerNames.push(layerName);
+            }
+        };
+
+        this.layerNames.forEach((layerName, layerIndex) => {
+            if (selectedLayerNames.has(layerName) || this.isLayerVisibleInAnyView(layerIndex)) {
+                addLayerName(layerName);
+            }
+        });
+        selectedLayerNames.forEach(addLayerName);
+        return urlLayerNames;
+    }
+
+    /** Returns whether a layer slot is active in at least one configured map view. */
+    private isLayerVisibleInAnyView(layerIndex: number): boolean {
+        for (let viewIndex = 0; viewIndex < Math.max(1, this.numViews); viewIndex++) {
+            if (this.layerVisibilityState.getValue(viewIndex)[layerIndex]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Returns true for per-view arrays whose entries are indexed by `layerNames`. */
+    private isLayerIndexedMapViewState(state: unknown): boolean {
+        return state === this.layerVisibilityState.appState
+            || state === this.layerZoomLevelState.appState
+            || state === this.layerAutoZoomLevelState.appState;
+    }
+
+    /** Serializes one layer-indexed per-view state against the finalized v2 URL layer order. */
+    private serializeLayerIndexedMapViewParam<T>(
+        params: Record<string, string | string[]>,
+        key: string,
+        state: MapViewState<T[]>,
+        urlLayerNames: readonly string[],
+        fallback: T,
+        encode: (value: T) => string
+    ): void {
+        if (!urlLayerNames.length) {
+            return;
+        }
+        const currentLayerIndexByName = new Map(this.layerNames.map((layerName, index) => [layerName, index]));
+        const groups: string[] = [];
+        for (let viewIndex = 0; viewIndex < Math.max(1, this.numViews); viewIndex++) {
+            const currentValues = state.getValue(viewIndex);
+            groups.push(urlLayerNames.map(layerName => {
+                const currentIndex = currentLayerIndexByName.get(layerName);
+                const value = currentIndex !== undefined && currentIndex < currentValues.length
+                    ? currentValues[currentIndex]
+                    : fallback;
+                return encode(value);
+            }).join(","));
+        }
+        params[key] = compressUrlCsvRuns(groups.join(":"));
+    }
+
+    /** Keeps non-Erdblick query params while dropping stale v1 and v2 state params. */
+    private preservedUnknownUrlParams(): Record<string, string | string[]> {
+        const managedKeys = this.managedUrlParamKeys();
+        const params: Record<string, string | string[]> = {};
+        for (const [key, value] of Object.entries(this.currentBrowserQueryParams())) {
+            if (managedKeys.has(key) || this.stylesState.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            params[key] = Array.isArray(value)
+                ? value.map(entry => String(entry))
+                : String(value);
+        }
+        return params;
+    }
+
+    /** Returns query-param keys owned by Erdblick URL state. */
+    private managedUrlParamKeys(): Set<string> {
+        const keys = new Set<string>(["v2", "map", "osm"]);
+        this.RETIRED_URL_PARAM_KEYS.forEach(key => keys.add(key));
+        for (const state of this.statePool.values()) {
+            if (state === this.stylesState || !state.isUrlState()) {
+                continue;
+            }
+            const serialized = state.serialize(true);
+            if (serialized === undefined) {
+                continue;
+            }
+            for (const key of Object.keys(serialized)) {
+                keys.add(key);
+            }
+        }
+        return keys;
     }
 
     /** Restores storage-backed state slots from local storage during startup. */
@@ -1252,7 +1438,7 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
 
-                state.deserialize(raw);
+                this.deserializeStateSafely(state, raw);
             }
 
             const styleOptionEntries = this.collectStyleOptionStorageEntries();
@@ -1271,7 +1457,7 @@ export class AppStateService implements OnDestroy {
             }
 
             if (Object.keys(filteredStyleOptionEntries).length) {
-                this.stylesState.deserialize(filteredStyleOptionEntries);
+                this.deserializeStateSafely(this.stylesState, filteredStyleOptionEntries);
             }
             this.persistConfigDefaultStateMeta();
         });
@@ -1284,10 +1470,113 @@ export class AppStateService implements OnDestroy {
                 return;
             }
 
+            if (firstParamValue(params, "v2") === "1") {
+                this.hydrateFromUrlV2(params);
+                return;
+            }
+
             for (const state of this.statePool.values()) {
-                state.deserialize(params);
+                this.deserializeStateSafely(state, params);
             }
         });
+    }
+
+    /** Keeps one malformed persisted state entry from aborting startup hydration. */
+    private deserializeStateSafely(
+        state: {name: string; deserialize(raw: string | Params): void},
+        raw: string | Params
+    ): void {
+        try {
+            state.deserialize(raw);
+        } catch (error) {
+            console.error(`[AppStateService] Failed to hydrate ${state.name}.`, error);
+        }
+    }
+
+    /** Creates persisted selection MapTileKeys exclusively through mapget's C++ serializer. */
+    private readonly createMapTileKeyFromUrlComponents: UrlV2MapTileKeyFactory = (
+        layerType,
+        mapId,
+        layerId,
+        tileId,
+        stage
+    ) => {
+        const parsedStage = Number(stage || 0);
+        return coreLib.createMapTileKey(
+            layerType,
+            mapId,
+            layerId,
+            tileId,
+            Number.isFinite(parsedStage) ? parsedStage : 0);
+    };
+
+    /** Restores v2 URL params through a coordinated layer-indexed decode path. */
+    private hydrateFromUrlV2(params: Params): void {
+        const mapParam = firstParamValue(params, "map");
+        const layerParam = firstParamValue(params, "l");
+        this.hasAuthoritativeUrlLayerList = layerParam !== undefined;
+        const decodedLayerNames = decodeLayerNamesV2(mapParam, layerParam);
+        if (decodedLayerNames.length) {
+            this.layerNamesState.next(decodedLayerNames);
+        }
+
+        for (const state of this.statePool.values()) {
+            if (state === this.layerNamesState || state === this.selectionState || state === this.stylesState) {
+                continue;
+            }
+            try {
+                state.deserialize(params);
+            } catch (error) {
+                console.error(`[AppStateService] Failed to hydrate v2 state '${state.name}'`, error);
+            }
+        }
+
+        if (this.hasStyleOptionParams(params)) {
+            const decodedStyles = decodeStyleOptionsV2(
+                params,
+                this.layerNames,
+                this.numViews,
+                this.stylesState.getValue()
+            );
+            this.stylesState.next(decodedStyles);
+        }
+
+        const selectionParam = firstParamValue(params, "sel");
+        if (selectionParam !== undefined) {
+            try {
+                const mapNames = mapParam ? decodeMapNamesV2(mapParam) : [];
+                const panels = decodeSelectionsV2(
+                    selectionParam,
+                    this.layerNames,
+                    mapNames,
+                    DEFAULT_HIGHLIGHT_COLORS,
+                    this.createMapTileKeyFromUrlComponents
+                );
+                if (panels.length || !this.looksLikeLegacySelectionParam(selectionParam)) {
+                    this.selectionState.next(panels);
+                } else {
+                    this.selectionState.next([]);
+                    this.deserializeStateSafely(this.selectionState, {sel: selectionParam});
+                }
+            } catch (error) {
+                console.error("[AppStateService] Failed to hydrate v2 selection state", error);
+            }
+        } else {
+            this.selectionState.next([]);
+        }
+    }
+
+    /** Detects pre-v2 `sel` payloads that may still be attached to a v2 URL during upgrades or shared-link reuse. */
+    private looksLikeLegacySelectionParam(selectionParam: string): boolean {
+        if (!selectionParam.trim()) {
+            return false;
+        }
+        return selectionParam.includes("Features:") || selectionParam.includes("SourceData:");
+    }
+
+    /** Returns whether the params contain compact style-option entries. */
+    private hasStyleOptionParams(params: Params): boolean {
+        return Object.keys(params).some(key => this.stylesState.isStyleOptionUrlParamKey(key));
     }
 
     /**
@@ -1407,7 +1696,7 @@ export class AppStateService implements OnDestroy {
             }
 
             if (Object.keys(styleOptionEntries).length) {
-                this.stylesState.deserialize(styleOptionEntries);
+                this.deserializeStateSafely(this.stylesState, styleOptionEntries);
                 this.stylesState.next(new Map(this.stylesState.getValue()));
             }
         } finally {
@@ -1491,7 +1780,7 @@ export class AppStateService implements OnDestroy {
         }
         const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
         if (Object.keys(styleOptionEntries).length) {
-            this.stylesState.deserialize(styleOptionEntries);
+            this.deserializeStateSafely(this.stylesState, styleOptionEntries);
             this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.pendingOpenDialogs.clear();
@@ -1756,8 +2045,14 @@ export class AppStateService implements OnDestroy {
     };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
+    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
+    set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
     set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
+    get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
+    set lowFiTileThreshold(val: number) {
+        this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));
+    }
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
@@ -1768,15 +2063,6 @@ export class AppStateService implements OnDestroy {
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
     get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
     set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
-    get search() {return this.searchState.getValue();}
-    set search(val: SearchStateValue) {this.searchState.next(val);};
-    consumeInitialSearchStateReplay(): boolean {
-        if (this.initialSearchStateReplayConsumed) {
-            return false;
-        }
-        this.initialSearchStateReplayConsumed = true;
-        return true;
-    }
     get marker() {return this.markerState.getValue();}
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
@@ -1809,6 +2095,14 @@ export class AppStateService implements OnDestroy {
     };
     get inspectionComparison() {return this.inspectionComparisonState.getValue();}
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
+    get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
+    set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
+    get inspectionValueVaryColors() {return this.inspectionValueVaryColorsState.getValue();}
+    set inspectionValueVaryColors(val: boolean) {this.inspectionValueVaryColorsState.next(!!val);}
+    get inspectionValueVaryOutlines() {return this.inspectionValueVaryOutlinesState.getValue();}
+    set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
+    get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
+    set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}
@@ -1834,8 +2128,6 @@ export class AppStateService implements OnDestroy {
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get featureSearches() {return this.featureSearchState.getValue();}
     set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
-    get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
-    set lastSearchHistoryEntry(val: SearchHistoryStateEntry | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -2297,6 +2589,42 @@ export class AppStateService implements OnDestroy {
         return this.focusedInspectionPanelId === id;
     }
 
+    /** Stores row and header-button expansion state for the current in-memory inspection panel instance. */
+    setInspectionTreeExpansionState(panelId: number, state: InspectionTreeExpansionState): void {
+        this.inspectionTreeExpansionStates.set(panelId, this.cloneInspectionTreeExpansionState(state));
+    }
+
+    /** Returns a defensive copy of the last known expansion state for one inspection panel. */
+    getInspectionTreeExpansionState(panelId: number): InspectionTreeExpansionState | undefined {
+        const state = this.inspectionTreeExpansionStates.get(panelId);
+        return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
+    }
+
+    /** Clones an optional inspection-tree expansion snapshot. */
+    private cloneInspectionTreeExpansionSnapshot(
+        snapshot?: InspectionTreeExpansionSnapshot
+    ): InspectionTreeExpansionSnapshot | undefined {
+        return snapshot ? new Map(snapshot) : undefined;
+    }
+
+    /** Clones transient inspection-tree expansion state so component instances cannot share mutable maps. */
+    private cloneInspectionTreeExpansionState(state: InspectionTreeExpansionState): InspectionTreeExpansionState {
+        const clone: InspectionTreeExpansionState = {
+            expandedNodes: new Map(state.expandedNodes),
+            fullExpansionActive: state.fullExpansionActive,
+            fullCollapseActive: state.fullCollapseActive
+        };
+        const expandSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullExpand);
+        if (expandSnapshot) {
+            clone.expansionSnapshotBeforeFullExpand = expandSnapshot;
+        }
+        const collapseSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullCollapse);
+        if (collapseSnapshot) {
+            clone.expansionSnapshotBeforeFullCollapse = collapseSnapshot;
+        }
+        return clone;
+    }
+
     /** Returns the persisted layout for a dialog if one exists. */
     getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
         return this.dialogLayoutsState.getValue()[id];
@@ -2605,6 +2933,16 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Removes transient inspection-tree expansion states for panels that no longer exist. */
+    private pruneInspectionTreeExpansionStates(activePanelIds: number[]): void {
+        const activeIds = new Set(activePanelIds);
+        for (const panelId of this.inspectionTreeExpansionStates.keys()) {
+            if (!activeIds.has(panelId)) {
+                this.inspectionTreeExpansionStates.delete(panelId);
+            }
+        }
+    }
+
     /** Opens the inspection comparison dialog with the supplied model. */
     openInspectionComparison(model: InspectionComparisonModel): void {
         this.inspectionComparisonState.next(model);
@@ -2762,6 +3100,7 @@ export class AppStateService implements OnDestroy {
         const mapLayerId = `${mapId}/${layerId}`;
         const names = this.layerNames;
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
+        const missingFromAuthoritativeUrl = layerIndex === -1 && this.hasAuthoritativeUrlLayerList;
         if (layerIndex === -1) {
             layerIndex = names.length;
             this.layerNamesState.next([...names, mapLayerId]);
@@ -2779,7 +3118,10 @@ export class AppStateService implements OnDestroy {
         for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
             result.push({
                 autoLevel: layerStateValue(this.layerAutoZoomLevelState, viewIndex, true),
-                visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
+                visible: layerStateValue(
+                    this.layerVisibilityState,
+                    viewIndex,
+                    missingFromAuthoritativeUrl ? false : fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
             });
         }
@@ -2895,17 +3237,6 @@ export class AppStateService implements OnDestroy {
         this.styleVisibilityState.next(this.styleVisibility);
     }
 
-    /** Updates the active search-history selection and optionally persists the query. */
-    setSearchHistoryState(value: SearchHistoryEntry | null, saveHistory: boolean = true) {
-        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
-        if (trimmed && saveHistory) {
-            this.saveHistoryStateValue(trimmed);
-        }
-        this.lastSearchHistoryEntryState.next(trimmed);
-        this.searchState.next(trimmed ? trimmed : []);
-        this._replaceUrl = false;
-    }
-
     /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
     addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
         const entry = createFeatureSearchStateEntry(value);
@@ -2942,50 +3273,6 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    /** Rewrites search state during legacy migration without saving another history row. */
-    migrateSearchStateValue(value: SearchHistoryEntry | null) {
-        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
-        this.searchState.next(trimmed ? trimmed : []);
-        this._replaceUrl = false;
-    }
-
-    /** Rewrites the last search entry during legacy migration. Callers decide whether to suppress replay. */
-    migrateLastSearchHistoryEntry(value: SearchHistoryEntry | null) {
-        const trimmed = value ? normalizeResolvedSearchHistoryEntry(value) : null;
-        this.lastSearchHistoryEntryState.next(trimmed);
-    }
-
-    /** Persists one search-history entry into the bounded stored history list. */
-    private saveHistoryStateValue(value: SearchHistoryEntry) {
-        const searchHistoryString = localStorage.getItem("searchHistory");
-        let searchHistory: Array<SearchHistoryEntry> = [];
-        if (searchHistoryString) {
-            const parsed = JSON.parse(searchHistoryString) as unknown;
-            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
-                ? parsed
-                : [parsed];
-            const seen = new Set<string>();
-            for (const rawEntry of rawEntries) {
-                const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
-                if (!entry) {
-                    continue;
-                }
-                const key = historyEntryDedupeKey(entry);
-                if (seen.has(key)) {
-                    continue;
-                }
-                seen.add(key);
-                searchHistory.push(entry);
-            }
-        }
-        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
-        searchHistory.unshift(value);
-        while (searchHistory.length > 100) {
-            searchHistory.pop();
-        }
-        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
-    }
-
     /** Clears persisted app state from local storage and resets URL-backed state. */
     resetStorage() {
         for (const state of this.statePool.values()) {
@@ -3006,14 +3293,24 @@ export class AppStateService implements OnDestroy {
             // 1) Build sets of present maps, layers and styles
             const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
             const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
+            const presentMapIds = new Set<string>();
+            const mapsWithKnownFeatureLayers = new Set<string>();
+            const mapsWithKnownSelectionLayers = new Set<string>();
             for (const [mapId, mapNode] of presentMaps.entries()) {
+                presentMapIds.add(mapId);
                 // Use feature layers (exclude SourceData) via children
                 for (const layer of mapNode.children) {
                     presentLayerIds.add(`${mapId}/${layer.id}`);
                 }
+                if (mapNode.children.length > 0) {
+                    mapsWithKnownFeatureLayers.add(mapId);
+                }
                 // Selection pruning must keep SourceData inspections too.
                 for (const layerId of mapNode.layers.keys()) {
                     presentSelectionLayerIds.add(`${mapId}/${layerId}`);
+                }
+                if (mapNode.layers.size > 0) {
+                    mapsWithKnownSelectionLayers.add(mapId);
                 }
             }
 
@@ -3118,15 +3415,40 @@ export class AppStateService implements OnDestroy {
         // 6) Prune selections that reference maps/layers that are not present anymore
         const panels = this.selectionState.getValue();
         const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
+        let selectionChanged = false;
 
-        const parseKey = (tileKey: string): string | undefined => {
+        const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
+            let parsed: [string, string, number];
             try {
-                const [mapId, layerId, _] = coreLib.parseMapTileKey(tileKey);
-                // res is expected to be [mapId, layerId, tileId]
-                return `${mapId}/${layerId}`
-            } catch (_) {
-                return;
+                parsed = coreLib.parseMapTileKey(tileKey) as [string, string, number];
+            } catch {
+                return undefined;
             }
+            const [mapId, layerId] = parsed;
+            return {mapId, mapLayerId: `${mapId}/${layerId}`};
+        };
+
+        const keepFeatureSelection = (tileKey: string): boolean => {
+            const parsed = parseKey(tileKey);
+            if (!parsed) {
+                return false;
+            }
+            if (presentLayerIds.has(parsed.mapLayerId)) {
+                return true;
+            }
+            // Nonblocking datasource startup can transiently publish a map before its layers.
+            return !presentMapIds.has(parsed.mapId) || !mapsWithKnownFeatureLayers.has(parsed.mapId);
+        };
+
+        const keepSourceDataSelection = (tileKey: string): boolean => {
+            const parsed = parseKey(tileKey);
+            if (!parsed) {
+                return false;
+            }
+            if (presentSelectionLayerIds.has(parsed.mapLayerId)) {
+                return true;
+            }
+            return !presentMapIds.has(parsed.mapId) || !mapsWithKnownSelectionLayers.has(parsed.mapId);
         };
 
         for (const panel of panels) {
@@ -3137,31 +3459,35 @@ export class AppStateService implements OnDestroy {
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
                 color: panel.color,
-                undocked: panel.undocked
+                undocked: panel.undocked,
+                focused: panel.focused
             };
 
             // Filter features
             for (const feat of panel.features) {
-                const mapLayerId = parseKey(feat.mapTileKey);
-                if (mapLayerId && presentLayerIds.has(mapLayerId)) {
+                if (keepFeatureSelection(feat.mapTileKey)) {
                     updated.features.push(feat);
                 }
             }
 
             // Validate sourceData if present
-            if (updated.sourceData) {
-                const mapLayerId = parseKey(updated.sourceData.mapTileKey);
-                if (!mapLayerId || !presentSelectionLayerIds.has(mapLayerId)) {
-                    delete updated.sourceData;
-                }
+            if (updated.sourceData && !keepSourceDataSelection(updated.sourceData.mapTileKey)) {
+                delete updated.sourceData;
+            }
+
+            if (updated.features.length !== panel.features.length ||
+                (panel.sourceData !== undefined && updated.sourceData === undefined)) {
+                selectionChanged = true;
             }
 
             if (updated.features.length || updated.sourceData) {
                 nextPanels.push(updated);
+            } else {
+                selectionChanged = true;
             }
         }
 
-        if (nextPanels.length !== panels.length) {
+        if (selectionChanged || nextPanels.length !== panels.length) {
             this.selectionState.next(nextPanels);
         }
             this.sanitizeInspectionComparisonForSelection(nextPanels);

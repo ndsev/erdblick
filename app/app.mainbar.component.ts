@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy} from '@angular/core';
+import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {MapInfoService} from './mapdata/map-info.service';
 import {
@@ -17,16 +17,30 @@ import {
 import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 import {MenuItem} from "primeng/api";
+import {FeatureSearchService} from "./search/feature.search.service";
+import {InfoMessageService} from "./shared/info.service";
+import {StyleService} from "./styledata/style.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
-const MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM = 45;
+const MAIN_BAR_AVAILABLE_WIDTH_BREAKPOINT_EM = 56;
 const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
+const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
+const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
+const MENU_LABEL_MAX_LENGTH = 48;
+const MENU_LABEL_ELLIPSIS = "...";
+
+interface StyleSheetExportMenuNode {
+    name: string;
+    styleId?: string;
+    children: Map<string, StyleSheetExportMenuNode>;
+}
 
 @Component({
     selector: 'main-bar',
     host: {
-        '[class.main-bar-mobile-layout]': 'isMobileMenubar'
+        '[class.main-bar-mobile-layout]': 'isMobileMenubar',
+        '[class.main-bar-viewport-mobile-layout]': 'viewportMobileMenubar'
     },
     template: `
         @if (mapsPanelOpen) {
@@ -51,9 +65,11 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
                 }
             </ng-template>
             <ng-template #item let-item let-root="root">
-                <a pRipple class="p-menubar-item-link" [ngClass]="{'sync-option-active': isSyncViewOptionActive(item)}">
+                <a pRipple class="p-menubar-item-link"
+                   [ngClass]="{'sync-option-active': isSyncViewOptionActive(item), 'p-disabled': item.disabled}"
+                   [attr.aria-disabled]="item.disabled ? 'true' : null">
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
-                    <span>{{ item.name }}</span>
+                    <span>{{ item.name ?? item.label }}</span>
                     @if (!root && item.items?.length) {
                         <span class="pi submenu-indicator pi-angle-right"></span>
                     }
@@ -70,8 +86,17 @@ const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
                 </div>
             </ng-template>
         </p-menubar>
+        <input #searchJsonImportInput
+               type="file"
+               accept=".json,application/json"
+               class="hidden-file-input"
+               (change)="onSearchJsonImportSelected($event)">
+        <input #styleYamlImportInput
+               type="file"
+               accept=".yaml,.yml,application/x-yaml,text/yaml,text/plain"
+               class="hidden-file-input"
+               (change)="onStyleYamlImportSelected($event)">
     `,
-    styles: [``],
     standalone: false
 })
 /**
@@ -89,8 +114,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     private mobileMenubarStateFrame?: number;
     private mapsPanelTooltipAlignFrame?: number;
     private mapsPanelTooltipSafetyTimeout?: number;
-    private viewportMobileMenubar = false;
+    protected viewportMobileMenubar = false;
     private viewerLayoutMobileMenubar = false;
+    private mobileMapsMenuIncluded = false;
 
     protected isMobileMenubar = false;
     protected readonly desktopMenubarBreakpoint = MAIN_BAR_BREAKPOINT;
@@ -98,6 +124,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     protected readonly environment = environment;
     menuItems: MenuItem[] = [];
     copyright: string = '';
+    @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
+    @ViewChild('styleYamlImportInput') private styleYamlImportInput?: ElementRef<HTMLInputElement>;
 
     protected get menubarBreakpoint(): string {
         return this.isMobileMenubar
@@ -112,6 +140,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     constructor(public mapService: MapInfoService,
                 public stateService: AppStateService,
                 private diagnostics: DiagnosticsFacadeService,
+                private featureSearchService: FeatureSearchService,
+                private styleService: StyleService,
+                private infoMessageService: InfoMessageService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
         this.setupMobileMenuTracking();
@@ -135,11 +166,24 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.stateService.viewSyncState.subscribe(() => {
             this.rebuildMenuItems();
         }));
+        this.subscriptions.add(this.stateService.dockOpenState.subscribe(() => {
+            this.scheduleMobileMenubarStateUpdate();
+        }));
+        this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
+        this.subscriptions.add(this.stateService.featureSearchState.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
     }
 
     /** Starts observing the viewer layout width once the main bar is attached to the DOM. */
     ngAfterViewInit() {
         this.setupViewerLayoutTracking();
+        this.scheduleMobileMenubarStateUpdate();
     }
 
     /** Releases media-query, resize-observer, and tooltip-alignment resources. */
@@ -197,7 +241,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the external user guide. */
     openHelp() {
-        window.open('https://developer.nds.live/tools/mapviewer/user-guide', '_blank');
+        window.open('https://developer.nds.live/tools/mapviewer/', '_blank');
     }
 
     /** Opens the About dialog. */
@@ -213,6 +257,68 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Opens the styles dialog. */
     private openStylesDialog() {
         this.stateService.openDialog(STYLES_DIALOG_LAYOUT_ID);
+    }
+
+    /** Opens the hidden file input used to import feature-search JSON. */
+    protected triggerSearchJsonImport() {
+        this.searchJsonImportInput?.nativeElement.click();
+    }
+
+    /** Opens the hidden file input used to import YAML style sheets. */
+    protected triggerStyleYamlImport() {
+        this.styleYamlImportInput?.nativeElement.click();
+    }
+
+    /** Reads a selected feature-search JSON file and imports it as a new search session. */
+    protected async onSearchJsonImportSelected(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) {
+            return;
+        }
+        try {
+            if (file.size > SEARCH_JSON_IMPORT_MAX_BYTES) {
+                this.infoMessageService.showError("Search JSON file is too large.");
+                return;
+            }
+            const payload = JSON.parse(await file.text()) as unknown;
+            this.featureSearchService.importSearchJsonPayload(payload);
+            this.infoMessageService.showSuccess("Search JSON imported");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.infoMessageService.showError(`Could not import Search JSON: ${message}`);
+        } finally {
+            input.value = '';
+        }
+    }
+
+    /** Reads a selected YAML style sheet, imports it, and opens the Style Sheets dialog. */
+    protected async onStyleYamlImportSelected(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) {
+            return;
+        }
+        try {
+            if (file.size > STYLE_YAML_IMPORT_MAX_BYTES) {
+                this.infoMessageService.showError("Style sheet file is too large.");
+                return;
+            }
+            const imported = await this.styleService.importStyleYamlFile(file);
+            if (imported) {
+                this.infoMessageService.showSuccess("Style sheet imported");
+            } else if (this.styleService.lastValidationReport && !this.styleService.lastValidationReport.valid) {
+                this.infoMessageService.showError("Could not import Style Sheet: validation failed.");
+            } else {
+                this.infoMessageService.showError("Could not import Style Sheet: empty or invalid file.");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.infoMessageService.showError(`Could not import Style Sheet: ${message}`);
+        } finally {
+            input.value = '';
+            this.openStylesDialog();
+        }
     }
 
     /** Opens the maps panel. */
@@ -298,7 +404,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.mediaQueryList = undefined;
     }
 
-    /** Computes the initial viewer-layout-driven mobile menubar state. */
+    /** Computes the initial available-width-driven mobile menubar state before resize observation starts. */
     private initializeViewerLayoutMobileState() {
         const viewerLayoutElement = this.findViewerLayoutElement();
         if (!viewerLayoutElement) {
@@ -311,7 +417,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
+        this.viewerLayoutMobileMenubar = width < this.getAvailableWidthMobileBreakpointPx();
         this.isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
     }
 
@@ -326,10 +432,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
             this.ngZone.run(() => {
                 const [entry] = entries;
-                const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width;
-                if (typeof width === 'number') {
-                    this.updateViewerLayoutMobileState(width);
-                }
+                const width = entry?.contentRect.width
+                    ?? this.viewerLayoutElement?.getBoundingClientRect().width
+                    ?? 0;
+                this.updateViewerLayoutMobileState(width);
             });
         });
         this.viewerLayoutResizeObserver.observe(viewerLayoutElement);
@@ -342,16 +448,24 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.viewerLayoutElement = undefined;
     }
 
-    /** Updates the viewer-layout contribution to the mobile menubar state. */
+    /** Updates the available-width contribution to the mobile menubar state. */
     private updateViewerLayoutMobileState(width: number) {
-        this.viewerLayoutMobileMenubar = width < this.getViewerLayoutMobileBreakpointPx();
+        if (!Number.isFinite(width) || width <= 0) {
+            return;
+        }
+        this.viewerLayoutMobileMenubar = width < this.getAvailableWidthMobileBreakpointPx();
         this.scheduleMobileMenubarStateUpdate();
     }
 
     /** Applies the effective mobile menubar state and rebuilds menu items if it changed. */
     private updateMobileMenubarState() {
+        const width = this.viewerLayoutElement?.getBoundingClientRect().width ?? 0;
+        if (Number.isFinite(width) && width > 0) {
+            this.viewerLayoutMobileMenubar = width < this.getAvailableWidthMobileBreakpointPx();
+        }
         const isMobileMenubar = this.viewportMobileMenubar || this.viewerLayoutMobileMenubar;
-        if (this.isMobileMenubar === isMobileMenubar) {
+        const mobileMapsMenuChanged = this.mobileMapsMenuIncluded !== this.viewportMobileMenubar;
+        if (this.isMobileMenubar === isMobileMenubar && !mobileMapsMenuChanged) {
             return;
         }
         this.isMobileMenubar = isMobileMenubar;
@@ -379,21 +493,57 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return viewerLayoutElement instanceof HTMLElement ? viewerLayoutElement : undefined;
     }
 
-    /** Converts the viewer-layout breakpoint from `em` to pixels. */
-    private getViewerLayoutMobileBreakpointPx(): number {
+    /** Converts the available-width breakpoint from `em` to pixels. */
+    private getAvailableWidthMobileBreakpointPx(): number {
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
         const effectiveRootFontSize = Number.isFinite(rootFontSize) ? rootFontSize : 16;
-        return MAIN_BAR_VIEWER_LAYOUT_BREAKPOINT_EM * effectiveRootFontSize;
+        return MAIN_BAR_AVAILABLE_WIDTH_BREAKPOINT_EM * effectiveRootFontSize;
     }
 
     /** Rebuilds the current menu model using the latest view count and layout mode. */
     private rebuildMenuItems(numViews: number = this.stateService.numViews): void {
-        this.menuItems = this.buildMenuItems(numViews, this.isMobileMenubar);
+        this.mobileMapsMenuIncluded = this.viewportMobileMenubar;
+        this.menuItems = this.buildMenuItems(numViews, this.mobileMapsMenuIncluded);
     }
 
     /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
+        const exportSearchItems = this.buildExportSearchItems();
+        const exportStyleSheetItems = this.buildExportStyleSheetItems();
         const menuItems: MenuItem[] = [
+            {
+                name: 'File',
+                icon: 'folder_open',
+                items: [
+                    {
+                        name: 'Import Search',
+                        icon: 'manage_search',
+                        command: () => { this.triggerSearchJsonImport(); }
+                    },
+                    {
+                        name: 'Import Style Sheet',
+                        icon: 'palette',
+                        command: () => { this.triggerStyleYamlImport(); }
+                    },
+                    {
+                        name: 'Export Diagnostics',
+                        icon: 'download',
+                        command: () => { this.openDiagnosticsExport(); }
+                    },
+                    {
+                        name: 'Export Search',
+                        icon: 'travel_explore',
+                        disabled: !exportSearchItems.length,
+                        items: exportSearchItems
+                    },
+                    {
+                        name: 'Export Style Sheet',
+                        icon: 'file_save',
+                        disabled: !exportStyleSheetItems.length,
+                        items: exportStyleSheetItems
+                    }
+                ]
+            },
             {
                 name: 'Edit',
                 icon: 'tune',
@@ -469,11 +619,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         command: () => { this.openDiagnosticsPerformance(); }
                     },
                     {
-                        name: 'Export Diagnostics',
-                        icon: 'download',
-                        command: () => { this.openDiagnosticsExport(); }
-                    },
-                    {
                         name: 'Logs',
                         icon: 'list_alt',
                         command: () => { this.openDiagnosticsLog(); }
@@ -510,6 +655,96 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             });
         }
         return menuItems;
+    }
+
+    /** Builds the submenu for exporting live feature-search sessions. */
+    private buildExportSearchItems(): MenuItem[] {
+        const sessions = this.featureSearchService.getSessions();
+        if (!sessions.length) {
+            return [];
+        }
+        return sessions.map(session => ({
+            name: this.ellipsizeMenuLabel(session.definition.query, session.id),
+            icon: 'manage_search',
+            command: () => { this.featureSearchService.openExportDialog(session.id); }
+        }));
+    }
+
+    /** Builds the submenu for exporting currently loaded style sheets. */
+    private buildExportStyleSheetItems(): MenuItem[] {
+        const styles = Array.from(this.styleService.styles.values())
+            .filter(style => !!style.source)
+            .sort((left, right) => left.id.localeCompare(right.id));
+        if (!styles.length) {
+            return [];
+        }
+        const root: StyleSheetExportMenuNode = {name: "", children: new Map()};
+        for (const style of styles) {
+            let current = root;
+            for (const segment of this.styleSheetMenuSegments(style.id)) {
+                let child = current.children.get(segment);
+                if (!child) {
+                    child = {name: segment, children: new Map()};
+                    current.children.set(segment, child);
+                }
+                current = child;
+            }
+            current.styleId = style.id;
+        }
+        return Array.from(root.children.values())
+            .map(node => this.styleSheetExportMenuItem(node));
+    }
+
+    /** Splits a style id into menu path segments, ignoring empty slash path parts. */
+    private styleSheetMenuSegments(styleId: string): string[] {
+        const segments = styleId.split("/")
+            .map(segment => segment.trim())
+            .filter(segment => !!segment);
+        return segments.length ? segments : [styleId];
+    }
+
+    /** Converts one style-sheet export tree node into a PrimeNG menu item. */
+    private styleSheetExportMenuItem(node: StyleSheetExportMenuNode): MenuItem {
+        const childItems = Array.from(node.children.values())
+            .map(childNode => this.styleSheetExportMenuItem(childNode));
+        const styleId = node.styleId;
+        if (styleId && !childItems.length) {
+            return {
+                name: this.ellipsizeMenuLabel(node.name, styleId),
+                icon: 'palette',
+                command: () => { this.exportStyleSheet(styleId); }
+            };
+        }
+        if (styleId) {
+            childItems.unshift({
+                name: 'Export',
+                icon: 'file_save',
+                command: () => { this.exportStyleSheet(styleId); }
+            });
+        }
+        return {
+            name: this.ellipsizeMenuLabel(node.name, styleId ?? node.name),
+            icon: 'folder_open',
+            items: childItems
+        };
+    }
+
+    /** Exports one loaded style sheet and reports errors to the user. */
+    private exportStyleSheet(styleId: string): void {
+        if (!this.styleService.exportStyleYamlFile(styleId)) {
+            this.infoMessageService.showError(`Error occurred while trying to export style: ${styleId}`);
+        }
+    }
+
+    /** Shortens a dynamic menu label without losing the full label tooltip. */
+    private ellipsizeMenuLabel(value: string, fallback: string): string {
+        const normalized = value.trim().replace(/\s+/g, " ");
+        const label = normalized || fallback;
+        if (label.length <= MENU_LABEL_MAX_LENGTH) {
+            return label;
+        }
+        const contentLength = MENU_LABEL_MAX_LENGTH - MENU_LABEL_ELLIPSIS.length;
+        return `${label.slice(0, contentLength).trimEnd()}${MENU_LABEL_ELLIPSIS}`;
     }
 
     /** Toggles one synchronized-view option and mirrors the change into state. */

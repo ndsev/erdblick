@@ -42,7 +42,6 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
             </div>
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /** Dialog that configures and launches diagnostics JSON exports. */

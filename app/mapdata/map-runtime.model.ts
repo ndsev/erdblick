@@ -18,7 +18,7 @@ export interface SelectionTileRequest {
     reject: null | ((why: unknown) => void);
 }
 
-/** Aggregate backend request progress reported by the `/tiles` websocket. */
+/** Aggregate backend request progress reported by the interactive websocket. */
 export interface BackendRequestProgress {
     done: number;
     total: number;
@@ -44,7 +44,7 @@ export interface TileLoadingHudStats {
     viewportRenderSeconds: number;
 }
 
-/** Canonical map-tile cache key produced by the native TileLayerParser/core helpers. */
+/** Serialized mapget tile key produced by native TileLayerParser/core helpers. */
 export type MapTileKey = string;
 
 /** Fine-grained tile-data lifecycle event for consumers that need the concrete tile instance. */
@@ -87,11 +87,11 @@ export interface SearchResultTilePayload {
     refresh: number;
     mapId: string;
     layerId: string;
-    tileId: bigint;
+    tileId: number;
     sourceTileKey: string;
     sourceMapId: string;
     sourceLayerId: string;
-    sourceTileId: bigint;
+    sourceTileId: number;
     requestOrder: number;
     resultCount: number;
     resultFields: string[];
@@ -135,10 +135,11 @@ export interface SearchLayerTileEntry {
 export interface SearchLayerTileSet {
     mapId: string;
     layerId: string;
+    featureTypes: string[];
     tiles: Map<number, SearchLayerTileEntry>;
 }
 
-/** Concrete server-side search request embedded in the next `/tiles` update. */
+/** Concrete server-side search request embedded in the next interactive update. */
 export interface FeatureSearchTileRequest {
     mapId: string;
     layerId: string;
@@ -148,6 +149,7 @@ export interface FeatureSearchTileRequest {
     refresh: number;
     searchQuery: string;
     searchScope: "feature" | "attribute";
+    featureTypes: string[];
     withFields?: string[];
 }
 

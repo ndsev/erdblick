@@ -1,0 +1,143 @@
+@import "primeicons/primeicons.css";
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource/inter/index.css";
+
+/* Translucent surfaces used in UI (light/dark specific) */
+:root {
+  --erdblick-card-bg: rgba(255, 255, 255, 0.87);
+  --erdblick-card-bg-hover: rgba(255, 255, 255, 1);
+  --erdblick-map-bg: #050505;
+  --p-progressspinner-color-one: var(--p-blue-500) !important;
+  --p-progressspinner-color-two: var(--p-blue-500) !important;
+  --p-progressspinner-color-three: var(--p-blue-500) !important;
+  --p-progressspinner-color-four: var(--p-blue-500) !important;
+}
+
+.erdblick-dark {
+  --erdblick-card-bg: rgba(0, 0, 0, 0.5);
+  --erdblick-card-bg-hover: rgba(0, 0, 0, 0.65);
+  --p-treetable-row-hover-background: color-mix(in srgb, var(--p-primary-400) 20%, transparent) !important;
+  --p-highlight-background: color-mix(in srgb, var(--p-primary-400), transparent 75%) !important;
+}
+
+:root {
+  font-family: Inter, sans-serif;
+  font-feature-settings: 'liga' 1, 'calt' 1; /* fix for Chrome */
+}
+
+@supports (font-variation-settings: normal) {
+  :root {
+    font-family: 'Inter Variable', sans-serif;
+  }
+}
+
+.source-layer-dropdown {
+  height: 1.6em;
+  max-width: 50%;
+
+  .p-select-label {
+    padding: 0.2em;
+    height: 1.6em;
+  }
+
+  .p-select-dropdown {
+    height: 1.75em;
+    width: 1.75em;
+  }
+}
+
+body {
+  overflow: hidden;
+  height: 100vh !important;
+  width: 100vw !important;
+  margin: 0;
+
+  .p-multiselect-header {
+    padding: 0.25em;
+
+    .p-iconfield .p-inputtext:not(:last-child) {
+      padding: 0.25em;
+    }
+
+    .p-inputtext {
+      padding: 0.25em;
+      height: 1.75em;
+    }
+  }
+
+  .p-multiselect-option {
+    padding: 0.25em !important;
+    font-size: 0.9em;
+  }
+
+  .p-multiselectitem {
+    font-size: 0.9em;
+
+    li {
+      padding: 0.5em 0.75em;
+    }
+  }
+
+  .p-contextmenu {
+    width: 22em;
+  }
+
+  .p-popover-content {
+    padding: 0.25em;
+  }
+}
+
+mapview-container {
+  width: 100%;
+}
+
+legal-dialog {
+  .p-dialog-header, .p-dialog-content {
+    padding: 0.5em !important;
+  }
+
+  .stats-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+
+    button {
+      width: 100%;
+    }
+
+    .stats-table {
+      width: 100%;
+      border-collapse: collapse;
+
+      th, td {
+        border: 1px solid var(--p-content-border-color);
+        padding: 0.25em;
+        text-align: left;
+      }
+
+      th {
+        background: var(--p-highlight-background);
+        color: var(--p-treetable-row-color);
+        font-weight: bold;
+      }
+
+      tr {
+        background: var(--p-treetable-row-background);
+        color: var(--p-treetable-row-color);
+      }
+    }
+  }
+}
+
+app-root {
+  .dialog-content {
+    margin-bottom: 0.5em;
+  }
+
+  @media only screen and (max-width: 56em) {
+    .elevated {
+      bottom: 3.5em;
+      padding-bottom: 0;
+    }
+  }
+}

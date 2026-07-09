@@ -1,0 +1,219 @@
+.alert-dialog {
+  .p-dialog-mask {
+    z-index: 9001 !important;
+  }
+
+  .p-dialog-header {
+    padding: 0.75em !important;
+    height: 2.5em !important;
+  }
+
+  .p-dialog-content {
+    padding: 0.5em !important;
+  }
+}
+
+.stats-dialog {
+  .p-dialog-mask {
+    z-index: 9001 !important;
+  }
+
+  .p-dialog {
+    min-height: 20em;
+    min-width: 40em;
+    width: 40em;
+
+    .p-dialog-header {
+      padding: 0.75em !important;
+      height: 2.5em !important;
+    }
+
+    .p-dialog-content {
+      padding: 0.5em !important;
+    }
+  }
+}
+
+.diagnostics-progress-dialog,
+.diagnostics-performance-dialog,
+.diagnostics-log-dialog,
+.diagnostics-export-dialog,
+.feature-search-export-dialog {
+  .p-dialog {
+    .p-dialog-header {
+      padding: 0.75em !important;
+      height: 2.5em !important;
+    }
+
+    .p-dialog-content {
+      padding: 0 0.25em 0.25em 0.25em !important;
+    }
+  }
+}
+
+.diagnostics-progress-dialog {
+  .p-dialog {
+    min-width: 40em;
+    min-height: 22em;
+    width: 42em;
+  }
+}
+
+.diagnostics-performance-dialog {
+  .p-dialog {
+    min-width: 44em;
+    min-height: 24em;
+    width: 48em;
+  }
+
+  .p-dialog-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .diagnostics-perf-progress,
+  .diagnostics-perf-filter {
+    margin: 0.25em 0.25em 0.5em 0.25em;
+  }
+
+  .diagnostics-perf-value {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .diagnostics-perf-table {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .p-treetable {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .p-treetable-header {
+    padding: 0;
+  }
+
+  .p-treetable-thead {
+    th {
+      padding: 0.25em;
+      font-size: 0.9em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  .p-treetable-tbody {
+    border-collapse: collapse;
+    font-size: 0.9em !important;
+
+    td {
+      padding: 0.25em !important;
+      height: 1.5em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    th {
+      padding: 0 0 0 0.5em;
+      height: 1.5em;
+    }
+
+    .p-treetable-toggler {
+      margin: 0;
+      width: 1.25em;
+      height: 1.25em;
+    }
+
+    tr.diagnostics-perf-parent > td {
+      font-weight: 600;
+    }
+
+    tr.diagnostics-perf-root > td {
+      font-weight: 700;
+      background: var(--p-highlight-background);
+    }
+  }
+}
+
+.diagnostics-log-dialog {
+  .p-dialog {
+    min-width: 40em;
+    min-height: 20em;
+    width: 44em;
+  }
+
+  .p-dialog-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
+
+.diagnostics-export-dialog {
+  .p-dialog {
+    min-width: 26em;
+    width: 30em;
+  }
+}
+
+.feature-search-export-dialog {
+  .p-dialog {
+    min-width: 24em;
+    width: 28em;
+  }
+}
+
+.app-confirm-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65em;
+  padding: 0.75em;
+  max-width: 24em;
+}
+
+.app-confirm-popup-icon {
+  align-self: center;
+  font-size: 2.4em;
+  line-height: 1;
+}
+
+.app-confirm-popup-header {
+  font-weight: 700;
+  text-align: center;
+}
+
+.app-confirm-popup-message {
+  line-height: 1.35;
+  text-align: center;
+}
+
+.app-confirm-popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  justify-content: flex-end;
+}
+
+.app-confirm-popup-success .app-confirm-popup-icon {
+  color: var(--p-green-500, var(--p-button-success-background));
+}
+
+.app-confirm-popup-info .app-confirm-popup-icon {
+  color: var(--p-blue-500, var(--p-button-info-background));
+}
+
+.app-confirm-popup-warn .app-confirm-popup-icon {
+  color: var(--p-yellow-500, var(--p-button-warn-background));
+}
+
+.app-confirm-popup-error .app-confirm-popup-icon {
+  color: var(--p-red-500, var(--p-button-danger-background));
+}
+

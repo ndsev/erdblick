@@ -4,6 +4,7 @@
 #include "geometry.h"
 #include "mapget/log.h"
 #include "mapget/model/feature.h"
+#include "mapget/model/point.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -374,13 +375,10 @@ std::string TileFeatureLayer::id() const
     return model_->id().toString();
 }
 
-/**
- * Retrieves the tile ID as a 64-bit unsigned integer.
- * @return The tile ID.
- */
-uint64_t TileFeatureLayer::tileId() const
+/** Retrieves the signed packed NDS.Live tile ID. */
+int32_t TileFeatureLayer::tileId() const
 {
-    return model_->tileId().value_;
+    return model_->tileId().value();
 }
 
 uint32_t TileFeatureLayer::stage() const
@@ -408,8 +406,8 @@ uint64_t TileFeatureLayer::numVertices() const
  */
 mapget::Point TileFeatureLayer::center() const
 {
-    auto result = model_->tileId().center();
-    result.z = model_->tileId().z();
+    auto result = mapget::Point(model_->tileId().centerWgs84());
+    result.z = model_->tileId().level();
     return result;
 }
 
@@ -713,9 +711,9 @@ std::string TileSearchResultLayer::layerId() const
     return model_->layerInfo() ? model_->layerInfo()->layerId_ : "";
 }
 
-uint64_t TileSearchResultLayer::tileId() const
+int32_t TileSearchResultLayer::tileId() const
 {
-    return model_->tileId().value_;
+    return model_->tileId().value();
 }
 
 uint32_t TileSearchResultLayer::stage() const
@@ -761,12 +759,12 @@ NativeJsValue resultEntryRangeForLayer(
     auto const sourceLayerId = layerInfo.value(
         "sourceLayerId",
         model.layerInfo() ? model.layerInfo()->layerId_ : std::string{});
-    auto const sourceTileId = layerInfo.value("sourceTileId", model.tileId().value_);
+    auto const sourceTileId = layerInfo.value("sourceTileId", model.tileId().value());
     auto const sourceTileKey = mapget::MapTileKey(
         mapget::LayerType::Features,
         sourceMapId,
         sourceLayerId,
-        mapget::TileId(sourceTileId)).toString();
+        mapget::TileId::fromValue(sourceTileId)).toString();
 
     auto const begin = std::min<size_t>(offset, model.size());
     auto const end = limit == 0

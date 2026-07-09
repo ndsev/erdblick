@@ -16,7 +16,6 @@ import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "
             <inspection-comparison-dialog [comparison]="comparison"></inspection-comparison-dialog>
         }
     `,
-    styles: [``],
     standalone: false
 })
 /** Hosts floating inspection dialogs independently from the dock tab lifecycle. */

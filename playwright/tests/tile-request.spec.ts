@@ -16,9 +16,9 @@ test.describe('Python example datasource integration', () => {
         await requireTestMapSource(request);
 
         const tilePullRequests: string[] = [];
-        // Capture outgoing long-poll pulls for the `/tiles` stream.
+        // Capture outgoing long-poll pulls for the interactive stream.
         page.on('request', (req) => {
-            if (req.url().includes('/tiles/next') && req.method() === 'GET') {
+            if (req.url().includes('/interactive/payload') && req.method() === 'GET') {
                 tilePullRequests.push(req.url());
             }
         });

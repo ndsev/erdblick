@@ -84,7 +84,10 @@ public:
     bool forEachMatchingRule(
         mapget::Feature& feature,
         BoundEvalFun const& evalFun,
-        std::function<void(FeatureStyleRule const&)> const& callback) const;
+        std::function<void(FeatureStyleRule const&)> const& callback,
+        std::string_view const* relationName = nullptr) const;
+    /** Check only source-feature gates that do not require the final evaluation context. */
+    [[nodiscard]] bool matchesFeatureGates(mapget::Feature& feature) const;
     /** Visit all concrete renderable leaf rules without evaluating feature gates. */
     void forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const;
     /** Assign stable render identities to concrete leaf rules in source order. */

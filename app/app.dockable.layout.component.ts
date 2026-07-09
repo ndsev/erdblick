@@ -1,14 +1,16 @@
-import {Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
+import {ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
 import {AppStateService, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
 import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
 import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-panel-drag.controller";
+import {Subscription} from "rxjs";
+import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model";
 
 @Component({
     selector: 'dockable-layout',
     template: `
         <div class="main-layout">
-            <div class="viewer-layout" [ngClass]="{'open': !stateService.isDockOpen, 'collapsed': stateService.isDockOpen}">
+            <div #viewerLayout class="viewer-layout" [ngClass]="{'open': !stateService.isDockOpen, 'collapsed': stateService.isDockOpen}">
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
@@ -102,7 +104,6 @@ import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-
             }
         </div>
     `,
-    styles: [``],
     standalone: false
 })
 /**
@@ -116,6 +117,7 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
 
     @ViewChild('dock') private dockRef?: ElementRef<HTMLDivElement>;
+    @ViewChild('viewerLayout') private viewerLayoutRef?: ElementRef<HTMLDivElement>;
     private detachMove?: () => void;
     private detachUp?: () => void;
     private detachCancel?: () => void;
@@ -124,15 +126,43 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private dockPauseEndRafFirst?: number;
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
+    private dockOpenSubscription: Subscription;
+    private observedDockOpen: boolean;
     protected readonly searchDockDrag: DockedPanelDragController<string>;
 
     constructor(public stateService: AppStateService,
                 private renderer: Renderer2,
-                private featureSearchService: FeatureSearchService) {
+                private featureSearchService: FeatureSearchService,
+                private cdr: ChangeDetectorRef) {
+        this.observedDockOpen = this.stateService.isDockOpen;
+        this.dockOpenSubscription = this.stateService.dockOpenState.subscribe(nextDockOpen => {
+            if (nextDockOpen === this.observedDockOpen) {
+                return;
+            }
+            this.observedDockOpen = nextDockOpen;
+            const viewerLayout = this.viewerLayoutRef?.nativeElement;
+            if (!viewerLayout) {
+                return;
+            }
+
+            this.dispatchDockResizePauseStart();
+            const viewerWidth = viewerLayout.getBoundingClientRect().width;
+            this.cdr.detectChanges();
+            const targetViewerWidth = viewerLayout.getBoundingClientRect().width;
+
+            if (!Number.isFinite(viewerWidth) || !Number.isFinite(targetViewerWidth) || viewerWidth <= 0
+                || Math.abs(targetViewerWidth - viewerWidth) < 0.5) {
+                this.scheduleDockResizePauseEnd();
+                return;
+            }
+
+            window.dispatchEvent(new Event(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT));
+            this.scheduleDockResizePauseEnd();
+        });
         this.searchDockDrag = new DockedPanelDragController<string>({
             renderer: this.renderer,
             baseFontSize: () => this.stateService.baseFontSize,
-            container: () => this.searchDockContainer(),
+            container: () => this.dockRef?.nativeElement.querySelector('.feature-search-dock-container') ?? null,
             itemSelector: 'feature-search',
             readId: element => element.dataset['surfaceId'],
             previewClass: 'app-dock-drag-preview',
@@ -150,11 +180,9 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     protected readonly inspectionDockTabId = INSPECTION_DOCK_TAB_ID;
     protected readonly searchDockTabId = SEARCH_DOCK_TAB_ID;
 
-    /** Toggles dock visibility and emits resize-pause events around the transition. */
+    /** Toggles dock visibility; the dock-open subscription performs the resize preparation. */
     protected toggleDock() {
-        this.dispatchDockResizePauseStart();
         this.stateService.isDockOpen = !this.stateService.isDockOpen;
-        this.scheduleDockResizePauseEnd();
     }
 
     protected dockedInspectionCount(): number {
@@ -203,6 +231,7 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
         this.detachMove?.();
         this.detachUp?.();
         this.detachCancel?.();
+        this.dockOpenSubscription.unsubscribe();
         this.searchDockDrag.destroy();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();
@@ -210,6 +239,9 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
 
     /** Closes the right-hand dock without changing any surface dock state. */
     protected closeDock() {
+        if (!this.stateService.isDockOpen) {
+            return;
+        }
         this.stateService.isDockOpen = false;
     }
 
@@ -230,10 +262,6 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
         this.featureSearchService.setSessionDocked(searchId, false);
     }
 
-    private searchDockContainer(): HTMLElement | null {
-        return this.dockRef?.nativeElement.querySelector('.feature-search-dock-container') ?? null;
-    }
-    
     /** Starts a manual dock resize interaction from the resize handle. */
     onResizeStart(ev: PointerEvent) {
         if (!this.stateService.isDockOpen || !this.dockRef) {

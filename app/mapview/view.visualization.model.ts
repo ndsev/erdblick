@@ -1,6 +1,7 @@
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
 import type {ITileVisualization} from "./render-view.model";
+import {clampLowFiTileThreshold, DEFAULT_LOW_FI_TILE_THRESHOLD} from "../shared/appstate.service";
 
 export const DEFAULT_VIEWPORT: Viewport = {
     south: .0,
@@ -33,11 +34,21 @@ export interface TileRenderPolicy {
 }
 
 /** Maps a visible tile count to the low-/high-fidelity policy that should be applied at that density. */
-function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean): TileRenderPolicy {
+function tileRenderPolicyForCount(
+    tileCount: number,
+    pinLowFiToMaxLod: boolean,
+    lowFiTileThreshold: number): TileRenderPolicy {
+    const threshold = clampLowFiTileThreshold(lowFiTileThreshold);
     const lowFiPolicy = (maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7): TileRenderPolicy => ({
         targetFidelity: "low",
         maxLowFiLod: pinLowFiToMaxLod ? LOW_FI_MAX_LOD : maxLowFiLod
     });
+    if (tileCount < threshold) {
+        return {
+            targetFidelity: "high",
+            maxLowFiLod: null
+        };
+    }
     if (tileCount >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(0);
     }
@@ -62,10 +73,7 @@ function tileRenderPolicyForCount(tileCount: number, pinLowFiToMaxLod: boolean):
     if (tileCount >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
         return lowFiPolicy(7);
     }
-    return {
-        targetFidelity: "high",
-        maxLowFiLod: null
-    };
+    return lowFiPolicy(LOW_FI_MAX_LOD);
 }
 
 /**
@@ -103,7 +111,7 @@ export class VisualizationQueue {
     }
 
     /** Pops the highest-priority visualization whose tile is not currently blocked. */
-    dequeueNext(blockedTileIds?: ReadonlyMap<bigint, number>): ITileVisualization | undefined {
+    dequeueNext(blockedTileIds?: ReadonlyMap<number, number>): ITileVisualization | undefined {
         if (!this.queue.length) {
             return undefined;
         }
@@ -204,13 +212,13 @@ export class VisualizationQueue {
  */
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
-    visibleTileIds: Set<bigint> = new Set();
-    visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
-    visibleTileIdSetsPerLevel = new Map<number, Set<bigint>>();
-    searchVisibleTileIdsPerLevel = new Map<number, Array<bigint>>();
-    searchVisibleTileIdSetsPerLevel = new Map<number, Set<bigint>>();
-    tileRenderPolicy = new Map<bigint, TileRenderPolicy>();
-    tileOrder = new Map<bigint, number>();
+    visibleTileIds: Set<number> = new Set();
+    visibleTileIdsPerLevel = new Map<number, Array<number>>();
+    visibleTileIdSetsPerLevel = new Map<number, Set<number>>();
+    searchVisibleTileIdsPerLevel = new Map<number, Array<number>>();
+    searchVisibleTileIdSetsPerLevel = new Map<number, Set<number>>();
+    tileRenderPolicy = new Map<number, TileRenderPolicy>();
+    tileOrder = new Map<number, number>();
     readonly visualizationQueue = new VisualizationQueue();
     private visualizedTileLayers: Map<string, Map<string, ITileVisualization>> = new Map();
 
@@ -340,7 +348,8 @@ export class ViewVisualizationState {
         tileLimit: number,
         levels: Iterable<number>,
         canonicalCameraAltitudeMeters: number,
-        pinLowFiToMaxLod = false
+        pinLowFiToMaxLod = false,
+        lowFiTileThreshold = DEFAULT_LOW_FI_TILE_THRESHOLD
     ) {
         this.visibleTileIds.clear();
         this.tileRenderPolicy.clear();
@@ -353,8 +362,8 @@ export class ViewVisualizationState {
             if (this.visibleTileIdsPerLevel.has(level)) {
                 continue;
             }
-            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, tileLimit) as bigint[];
-            const visibleTileIdSetForLevel = new Set<bigint>(visibleTileIdsForLevel);
+            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, tileLimit) as number[];
+            const visibleTileIdSetForLevel = new Set<number>(visibleTileIdsForLevel);
             this.visibleTileIdsPerLevel.set(level, visibleTileIdsForLevel);
             this.visibleTileIdSetsPerLevel.set(level, visibleTileIdSetForLevel);
             for (const tileId of visibleTileIdSetForLevel) {
@@ -362,7 +371,10 @@ export class ViewVisualizationState {
             }
 
             const canonicalTileCount = coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level);
-            const levelPolicy = tileRenderPolicyForCount(canonicalTileCount, pinLowFiToMaxLod);
+            const levelPolicy = tileRenderPolicyForCount(
+                canonicalTileCount,
+                pinLowFiToMaxLod,
+                lowFiTileThreshold);
 
             for (const tileId of visibleTileIdsForLevel) {
                 this.tileRenderPolicy.set(tileId, levelPolicy);
@@ -375,7 +387,7 @@ export class ViewVisualizationState {
     }
 
     /** Returns the cached fidelity policy for a tile, defaulting to the most conservative low-fi fallback. */
-    getTileRenderPolicy(tileId: bigint): TileRenderPolicy {
+    getTileRenderPolicy(tileId: number): TileRenderPolicy {
         return this.tileRenderPolicy.get(tileId) ?? {
             targetFidelity: "low",
             maxLowFiLod: 0
@@ -383,7 +395,7 @@ export class ViewVisualizationState {
     }
 
     /** Returns the cached render-order index for a tile, or a large fallback for unknown tiles. */
-    getTileOrder(tileId: bigint): number {
+    getTileOrder(tileId: number): number {
         return this.tileOrder.get(tileId) ?? Number.MAX_SAFE_INTEGER;
     }
 }

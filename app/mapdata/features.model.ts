@@ -32,7 +32,7 @@ export class FeatureTile implements RenderableTileLayer {
     nodeId: string = "undefined";
     mapName: string = "undefined";
     layerName: string = "undefined";
-    tileId: bigint = BigInt(0);
+    tileId: number = 0;
     legalInfo: string = "";
     numFeatures: number = 0;
     error?: string;
@@ -78,7 +78,7 @@ export class FeatureTile implements RenderableTileLayer {
         parser: TileLayerParser,
         tileFeatureLayerBlob: Uint8Array | null,
         preventCulling: boolean,
-        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: bigint})
+        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: number})
     {
         this.parser = parser;
         this.preventCulling = preventCulling;
@@ -98,7 +98,7 @@ export class FeatureTile implements RenderableTileLayer {
 
     /**
      * Updates the tile metadata and per-stage blob cache from a serialized layer payload.
-     * The highest loaded stage becomes the canonical blob for stats and placeholder metadata.
+     * The highest loaded stage becomes the blob used for stats and placeholder metadata.
      */
     hydrateFromBlob(tileFeatureLayerBlob: Uint8Array, stageOverride?: number) {
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
@@ -108,7 +108,7 @@ export class FeatureTile implements RenderableTileLayer {
             nodeId: string;
             mapName: string;
             layerName: string;
-            tileId: bigint;
+            tileId: number;
             stage?: number;
             legalInfo?: string;
             error?: string;
@@ -122,7 +122,10 @@ export class FeatureTile implements RenderableTileLayer {
         const stage = Number.isInteger(stageOverride)
             ? Math.max(0, Number(stageOverride))
             : Math.max(0, parsedStage);
-        const canonicalMapTileKey = this.canonicalMapTileKeyForMetadata(mapTileMetadata);
+        const mapTileKey = coreLib.getTileFeatureLayerKey(
+            mapTileMetadata.mapName,
+            mapTileMetadata.layerName,
+            Number(mapTileMetadata.tileId));
 
         this.tileFeatureLayerBlobsByStage.set(stage, tileFeatureLayerBlob);
         this.tileFeatureLayerBlob = this.highestStageBlob();
@@ -133,14 +136,14 @@ export class FeatureTile implements RenderableTileLayer {
         this.dataVersion += 1;
 
         if (this.mapTileKey === "undefined") {
-            this.mapTileKey = canonicalMapTileKey;
-        } else if (this.mapTileKey !== canonicalMapTileKey) {
-            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${canonicalMapTileKey}`);
+            this.mapTileKey = mapTileKey;
+        } else if (this.mapTileKey !== mapTileKey) {
+            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${mapTileKey}`);
         }
         this.nodeId = mapTileMetadata.nodeId as string;
         this.mapName = mapTileMetadata.mapName as string;
         this.layerName = mapTileMetadata.layerName as string;
-        this.tileId = BigInt(mapTileMetadata.tileId as any);
+        this.tileId = Number(mapTileMetadata.tileId);
         this.legalInfo = mapTileMetadata.legalInfo as string;
         this.error = mapTileMetadata.error ? mapTileMetadata.error as string : undefined;
         const parsedNumFeatures = Number(mapTileMetadata.numFeatures);
@@ -349,30 +352,6 @@ export class FeatureTile implements RenderableTileLayer {
         return snapshot;
     }
 
-    /**
-     * Reconstructs the canonical map tile key from parser metadata.
-     * This defends against placeholder keys and older payloads that omit the composed id.
-     */
-    private canonicalMapTileKeyForMetadata(metadata: {
-        id?: string;
-        mapName?: string;
-        layerName?: string;
-        tileId?: bigint;
-    }): string {
-        if (metadata.id) {
-            try {
-                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(metadata.id);
-                return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
-            } catch (_error) {
-                return metadata.id;
-            }
-        }
-        if (metadata.mapName && metadata.layerName && metadata.tileId !== undefined) {
-            return coreLib.getTileFeatureLayerKey(metadata.mapName, metadata.layerName, metadata.tileId);
-        }
-        return this.mapTileKey;
-    }
-
     /** Returns the highest-stage blob, which is the payload most callers want as the tile summary. */
     private highestStageBlob(): Uint8Array | null {
         const highest = this.highestLoadedStage();
@@ -547,9 +526,9 @@ export class FeatureTile implements RenderableTileLayer {
         });
     }
 
-    /** Returns the tile level encoded in the low 16 bits of the NDS tile id. */
+    /** Returns the tile level decoded by the native packed-tile helper. */
     level() {
-        return Number(this.tileId & BigInt(0xffff));
+        return Number(coreLib.getTileLevel(this.tileId));
     }
 
     /** Returns true when the normalized feature id can be resolved inside this tile. */

@@ -18,13 +18,36 @@ beforeAll(async () => {
     await initializeLibrary();
 });
 
-/** Builds a mapget tile id with the same bit layout used by the native helpers. */
-function tileId(x: number, y: number, level: number): bigint {
-    return (BigInt(x) << 32n) | (BigInt(y) << 16n) | BigInt(level);
+/** Builds a deterministic packed tile id from stable sample coordinates. */
+function tileId(x: number, y: number, level: number): number {
+    const lon = [-135, -45, 45, 135][Math.max(0, Math.min(3, x))] ?? 0;
+    const lat = [45, -45, 20, -20][Math.max(0, Math.min(3, y))] ?? 0;
+    return coreLib.getTileIdFromPosition(lon, lat, level);
+}
+
+/** Finds two valid child tiles that collapse into the same parent tile. */
+function siblingTileIds(level = 2): [number, number] {
+    const groups = new Map<number, number[]>();
+    for (let lon = -170; lon <= 170; lon += 10) {
+        for (let lat = -80; lat <= 80; lat += 10) {
+            const id = coreLib.getTileIdFromPosition(lon, lat, level);
+            const center = coreLib.getTilePosition(id);
+            const parentId = coreLib.getTileIdFromPosition(center.x, center.y, level - 1);
+            const group = groups.get(parentId) ?? [];
+            if (!group.includes(id)) {
+                group.push(id);
+            }
+            if (group.length >= 2) {
+                return [group[0], group[1]];
+            }
+            groups.set(parentId, group);
+        }
+    }
+    throw new Error("No sibling packed tile ids found for density test.");
 }
 
 /** Creates one positioned search-result point for density-index tests. */
-function searchResultPoint(featureId: string, sourceTileId: bigint, coordinates: [number, number]): SearchResultPoint {
+function searchResultPoint(featureId: string, sourceTileId: number, coordinates: [number, number]): SearchResultPoint {
     const sourceTileKey = coreLib.getTileFeatureLayerKey("TestMap", "WayLayer", sourceTileId);
     const resultKey = `${sourceTileKey}\n${featureId}`;
     return {
@@ -46,7 +69,7 @@ function searchResultPoint(featureId: string, sourceTileId: bigint, coordinates:
 }
 
 /** Creates one already materialized density marker for low-fidelity layout tests. */
-function densityMarker(featureId: string, tileIdValue: bigint, count: number): SearchResultDensityMarker {
+function densityMarker(featureId: string, tileIdValue: number, count: number): SearchResultDensityMarker {
     return {
         coordinates: [0, 0],
         count,
@@ -64,8 +87,7 @@ function densityMarker(featureId: string, tileIdValue: bigint, count: number): S
 describe('SearchResultDensityIndex', () => {
     it('aggregates source-tile contributions at the requested ancestor tile level', () => {
         const index = new SearchResultDensityIndex();
-        const firstTileId = tileId(0, 0, 2);
-        const secondTileId = tileId(1, 0, 2);
+        const [firstTileId, secondTileId] = siblingTileIds(2);
         const firstPoint = searchResultPoint("first", firstTileId, [10, 20]);
         const secondPoint = searchResultPoint("second", secondTileId, [12, 24]);
 

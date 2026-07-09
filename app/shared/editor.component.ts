@@ -136,7 +136,6 @@ const highlightedLineTheme = EditorView.theme({
     template: `
         <div #editor class="editor-container"></div>
     `,
-    styles: [],
     standalone: false
 })
 /**

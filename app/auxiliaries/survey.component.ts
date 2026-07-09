@@ -36,7 +36,6 @@ import {AppConfigService, SurveyConfig} from "../shared/app-config.service";
             </div>
         }
     `,
-    styles: [``],
     standalone: false
 })
 /**

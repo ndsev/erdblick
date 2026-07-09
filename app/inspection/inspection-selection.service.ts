@@ -71,6 +71,9 @@ export class InspectionSelectionService {
                 if (revision !== this.selectionConversionRevision) {
                     return;
                 }
+                if (selection.features.length && !features.length && !selection.sourceData) {
+                    continue;
+                }
                 convertedSelections.push({
                     id: selection.id,
                     locked: selection.locked,
@@ -114,8 +117,27 @@ export class InspectionSelectionService {
                         panel.features.some(feature => feature.equals(hoveredFeature)))));
             }
         });
-        this.tileStream.tileDataChanged.subscribe(() => {
+        this.tileStream.tileDataChanged.subscribe(change => {
             this.lastHoverRequestSignature = "";
+            if (change.reason === "loaded" && this.selectionStateReferencesTile(change.tileKey)) {
+                this.reprojectCurrentSelection();
+            }
+        });
+    }
+
+
+    /** Re-emits persisted selection after late tile arrivals so empty reload panels can hydrate. */
+    private reprojectCurrentSelection(): void {
+        this.stateService.selectionState.next([...this.stateService.selectionState.getValue()]);
+    }
+
+    /** Checks whether a tile-data update belongs to one of the persisted selected features/source-data rows. */
+    private selectionStateReferencesTile(tileKey: string): boolean {
+        return this.stateService.selectionState.getValue().some(panel => {
+            if (panel.sourceData && panel.sourceData.mapTileKey === tileKey) {
+                return true;
+            }
+            return panel.features.some(feature => feature.mapTileKey === tileKey);
         });
     }
 
@@ -156,8 +178,9 @@ export class InspectionSelectionService {
     }
 
     /** Loads a feature and centers the target view on its reported center point. */
-    async focusOnFeature(viewIndex: number, tileFeatureId: TileFeatureId) {
-        const features = await this.tileStream.loadFeatures([tileFeatureId]);
+    async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
+        // Feature centers and bounding radii are only reliable after every advertised stage has arrived.
+        const features = await this.tileStream.loadFeatures([tileFeatureId], {requireAllStages: true});
         if (!features.length) {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
@@ -225,7 +248,7 @@ export class InspectionSelectionService {
                 targetViews.push(i);
             }
         }
-        return targetViews;
+        return targetViews.length ? targetViews : [this.stateService.focusedView];
     }
 
     /** Fits the target view to the tile represented by a focused source-data inspection. */

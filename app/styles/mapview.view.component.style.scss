@@ -1,0 +1,157 @@
+.hidden {
+  display: none;
+}
+
+map-view {
+  display: block;
+  height: 100%;
+  width: 100%;
+  position: relative;
+
+  .viewsync-select {
+    position: absolute;
+    right: 0.25em;
+    top: 2.75em;
+    z-index: 110;
+    opacity: 0.75;
+
+    &:hover {
+      opacity: 1;
+    }
+
+    .p-buttongroup > .p-togglebutton {
+      border-radius: 0;
+      padding: 0;
+
+      &:first-child {
+        border-top-left-radius: var(--p-togglebutton-border-radius) !important;
+        border-bottom-left-radius: var(--p-togglebutton-border-radius) !important;
+      }
+
+      &:last-child {
+        border-top-right-radius: var(--p-togglebutton-border-radius) !important;
+        border-bottom-right-radius: var(--p-togglebutton-border-radius) !important;
+      }
+
+      .p-togglebutton-content {
+        gap: 0.25em;
+        padding: 0.25em;
+
+        .p-togglebutton-label {
+          display: none;
+        }
+
+        .material-symbols-outlined {
+          font-size: 1.25em;
+        }
+      }
+    }
+
+    .p-buttongroup > .green {
+      .p-togglebutton-content {
+        background: var(--p-button-success-background) !important;
+      }
+
+      .material-symbols-outlined {
+        color: var(--p-button-success-color) !important;
+      }
+    }
+  }
+
+  .mapviewer-renderlayer {
+    position: relative;
+    height: 100vh;
+    inset: 0;
+    overflow: hidden;
+    background: var(--erdblick-map-bg);
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    -o-user-select: none;
+    box-sizing: border-box;
+    transition: filter 180ms ease, opacity 180ms ease;
+
+    &.dock-resize-active {
+      filter: blur(0.6px);
+      opacity: 0.92;
+    }
+
+    canvas {
+      background: var(--erdblick-map-bg);
+    }
+
+    &.border::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border: 0.15em solid var(--p-focus-ring-color);
+      border-radius: inherit;
+      z-index: 1000;
+    }
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-layout {
+    .collapsible-dock.toggle-transition-active {
+      transition: none !important;
+    }
+  }
+
+  .mapviewer-renderlayer {
+    transition: none !important;
+  }
+}
+
+.p-tooltip {
+  z-index: 30050 !important;
+}
+
+.p-splitter {
+  border: 0 !important;
+  width: 100% !important;
+}
+
+map-view {
+  @media only screen and (max-width: 56em) {
+    .elevated {
+      bottom: 3.5em;
+      padding-bottom: 0;
+    }
+  }
+
+  .mapviewer-error-state {
+    align-items: flex-start;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #efb6b6;
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+    color: #7f1d1d;
+    display: flex;
+    gap: 0.75rem;
+    height: fit-content;
+    inset: 1rem;
+    max-width: 36rem;
+    padding: 0.875rem 1rem;
+    position: absolute;
+    z-index: 2;
+
+    p {
+      margin: 0.25rem 0 0;
+    }
+  }
+}
+
+mapview-container {
+  @media only screen and (max-width: 56em) {
+    .elevated {
+      bottom: 3.5em;
+      padding-bottom: 0;
+    }
+  }
+}
+
+/* Shared styles for both panels */

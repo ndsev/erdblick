@@ -1,0 +1,131 @@
+.trace-entries {
+  font-size: 0.9em;
+
+  .p-accordionheader {
+    padding: 0.8em;
+    font-size: 0.9em;
+  }
+
+  .p-accordioncontent-content {
+    font-size: 0.9em;
+  }
+}
+
+.coordinates-container {
+  z-index: 9000;
+  pointer-events: none;
+  position: absolute;
+  bottom: 0.25em;
+  left: 0;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+
+  .marker-button {
+    button {
+      pointer-events: all;
+      width: 1.75em;
+      height: 1.75em;
+      box-shadow: none;
+      padding: 0;
+    }
+  }
+
+  .coordinates-panel {
+    pointer-events: all;
+    border-radius: 6px;
+    max-width: 80%;
+
+    .coordinates-entries {
+      display: flex;
+      flex-direction: row;
+      padding-bottom: 0;
+      gap: 0.25em;
+      overflow-y: auto;
+      max-width: calc(100% - 1.75em);
+      min-width: 0;
+      align-items: center;
+
+      & > .coordinates-entry:nth-child(1) {
+        margin-left: 0.25em;
+      }
+
+      & > .coordinates-entry:last-child {
+        margin-right: 0.25em;
+      }
+
+      .coord-span {
+        font-size: math;
+        text-align: right;
+        font-family: monospace;
+      }
+
+      .name-span {
+        cursor: pointer;
+        text-decoration: underline dotted;
+        text-wrap: nowrap;
+        font-size: 0.9em;
+      }
+    }
+
+    .coordinates-button {
+      button {
+        padding-left: 0;
+        padding-right: 0;
+        width: 1.75em;
+        height: 1.75em;
+        box-shadow: none;
+        background: none;
+        border: none;
+        color: var(--text-color);
+      }
+    }
+
+    .p-card {
+      background: var(--erdblick-card-bg);
+      border-radius: var(--p-button-border-radius)
+    }
+
+    .p-card:hover {
+      background: var(--erdblick-card-bg-hover);
+    }
+
+    .p-card-body {
+      padding: 0;
+    }
+
+    .p-card-content {
+      padding: 0;
+      display: flex;
+      flex-direction: row;
+      max-width: 100%;
+
+      .p-multiselect {
+        box-shadow: none;
+        border: none;
+        width: 1.75em;
+        height: 1.75em;
+
+        .p-multiselect-dropdown {
+          width: 1.75em;
+        }
+      }
+
+      .p-multiselect-label {
+        display: none;
+      }
+    }
+
+    .coordinates-entry {
+      display: flex;
+      align-items: center;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      gap: 0.25em;
+    }
+  }
+}
+

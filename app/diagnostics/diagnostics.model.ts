@@ -79,6 +79,17 @@ export interface PerfStat {
     peakTileIds?: string[];
 }
 
+/** Optional filter scope for Performance Diagnostics, plus a transient dialog request id when applied. */
+export interface PerformanceDiagnosticsScope {
+    tileIds: string[];
+    layers: Array<{
+        mapId: string;
+        layerId: string;
+    }>;
+    source?: 'context-menu';
+    requestId?: number;
+}
+
 /** One diagnostics log entry, including optional structured payload data. */
 export interface LogEntry {
     at: number;

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <iostream>
 #include <regex>
+#include <set>
 
 #include "yaml-cpp/yaml.h"
 #include "simfil/simfil.h"
@@ -151,8 +152,21 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
                 locationForNode(options));
         } else {
             uint32_t optionIndex = 0;
+            std::set<std::string> seenOptionIds;
             for (auto const& option : options) {
                 if (!validateStyleOptionYaml(option, optionIndex++, styleSpec, validationReport_)) {
+                    continue;
+                }
+                auto const optionId = option["id"].Scalar();
+                if (!seenOptionIds.insert(optionId).second) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "option-skipped",
+                        "Duplicate style option id '" + optionId + "' was ignored.",
+                        locationForNode(option["id"]));
+                    issue.rulePath = "options[" + std::to_string(optionIndex - 1) + "]";
+                    issue.property = "id";
                     continue;
                 }
                 try {

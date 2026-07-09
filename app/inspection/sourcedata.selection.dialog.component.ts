@@ -75,7 +75,6 @@ import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service
             }
         </app-dialog>
     `,
-    styles: [``],
     standalone: false
 })
 /** Dialog for choosing which source-data layer should be inspected for a clicked tile. */
@@ -89,7 +88,7 @@ export class SourceDataLayerSelectionDialogComponent {
     mapIds: SourceDataDropdownOption[] = [];
     sourceDataLayers: SourceDataDropdownOption[] = [];
 
-    mapIdsPerTileId: Map<bigint, SourceDataDropdownOption[]> = new Map<bigint, SourceDataDropdownOption[]>();
+    mapIdsPerTileId: Map<number, SourceDataDropdownOption[]> = new Map<number, SourceDataDropdownOption[]>();
     sourceDataLayersPerMapId: Map<string, SourceDataDropdownOption[]> = new Map<string, SourceDataDropdownOption[]>();
 
     errorString: string = "";
@@ -147,7 +146,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
         // Fill map IDs per tile ID.
         for (let i = 0; i < this.tileIds.length; i++) {
-            const id = this.tileIds[i].id as bigint;
+            const id = Number(this.tileIds[i].id);
             const maps = this.mapService.findSourceDataMapsForTileId(id);
             this.tileIds[i]["disabled"] = !maps.length;
             this.mapIdsPerTileId.set(id, maps);
@@ -169,7 +168,12 @@ export class SourceDataLayerSelectionDialogComponent {
             return;
         }
 
-        const tileId = BigInt(tileIdString);
+        const tileId = Number(tileIdString);
+        if (!Number.isFinite(tileId)) {
+            this.resetSelectionState();
+            this.menuService.tileOutline.next(null);
+            return;
+        }
         const maps = this.mapService.findSourceDataMapsForTileId(tileId);
         this.mapIdsPerTileId.set(tileId, maps);
         this.setCurrentTileId({id: tileId, name: tileIdString});
@@ -200,8 +204,8 @@ export class SourceDataLayerSelectionDialogComponent {
         this.selectedMapId = undefined;
         this.selectedSourceDataLayer = undefined;
         this.sourceDataLayers = [];
-        this.menuService.outlineTile(BigInt(tileId.id), Color.HOTPINK);
-        const mapIds = this.mapIdsPerTileId.get(tileId.id as bigint);
+        this.menuService.outlineTile(Number(tileId.id), Color.HOTPINK);
+        const mapIds = this.mapIdsPerTileId.get(Number(tileId.id));
         if (mapIds !== undefined) {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
             for (let i = 0; i < this.mapIds.length; i++) {

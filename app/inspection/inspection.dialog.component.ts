@@ -48,6 +48,8 @@ import {displayFeatureId} from "../shared/tile-feature-id";
                                       [(ngModel)]="selectedLayerItem"
                                       (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                      appendTo="body"
+                                      [overlayOptions]="sourceLayerDropdownOverlayOptions"
                                       optionLabel="label"
                                       optionDisabled="disabled"/>
                         } @else if (panel().features.length > 0) {
@@ -104,20 +106,6 @@ import {displayFeatureId} from "../shared/tile-feature-id";
             </div>
         </p-popover>
     `,
-    styles: [`
-        .inspection-focus-indicator {
-            align-items: center;
-            border: 2px solid transparent;
-            border-radius: 999px;
-            display: inline-flex;
-            justify-content: center;
-            padding: 2px;
-        }
-
-        .inspection-focus-indicator-active {
-            border-color: var(--p-primary-color, #2196f3);
-        }
-    `],
     standalone: false
 })
 /**
@@ -136,6 +124,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     isMetadata: boolean = false;
+    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
 
     @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -164,7 +153,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (panel.sourceData !== undefined) {
             const selection = panel.sourceData!;
             const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
-            this.isMetadata = tileId === 0n;
+            this.isMetadata = tileId === 0;
             this.title = this.isMetadata ? `${mapId}:` : `${tileId}.`;
             const map = this.mapService.maps.maps.get(mapId);
             if (map) {

@@ -1,4 +1,5 @@
 import {Injectable, OnDestroy} from '@angular/core';
+import {BehaviorSubject} from 'rxjs';
 import {
     AppStateService,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
@@ -13,6 +14,7 @@ import {
     DiagnosticsExportOptions,
     DiagnosticsLogFilter,
     LogEntry,
+    PerformanceDiagnosticsScope,
     TileSizeDistribution
 } from './diagnostics.model';
 import {StyleValidationReportService} from '../styledata/style-validation-report.service';
@@ -35,6 +37,8 @@ interface MapgetStatusDataResponse {
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
+    readonly performanceScope$ = new BehaviorSubject<PerformanceDiagnosticsScope | null>(null);
+    private nextPerformanceScopeRequestId = 1;
 
     constructor(mapService: MapTileStreamService,
                 mapRenderService: MapRenderService,
@@ -44,7 +48,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */
-    openPerformanceDialog() {
+    openPerformanceDialog(scope?: PerformanceDiagnosticsScope) {
+        this.performanceScope$.next(scope ? {
+            ...scope,
+            requestId: this.nextPerformanceScopeRequestId++
+        } : null);
         this.refreshPerfStats();
         this.stateService.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
     }

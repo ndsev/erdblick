@@ -131,7 +131,7 @@ export class FeatureSearchRuntimeState {
         for (const entry of visibleLayerTiles.values()) {
             for (const visibleTile of entry.tiles.values()) {
                 const tileId = visibleTile.tileId;
-                const sourceTileId = BigInt(tileId);
+                const sourceTileId = tileId;
                 const sourceTileKey = coreLib.getTileFeatureLayerKey(entry.mapId, entry.layerId, sourceTileId);
                 desiredKeys.add(sourceTileKey);
                 const existing = this.tilesBySourceKey.get(sourceTileKey);
@@ -151,6 +151,7 @@ export class FeatureSearchRuntimeState {
                     entry.mapId,
                     entry.layerId,
                     sourceTileId,
+                    entry.featureTypes,
                     this.refresh,
                     visibleTile.priority,
                     visibleTile.requestOrder
@@ -217,6 +218,7 @@ export class FeatureSearchRuntimeState {
         const statesByLevelLayer = new Map<string, {
             mapId: string;
             layerId: string;
+            featureTypes: string[];
             firstRequestOrder: number;
             tiles: Array<{tileId: number; requestOrder: number; priority: boolean}>;
         }>();
@@ -224,14 +226,15 @@ export class FeatureSearchRuntimeState {
             if (tile.completed) {
                 continue;
             }
-            const tileId = Number(tile.sourceTileId);
-            const tileLevel = Math.trunc(tileId % 0x10000);
+            const tileId = tile.sourceTileId;
+            const tileLevel = Number(coreLib.getTileLevel(tileId));
             const key = `${tile.sourceMapId}/${tile.sourceLayerId}/${tileLevel}`;
             let entry = statesByLevelLayer.get(key);
             if (!entry) {
                 entry = {
                     mapId: tile.sourceMapId,
                     layerId: tile.sourceLayerId,
+                    featureTypes: tile.featureTypes,
                     firstRequestOrder: tile.requestOrder,
                     tiles: []
                 };
@@ -267,6 +270,7 @@ export class FeatureSearchRuntimeState {
                     this.definition,
                     entry.mapId,
                     entry.layerId,
+                    entry.featureTypes,
                     tileIds,
                     priorityTileIds,
                     this.refresh
@@ -289,6 +293,7 @@ export class FeatureSearchRuntimeState {
                 this.definition,
                 parsed.mapId,
                 parsed.layerId,
+                [],
                 [],
                 [],
                 refresh
@@ -330,6 +335,7 @@ export class FeatureSearchRuntimeState {
             query: this.definition.query,
             backendQuery: this.definition.backendQuery,
             scope: this.definition.concreteScope,
+            featureTypes: this.definition.selectedFeatureTypes,
             selectedMapLayers: normalizedSelectedLayerRefs(this.definition),
             selectedTileLevels: this.definition.selectedTileLevels,
             withFields: this.definition.resultFields
@@ -341,6 +347,7 @@ export class FeatureSearchRuntimeState {
         request: FeatureSearchResolvedDefinition,
         mapId: string,
         layerId: string,
+        featureTypes: string[],
         tileIds: number[],
         priorityTileIds: number[],
         refresh: number
@@ -353,6 +360,7 @@ export class FeatureSearchRuntimeState {
             refresh,
             searchQuery: request.backendQuery,
             searchScope: request.concreteScope,
+            featureTypes: [...featureTypes],
         };
         if (priorityTileIds.length) {
             result.priorityTileIds = priorityTileIds;

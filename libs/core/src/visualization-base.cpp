@@ -112,11 +112,14 @@ std::optional<ParsedHighlightAttributeId> parseHighlightAttributeId(std::string_
     return result;
 }
 
-/** Build a cache key that keeps plain and any-wrapped ASTs separate. */
-std::string makeExpressionCacheKey(std::string_view expression, bool anyMode) {
+/** Build a cache key that keeps plain, any-wrapped, and schema-specific ASTs separate. */
+std::string makeExpressionCacheKey(std::string_view expression, simfil::SchemaId rootSchema, bool anyMode) {
     std::string key;
-    key.reserve(expression.size() + 2);
+    auto const schemaText = std::to_string(rootSchema);
+    key.reserve(expression.size() + schemaText.size() + 3);
     key.push_back(anyMode ? '1' : '0');
+    key.push_back(':');
+    key.append(schemaText);
     key.push_back(':');
     key.append(expression);
     return key;
@@ -198,13 +201,6 @@ void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
     model_ptr<Relation> const& relation,
     bool onlyUpdateTwowayFlags)
 {
-    if (auto const& relationType = rule_.relationType()) {
-        auto relationName = relation->name();
-        if (!std::regex_match(relationName.begin(), relationName.end(), *relationType)) {
-            return;
-        }
-    }
-
     auto const sourceId = sourceFeature->id()->toString();
     auto const targetRef = relation->target();
     auto const targetRefString = targetRef->toString();
@@ -366,18 +362,19 @@ glm::dvec3 FeatureLayerVisualizationBase::effectiveOffsetForSlot(
 void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisualize& relationToRender)
 {
     auto const& relation = static_cast<mapget::Relation const&>(*relationToRender.relation_);
-    auto const& source = static_cast<mapget::Feature const&>(*relationToRender.sourceFeature_);
-    auto const& target = static_cast<mapget::Feature const&>(*relationToRender.targetFeature_);
+    auto& source = static_cast<mapget::Feature&>(*relationToRender.sourceFeature_);
+    auto const& constSource = static_cast<mapget::Feature const&>(*relationToRender.sourceFeature_);
+    auto const& constTarget = static_cast<mapget::Feature const&>(*relationToRender.targetFeature_);
 
     auto relationContext =
         simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(relation));
     visualization_.addOptionsToSimfilContext(relationContext);
     relationContext->set(
         visualization_.internalStringPoolCopy_->emplace("$source").value(),
-        simfil::Value::field(source));
+        simfil::Value::field(constSource));
     relationContext->set(
         visualization_.internalStringPoolCopy_->emplace("$target").value(),
-        simfil::Value::field(target));
+        simfil::Value::field(constTarget));
     relationContext->set(
         visualization_.internalStringPoolCopy_->emplace("$twoway").value(),
         simfil::Value(relationToRender.twoway_));
@@ -393,99 +390,109 @@ void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisuali
             visualization_.recordRuntimeStyleIssue(property, expression, message, ruleIndex);
         }};
 
-    auto const preferredGeometryStage =
-        visualization_.preferredGeometryStageForCurrentFidelity(std::nullopt);
-    auto const sourceGeometries = relationGeometries(
-        relationToRender.relation_->sourceValidityOrNull(),
-        relationToRender.sourceFeature_,
-        preferredGeometryStage);
-    auto const targetGeometries = relationGeometries(
-        relationToRender.relation_->targetValidityOrNull(),
-        relationToRender.targetFeature_,
-        preferredGeometryStage);
-
     auto const sourceId = relationToRender.sourceFeature_->id()->toString();
     auto const targetId = relationToRender.targetFeature_->id()->toString();
+    auto const relationName = relation.name();
+    auto const relationInstanceKey =
+        sourceId + ":" + std::string(relationName) + ":" + targetId + ":"
+        + std::to_string(relationToRender.relation_->addr().index());
 
-    if (!sourceGeometries.empty()
-        && !targetGeometries.empty()
-        && !sourceGeometries.front().geometry_.points_.empty()
-        && !targetGeometries.front().geometry_.points_.empty()) {
-        auto const sourceCenter = geometryCenter(sourceGeometries.front().geometry_);
-        auto const targetCenter = geometryCenter(targetGeometries.front().geometry_);
-        auto const liftedSource = Point{
-            sourceCenter.x,
-            sourceCenter.y,
-            sourceCenter.z + rule_.relationLineHeightOffset()};
-        auto const liftedTarget = Point{
-            targetCenter.x,
-            targetCenter.y,
-            targetCenter.z + rule_.relationLineHeightOffset()};
+    rule_.forEachMatchingRule(source, boundEvalFun, [&](FeatureStyleRule const& matchingRule) {
+        auto const preferredGeometryStage =
+            visualization_.preferredGeometryStageForCurrentFidelity(matchingRule.stage());
+        auto const sourceGeometries = relationGeometries(
+            relationToRender.relation_->sourceValidityOrNull(),
+            relationToRender.sourceFeature_,
+            preferredGeometryStage);
+        auto const targetGeometries = relationGeometries(
+            relationToRender.relation_->targetValidityOrNull(),
+            relationToRender.targetFeature_,
+            preferredGeometryStage);
 
-        if (rule_.width() > 0.0f) {
-            visualization_.addLine(
-                liftedSource,
-                liftedTarget,
-                FeatureLayerVisualizationBase::kUnselectableFeatureId,
-                rule_,
-                boundEvalFun,
-                rule_.offset());
-        }
-        if (auto lineEndMarkerStyle = rule_.relationLineEndMarkerStyle()) {
-            if (visualizedFeatureParts_.emplace(sourceId + "-line-end-marker").second) {
+        if (!sourceGeometries.empty()
+            && !targetGeometries.empty()
+            && !sourceGeometries.front().geometry_.points_.empty()
+            && !targetGeometries.front().geometry_.points_.empty()) {
+            auto const sourceCenter = geometryCenter(sourceGeometries.front().geometry_);
+            auto const targetCenter = geometryCenter(targetGeometries.front().geometry_);
+            auto const liftedSource = Point{
+                sourceCenter.x,
+                sourceCenter.y,
+                sourceCenter.z + matchingRule.relationLineHeightOffset()};
+            auto const liftedTarget = Point{
+                targetCenter.x,
+                targetCenter.y,
+                targetCenter.z + matchingRule.relationLineHeightOffset()};
+
+            if (matchingRule.width() > 0.0f) {
                 visualization_.addLine(
-                    sourceCenter,
                     liftedSource,
-                    FeatureLayerVisualizationBase::kUnselectableFeatureId,
-                    *lineEndMarkerStyle,
-                    boundEvalFun,
-                    lineEndMarkerStyle->offset());
-            }
-            if (visualizedFeatureParts_.emplace(targetId + "-line-end-marker").second) {
-                visualization_.addLine(
-                    targetCenter,
                     liftedTarget,
                     FeatureLayerVisualizationBase::kUnselectableFeatureId,
-                    *lineEndMarkerStyle,
+                    matchingRule,
                     boundEvalFun,
-                    lineEndMarkerStyle->offset());
+                    matchingRule.offset());
+            }
+            if (auto lineEndMarkerStyle = matchingRule.relationLineEndMarkerStyle()) {
+                auto const markerKeyPrefix =
+                    relationInstanceKey + ":line-end-marker:" + std::to_string(matchingRule.renderIndex());
+                if (visualizedFeatureParts_.emplace(markerKeyPrefix + ":source").second) {
+                    visualization_.addLine(
+                        sourceCenter,
+                        liftedSource,
+                        FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                        *lineEndMarkerStyle,
+                        boundEvalFun,
+                        lineEndMarkerStyle->offset());
+                }
+                if (visualizedFeatureParts_.emplace(markerKeyPrefix + ":target").second) {
+                    visualization_.addLine(
+                        targetCenter,
+                        liftedTarget,
+                        FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                        *lineEndMarkerStyle,
+                        boundEvalFun,
+                        lineEndMarkerStyle->offset());
+                }
             }
         }
-    }
 
-    if (auto sourceStyle = rule_.relationSourceStyle();
-        sourceStyle && visualizedFeatureParts_.emplace(sourceId).second) {
-        for (auto const& sourceGeometry : sourceGeometries) {
-            if (sourceGeometry.geometry_.points_.empty()) {
-                continue;
+        if (auto sourceStyle = matchingRule.relationSourceStyle();
+            sourceStyle && visualizedFeatureParts_.emplace(
+                sourceId + ":source-style:" + std::to_string(matchingRule.renderIndex())).second) {
+            for (auto const& sourceGeometry : sourceGeometries) {
+                if (sourceGeometry.geometry_.points_.empty()) {
+                    continue;
+                }
+                visualization_.addGeometry(
+                    sourceGeometry.geometry_,
+                    sourceGeometry.stage_,
+                    FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                    *sourceStyle,
+                    "",
+                    boundEvalFun,
+                    sourceStyle->offset());
             }
-            visualization_.addGeometry(
-                sourceGeometry.geometry_,
-                sourceGeometry.stage_,
-                FeatureLayerVisualizationBase::kUnselectableFeatureId,
-                *sourceStyle,
-                "",
-                boundEvalFun,
-                sourceStyle->offset());
         }
-    }
 
-    if (auto targetStyle = rule_.relationTargetStyle();
-        targetStyle && visualizedFeatureParts_.emplace(targetId).second) {
-        for (auto const& targetGeometry : targetGeometries) {
-            if (targetGeometry.geometry_.points_.empty()) {
-                continue;
+        if (auto targetStyle = matchingRule.relationTargetStyle();
+            targetStyle && visualizedFeatureParts_.emplace(
+                targetId + ":target-style:" + std::to_string(matchingRule.renderIndex())).second) {
+            for (auto const& targetGeometry : targetGeometries) {
+                if (targetGeometry.geometry_.points_.empty()) {
+                    continue;
+                }
+                visualization_.addGeometry(
+                    targetGeometry.geometry_,
+                    targetGeometry.stage_,
+                    FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                    *targetStyle,
+                    "",
+                    boundEvalFun,
+                    targetStyle->offset());
             }
-            visualization_.addGeometry(
-                targetGeometry.geometry_,
-                targetGeometry.stage_,
-                FeatureLayerVisualizationBase::kUnselectableFeatureId,
-                *targetStyle,
-                "",
-                boundEvalFun,
-                targetStyle->offset());
         }
-    }
+    }, &relationName);
 
     relationToRender.rendered_ = true;
 }
@@ -935,11 +942,12 @@ void FeatureLayerVisualizationBase::run()
         };
         boundEvalFun.eval_ = [this, &ensureEvaluationContext, &boundEvalFun](auto&& str)
         {
-            if (auto constantValue = evaluateConstantExpression(str, false)) {
-                return std::move(*constantValue);
-            }
             auto& context = ensureEvaluationContext();
             boundEvalFun.context_ = context;
+            auto const rootSchema = context->schema();
+            if (auto constantValue = evaluateConstantExpression(str, rootSchema, false)) {
+                return std::move(*constantValue);
+            }
             return evaluateExpression(str, *context, false);
         };
 
@@ -963,6 +971,13 @@ void FeatureLayerVisualizationBase::run()
         }
         for (auto ruleIndex : candidateRuleIndices) {
             auto const& rule = style_.rules()[ruleIndex];
+            if (rule.aspect() == FeatureStyleRule::Relation) {
+                if (rule.matchesFeatureGates(*feature)) {
+                    onRelationStyle(feature, boundEvalFun, rule, makeMapLayerStyleRuleId(rule.renderIndex()));
+                    featuresAdded_ = true;
+                }
+                continue;
+            }
             if (rule.aspect() == FeatureStyleRule::Feature) {
                 if ((featureGeomMask & rule.effectiveGeometryTypesMask()) == 0) {
                     continue;
@@ -1369,7 +1384,7 @@ void FeatureLayerVisualizationBase::addMergedPointGeometry(
                 "count",
                 pointCartographic,
                 gridPositionHash,
-                tile_->tileId().z(),
+                tile_->tileId().level(),
                 mapLayerStyleRuleId);
         } catch (...) {
             externalMergedPointCount = 0;
@@ -1503,6 +1518,9 @@ void FeatureLayerVisualizationBase::ensureEvaluationEnvironment()
     }
 
     evalEnvironment_ = mapget::makeEnvironment(internalStringPoolCopy_);
+    if (tile_) {
+        mapget::installLayerSchema(*evalEnvironment_, tile_->layerSchema(), internalStringPoolCopy_);
+    }
     for (auto const& [key, value] : optionValues_) {
         evalEnvironment_->constants.insert_or_assign(key, value);
     }
@@ -1511,6 +1529,7 @@ void FeatureLayerVisualizationBase::ensureEvaluationEnvironment()
 FeatureLayerVisualizationBase::CachedExpression*
 FeatureLayerVisualizationBase::getOrCompileExpression(
     std::string const& expression,
+    simfil::SchemaId rootSchema,
     bool anyMode)
 {
     ensureEvaluationEnvironment();
@@ -1518,7 +1537,7 @@ FeatureLayerVisualizationBase::getOrCompileExpression(
         return nullptr;
     }
 
-    auto cacheKey = makeExpressionCacheKey(expression, anyMode);
+    auto cacheKey = makeExpressionCacheKey(expression, rootSchema, anyMode);
     auto [iter, inserted] = expressionCache_.try_emplace(std::move(cacheKey));
     if (!inserted) {
         return &iter->second;
@@ -1526,7 +1545,10 @@ FeatureLayerVisualizationBase::getOrCompileExpression(
 
     auto ast = simfil::compile(*evalEnvironment_, expression, simfil::CompileOptions{
         .any = anyMode,
-        .rewriteMode = simfil::RewriteMode::None});
+        .rewriteMode = rootSchema == simfil::NoSchemaId
+            ? simfil::RewriteMode::None
+            : simfil::RewriteMode::Schema,
+        .rootSchema = rootSchema});
     if (!ast) {
         std::cout << "Error compiling " << expression << ": " << ast.error().message
                   << std::endl;
@@ -1543,8 +1565,9 @@ FeatureLayerVisualizationBase::getOrCompileExpression(
     return &iter->second;
 }
 
-void FeatureLayerVisualizationBase::resolveCachedConstant(CachedExpression& cached)
+void FeatureLayerVisualizationBase::resolveCachedConstant(CachedExpression& cached, simfil::SchemaId rootSchema)
 {
+    (void) rootSchema;
     if (cached.constantResolved_) {
         return;
     }
@@ -1614,13 +1637,14 @@ void FeatureLayerVisualizationBase::recordRuntimeStyleIssue(
 
 std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpression(
     std::string const& expression,
+    simfil::SchemaId rootSchema,
     bool anyMode)
 {
-    auto* cached = getOrCompileExpression(expression, anyMode);
+    auto* cached = getOrCompileExpression(expression, rootSchema, anyMode);
     if (!cached) {
         return std::nullopt;
     }
-    resolveCachedConstant(*cached);
+    resolveCachedConstant(*cached, rootSchema);
     if (cached->constantValue_.has_value()) {
         return cached->constantValue_;
     }
@@ -1632,11 +1656,12 @@ simfil::Value FeatureLayerVisualizationBase::evaluateExpression(
     simfil::ModelNode const& ctx,
     bool anyMode)
 {
-    auto* cached = getOrCompileExpression(expression, anyMode);
+    auto const rootSchema = ctx.schema();
+    auto* cached = getOrCompileExpression(expression, rootSchema, anyMode);
     if (!cached || !cached->ast_ || !evalEnvironment_) {
         return simfil::Value::null();
     }
-    resolveCachedConstant(*cached);
+    resolveCachedConstant(*cached, rootSchema);
     if (cached->constantValue_.has_value()) {
         return *cached->constantValue_;
     }
@@ -1731,6 +1756,9 @@ void FeatureLayerVisualizationBase::addAttribute(
         attrEvaluationContext,
         [this, &attrEvaluationContext](auto&& str)
         {
+            if (auto constantValue = evaluateConstantExpression(str, attrEvaluationContext->schema(), false)) {
+                return std::move(*constantValue);
+            }
             return evaluateExpression(str, *attrEvaluationContext, false);
         },
         [this](auto const& property, auto const& expression, auto const& message, auto ruleIndex)

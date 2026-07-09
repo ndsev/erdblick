@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <ranges>
 #include <regex>
 #include <set>
@@ -98,6 +99,25 @@ bool validateEnumValue(
     issue.rulePath = rulePath;
     issue.property = property;
     return false;
+}
+
+bool isStyleOptionIdentifier(std::string const& value)
+{
+    if (value.empty()) {
+        return false;
+    }
+    auto isAlphaOrUnderscore = [](unsigned char ch) {
+        return std::isalpha(ch) || ch == '_';
+    };
+    auto isAlnumOrUnderscore = [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '_';
+    };
+    if (!isAlphaOrUnderscore(static_cast<unsigned char>(value.front()))) {
+        return false;
+    }
+    return std::ranges::all_of(value.substr(1), [&](char ch) {
+        return isAlnumOrUnderscore(static_cast<unsigned char>(ch));
+    });
 }
 
 bool validateRegexValue(
@@ -596,6 +616,18 @@ bool validateStyleOptionYaml(
     }
     if (!optionYaml["id"] || !optionYaml["id"].IsScalar() || optionYaml["id"].Scalar().empty()) {
         auto& issue = report.addIssue("warning", "schema", "option-skipped", "Style option must define a non-empty scalar id.", locationForNode(optionYaml));
+        issue.rulePath = optionPath;
+        issue.property = "id";
+        return false;
+    }
+    auto const optionId = optionYaml["id"].Scalar();
+    if (!isStyleOptionIdentifier(optionId)) {
+        auto& issue = report.addIssue(
+            "warning",
+            "schema",
+            "option-skipped",
+            "Style option id '" + optionId + "' must match [A-Za-z_][A-Za-z0-9_]*.",
+            locationForNode(optionYaml["id"]));
         issue.rulePath = optionPath;
         issue.property = "id";
         return false;

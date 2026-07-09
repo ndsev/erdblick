@@ -6,6 +6,9 @@
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 #include "mapget/model/searchresultlayer.h"
+#include "mapget/model/point.h"
+#include "mapget/model/sourceinfo.h"
+#include "mapget/model/sourcedatareference.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
@@ -15,6 +18,8 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <sstream>
+#include <variant>
 
 using namespace erdblick;
 
@@ -71,6 +76,17 @@ std::shared_ptr<mapget::LayerInfo> lineTestLayerInfo()
             }
         ]
     })json"));
+}
+
+/** Serializes a minimal datasource string-pool update for parser cache tests. */
+SharedUint8Array serializedStringPool(std::string const& nodeId, std::string const& dynamicEntry)
+{
+    mapget::StringPool pool(nodeId);
+    pool.emplace(dynamicEntry);
+    std::ostringstream stream;
+    auto writeResult = pool.write(stream, 0);
+    REQUIRE(writeResult);
+    return SharedUint8Array(stream.str());
 }
 
 /** Build a schema-backed layer with one range attribute field used by search-scope inference tests. */
@@ -403,6 +419,31 @@ nlohmann::json warningSignLayerInfoJson()
     };
 }
 
+/** Build a schema-backed render tile with one warning-sign enum attribute. */
+std::shared_ptr<mapget::TileFeatureLayer> makeWarningSignRenderTile(mapget::TileId tileId)
+{
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        tileId,
+        "WarningSignRenderNode",
+        "WarningSignRenderMap",
+        mapget::LayerInfo::fromJson(warningSignLayerInfoJson()),
+        std::make_shared<simfil::StringPool>());
+
+    auto const center = mapget::Point(tileId.centerWgs84());
+    auto feature = layer->newFeature("Road", {{"id", 1}});
+    feature->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+
+    auto attr = feature->attributeLayers()->newLayer("RoadRulesLayer")->newAttribute("WARNING_SIGN");
+    auto attrValue = layer->newObject();
+    REQUIRE(attrValue->addField("warningSign", "SPEED_LIMIT_END").has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    return layer;
+}
+
 std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId)
 {
     auto layer = std::make_shared<mapget::TileFeatureLayer>(
@@ -412,7 +453,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId
         lineTestLayerInfo(),
         std::make_shared<simfil::StringPool>());
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     auto feature = layer->newFeature("Way", {{"wayId", 1}});
     feature->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -431,10 +472,10 @@ std::shared_ptr<mapget::TileFeatureLayer> makeRelationTestTile(
         "RelationTestNode",
         "RelationTestMap",
         relationTestLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     if (includeSource) {
         auto source = layer->newFeature("Diamond", {{"diamondId", 1}});
         source->addLine({
@@ -470,10 +511,10 @@ std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapge
         "RelationTestNode",
         "RelationTestMap",
         relationTestLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("RelationTestNode"));
     layer->setIdPrefix({{"areaId", "Area"}});
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     auto source = layer->newFeature("Diamond", {{"diamondId", 1}});
     source->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -511,7 +552,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
         externalReferenceInspectionLayerInfo(),
         std::make_shared<simfil::StringPool>());
 
-    auto const center = tileId.center();
+    auto const center = mapget::Point(tileId.centerWgs84());
     auto source = layer->newFeature("Way", {{"wayId", 1}});
     source->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -528,6 +569,22 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
         mapget::Validity::Positive);
 
     return layer;
+}
+
+/** Creates a single source-data reference collection for inspection provenance tests. */
+mapget::model_ptr<mapget::SourceDataReferenceCollection> makeInspectionSourceDataRefs(
+    mapget::TileFeatureLayer& tile,
+    std::string const& layerId,
+    size_t bitOffset)
+{
+    auto const layerIdString = tile.strings()->emplace(layerId).value();
+    auto const qualifierString = tile.strings()->emplace("Value").value();
+    mapget::QualifiedSourceDataReference ref{
+        .address_ = mapget::SourceDataAddress::fromBitPosition(bitOffset, 8),
+        .layerId_ = layerIdString,
+        .qualifier_ = qualifierString,
+    };
+    return tile.newSourceDataReferenceCollection({&ref, 1});
 }
 
 /** Recursively collect rendered FeatureId rows from the inspection tree for focused assertions. */
@@ -614,6 +671,33 @@ nlohmann::json const* findInspectionNodeByKey(nlohmann::json const& node, std::s
     return findInspectionNode(node, [&key](nlohmann::json const& candidate) {
         return candidate.value("key", nlohmann::json{}) == key;
     });
+}
+
+/** Find a direct inspection child by key without searching grandchildren. */
+nlohmann::json const* findInspectionDirectChildByKey(nlohmann::json const& node, std::string const& key)
+{
+    if (!node.contains("children") || !node.at("children").is_array()) {
+        return nullptr;
+    }
+    for (auto const& child : node.at("children")) {
+        if (child.value("key", nlohmann::json{}) == key) {
+            return &child;
+        }
+    }
+    return nullptr;
+}
+
+/** Collect the labels from value bubbles attached directly to one inspection node. */
+std::vector<std::string> inspectionValueBubbleLabels(nlohmann::json const& node)
+{
+    std::vector<std::string> labels;
+    if (!node.contains("valueBubbles") || !node.at("valueBubbles").is_array()) {
+        return labels;
+    }
+    for (auto const& bubble : node.at("valueBubbles")) {
+        labels.push_back(bubble.value("label", std::string{}));
+    }
+    return labels;
 }
 
 nlohmann::json const* findInspectionNodeByGeoJsonPath(nlohmann::json const& node, std::string const& path)
@@ -703,6 +787,30 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
         REQUIRE(inspection.size() > 0);
         REQUIRE(inspection.at(0)["key"].as<std::string>() == "Identifiers");
 
+        auto const* typeNode = findInspectionDirectChildByKey((*inspection).at(0), "type");
+        REQUIRE(typeNode);
+        REQUIRE(typeNode->value("geoJsonPath", std::string{}) == "typeId");
+
+        auto const* featureIdNode = findInspectionDirectChildByKey((*inspection).at(0), "featureId");
+        REQUIRE(featureIdNode);
+        REQUIRE_FALSE(featureIdNode->contains("children"));
+        REQUIRE(featureIdNode->value("value", std::string{}) == f->id()->toString());
+        REQUIRE(featureIdNode->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
+        REQUIRE(featureIdNode->value("mapId", std::string{}) == f->model().mapId());
+        REQUIRE(featureIdNode->value("geoJsonPath", std::string{}) == "id");
+
+        for (auto const& [key, value] : f->id()->keyValuePairs()) {
+            auto const* idPartNode = findInspectionDirectChildByKey((*inspection).at(0), std::string(key));
+            REQUIRE(idPartNode);
+            REQUIRE_FALSE(idPartNode->contains("children"));
+            REQUIRE(idPartNode->value("geoJsonPath", std::string{}) == key);
+            if (std::holds_alternative<int64_t>(value)) {
+                REQUIRE(idPartNode->at("value").get<int64_t>() == std::get<int64_t>(value));
+            } else {
+                REQUIRE(idPartNode->value("value", std::string{}) == std::get<std::string_view>(value));
+            }
+        }
+
         bool hasFeatureRoot = false;
         for (uint32_t i = 0; i < inspection.size(); ++i) {
             if (inspection.at(i)["key"].as<std::string>() == "Feature") {
@@ -785,6 +893,9 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     items->append(tile->newValue("B"));
     REQUIRE(testObject->addField("items", items).has_value());
 
+    auto emptyItems = tile->newArray();
+    REQUIRE(testObject->addField("emptyItems", emptyItems).has_value());
+
     auto objectItems = tile->newArray();
     auto objectItem = tile->newObject();
     REQUIRE(objectItem->addField("code", "C").has_value());
@@ -794,10 +905,14 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     REQUIRE(feature->attributes()->addField("test", testObject).has_value());
 
     auto inspection = InspectionConverter().convert(feature);
-    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.items.*"));
-    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.items[0]"));
-    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.objectItems.*"));
-    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "properties.test.objectItems[0].code"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "attributes.test.items.*"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "attributes.test.items[0]"));
+    auto const* emptyItemsNode = findInspectionNodeByGeoJsonPath(*inspection, "attributes.test.emptyItems.*");
+    REQUIRE(emptyItemsNode);
+    REQUIRE(emptyItemsNode->at("value").is_null());
+    REQUIRE(emptyItemsNode->value("valueCount", std::string{}) == "0");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "attributes.test.objectItems.*"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "attributes.test.objectItems[0].code"));
 
     std::vector<std::string> paths;
     collectInspectionGeoJsonPaths(*inspection, paths);
@@ -806,7 +921,48 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     }));
 }
 
-TEST_CASE("FeatureInspection copies propagated attribute value search path", "[erdblick.inspection]")
+TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto inspection = InspectionConverter().convert(feature);
+
+    auto const* geometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.type");
+    REQUIRE(geometryType);
+    REQUIRE(geometryType->value("value", std::string{}) == "Polyline");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.coordinates[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.coordinates[1]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[0]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[0][0]"));
+}
+
+TEST_CASE("FeatureInspection copies geometry collection search paths", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto const center = mapget::Point(tile->tileId().centerWgs84());
+    feature->addPoint({center.x, center.y + 0.0005, 0.0});
+
+    auto inspection = InspectionConverter().convert(feature);
+
+    auto const* firstGeometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].type");
+    REQUIRE(firstGeometryType);
+    REQUIRE(firstGeometryType->value("value", std::string{}) == "Polyline");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[0]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[1]"));
+
+    auto const* secondGeometryType = findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].type");
+    REQUIRE(secondGeometryType);
+    REQUIRE(secondGeometryType->value("value", std::string{}) == "Points");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].coordinates[0]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry[1]"));
+}
+
+TEST_CASE("FeatureInspection keeps scalar value paths on leaf nodes", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
     auto feature = tile->find("Way.1");
@@ -820,10 +976,219 @@ TEST_CASE("FeatureInspection copies propagated attribute value search path", "[e
     auto inspection = InspectionConverter().convert(feature);
     auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
     REQUIRE(attrNode);
-    REQUIRE(attrNode->value("value", 0) == 50);
+    REQUIRE(attrNode->at("value").is_null());
     REQUIRE(
         attrNode->value("geoJsonPath", std::string{}) ==
-        "properties.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
+        "attributes.layer.rules.SPEED_LIMIT_METRIC");
+
+    auto const* speedLimitNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh");
+    REQUIRE(speedLimitNode);
+    REQUIRE(speedLimitNode->value("value", 0) == 50);
+}
+
+TEST_CASE("FeatureInspection exposes propagated scalar value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("ROAD_LOCATION_ID");
+    auto roadLocation = tile->newObject();
+    REQUIRE(roadLocation->addField("locationId", int64_t(418182439)).has_value());
+    REQUIRE(roadLocation->addField("locationIndex", int64_t(0)).has_value());
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("numLocations", int64_t(1)).has_value());
+    REQUIRE(attrValue->addField("roadLocationId", roadLocation).has_value());
+    REQUIRE(attrValue->addBool("sameDirectionAsSource", true).has_value());
+    REQUIRE(attrValue->addBool("completeLocation", true).has_value());
+    REQUIRE(attrValue->addBool("optionalFlag", false).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "ROAD_LOCATION_ID");
+    REQUIRE(attrNode);
+    auto labels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "418182439 0") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "sameDirectionAsSource") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "completeLocation") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "numLocations") == labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "optionalFlag") == labels.end());
+
+    auto const* completeLocationNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.ROAD_LOCATION_ID.attributeValue.completeLocation");
+    REQUIRE(completeLocationNode);
+    auto leafLabels = inspectionValueBubbleLabels(*completeLocationNode);
+    REQUIRE(std::find(leafLabels.begin(), leafLabels.end(), "true") != leafLabels.end());
+
+    auto const* rulesLayer = findInspectionNodeByKey(*inspection, "rules");
+    REQUIRE(rulesLayer);
+    REQUIRE_FALSE(rulesLayer->contains("valueBubbles"));
+
+    auto const* identifiersNode = findInspectionNodeByKey(*inspection, "Identifiers");
+    REQUIRE(identifiersNode);
+    REQUIRE_FALSE(identifiersNode->contains("valueBubbles"));
+    auto const* featureIdNode = findInspectionDirectChildByKey(*identifiersNode, "featureId");
+    REQUIRE(featureIdNode);
+    REQUIRE_FALSE(featureIdNode->contains("valueBubbles"));
+}
+
+TEST_CASE("FeatureInspection summarizes days of week as compact value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("ACTIVE_DAYS");
+    auto daysOfWeek = tile->newObject();
+    REQUIRE(daysOfWeek->addBool("isMonday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isTuesday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isWednesday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isThursday", false).has_value());
+    REQUIRE(daysOfWeek->addBool("isFriday", false).has_value());
+    REQUIRE(daysOfWeek->addBool("isSaturday", true).has_value());
+    REQUIRE(daysOfWeek->addBool("isSunday", false).has_value());
+    REQUIRE(daysOfWeek->addBool("isInclusive", true).has_value());
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("daysOfWeek", daysOfWeek).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* daysNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.ACTIVE_DAYS.attributeValue.daysOfWeek");
+    REQUIRE(daysNode);
+    auto labels = inspectionValueBubbleLabels(*daysNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "Mon-Wed,Sat") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "isInclusive") != labels.end());
+}
+
+TEST_CASE("FeatureInspection summarizes months of year as compact value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("ACTIVE_MONTHS");
+    auto monthsOfYear = tile->newObject();
+    REQUIRE(monthsOfYear->addBool("january", true).has_value());
+    REQUIRE(monthsOfYear->addBool("february", true).has_value());
+    REQUIRE(monthsOfYear->addBool("march", false).has_value());
+    REQUIRE(monthsOfYear->addBool("april", false).has_value());
+    REQUIRE(monthsOfYear->addBool("may", true).has_value());
+    REQUIRE(monthsOfYear->addBool("june", true).has_value());
+    REQUIRE(monthsOfYear->addBool("july", true).has_value());
+    REQUIRE(monthsOfYear->addBool("august", false).has_value());
+    REQUIRE(monthsOfYear->addBool("september", false).has_value());
+    REQUIRE(monthsOfYear->addBool("october", false).has_value());
+    REQUIRE(monthsOfYear->addBool("november", false).has_value());
+    REQUIRE(monthsOfYear->addBool("december", true).has_value());
+    REQUIRE(monthsOfYear->addBool("isInclusive", true).has_value());
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("monthsOfYear", monthsOfYear).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* monthsNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.ACTIVE_MONTHS.attributeValue.monthsOfYear");
+    REQUIRE(monthsNode);
+    auto labels = inspectionValueBubbleLabels(*monthsNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "Jan-Feb,May-Jul,Dec") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "isInclusive") != labels.end());
+}
+
+TEST_CASE("FeatureInspection exposes compact validity value bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(attr->addField("value", int64_t(30)).has_value());
+    attr->validity()->newFeatureId(
+        tile->newFeatureId("Way", {{"wayId", 1}}),
+        mapget::Validity::Positive);
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
+    REQUIRE(attrNode);
+    auto labels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(labels.begin(), labels.end(), "30") != labels.end());
+    REQUIRE(std::find(labels.begin(), labels.end(), "+ Way.1") != labels.end());
+}
+
+TEST_CASE("FeatureInspection keeps complete validity bubbles local when values add more information", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(attr->addField("value", int64_t(30)).has_value());
+    attr->validity()->newDirection(mapget::Validity::Both);
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "SPEED_LIMIT_METRIC");
+    REQUIRE(attrNode);
+    auto attrLabels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(attrLabels.begin(), attrLabels.end(), "30") != attrLabels.end());
+    REQUIRE(std::find(attrLabels.begin(), attrLabels.end(), "COMPLETE") == attrLabels.end());
+
+    auto const* validityNode = findInspectionNodeByKey(*attrNode, "validity");
+    REQUIRE(validityNode);
+    auto validityLabels = inspectionValueBubbleLabels(*validityNode);
+    REQUIRE(std::find(validityLabels.begin(), validityLabels.end(), "COMPLETE") != validityLabels.end());
+}
+
+TEST_CASE("FeatureInspection keeps attributes in model layers with source data references", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attrLayer = feature->attributeLayers()->newLayer("RoadRulesLayer");
+    auto speed = attrLayer->newAttribute("SPEED_LIMIT_METRIC");
+    REQUIRE(speed->addField("value", int64_t(30)).has_value());
+    speed->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "SourceData-RoadRulesLayer-3", 8));
+
+    auto warning = attrLayer->newAttribute("WARNING_SIGN");
+    REQUIRE(warning->addField("value", "YIELD").has_value());
+    warning->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "SourceData-RoadRulesLayer-9", 24));
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* rulesLayer = findInspectionNodeByKey(*inspection, "RoadRulesLayer");
+    REQUIRE(rulesLayer);
+    REQUIRE(rulesLayer->contains("children"));
+
+    auto const& attributes = rulesLayer->at("children");
+    REQUIRE(attributes.is_array());
+    REQUIRE(attributes.size() == 2);
+    REQUIRE(attributes.at(0).value("key", std::string{}) == "SPEED_LIMIT_METRIC");
+    REQUIRE(attributes.at(1).value("key", std::string{}) == "WARNING_SIGN");
+
+    auto const* speedNode = findInspectionNodeByKey(*rulesLayer, "SPEED_LIMIT_METRIC");
+    REQUIRE(speedNode);
+    REQUIRE(
+        speedNode->value("geoJsonPath", std::string{}) ==
+        "attributes.layer.RoadRulesLayer.SPEED_LIMIT_METRIC");
+    REQUIRE(speedNode->value("hoverId", std::string{}) == "Way.1:attribute#0");
+    REQUIRE(speedNode->contains("sourceDataReferences"));
+    REQUIRE(
+        speedNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
+            .find("SourceData-RoadRulesLayer-3") != std::string::npos);
+
+    auto const* warningNode = findInspectionNodeByKey(*rulesLayer, "WARNING_SIGN");
+    REQUIRE(warningNode);
+    REQUIRE(warningNode->value("hoverId", std::string{}) == "Way.1:attribute#1");
+    REQUIRE(
+        warningNode->at("sourceDataReferences").at(0).value("mapTileKey", std::string{})
+            .find("SourceData-RoadRulesLayer-9") != std::string::npos);
 }
 
 TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspection]")
@@ -836,7 +1201,7 @@ TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspectio
         std::make_shared<simfil::StringPool>());
     tile->setIdPrefix({{"areaId", "Area"}});
 
-    auto const center = tile->tileId().center();
+    auto const center = mapget::Point(tile->tileId().centerWgs84());
     auto source = tile->newFeature("Diamond", {{"diamondId", 1}});
     source->addLine({
         {center.x - 0.0005, center.y, 0.0},
@@ -848,6 +1213,10 @@ TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspectio
         {{"areaId", "Area"}, {"pointId", 200}});
     relation->sourceValidity()->newDirection(mapget::Validity::Direction::Positive);
     relation->targetValidity()->newDirection(mapget::Validity::Direction::Negative);
+    source->addRelation(
+        "hasPoi",
+        "PointOfInterest",
+        {{"areaId", "Area"}, {"pointId", 201}});
 
     auto inspection = InspectionConverter().convert(source);
 
@@ -855,13 +1224,109 @@ TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspectio
     REQUIRE(relationGroup);
     REQUIRE(relationGroup->value("geoJsonPath", std::string{}) == "relations.*{name = \"hasPoi\"}");
 
-    auto const* targetRow = findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target");
+    auto const relationPath = std::string{"select(relations.*{name = \"hasPoi\"}, 0)"};
+    auto const secondRelationPath = std::string{"select(relations.*{name = \"hasPoi\"}, 1)"};
+    auto const* relationRow = findInspectionNodeByGeoJsonPath(*inspection, relationPath);
+    REQUIRE(relationRow);
+    REQUIRE(relationRow->value("hoverId", std::string{}) == source->id()->toString() + ":relation#0:validity#0");
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, secondRelationPath));
+
+    auto const* targetRow = findInspectionNodeByGeoJsonPath(*inspection, relationPath + ".target");
     REQUIRE(targetRow);
     REQUIRE(targetRow->value("value", std::string{}).find("PointOfInterest") != std::string::npos);
+    REQUIRE(targetRow->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, secondRelationPath + ".target"));
 
-    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].sourceValidity.direction"));
-    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].targetValidity.direction"));
-    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "relations[0].target.sourceValidity.direction"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, relationPath + ".sourceValidity.direction"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, relationPath + ".targetValidity.direction"));
+    auto const* targetValidity = findInspectionDirectChildByKey(*relationRow, "targetValidity");
+    REQUIRE(targetValidity);
+    REQUIRE(targetValidity->value("hoverId", std::string{}) == source->id()->toString() + ":relation#0:validity#0");
+    auto relationBubbles = relationRow->at("valueBubbles");
+    REQUIRE(relationBubbles.is_array());
+    auto const& relationBubble = relationBubbles.at(0);
+    REQUIRE(relationBubble.at("children").is_array());
+    auto const targetValidityNodeId = targetValidity->value("nodeId", std::string{});
+    auto const& relationBubbleChildren = relationBubble.at("children");
+    REQUIRE(relationBubbleChildren.size() == 3);
+    REQUIRE(relationBubbleChildren.at(0).value("label", std::string{}) == "+");
+    REQUIRE(relationBubbleChildren.at(2).value("label", std::string{}) == "-");
+    auto targetFeatureBubble = std::find_if(
+        relationBubbleChildren.begin(),
+        relationBubbleChildren.end(),
+        [](auto const& bubble) { return bubble.value("kind", std::string{}) == "feature-id"; });
+    REQUIRE(targetFeatureBubble != relationBubbleChildren.end());
+    REQUIRE(targetFeatureBubble->value("hoverTargetNodeId", std::string{}) == targetValidityNodeId);
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, relationPath + ".target.sourceValidity.direction"));
+}
+
+TEST_CASE("FeatureInspection renders relation references like relation rows", "[erdblick.inspection]")
+{
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::TileId::fromWgs84(42., 11., 13),
+        "RelationReferenceInspectionNode",
+        "RelationReferenceInspectionMap",
+        relationTestLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+    tile->setIdPrefix({{"areaId", "Area"}});
+
+    auto const center = mapget::Point(tile->tileId().centerWgs84());
+    auto source = tile->newFeature("Diamond", {{"diamondId", 1}});
+    source->addLine({
+        {center.x - 0.0005, center.y, 0.0},
+        {center.x + 0.0005, center.y, 0.0},
+    });
+    auto relation = source->addRelation(
+        "hasPoi",
+        "PointOfInterest",
+        {{"areaId", "Area"}, {"pointId", 200}});
+    relation->targetValidity()->newDirection(mapget::Validity::Direction::Negative);
+
+    auto relationRefEnvelope = tile->newObject();
+    REQUIRE(relationRefEnvelope->addField("primary", tile->newRelationReference(relation)).has_value());
+    auto attr = source->attributeLayers()->newLayer("rules")->newAttribute("TURN_RESTRICTION");
+    REQUIRE(attr->addField("attributeValue", relationRefEnvelope).has_value());
+
+    auto inspection = InspectionConverter().convert(source);
+    auto const* refNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.TURN_RESTRICTION.attributeValue.primary");
+    REQUIRE(refNode);
+    REQUIRE(refNode->value("hoverId", std::string{}) == source->id()->toString() + ":relation#0:validity#0");
+    REQUIRE(refNode->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::Null));
+
+    auto const* targetRow = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.TURN_RESTRICTION.attributeValue.primary.target");
+    REQUIRE(targetRow);
+    REQUIRE(targetRow->value("value", std::string{}).find("PointOfInterest") != std::string::npos);
+    REQUIRE(targetRow->value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId));
+    REQUIRE(findInspectionDirectChildByKey(*refNode, "targetValidity"));
+
+    auto relationBubbles = refNode->at("valueBubbles");
+    REQUIRE(relationBubbles.is_array());
+    REQUIRE(relationBubbles.at(0).at("children").is_array());
+    auto const& relationBubbleChildren = relationBubbles.at(0).at("children");
+    auto targetFeatureBubble = std::find_if(
+        relationBubbleChildren.begin(),
+        relationBubbleChildren.end(),
+        [](auto const& bubble) { return bubble.value("kind", std::string{}) == "feature-id"; });
+    REQUIRE(targetFeatureBubble != relationBubbleChildren.end());
+    REQUIRE(targetFeatureBubble->value("hoverTargetNodeId", std::string{}).empty() == false);
+}
+
+TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is replaced", "[erdblick.parser]")
+{
+    TileLayerParser parser;
+    parser.addFieldDict(serializedStringPool("ReloadedNode", "stale-field-name"));
+
+    auto offsetsBeforeReload = parser.getFieldDictOffsets();
+    REQUIRE(offsetsBeforeReload.contains("ReloadedNode"));
+
+    parser.setDataSourceInfo(SharedUint8Array("[]"));
+
+    auto offsetsAfterReload = parser.getFieldDictOffsets();
+    REQUIRE_FALSE(offsetsAfterReload.contains("ReloadedNode"));
 }
 
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
@@ -1054,36 +1519,6 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE(hasHint(speedCompletions, "\"SPEED_LIMIT_END\"", "enum WarningSign"));
     REQUIRE_FALSE(hasCompletionType(warningCompletions, "Hint"));
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
-}
-
-TEST_CASE("Feature search diagnostics expose schema ASTs used by scope inference", "[erdblick.search]")
-{
-    auto datasource = nlohmann::json{
-        {"nodeId", "WarningSignAstNode"},
-        {"mapId", "WarningSignAstMap"},
-        {"layers", {
-            {"Road", warningSignLayerInfoJson()}
-        }}
-    };
-
-    TileLayerParser parser;
-    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
-
-    auto diagnostics = parser.searchQueryAstDiagnostics("WARNING_SIGN", "auto", nlohmann::json::object());
-    REQUIRE(diagnostics.is_array());
-
-    bool hasCompiledAst = false;
-    bool hasLegacyAttributeScopeLabel = false;
-    for (auto const& diagnostic : diagnostics) {
-        auto const message = diagnostic.value("message", std::string{});
-        hasCompiledAst = hasCompiledAst
-            || (message.find("Compiled query for WarningSignAstMap/Road/Road.RoadRulesLayer.WARNING_SIGN") != std::string::npos
-                && message.find("WARNING_SIGN") != std::string::npos);
-        hasLegacyAttributeScopeLabel = hasLegacyAttributeScopeLabel
-            || message.find("Schema AST for attribute scope") != std::string::npos;
-    }
-    REQUIRE(hasCompiledAst);
-    REQUIRE_FALSE(hasLegacyAttributeScopeLabel);
 }
 
 TEST_CASE("FeatureStyleRuleLodFilterParsing", "[erdblick.style]")
@@ -1286,6 +1721,36 @@ rules:
     REQUIRE(reportHasProperty(nlohmann::json(badLateralOffset.validationReport()), "lateral-offset"));
 }
 
+TEST_CASE("FeatureLayerStyleSkipsUnsafeOptionIdentifiers", "[erdblick.style]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "OptionIdentifierValidation"
+options:
+  - label: Valid
+    id: showValid
+    type: bool
+    default: true
+  - label: Unsafe
+    id: "show~unsafe"
+    type: bool
+    default: true
+  - label: Duplicate
+    id: showValid
+    type: bool
+    default: false
+rules:
+  - type: Way
+    geometry: [line]
+)yaml"));
+
+    REQUIRE(style.isValid());
+    REQUIRE(style.options().size() == 1);
+    REQUIRE(style.options().front().id_ == "showValid");
+    auto report = nlohmann::json(style.validationReport());
+    REQUIRE(reportHasProperty(report, "id"));
+    REQUIRE(report["issues"].size() == 2);
+}
+
 TEST_CASE("DeckFeatureLayerVisualization renders all-of line leaves", "[erdblick.renderer]")
 {
     auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
@@ -1328,7 +1793,7 @@ TEST_CASE("DeckTileSearchResultLayerVisualization does not connect point-cloud v
         lineTestLayerInfo(),
         strings);
 
-    auto const center = layer->tileId().center();
+    auto const center = mapget::Point(layer->tileId().centerWgs84());
     auto geometry = layer->newGeometryCollection();
     auto line = geometry->newGeometry(mapget::GeomType::Line);
     for (auto pointIndex = 0; pointIndex < 10; ++pointIndex) {
@@ -1367,7 +1832,7 @@ TEST_CASE("DeckTileSearchResultLayerVisualization renders every matching style r
         strings);
     layer->setResultFields({"name"});
 
-    auto const center = layer->tileId().center();
+    auto const center = mapget::Point(layer->tileId().centerWgs84());
     auto geometry = layer->newGeometryCollection();
     auto line = geometry->newGeometry(mapget::GeomType::Line);
     line->append({center.x, center.y, 0.0});
@@ -1422,7 +1887,7 @@ TEST_CASE("TileSearchResultLayer value summaries aggregate fields and typed trac
     layer->setResultFields({"speed", "category", "shape"});
 
     auto geometry = layer->newGeometryCollection();
-    geometry->newGeometry(mapget::GeomType::Points)->append(layer->tileId().center());
+    geometry->newGeometry(mapget::GeomType::Points)->append(mapget::Point(layer->tileId().centerWgs84()));
     auto firstFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
     auto secondFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(2)}});
     auto listValue = layer->newArray(1, true);
@@ -1481,12 +1946,61 @@ TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdbli
     REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }
 
+TEST_CASE("DeckFeatureLayerVisualization rewrites style enum symbols through layer schema", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "WarningSignEnumStyle"
+rules:
+  - type: Road
+    geometry: [line]
+    filter: properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END
+    color-expression: "(properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END) and '#ff0000' or '#0000ff'"
+    width: 4
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeWarningSignRenderTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
+    DeckFeatureLayerVisualization visualization(0, "WarningSignRenderMap/Road/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
+}
+
+TEST_CASE("DeckFeatureLayerVisualization evaluates relation branches in relation context", "[erdblick.renderer]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "RelationContextStyle"
+rules:
+  - type: "Diamond"
+    aspect: relation
+    first-of:
+      - relation-type: "doesNotMatch"
+        color: "#ff0000"
+        width: 4
+      - relation-type: "hasPoi"
+        filter: $target.typeId == "PointOfInterest"
+        color-expression: "($target.typeId == 'PointOfInterest') and '#00ff00' or '#ff0000'"
+        width: 4
+)yaml"));
+    REQUIRE(style.isValid());
+
+    auto tile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13), true, true);
+    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
+    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
+    visualization.run();
+
+    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
+    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
+}
+
 TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added auxiliary tiles", "[erdblick.renderer]")
 {
     auto style = relationTestStyle();
     auto sourceTileId = mapget::TileId::fromWgs84(42.0, 11.0, 13);
     auto sourceTile = makeRelationTestTile(sourceTileId, true, false);
-    auto auxiliaryTile = makeRelationTestTile(sourceTileId.neighbor(1, 0), false, true);
+    auto auxiliaryTile = makeRelationTestTile(sourceTileId.neighbour(1, 0), false, true);
 
     DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
     visualization.addTileFeatureLayer(TileFeatureLayer(sourceTile));
@@ -1517,7 +2031,7 @@ TEST_CASE("DeckFeatureLayerVisualization resolves external relations with canoni
 {
     auto style = relationTestStyle();
     auto sourceTile = makeSecondaryReferenceSourceTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
-    auto targetTile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13).neighbor(1, 0), false, true);
+    auto targetTile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13).neighbour(1, 0), false, true);
 
     DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
     visualization.addTileFeatureLayer(TileFeatureLayer(sourceTile));

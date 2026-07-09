@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glm/glm.hpp"
+#include "mapget/model/point.h"
 #include "mapget/model/tileid.h"
 
 #include <iostream>

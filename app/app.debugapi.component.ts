@@ -116,8 +116,8 @@ export class ErdblickDebugApi {
         return coreLib;
     }
 
-    mapTileKey(mapId: string, layerId: string, tileId: string | number | bigint): string {
-        const numericTileId = typeof tileId === "bigint" ? tileId : BigInt(tileId);
+    mapTileKey(mapId: string, layerId: string, tileId: string | number): string {
+        const numericTileId = Number(tileId);
         return coreLib.getTileFeatureLayerKey(mapId, layerId, numericTileId) as string;
     }
 

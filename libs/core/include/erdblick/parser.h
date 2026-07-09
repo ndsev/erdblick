@@ -58,7 +58,7 @@ public:
         std::string nodeId;
         std::string mapName;
         std::string layerName;
-        uint64_t tileId;
+        int32_t tileId;
         uint32_t stage;
         std::string legalInfo;
         std::string error;
@@ -129,11 +129,6 @@ public:
      * Return concrete search scope plus the backend-safe normalized query.
      */
     NativeJsValue normalizeSearchQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
-
-    /**
-     * Return diagnostic messages containing the schema-aware ASTs used by search scope inference.
-     */
-    NativeJsValue searchQueryAstDiagnostics(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
      * Enumerate schema-backed result fields usable by search-result style rules.
