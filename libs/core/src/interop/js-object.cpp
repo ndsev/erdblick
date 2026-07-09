@@ -48,7 +48,7 @@ JsValue::JsValue()
 #ifdef EMSCRIPTEN
     : value_(emscripten::val::null())
 #else
-    : value_({})
+    : value_(nullptr)
 #endif
 {}
 

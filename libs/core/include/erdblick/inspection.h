@@ -112,7 +112,11 @@ public:
     struct RawPath {
         std::string_view value_;
     };
-    using FieldOrIndex = std::variant<uint32_t, std::string_view, RawPath>;
+    /** Marker for a complete pre-rendered search path that must not inherit the parent path. */
+    struct AbsolutePath {
+        std::string_view value_;
+    };
+    using FieldOrIndex = std::variant<uint32_t, std::string_view, RawPath, AbsolutePath>;
 
     /** Convert a feature, including identifiers, attributes, relations, and geometry. */
     JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
@@ -131,7 +135,7 @@ public:
         std::string_view const& name,
         mapget::model_ptr<mapget::AttributeLayer> const& l,
         size_t& attributeIndex);
-    /** Pick the canonical relation index used by GeoJSON paths and hover ids. */
+    /** Pick the canonical relation index used by relation hover ids. */
     uint32_t relationIndexFor(mapget::model_ptr<mapget::Relation> const& r);
     /** Convert one relation row/reference through the same representation everywhere it appears. */
     void convertRelation(
@@ -185,12 +189,17 @@ public:
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
+    /** Tracks one relation-name group and the next local index copied as `select(group, n)`. */
+    struct RelationTypeState {
+        InspectionNode* node_ = nullptr;
+        uint32_t nextLocalIndex_ = 0;
+    };
     InspectionNode root_;
     std::vector<InspectionNode*> stack_ = {&root_};
     InspectionNode* current_ = &root_;
     std::shared_ptr<simfil::StringPool> stringPool_;
     std::unordered_map<std::string_view, JsValue> translatedFieldNames_;
-    std::unordered_map<std::string_view, InspectionNode*> relationsByType_;
+    std::unordered_map<std::string_view, RelationTypeState> relationsByType_;
     mapget::TileFeatureLayer* tile_ = nullptr;
 };
 

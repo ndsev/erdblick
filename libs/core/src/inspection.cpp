@@ -942,11 +942,11 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 
     // Identifiers section.
     {
-        auto scope = push(convertString("Identifiers"), "", ValueType::Section);
+        auto scope = push(convertString("Identifiers"), RawPath{""}, ValueType::Section);
         convertSourceDataReferences(featurePtr->sourceDataReferences(), *scope);
         push("type", "typeId", ValueType::String)->value_ = convertString(featurePtr->typeId());
         {
-            auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
+            auto featureIdScope = push("featureId", "id", ValueType::FeatureId);
             assignFeatureReference(*featureIdScope, featurePtr->id());
         }
 
@@ -965,7 +965,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 
     // Basic attributes section.
     if (auto mergedBasicAttrs = featurePtr->mergedAttributesOrNull()) {
-        auto scope = push(convertString("Basic Attributes"), RawPath{"properties"}, ValueType::Section);
+        auto scope = push(convertString("Basic Attributes"), RawPath{"attributes"}, ValueType::Section);
         for (auto i = 0U; i < mergedBasicAttrs->size(); ++i) {
             convertField(
                 mergedBasicAttrs->keyAt(static_cast<int64_t>(i)),
@@ -976,7 +976,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     // Flexible attributes section.
     if (auto layers = featurePtr->attributeLayersOrNull())
     {
-        auto scope = push(convertString("Attribute Layers"), RawPath{"properties.layer"}, ValueType::Section);
+        auto scope = push(convertString("Attribute Layers"), RawPath{"attributes.layer"}, ValueType::Section);
         size_t attributeIndex = 0;
         layers->forEachLayer([this, &attributeIndex](auto&& layerName, auto&& layer) -> bool {
             convertAttributeLayer(layerName, layer, attributeIndex);
@@ -1047,6 +1047,9 @@ InspectionConverter::InspectionNodeScope InspectionConverter::push(
         else {
             current_->geoJsonPath_ = fmt::format("{}.{}", prevTop->geoJsonPath_, rawPath);
         }
+    }
+    else if (std::holds_alternative<AbsolutePath>(path)) {
+        current_->geoJsonPath_ = std::string(std::get<AbsolutePath>(path).value_);
     }
     else {
         std::string_view field = std::get<std::string_view>(path);
@@ -1168,22 +1171,24 @@ void InspectionConverter::convertRelation(
 void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
 {
     auto& relGroup = relationsByType_[r->name()];
-    if (!relGroup) {
-        relGroup = push(r->name(), RawPath{""}).node_;
-        relGroup->geoJsonPath_ = fmt::format(
+    if (!relGroup.node_) {
+        relGroup.node_ = push(r->name(), RawPath{""}).node_;
+        relGroup.node_->geoJsonPath_ = fmt::format(
             "{}.*{{name = {}}}",
-            relGroup->geoJsonPath_,
+            relGroup.node_->geoJsonPath_,
             simfilStringLiteral(r->name()));
     }
-    auto relGroupScope = push(relGroup);
+    auto relGroupScope = push(relGroup.node_);
     auto const relationIndex = relationIndexFor(r);
-    auto const relationObjectPath = fmt::format("relations[{}]", relationIndex);
+    auto const relationObjectPath = fmt::format(
+        "select({}, {})",
+        relGroup.node_->geoJsonPath_,
+        relGroup.nextLocalIndex_++);
     convertRelation(
-        JsValue(relGroup->children_.size()),
-        RawPath{relationObjectPath},
+        JsValue(relGroup.node_->children_.size()),
+        AbsolutePath{relationObjectPath},
         r,
-        relationIndex,
-        appendGeoJsonPathField(relationObjectPath, "target"));
+        relationIndex);
 }
 
 void InspectionConverter::convertGeometry(
