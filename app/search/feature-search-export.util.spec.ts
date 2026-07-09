@@ -233,7 +233,7 @@ describe("feature search JSON export helpers", () => {
         const definition = searchDefinition();
         const payload = featureSearchExportPayload(
             definition,
-            [result("Road.1", "MapA", "LayerA", 120n)],
+            [result("Road.1", "MapA", "LayerA", 120)],
             [],
             "",
             {includeConfiguration: true, includeResults: true},
@@ -250,7 +250,7 @@ describe("feature search JSON export helpers", () => {
     });
 
     it("rejects result-only search JSON imports", () => {
-        const payload = featureSearchResultsExport([result("Road.1", "MapA", "LayerA", 120n)], [], "");
+        const payload = featureSearchResultsExport([result("Road.1", "MapA", "LayerA", 120)], [], "");
 
         expect(() => featureSearchDefinitionFromImportPayload(payload))
             .toThrow("Search JSON contains results but no importable search configuration.");

@@ -1,5 +1,5 @@
 import {beforeAll, describe, expect, it} from 'vitest';
-import {initializeLibrary} from '../integrations/wasm';
+import {coreLib, initializeLibrary} from '../integrations/wasm';
 import {DeckLayerLike, DeckLayerRegistry, DeckLike} from './deck/deck-layer-registry';
 
 beforeAll(async () => {
@@ -7,6 +7,11 @@ beforeAll(async () => {
 });
 
 import {MergedPointsTile, PointMergeService} from './pointmerge.service';
+
+/** Builds a stable packed tile id for tests that need tile-neighbor math. */
+function testTileId(level = 2): number {
+    return coreLib.getTileIdFromPosition(0, 0, level);
+}
 
 class DeckStub implements DeckLike {
     readonly commits: DeckLayerLike[][] = [];
@@ -118,7 +123,7 @@ describe('PointMergeService', () => {
             featureAddresses: [1],
         } as any;
 
-        const sourceTileId = 5;
+        const sourceTileId = testTileId();
         const yielded = Array.from(service.insert([point], sourceTileId, 'k', ruleId));
 
         const styleMap = service.mergedPointsTiles.get(ruleId)!;
@@ -164,7 +169,7 @@ describe('PointMergeService', () => {
     it('captures merge-count snapshot for surrounding corner tiles', () => {
         const service = new PointMergeService();
         const ruleId = '0:map:layer:style:0:7';
-        const sourceTileId = 5;
+        const sourceTileId = testTileId();
         const cornerTile = new MergedPointsTile(sourceTileId, ruleId);
         cornerTile.features.set('h', {
             position: {x: 0, y: 0, z: 0},
@@ -185,7 +190,7 @@ describe('PointMergeService', () => {
     it('excludes the current source tile from merge-count snapshot and direct counts', () => {
         const service = new PointMergeService();
         const ruleId = '0:map:layer:style:0:7';
-        const sourceTileId = 5;
+        const sourceTileId = testTileId();
         const cornerTile = new MergedPointsTile(sourceTileId, ruleId);
         cornerTile.features.set('h', {
             position: {x: 0, y: 0, z: 0},

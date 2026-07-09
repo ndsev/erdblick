@@ -134,10 +134,10 @@ describe("ViewVisualizationState", () => {
             orientation: 0
         };
 
-        const tileIdsForLevel = new Map<number, bigint[]>();
-        tileIdsForLevel.set(0, [1000n]);
-        tileIdsForLevel.set(1, [2000n]);
-        tileIdsForLevel.set(2, [3000n]);
+        const tileIdsForLevel = new Map<number, number[]>();
+        tileIdsForLevel.set(0, [1000]);
+        tileIdsForLevel.set(1, [2000]);
+        tileIdsForLevel.set(2, [3000]);
         const canonicalTileCountsByLevel = new Map<number, number>([
             [0, 512],
             [1, 511],
@@ -162,15 +162,15 @@ describe("ViewVisualizationState", () => {
             getNumTileIdsForCanonicalCameraSpy.mockRestore();
         }
 
-        expect(state.getTileRenderPolicy(1000n)).toEqual({
+        expect(state.getTileRenderPolicy(1000)).toEqual({
             targetFidelity: "low",
             maxLowFiLod: 2
         });
-        expect(state.getTileRenderPolicy(2000n)).toEqual({
+        expect(state.getTileRenderPolicy(2000)).toEqual({
             targetFidelity: "high",
             maxLowFiLod: null
         });
-        expect(state.getTileRenderPolicy(3000n)).toEqual({
+        expect(state.getTileRenderPolicy(3000)).toEqual({
             targetFidelity: "high",
             maxLowFiLod: null
         });
@@ -188,11 +188,11 @@ describe("ViewVisualizationState", () => {
             orientation: 0
         };
 
-        const tileIdsForLevel = new Map<number, bigint[]>();
-        tileIdsForLevel.set(0, [1000n]);
-        tileIdsForLevel.set(1, [2000n]);
-        tileIdsForLevel.set(2, [3000n]);
-        tileIdsForLevel.set(3, [4000n]);
+        const tileIdsForLevel = new Map<number, number[]>();
+        tileIdsForLevel.set(0, [1000]);
+        tileIdsForLevel.set(1, [2000]);
+        tileIdsForLevel.set(2, [3000]);
+        tileIdsForLevel.set(3, [4000]);
         const canonicalTileCountsByLevel = new Map<number, number>([
             [0, 64],
             [1, 32],
@@ -218,19 +218,19 @@ describe("ViewVisualizationState", () => {
             getNumTileIdsForCanonicalCameraSpy.mockRestore();
         }
 
-        expect(state.getTileRenderPolicy(1000n)).toEqual({
+        expect(state.getTileRenderPolicy(1000)).toEqual({
             targetFidelity: "low",
             maxLowFiLod: 5
         });
-        expect(state.getTileRenderPolicy(2000n)).toEqual({
+        expect(state.getTileRenderPolicy(2000)).toEqual({
             targetFidelity: "low",
             maxLowFiLod: 6
         });
-        expect(state.getTileRenderPolicy(3000n)).toEqual({
+        expect(state.getTileRenderPolicy(3000)).toEqual({
             targetFidelity: "low",
             maxLowFiLod: 7
         });
-        expect(state.getTileRenderPolicy(4000n)).toEqual({
+        expect(state.getTileRenderPolicy(4000)).toEqual({
             targetFidelity: "high",
             maxLowFiLod: null
         });
@@ -249,7 +249,7 @@ describe("ViewVisualizationState", () => {
         };
 
         const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
-            .mockReturnValue([1000n]);
+            .mockReturnValue([1000]);
         const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
             .mockReturnValue(8);
 
@@ -260,7 +260,7 @@ describe("ViewVisualizationState", () => {
             getNumTileIdsForCanonicalCameraSpy.mockRestore();
         }
 
-        expect(state.getTileRenderPolicy(1000n)).toEqual({
+        expect(state.getTileRenderPolicy(1000)).toEqual({
             targetFidelity: "low",
             maxLowFiLod: LOW_FI_MAX_LOD
         });
@@ -279,7 +279,7 @@ describe("ViewVisualizationState", () => {
         };
 
         const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
-            .mockReturnValue([1000n]);
+            .mockReturnValue([1000]);
         const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
             .mockReturnValue(7);
 
@@ -290,7 +290,7 @@ describe("ViewVisualizationState", () => {
             getNumTileIdsForCanonicalCameraSpy.mockRestore();
         }
 
-        expect(state.getTileRenderPolicy(1000n)).toEqual({
+        expect(state.getTileRenderPolicy(1000)).toEqual({
             targetFidelity: "high",
             maxLowFiLod: null
         });
