@@ -19,6 +19,12 @@ interface InspectionValueBubble {
     children?: InspectionValueBubble[];
 }
 
+/** Non-interactive key-column badge emitted by C++ for node metadata. */
+interface InspectionKeyBubble {
+    label: string;
+    kind?: string;
+}
+
 /** Shape emitted by the WASM inspection converter for one inspection subtree. */
 interface InspectionModelData {
     key: string;
@@ -30,6 +36,7 @@ interface InspectionModelData {
     mapId?: string;
     nodeId?: string;
     valueCount?: string;
+    keyBubbles?: InspectionKeyBubble[];
     valueBubbles?: InspectionValueBubble[];
     sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
@@ -481,6 +488,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 if (data?.hasOwnProperty("valueCount")) {
                     node.data["valueCount"] = data.valueCount;
                 }
+                if (Array.isArray(data?.keyBubbles) && data.keyBubbles.length) {
+                    node.data["keyBubbles"] = data.keyBubbles;
+                }
                 const valueBubbles = prefixValueBubbleTargets(data?.valueBubbles, context.nodeIdPrefix);
                 if (valueBubbles) {
                     node.data["valueBubbles"] = valueBubbles;
@@ -556,6 +566,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 }
                 if (section?.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = section.sourceDataReferences;
+                }
+                if (Array.isArray(section?.keyBubbles) && section.keyBubbles.length) {
+                    node.data["keyBubbles"] = section.keyBubbles;
                 }
                 const valueBubbles = prefixValueBubbleTargets(section?.valueBubbles, nodeIdPrefix);
                 if (valueBubbles) {

@@ -156,6 +156,29 @@ inspection-tree {
     display: inline-block;
   }
 
+  .inspection-key-bubbles {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 0.2em;
+  }
+
+  .inspection-key-bubble {
+    background: color-mix(in srgb, var(--p-primary-color) 18%, var(--p-content-background));
+    border: 1px solid color-mix(in srgb, var(--p-primary-color) 48%, var(--p-content-border-color));
+    border-radius: 0.22rem;
+    color: var(--p-content-color);
+    font-size: 0.78em;
+    font-weight: 700;
+    line-height: 1.05;
+    padding: 0.05em 0.32em;
+    white-space: nowrap;
+  }
+
+  .inspection-key-bubble-attribute-layer-id {
+    font-family: monospace;
+  }
+
   .inspection-value-bubbles {
     align-items: center;
     display: inline-flex;
@@ -528,7 +551,7 @@ inspection-tree {
   box-shadow: 0 0.45rem 1.1rem color-mix(in srgb, #000 28%, transparent);
   box-sizing: border-box;
   max-height: min(24rem, calc(100vh - 0.5rem));
-  max-width: min(46rem, 70vw);
+  max-width: min(64rem, 90vw);
   overflow: auto;
   padding: 0.35rem;
   pointer-events: none;

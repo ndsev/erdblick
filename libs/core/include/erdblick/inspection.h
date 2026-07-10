@@ -76,6 +76,13 @@ public:
         };
         std::deque<ValueBubble> valueBubbles_;
 
+        /** Compact metadata badge shown next to the node key. */
+        struct KeyBubble {
+            std::string label_;
+            std::string kind_;
+        };
+        std::deque<KeyBubble> keyBubbles_;
+
         /** Materialize this node and its metadata as a JS object for the UI. */
         [[nodiscard]] JsValue toJsValue(std::string_view const& mapId) const;
         /** Convert only the child array when the parent object already exists. */
