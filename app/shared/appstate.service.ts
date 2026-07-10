@@ -847,7 +847,7 @@ export class AppStateService implements OnDestroy {
 
     readonly inspectionValueVaryOutlinesState = this.createState<boolean>({
         name: 'inspectionValueVaryOutlines',
-        defaultValue: true,
+        defaultValue: false,
         schema: Boolish
     });
 

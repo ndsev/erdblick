@@ -231,6 +231,18 @@ export class FeatureFilterOptions {
                                               [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                         </span>
                                     }
+                                    @if (col.key === "key" && hasKeyBubbles(rowData)) {
+                                        <span class="inspection-key-bubbles">
+                                            @for (bubble of rowData["keyBubbles"]; track bubble.kind + ':' + bubble.label + ':' + $index) {
+                                                <span class="inspection-key-bubble"
+                                                      [ngClass]="keyBubbleClasses(bubble)"
+                                                      [pTooltip]="keyBubbleTooltip(bubble)"
+                                                      tooltipPosition="top">
+                                                    {{ bubble.label }}
+                                                </span>
+                                            }
+                                        </span>
+                                    }
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
                                         <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
                                     }
@@ -355,8 +367,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private valueBubblePopoverFrame?: number;
     private readonly valueBubblePopoverGapPx = 8;
     private readonly valueBubblePopoverMarginPx = 4;
-    private readonly valueBubblePopoverMaxWidthPx = 736;
-    private readonly valueBubblePopoverPreferredWidthPx = 480;
+    private readonly valueBubblePopoverMaxWidthPx = 1024;
+    private readonly valueBubblePopoverPreferredWidthPx = 720;
     private readonly onWindowResize = () => this.scheduleScrollerRecalc();
     private readonly onDockResizePauseStart = () => {
         this.dockFreezeRequested = true;
@@ -662,6 +674,27 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Returns whether C++ supplied propagated child-value pills for this row. */
     protected hasValueBubbles(rowData: any): boolean {
         return Array.isArray(rowData?.["valueBubbles"]) && rowData["valueBubbles"].length > 0;
+    }
+
+    /** Returns whether C++ supplied compact key-column metadata badges for this row. */
+    protected hasKeyBubbles(rowData: any): boolean {
+        return Array.isArray(rowData?.["keyBubbles"]) && rowData["keyBubbles"].length > 0;
+    }
+
+    /** Assigns stable kind classes for key-column metadata badges. */
+    protected keyBubbleClasses(bubble: any): Record<string, boolean> {
+        const kind = typeof bubble?.kind === "string" && bubble.kind.length ? bubble.kind : "metadata";
+        return {
+            [`inspection-key-bubble-${kind}`]: true
+        };
+    }
+
+    /** Describes key-column metadata badges without forcing the label to include verbose context. */
+    protected keyBubbleTooltip(bubble: any): string {
+        if (bubble?.kind === "attribute-layer-id") {
+            return `Attribute layer ID ${bubble?.label ?? ""}`.trim();
+        }
+        return "";
     }
 
     /** Provides one cell-level tooltip, using bubble labels only when bubbles are visibly replacing the value text. */

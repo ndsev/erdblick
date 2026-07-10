@@ -9,6 +9,7 @@
 #include <iostream>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -321,7 +322,7 @@ bool isCompleteValidityBubble(ValueBubble const& bubble)
 /** Return whether a bubble is weak metadata for an empty zserio bitmask. */
 bool isEmptyBitmaskBubble(ValueBubble const& bubble)
 {
-    return bubble.label_ == "0[]";
+    return bubble.kind_ == "bool-array-empty" || bubble.label_ == "0[]";
 }
 
 /** Return whether this bubble must remain visually independent while propagating. */
@@ -499,6 +500,69 @@ std::deque<ValueBubble> monthsOfYearBubblesForNode(InspectionNode const& node)
         {"Dec", "december"},
     }};
     return booleanRangeBubblesForNode(node, kMonths, "months-of-year", "monthsOfYear");
+}
+
+/** Return whether a node represents a flat boolean array in inspection form. */
+bool isBooleanArrayNode(InspectionNode const& node)
+{
+    return isArrayValue(node.type_)
+        && !node.children_.empty()
+        && std::ranges::all_of(node.children_, [](auto const& child) {
+            return child.children_.empty()
+                && baseValueType(child.type_) == InspectionConverter::ValueType::Boolean
+                && child.value_.type() == JsValue::Type::Bool;
+        });
+}
+
+/** Summarize a boolean array as a compact bit-vector bubble. */
+std::optional<ValueBubble> booleanArrayBitsBubbleForNode(InspectionNode const& node)
+{
+    if (!isBooleanArrayNode(node)) {
+        return std::nullopt;
+    }
+
+    auto hasTrueValue = false;
+    auto targetNodeId = node.nodeId_;
+    std::string label;
+    for (auto const& child : node.children_) {
+        auto const childValue = child.value_.as<bool>();
+        if (!label.empty()) {
+            label += " ";
+        }
+        label += childValue ? "1" : "0";
+        if (childValue && !hasTrueValue) {
+            targetNodeId = child.nodeId_;
+            hasTrueValue = true;
+        }
+    }
+
+    return makeValueBubble(
+        std::move(label),
+        targetNodeId,
+        hasTrueValue ? "bool-array" : "bool-array-empty",
+        inspectionKeyString(node));
+}
+
+/** Return the named boolean-array summary that should propagate to parent rows. */
+std::optional<ValueBubble> propagatedBooleanArrayBubbleForNode(InspectionNode const& node)
+{
+    auto bitsBubble = booleanArrayBitsBubbleForNode(node);
+    if (!bitsBubble) {
+        return std::nullopt;
+    }
+
+    std::deque<ValueBubble> parts;
+    parts.push_back(makeValueBubble(
+        inspectionKeyString(node),
+        node.nodeId_,
+        "bool-array-name",
+        inspectionKeyString(node)));
+    parts.push_back(*bitsBubble);
+
+    auto result = makeGroupedBubble(std::move(parts));
+    result.kind_ = bitsBubble->kind_;
+    result.colorKey_ = inspectionKeyString(node);
+    return result;
 }
 
 /** Render a leaf scalar according to the inspection propagation rules. */
@@ -871,6 +935,15 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::s
         return node.valueBubbles_;
     }
 
+    auto booleanArrayBitsBubble = booleanArrayBitsBubbleForNode(node);
+    if (booleanArrayBitsBubble) {
+        node.valueBubbles_.push_back(*booleanArrayBitsBubble);
+        if (auto propagated = propagatedBooleanArrayBubbleForNode(node)) {
+            return std::deque<ValueBubble>{std::move(*propagated)};
+        }
+        return {};
+    }
+
     auto relationBubble = relationBubbleForNode(node);
     if (relationBubble) {
         node.valueBubbles_.push_back(std::move(*relationBubble));
@@ -916,8 +989,12 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::s
     }
     sortValidityBubblesFirst(node.valueBubbles_);
 
-    if (node.valueBubbles_.empty() || node.valueBubbles_.size() > kMaxPropagatedBubbles) {
-        node.valueBubbles_.clear();
+    if (node.valueBubbles_.empty()) {
+        return {};
+    }
+    if (node.valueBubbles_.size() > kMaxPropagatedBubbles) {
+        // Keep the row-local summary visible, but do not bubble very wide
+        // aggregates further upward into less specific parent rows.
         return {};
     }
     if (isTransparentPropagationContainer(inspectionKeyString(node))) {
@@ -1091,6 +1168,13 @@ void InspectionConverter::convertAttributeLayer(
     size_t& attributeIndex)
 {
     auto layerScope = push(convertString(name), name);
+    if (auto layerId = l->id()) {
+        layerScope->keyBubbles_.push_back({
+            .label_ = "#" + std::to_string(*layerId),
+            .kind_ = "attribute-layer-id"
+        });
+    }
+
     std::vector<simfil::StringId> attributeFieldIds;
     attributeFieldIds.reserve(l->size());
     for (auto const& [fieldId, value] : l->fields()) {
@@ -1566,6 +1650,16 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("nodeId", JsValue(nodeId_));
     if (mapId_)
         newDict.set("mapId", *mapId_);
+    if (!keyBubbles_.empty()) {
+        auto bubbles = JsValue::List();
+        for (auto const& bubble : keyBubbles_) {
+            bubbles.push(JsValue::Dict({
+                {"label", JsValue(bubble.label_)},
+                {"kind", JsValue(bubble.kind_)}
+            }));
+        }
+        newDict.set("keyBubbles", bubbles);
+    }
     if (!valueBubbles_.empty()) {
         auto bubbles = JsValue::List();
         for (auto const& bubble : valueBubbles_) {

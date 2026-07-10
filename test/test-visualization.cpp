@@ -700,6 +700,19 @@ std::vector<std::string> inspectionValueBubbleLabels(nlohmann::json const& node)
     return labels;
 }
 
+/** Collect the labels from key-column metadata bubbles attached to one inspection node. */
+std::vector<std::string> inspectionKeyBubbleLabels(nlohmann::json const& node)
+{
+    std::vector<std::string> labels;
+    if (!node.contains("keyBubbles") || !node.at("keyBubbles").is_array()) {
+        return labels;
+    }
+    for (auto const& bubble : node.at("keyBubbles")) {
+        labels.push_back(bubble.value("label", std::string{}));
+    }
+    return labels;
+}
+
 nlohmann::json const* findInspectionNodeByGeoJsonPath(nlohmann::json const& node, std::string const& path)
 {
     return findInspectionNode(node, [&path](nlohmann::json const& candidate) {
@@ -1034,6 +1047,69 @@ TEST_CASE("FeatureInspection exposes propagated scalar value bubbles", "[erdblic
     auto const* featureIdNode = findInspectionDirectChildByKey(*identifiersNode, "featureId");
     REQUIRE(featureIdNode);
     REQUIRE_FALSE(featureIdNode->contains("valueBubbles"));
+}
+
+TEST_CASE("FeatureInspection exposes attribute layer ids as key bubbles", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto firstLayer = feature->attributeLayers()->newLayer("rules");
+    firstLayer->setId(7);
+    firstLayer->newAttribute("SPEED_LIMIT_METRIC");
+
+    auto secondLayer = feature->attributeLayers()->newLayer("rules");
+    secondLayer->setId(8);
+    secondLayer->newAttribute("ROAD_LOCATION_ID");
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attributeLayersNode = findInspectionNodeByKey(*inspection, "Attribute Layers");
+    REQUIRE(attributeLayersNode);
+    REQUIRE(attributeLayersNode->contains("children"));
+
+    std::vector<std::string> idLabels;
+    for (auto const& child : attributeLayersNode->at("children")) {
+        if (child.value("key", std::string{}) != "rules") {
+            continue;
+        }
+        auto labels = inspectionKeyBubbleLabels(child);
+        REQUIRE(labels.size() == 1);
+        idLabels.push_back(labels.front());
+    }
+
+    REQUIRE(idLabels == std::vector<std::string>{"#7", "#8"});
+}
+
+TEST_CASE("FeatureInspection summarizes boolean arrays as named bit vectors", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("BOOLEAN_FLAGS");
+    auto flags = tile->newArray();
+    flags->append(tile->newSmallValue(false));
+    flags->append(tile->newSmallValue(false));
+    flags->append(tile->newSmallValue(true));
+    flags->append(tile->newSmallValue(false));
+
+    auto attrValue = tile->newObject();
+    REQUIRE(attrValue->addField("myBool", flags).has_value());
+    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* flagsNode = findInspectionNodeByGeoJsonPath(
+        *inspection,
+        "attributes.layer.rules.BOOLEAN_FLAGS.attributeValue.myBool.*");
+    REQUIRE(flagsNode);
+    auto flagsLabels = inspectionValueBubbleLabels(*flagsNode);
+    REQUIRE(std::find(flagsLabels.begin(), flagsLabels.end(), "0 0 1 0") != flagsLabels.end());
+
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "BOOLEAN_FLAGS");
+    REQUIRE(attrNode);
+    auto attrLabels = inspectionValueBubbleLabels(*attrNode);
+    REQUIRE(std::find(attrLabels.begin(), attrLabels.end(), "myBool 0 0 1 0") != attrLabels.end());
 }
 
 TEST_CASE("FeatureInspection summarizes days of week as compact value bubbles", "[erdblick.inspection]")
