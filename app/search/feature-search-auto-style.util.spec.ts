@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
+    isDefaultTrueSearchExpression,
     preferredSearchAutoStyleField,
     searchAutoStyleFieldOptions
 } from "./feature-search-auto-style.util";
@@ -34,6 +35,12 @@ const option = (partial: Partial<FeatureSearchAutoStyleOption>): FeatureSearchAu
 });
 
 describe("feature search auto-style helpers", () => {
+    it("recognizes the default unfiltered search expression", () => {
+        expect(isDefaultTrueSearchExpression("true")).toBe(true);
+        expect(isDefaultTrueSearchExpression(" TRUE ")).toBe(true);
+        expect(isDefaultTrueSearchExpression("typeId == \"Road\"")).toBe(false);
+    });
+
     it("generates one first scalar field per resolved attribute scope", () => {
         const warningSignField = option({
             value: "warningSign",

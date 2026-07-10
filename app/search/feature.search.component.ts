@@ -80,6 +80,7 @@ import {
 import {SimfilExpressionInputComponent} from "./simfil-expression-input.component";
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
+    isDefaultTrueSearchExpression,
     preferredSearchAutoStyleField,
     searchAutoStyleFieldOptions
 } from "./feature-search-auto-style.util";
@@ -2316,7 +2317,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Broad schema matches deliberately get a cheap generic visualization instead of per-attribute rules. */
     private shouldUseSolidAutoStyleRule(session: FeatureSearchSession): boolean {
-        return session.schemaAnalysis.status === "ready" && session.schemaAnalysis.rewriteSuppressed === true;
+        return session.schemaAnalysis.status === "ready"
+            && (session.schemaAnalysis.rewriteSuppressed === true
+                || isDefaultTrueSearchExpression(session.schemaAnalysis.normalizedQuery || session.definition.query));
     }
 
     /** Creates one generic auto-generated rule that does not depend on schema field enumeration. */

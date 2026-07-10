@@ -24,6 +24,9 @@ import {
     BackgroundLayerConfig,
     WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP
 } from "../shared/app-config.service";
+import {FeatureSearchService} from "../search/feature.search.service";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {InfoMessageService} from "../shared/info.service";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -433,7 +436,9 @@ export class MapPanelComponent {
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
                 private readonly configService: AppConfigService,
-                private readonly dialogStack: DialogStackService) {
+                private readonly dialogStack: DialogStackService,
+                private readonly featureSearchService: FeatureSearchService,
+                private readonly infoMessageService: InfoMessageService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
@@ -594,6 +599,7 @@ export class MapPanelComponent {
     /** Opens the bulk layer-toggle menu for one map or layer row. */
     showLayersToggleMenu(event: MouseEvent, viewIndex: number, mapId: string, layerId: string) {
         this.toggleMenu.toggle(event);
+        const selectedMapLayers = this.featureSearchMapLayersForMenuScope(mapId, layerId);
         this.toggleMenuItems = [
             {
                 label: 'Toggle All Off But This',
@@ -626,8 +632,61 @@ export class MapPanelComponent {
                         this.viewState.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, true);
                     }
                 }
+            },
+            {separator: true},
+            {
+                label: this.featureSearchMenuLabel(mapId, layerId, selectedMapLayers.length),
+                icon: 'pi pi-search',
+                disabled: selectedMapLayers.length === 0,
+                command: () => {
+                    this.startScopedFeatureSearch(viewIndex, selectedMapLayers);
+                }
             }
         ];
+    }
+
+    /** Collects feature layers covered by one maps-panel row, preserving tree order and excluding SourceData. */
+    private featureSearchMapLayersForMenuScope(mapId: string, layerId: string): FeatureSearchMapLayerRef[] {
+        const isExactMap = this.mapService.maps.maps.has(mapId);
+        const result: FeatureSearchMapLayerRef[] = [];
+        for (const layer of this.mapService.maps.allFeatureLayers()) {
+            const mapMatches = isExactMap ? layer.mapId === mapId : layer.mapId.startsWith(mapId);
+            if (!mapMatches || (layerId && layer.id !== layerId)) {
+                continue;
+            }
+            result.push({mapId: layer.mapId, layerId: layer.id});
+        }
+        return result;
+    }
+
+    /** Labels the row-scoped feature-search action for map, group, and layer rows. */
+    private featureSearchMenuLabel(mapId: string, layerId: string, layerCount: number): string {
+        if (!layerCount) {
+            return "No Feature Layers to Search";
+        }
+        if (layerId) {
+            return "Search Features in This Layer";
+        }
+        return this.mapService.maps.maps.has(mapId)
+            ? "Search Features in This Map"
+            : "Search Features in This Group";
+    }
+
+    /** Starts a feature search scoped to the selected maps-panel row and current view. */
+    private startScopedFeatureSearch(viewIndex: number, selectedMapLayers: FeatureSearchMapLayerRef[]): void {
+        if (!selectedMapLayers.length) {
+            return;
+        }
+        this.featureSearchService.run("true", {
+            selectedMapLayers,
+            selectedMapLayersManual: true,
+            selectedViewIndices: [viewIndex]
+        });
+        this.infoMessageService.showInfo(
+            selectedMapLayers.length === 1
+                ? "Started search in selected layer"
+                : `Started search in ${selectedMapLayers.length} selected layers`
+        );
     }
 
     /** Toggles the visibility of the maps panel dialog. */
