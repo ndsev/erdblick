@@ -18,11 +18,6 @@ export interface FeatureSearchAutoStyleAnalysis {
     matchedEnumValues: string[];
 }
 
-/** Returns whether the query is the default unfiltered predicate used for scoped searches. */
-export function isDefaultTrueSearchExpression(query: string | undefined): boolean {
-    return (query ?? "").trim().toLowerCase() === "true";
-}
-
 /** Selects the first scalar field from the first resolved attribute scope. */
 export function preferredSearchAutoStyleField(
     options: FeatureSearchAutoStyleOption[],
