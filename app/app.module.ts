@@ -2,7 +2,7 @@ import {inject, NgModule, provideAppInitializer} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
 import {AppRoutingModule} from './app.routing.module';
 import {AppComponent} from './app.component';
-import {provideHttpClient} from "@angular/common/http";
+import {provideHttpClient, withFetch} from "@angular/common/http";
 import {DialogModule} from "primeng/dialog";
 import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
 import {AnimateOnScroll} from "primeng/animateonscroll";
@@ -318,7 +318,7 @@ export const initializeServices = () => {
         EditorService,
         RightClickMenuService,
         DialogService,
-        provideHttpClient(),
+        provideHttpClient(withFetch()),
         provideAnimationsAsync(),
         providePrimeNG({
             ripple: true,
