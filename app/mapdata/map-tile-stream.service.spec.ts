@@ -4,14 +4,15 @@ import {MapTileStreamService} from './map-tile-stream.service';
 
 describe('MapTileStreamService source catalog refresh', () => {
     it('reloads again when a backend reconnect races an in-flight catalog fetch', async () => {
-        let finishFirstReload: (() => void) | null = null;
+        let finishFirstReload!: () => void;
+        const firstReload = new Promise<boolean>(resolve => {
+            finishFirstReload = () => resolve(true);
+        });
         const mapInfo = {
             dataSourceInfoChanged: new Subject<void>(),
             sourceCatalogRevision: 49,
             reloadDataSources: vi.fn()
-                .mockImplementationOnce(() => new Promise<boolean>(resolve => {
-                    finishFirstReload = () => resolve(true);
-                }))
+                .mockReturnValueOnce(firstReload)
                 .mockResolvedValue(true)
         };
         const service = new MapTileStreamService(
@@ -34,7 +35,7 @@ describe('MapTileStreamService source catalog refresh', () => {
         // The new backend may reuse or lower the process-local revision while
         // the request started against its predecessor is still unresolved.
         internals.handleSourcesRevisionChanged(1, true);
-        finishFirstReload?.();
+        finishFirstReload();
 
         await vi.waitFor(() => expect(mapInfo.reloadDataSources).toHaveBeenCalledTimes(2));
     });
