@@ -8,7 +8,7 @@ import {
     type PickingInfo,
     WebMercatorViewport
 } from "@deck.gl/core";
-import {BitmapLayer, IconLayer, PolygonLayer, TextLayer} from "@deck.gl/layers";
+import {BitmapLayer, IconLayer, PolygonLayer, ScatterplotLayer, TextLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
@@ -27,11 +27,15 @@ import {CoordinatesService} from "../../coords/coordinates.service";
 import {
     AppStateService,
     CameraViewState,
+    DEFAULT_TILE_GRID_COLOR,
+    DEFAULT_TILE_GRID_LEVEL,
+    DEFAULT_TILE_GRID_OPACITY,
     DEFAULT_MAP_ZOOM_STEP,
     TileFeatureId,
     TileGridMode,
     VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION
+    VIEW_SYNC_POSITION,
+    tileGridRgba
 } from "../../shared/appstate.service";
 import {
     AppConfigService,
@@ -64,7 +68,6 @@ import {
 } from "./deck-search-result-density.layer";
 import {TileLayer, type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 import {
-    coarsenedTileGridLevels,
     tileGridExtentForLevel,
     tileGridLatToNormY,
     tileGridLonToNormX,
@@ -85,6 +88,14 @@ interface DeckCameraState {
     pitch: number;
     bearing: number;
     maxPitch: number;
+}
+
+interface DeckRotationPivotDatum {
+    position: [number, number, number];
+    radius: number;
+    fillColor: [number, number, number, number];
+    lineColor: [number, number, number, number];
+    lineWidth: number;
 }
 
 /** Narrow access to deck's internal size refresh; deck.gl has no public synchronous equivalent in 9.3. */
@@ -195,6 +206,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly SEARCH_RESULTS_LAYER_PREFIX = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
     private static readonly LOCATION_LABEL_LAYER_KEY = "builtin/location-label";
+    private static readonly ROTATION_PIVOT_LAYER_KEY = "builtin/rotation-pivot";
     private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
     private static readonly CANVAS_USE_DEVICE_PIXELS = 1;
     private static readonly CANVAS_STYLE: Partial<CSSStyleDeclaration> = {
@@ -212,7 +224,6 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly VIEWPORT_BOUNDARY_SAMPLE_STEPS = 16;
     private static readonly UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
-    private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 100];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
     private static readonly SEARCH_RESULT_DENSITY_SIZE_SCALE = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE;
@@ -268,6 +279,8 @@ export abstract class DeckMapView implements IRenderView {
     private backgroundLayerSignature = "";
     private tileGridEnabled = false;
     private tileGridMode: TileGridMode = "nds";
+    private tileGridLevel = DEFAULT_TILE_GRID_LEVEL;
+    private tileGridLineColor = tileGridRgba(DEFAULT_TILE_GRID_COLOR, DEFAULT_TILE_GRID_OPACITY);
     private lastTileGridDiagnosticSignature = "";
     private tileGridLayerKeys = new Set<string>();
     private tileStateLayerKeys = new Set<string>();
@@ -303,7 +316,7 @@ export abstract class DeckMapView implements IRenderView {
      */
     private readonly deckLayerFilter: DeckProps<DeckMercatorView>["layerFilter"] = ({layer, isPicking}) => {
         const layerId = String(layer.id ?? "");
-        const layerPickable = Boolean((layer.props as {pickable?: boolean} | undefined)?.pickable);
+        const layerPickable = Boolean((layer.props as {pickable?: boolean | "3d"} | undefined)?.pickable);
         const isGltfPickProxyLayer = layerId.includes("/gltf-pick-proxy");
         const isVisibleGltfLayer = layerId.includes("/gltf") && !isGltfPickProxyLayer;
         if (isPicking) {
@@ -435,6 +448,7 @@ export abstract class DeckMapView implements IRenderView {
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.ROTATION_PIVOT_LAYER_KEY);
         this.removeSearchResultLayers();
         this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
@@ -1075,8 +1089,26 @@ export abstract class DeckMapView implements IRenderView {
                 .pipe(this._viewIndex, distinctUntilChanged())
                 .subscribe(mode => {
                     this.tileGridMode = mode;
+                    this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
                     this.scheduleTileGridOverlayUpdate();
                 })
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridLevelState
+                .pipe(this._viewIndex, distinctUntilChanged())
+                .subscribe(_ => {
+                    this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
+                    this.scheduleTileGridOverlayUpdate();
+                })
+        );
+        this.subscriptions.push(
+            combineLatest([
+                this.stateService.viewTileGridColorState.pipe(this._viewIndex, distinctUntilChanged()),
+                this.stateService.viewTileGridOpacityState.pipe(this._viewIndex, distinctUntilChanged())
+            ]).subscribe(([color, opacity]) => {
+                this.tileGridLineColor = tileGridRgba(color, opacity);
+                this.scheduleTileGridOverlayUpdate();
+            })
         );
         this.subscriptions.push(
             this.stateService.layerVisibilityState
@@ -1153,6 +1185,10 @@ export abstract class DeckMapView implements IRenderView {
 
         this.tileGridEnabled = this.stateService.viewTileBordersState.getValue(this._viewIndex);
         this.tileGridMode = this.stateService.viewTileGridModeState.getValue(this._viewIndex);
+        this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
+        this.tileGridLineColor = tileGridRgba(
+            this.mapInfo.maps.getViewTileGridColor(this._viewIndex),
+            this.mapInfo.maps.getViewTileGridOpacity(this._viewIndex));
         this.updateLocationMarkerOverlay();
         this.scheduleTileGridOverlayUpdate();
         this.scheduleSearchResultsOverlayUpdate();
@@ -1163,6 +1199,7 @@ export abstract class DeckMapView implements IRenderView {
         if (this.suppressDeckViewStateEvent) {
             return;
         }
+        this.updateRotationPivotOverlay(interactionState);
         if (this.stateService.focusedView !== this._viewIndex) {
             this.stateService.focusedView = this._viewIndex;
         }
@@ -1176,10 +1213,60 @@ export abstract class DeckMapView implements IRenderView {
     /** Tracks whether the camera is actively moving so hover picking can be suspended. */
     private onInteractionStateChange(interactionState: InteractionState): void {
         const wasCameraInteracting = this.isCameraInteracting;
+        this.updateRotationPivotOverlay(interactionState);
         this.noteCameraInteraction(interactionState);
         if (wasCameraInteracting && !this.isCameraInteracting) {
             this.flushPendingViewStatePush();
         }
+    }
+
+    /** Displays the picked object point used by deck.gl while a 3D rotation is active. */
+    private updateRotationPivotOverlay(interactionState: InteractionState | undefined): void {
+        if (!this.allowPitchAndBearing || !interactionState?.isRotating) {
+            this.layerRegistry.remove(DeckMapView.ROTATION_PIVOT_LAYER_KEY);
+            return;
+        }
+        const position = interactionState.rotationPivotPosition ?? [
+            this.viewState.longitude,
+            this.viewState.latitude,
+            0
+        ];
+        const data: DeckRotationPivotDatum[] = [
+            {
+                position,
+                radius: 8,
+                fillColor: [0, 0, 0, 0],
+                lineColor: [0, 229, 255, 255],
+                lineWidth: 3
+            },
+            {
+                position,
+                radius: 2.5,
+                fillColor: [0, 229, 255, 255],
+                lineColor: [0, 229, 255, 255],
+                lineWidth: 0
+            }
+        ];
+        this.layerRegistry.upsert(
+            DeckMapView.ROTATION_PIVOT_LAYER_KEY,
+            new ScatterplotLayer<DeckRotationPivotDatum>({
+                id: DeckMapView.ROTATION_PIVOT_LAYER_KEY,
+                data,
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                getPosition: datum => datum.position,
+                getRadius: datum => datum.radius,
+                radiusUnits: "pixels",
+                filled: true,
+                stroked: true,
+                getFillColor: datum => datum.fillColor,
+                getLineColor: datum => datum.lineColor,
+                getLineWidth: datum => datum.lineWidth,
+                lineWidthUnits: "pixels",
+                pickable: false,
+                parameters: DeckMapView.NO_DEPTH_PARAMETERS
+            }),
+            760);
+        this.requestRender();
     }
 
     /** Records the latest camera interaction state and temporarily suppresses expensive hover picking. */
@@ -1500,10 +1587,12 @@ export abstract class DeckMapView implements IRenderView {
                 scrollZoom: {speed: scrollZoomSpeed}
             };
         }
-        return {
+        const controllerOptions = {
             keyboard: {zoomSpeed: keyboardZoomSpeed},
-            scrollZoom: {speed: scrollZoomSpeed}
+            scrollZoom: {speed: scrollZoomSpeed},
+            rotationPivot: "3d" as const
         };
+        return controllerOptions;
     }
 
     /** Clamps and normalizes the deck camera state before it becomes authoritative. */
@@ -2124,19 +2213,12 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.upsert(DeckMapView.LOCATION_MARKER_LAYER_KEY, layer, 700);
     }
 
-    /** Rebuilds the tile-grid and tile-state overlays for the currently visible map layers. */
+    /** Rebuilds the independent line grid and data-derived tile-state overlays. */
     private updateTileGridOverlay(): void {
         if (!this.deck || !this.tileGridEnabled) {
             this.removeTileGridLayers();
             this.removeTileStateLayers();
             this.logTileGridDiagnostic("disabled");
-            return;
-        }
-        const levels = this.visibleMapLayerLevels();
-        if (!levels.length) {
-            this.removeTileGridLayers();
-            this.removeTileStateLayers();
-            this.logTileGridDiagnostic("no-levels");
             return;
         }
         const viewport = this.computeViewport();
@@ -2146,16 +2228,16 @@ export abstract class DeckMapView implements IRenderView {
             this.logTileGridDiagnostic("no-viewport");
             return;
         }
-        const effectiveLevels = coarsenedTileGridLevels(
-            levels,
-            viewport,
-            DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS,
-            this.tileGridMode
-        );
-        const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels, viewport);
-        const gridLayerCount = this.updateTileGridLayers(effectiveLevels, viewport);
+        const layerLevels = this.visibleMapLayerLevels();
+        const {layerCount, coloredTileCount} = layerLevels.length
+            ? this.updateTileStateOverlays(layerLevels, viewport)
+            : {layerCount: 0, coloredTileCount: 0};
+        if (!layerLevels.length) {
+            this.removeTileStateLayers();
+        }
+        const gridLayerCount = this.updateTileGridLayers([this.tileGridLevel], viewport);
         this.logTileGridDiagnostic(
-            `enabled mode=${this.tileGridMode} requested=[${levels.join(",")}] effective=[${effectiveLevels.join(",")}] gridLayers=${gridLayerCount} stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
+            `enabled mode=${this.tileGridMode} level=${this.tileGridLevel} gridLayers=${gridLayerCount} stateLevels=[${layerLevels.join(",")}] stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
         );
     }
 
@@ -2199,7 +2281,7 @@ export abstract class DeckMapView implements IRenderView {
             localSize: overlayGeometry.localSize,
             subdivisionX: overlayGeometry.subdivisionX,
             subdivisionY: overlayGeometry.subdivisionY,
-            lineColor: DeckMapView.TILE_GRID_LINE_COLOR,
+            lineColor: this.tileGridLineColor,
             lineWidthPixels: DeckMapView.TILE_GRID_LINE_WIDTH_PX,
             debugSolid: DeckMapView.TILE_GRID_DEBUG_SOLID,
             parameters: DeckMapView.NO_DEPTH_PARAMETERS
@@ -2301,9 +2383,6 @@ export abstract class DeckMapView implements IRenderView {
                 }
                 levels.add(Math.max(0, Math.floor(level)));
             }
-        }
-        if (!levels.size) {
-            levels.add(Math.max(0, Math.min(22, Math.floor(this.viewState.zoom))));
         }
         return Array.from(levels.values()).sort((lhs, rhs) => lhs - rhs);
     }

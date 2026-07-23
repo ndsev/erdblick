@@ -125,6 +125,40 @@
     padding-top: 0;
   }
 
+  .p-tree-node-content:has(.map-option-row.style-option-group-highlight) {
+    background: var(--p-highlight-background);
+  }
+
+  .map-option-row {
+    align-items: center;
+    display: flex;
+    min-width: 0;
+    width: 100%;
+
+    .checkbox-entry {
+      flex: 1 1 auto;
+    }
+
+    .style-option-edit-button {
+      display: none;
+      flex: 0 0 auto;
+
+      .p-button {
+        height: 1.45rem;
+        padding: 0;
+        width: 1.45rem;
+      }
+
+      .material-symbols-outlined {
+        font-size: 1rem;
+      }
+    }
+
+    &.style-option-group-highlight .style-option-edit-button {
+      display: inline-flex;
+    }
+  }
+
   .p-tree-root,
   .p-tree-root-children,
   .p-tree-node-children {

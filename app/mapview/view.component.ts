@@ -49,6 +49,11 @@ import {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";
 
+interface PreparedContextMenuPosition {
+    screenPos: {x: number; y: number};
+    cartographic: {lon: number; lat: number; alt: number};
+}
+
 
 
 @Component({
@@ -572,13 +577,18 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
     private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
         this.menuService.closeAllContextMenus();
+        let contextPosition: PreparedContextMenuPosition | null = null;
         try {
-            this.prepareSourceDataContextMenu(event);
+            contextPosition = this.contextMenuPosition(event);
+            this.prepareSourceDataContextMenu(contextPosition);
         } catch (error) {
             console.error("Failed to prepare source-data context menu.", error);
             this.menuService.tileIdsForSourceData.next([]);
             this.menuService.setTileDiagnosticsOptions([]);
         }
+        this.menuService.setExternalViewerLocation(contextPosition
+            ? {lon: contextPosition.cartographic.lon, lat: contextPosition.cartographic.lat}
+            : null);
         try {
             this.prepareFeatureSearchContextMenu();
         } catch (error) {
@@ -586,6 +596,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.menuService.setFeatureSearchScope(null);
         }
         menu.show(this.contextMenuShowEvent(event) as MouseEvent);
+    }
+
+    /** Resolves the screen and WGS84 position represented by a context-menu event. */
+    private contextMenuPosition(event: {clientX: number; clientY: number}): PreparedContextMenuPosition | null {
+        if (!this.mapView) {
+            return null;
+        }
+        this.stateService.focusedView = this.viewIndex();
+        const canvasRect = this.mapView.getCanvasClientRect();
+        const screenPos = {
+            x: event.clientX - canvasRect.left,
+            y: event.clientY - canvasRect.top
+        };
+        const cartographic = this.mapView.pickCartographic(screenPos);
+        return cartographic ? {screenPos, cartographic} : null;
     }
 
     /** Copies the event coordinates we need because the original pointer event may no longer be usable later. */
@@ -612,25 +637,19 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Derives source-data tile choices from the clicked world position and updates the menu service.
      * The preferred tile tries to match picked feature tiles first, then visible feature levels.
      */
-    private prepareSourceDataContextMenu(event: {clientX: number; clientY: number}): void {
+    private prepareSourceDataContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
             this.resetPreparedSourceData(true);
             this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
 
-        this.stateService.focusedView = this.viewIndex();
-        const canvasRect = this.mapView.getCanvasClientRect();
-        const screenPos = {
-            x: event.clientX - canvasRect.left,
-            y: event.clientY - canvasRect.top
-        };
-        const cartographic = this.mapView.pickCartographic(screenPos);
-        if (!cartographic) {
+        if (!contextPosition) {
             this.resetPreparedSourceData(true);
             this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
+        const {screenPos, cartographic} = contextPosition;
 
         const tileIds = Array.from({length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT}, (_, level) => {
             const tileId = coreLib.getTileIdFromPosition(cartographic.lon, cartographic.lat, level);
@@ -753,6 +772,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private resetPreparedSourceData(clearTileIds: boolean = false, clearOutline: boolean = true): void {
         this.menuService.preferredTileIdForSourceData = null;
         this.menuService.setFeatureSearchScope(null);
+        this.menuService.setExternalViewerLocation(null);
         if (clearOutline) {
             this.menuService.tileOutline.next(null);
         }

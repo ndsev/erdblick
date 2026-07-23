@@ -1,6 +1,9 @@
 import {
     AppStateService,
+    clampTileGridLevel,
+    clampTileGridOpacity,
     LayerViewConfig,
+    normalizeTileGridColor,
     TileGridMode,
     VIEW_SYNC_LAYERS
 } from "../shared/appstate.service";
@@ -104,12 +107,23 @@ export class StyleOptionNode {
     value: (boolean|number|string)[] = [];
     shortStyleId: string;
     styleId: string;
+    styleOptionGroupId: string;
+    firstInStyleGroup: boolean;
 
     /** Builds the stable key used by the tree and persisted style option state. */
-    constructor(mapId: string, layerId: string, definition: FeatureStyleOptionWithStringType, styleId: string, shortStyleId: string) {
+    constructor(
+        mapId: string,
+        layerId: string,
+        definition: FeatureStyleOptionWithStringType,
+        styleId: string,
+        shortStyleId: string,
+        firstInStyleGroup: boolean
+    ) {
         this.id = definition.id;
         this.shortStyleId = shortStyleId;
         this.styleId = styleId;
+        this.styleOptionGroupId = styleId;
+        this.firstInStyleGroup = firstInStyleGroup;
         this.type = definition.type as string;
         this.info = definition;
         this.mapId = mapId;
@@ -353,10 +367,15 @@ export class MapLayerTree {
                 layer.children = [];
                 for (const style of styleSheets) {
                     if (style.visible && style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
-                        for (const option of style.options) {
-                            if (!option.internal) {
-                                layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.id, style.shortId));
-                            }
+                        const visibleOptions = style.options.filter(option => !option.internal);
+                        for (const [index, option] of visibleOptions.entries()) {
+                            layer.children.push(new StyleOptionNode(
+                                layer.mapId,
+                                layer.id,
+                                option,
+                                style.id,
+                                style.shortId,
+                                index === 0));
                         }
                     }
                 }
@@ -445,11 +464,46 @@ export class MapLayerTree {
     /** Persists the tile grid coordinate mode shown in the given view. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.stateService.viewTileGridModeState.next(viewIndex, mode);
+        this.setViewTileGridLevel(viewIndex, this.getViewTileGridLevel(viewIndex));
     }
 
     /** Returns the configured tile grid coordinate mode for the given view. */
     getViewTileGridMode(viewIndex: number): TileGridMode {
         return this.stateService.viewTileGridModeState.getValue(viewIndex);
+    }
+
+    /** Persists the independent line-grid level for the given view. */
+    setViewTileGridLevel(viewIndex: number, level: number): void {
+        this.stateService.viewTileGridLevelState.next(
+            viewIndex,
+            clampTileGridLevel(level, this.getViewTileGridMode(viewIndex)));
+    }
+
+    /** Returns the selected line-grid level for the given view. */
+    getViewTileGridLevel(viewIndex: number): number {
+        return clampTileGridLevel(
+            this.stateService.viewTileGridLevelState.getValue(viewIndex),
+            this.getViewTileGridMode(viewIndex));
+    }
+
+    /** Persists the line-grid RGB colour for the given view. */
+    setViewTileGridColor(viewIndex: number, color: string): void {
+        this.stateService.viewTileGridColorState.next(viewIndex, normalizeTileGridColor(color));
+    }
+
+    /** Returns the normalized line-grid RGB colour for the given view. */
+    getViewTileGridColor(viewIndex: number): string {
+        return normalizeTileGridColor(this.stateService.viewTileGridColorState.getValue(viewIndex));
+    }
+
+    /** Persists the line-grid opacity percentage for the given view. */
+    setViewTileGridOpacity(viewIndex: number, opacity: number): void {
+        this.stateService.viewTileGridOpacityState.next(viewIndex, clampTileGridOpacity(opacity));
+    }
+
+    /** Returns the normalized line-grid opacity percentage for the given view. */
+    getViewTileGridOpacity(viewIndex: number): number {
+        return clampTileGridOpacity(this.stateService.viewTileGridOpacityState.getValue(viewIndex));
     }
 
     /** Persists the explicit layer level for a single view. */
@@ -715,6 +769,9 @@ export class MapLayerTree {
 
         const sourceTileBorders = this.getViewTileBorderState(viewIndex);
         const sourceTileGridMode = this.getViewTileGridMode(viewIndex);
+        const sourceTileGridLevel = this.getViewTileGridLevel(viewIndex);
+        const sourceTileGridColor = this.getViewTileGridColor(viewIndex);
+        const sourceTileGridOpacity = this.getViewTileGridOpacity(viewIndex);
         for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
             if (targetIndex === viewIndex) {
                 continue;
@@ -725,6 +782,18 @@ export class MapLayerTree {
             }
             if (this.getViewTileGridMode(targetIndex) !== sourceTileGridMode) {
                 this.setViewTileGridMode(targetIndex, sourceTileGridMode);
+                viewConfigChanged = true;
+            }
+            if (this.getViewTileGridLevel(targetIndex) !== sourceTileGridLevel) {
+                this.setViewTileGridLevel(targetIndex, sourceTileGridLevel);
+                viewConfigChanged = true;
+            }
+            if (this.getViewTileGridColor(targetIndex) !== sourceTileGridColor) {
+                this.setViewTileGridColor(targetIndex, sourceTileGridColor);
+                viewConfigChanged = true;
+            }
+            if (this.getViewTileGridOpacity(targetIndex) !== sourceTileGridOpacity) {
+                this.setViewTileGridOpacity(targetIndex, sourceTileGridOpacity);
                 viewConfigChanged = true;
             }
         }

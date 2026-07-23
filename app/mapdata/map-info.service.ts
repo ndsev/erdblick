@@ -509,6 +509,24 @@ export class MapInfoService {
         this.layerStateChanged.next("tile-grid");
     }
 
+    /** Sets the independent tile-grid line level for one view. */
+    setViewTileGridLevel(viewIndex: number, level: number): void {
+        this.maps.setViewTileGridLevel(viewIndex, level);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Sets the tile-grid line colour for one view. */
+    setViewTileGridColor(viewIndex: number, color: string): void {
+        this.maps.setViewTileGridColor(viewIndex, color);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Sets the tile-grid opacity for one view. */
+    setViewTileGridOpacity(viewIndex: number, opacity: number): void {
+        this.maps.setViewTileGridOpacity(viewIndex, opacity);
+        this.layerStateChanged.next("tile-grid");
+    }
+
     /** Persists an explicit layer level for one view. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.maps.setMapLayerLevel(viewIndex, mapId, layerId, level);

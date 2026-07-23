@@ -123,6 +123,8 @@ import {SearchCompletionPopupComponent} from "./search/search-completion-popup.c
 import {SimfilExpressionInputComponent} from "./search/simfil-expression-input.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
+import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
+import {CoordinatesLegalTermsDialogComponent} from "./coords/coordinates-legal-terms-dialog.component";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -166,6 +168,7 @@ export const initializeServices = () => {
     const tileStream = inject(MapTileStreamService);
     const inspectionSelection = inject(InspectionSelectionService);
     const coordService = inject(CoordinatesService);
+    const coordinatesPolicy = inject(CoordinatesPolicyService);
     inject(FeatureSearchService);
 
     return (async () => {
@@ -178,6 +181,7 @@ export const initializeServices = () => {
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
         stateService.initializePersistence();
+        coordinatesPolicy.initialize();
         updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
@@ -229,7 +233,8 @@ export const initializeServices = () => {
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
         DiagnosticsExportDialogComponent,
-        AdvancedPreferencesComponent
+        AdvancedPreferencesComponent,
+        CoordinatesLegalTermsDialogComponent
     ],
     bootstrap: [
         AppComponent

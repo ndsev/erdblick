@@ -1,7 +1,15 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapInfoService} from "./map-info.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
-import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
+import {
+    AppStateService,
+    DEFAULT_TILE_GRID_COLOR,
+    DEFAULT_TILE_GRID_LEVEL,
+    DEFAULT_TILE_GRID_OPACITY,
+    SelectedSourceData,
+    TileGridMode,
+    tileGridMaxLevel
+} from "../shared/appstate.service";
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
@@ -27,6 +35,7 @@ import {
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {InfoMessageService} from "../shared/info.service";
+import {StyleEditorRequestService} from "../styledata/style-editor-request.service";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -156,6 +165,42 @@ interface MetadataLayerOption {
                                                         <label [for]="'tile-grid-mode-xyz-' + index">XYZ</label>
                                                     </div>
                                                 </div>
+                                            </div>
+                                            <div class="tile-grid-level-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
+                                                <label [for]="'tile-grid-level-' + index">Level</label>
+                                                <p-inputNumber [ngModel]="tileGridLevels[index]"
+                                                               (ngModelChange)="setTileGridLevel(index, $event)"
+                                                               [showButtons]="true"
+                                                               [min]="0"
+                                                               [max]="maxTileGridLevel(tileGridModes[index])"
+                                                               [inputId]="'tile-grid-level-' + index"
+                                                               [disabled]="!tileBordersEnabled[index]"
+                                                               [attr.data-testid]="getTileGridLevelTestId(index)"/>
+                                            </div>
+                                            <div class="tile-grid-color-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
+                                                <span>Colour</span>
+                                                <p-colorpicker [ngModel]="tileGridColors[index]"
+                                                               (ngModelChange)="setTileGridColor(index, $event)"
+                                                               format="hex"
+                                                               [disabled]="!tileBordersEnabled[index]"
+                                                               [attr.data-testid]="getTileGridColorTestId(index)"/>
+                                            </div>
+                                            <div class="tile-grid-opacity-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
+                                                <span>Opacity</span>
+                                                <p-inputNumber class="tile-grid-opacity-input"
+                                                               [ngModel]="tileGridOpacities[index]"
+                                                               (ngModelChange)="setTileGridOpacity(index, $event)"
+                                                               suffix="%"
+                                                               [min]="0"
+                                                               [max]="100"
+                                                               [disabled]="!tileBordersEnabled[index]"/>
+                                                <p-slider class="tile-grid-opacity-slider"
+                                                          [ngModel]="tileGridOpacities[index]"
+                                                          (ngModelChange)="setTileGridOpacity(index, $event)"
+                                                          [min]="0"
+                                                          [max]="100"
+                                                          [disabled]="!tileBordersEnabled[index]"
+                                                          [attr.data-testid]="getTileGridOpacityTestId(index)"/>
                                             </div>
                                         </div>
                                     </p-popover>
@@ -387,7 +432,13 @@ interface MetadataLayerOption {
                                     </ng-template>
                                     <!-- Template for boolean style option nodes -->
                                     <ng-template let-node pTemplate="Bool">
-                                        <div class="map-option-row">
+                                        <div class="map-option-row"
+                                             [class.style-option-group-highlight]="isStyleOptionGroupActive(node, index)"
+                                             [attr.data-style-option-group]="styleOptionGroupKey(node, index)"
+                                             (mouseenter)="activateStyleOptionGroup(node, index)"
+                                             (mouseleave)="deactivateStyleOptionGroup($event, node, index)"
+                                             (focusin)="activateStyleOptionGroup(node, index)"
+                                             (focusout)="deactivateStyleOptionGroup($event, node, index)">
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
@@ -398,6 +449,16 @@ interface MetadataLayerOption {
                                                     [name]="index + '_' + node.key"/>
                                             <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
                                         </span>
+                                        @if (node.firstInStyleGroup) {
+                                            <p-button onEnterClick class="style-option-edit-button"
+                                                      [attr.data-testid]="styleOptionEditButtonTestId(node, index)"
+                                                      (click)="openStyleSheet($event, node)"
+                                                      pTooltip="Edit style sheet"
+                                                      tooltipPosition="bottom"
+                                                      tabindex="0">
+                                                <span class="material-symbols-outlined">brush</span>
+                                            </p-button>
+                                        }
                                         </div>
                                     </ng-template>
                                     <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
@@ -442,6 +503,10 @@ export class MapPanelComponent {
     lastEnabledBackgroundLayerIds: Array<string | null> = [];
     tileBordersEnabled: boolean[] = [];
     tileGridModes: TileGridMode[] = [];
+    tileGridLevels: number[] = [DEFAULT_TILE_GRID_LEVEL];
+    tileGridColors: string[] = [DEFAULT_TILE_GRID_COLOR];
+    tileGridOpacities: number[] = [DEFAULT_TILE_GRID_OPACITY];
+    activeStyleOptionGroup: string | null = null;
 
     syncedOptions: boolean[] = [];
     layerDialogVisible: boolean = false;
@@ -462,7 +527,8 @@ export class MapPanelComponent {
                 private readonly configService: AppConfigService,
                 private readonly dialogStack: DialogStackService,
                 private readonly featureSearchService: FeatureSearchService,
-                private readonly infoMessageService: InfoMessageService) {
+                private readonly infoMessageService: InfoMessageService,
+                private readonly styleEditorRequestService: StyleEditorRequestService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
@@ -484,6 +550,7 @@ export class MapPanelComponent {
                     this.mapService.maps.getViewTileBorderState(index));
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
                     this.mapService.maps.getViewTileGridMode(index));
+                this.refreshTileGridControls();
             })
         );
 
@@ -507,6 +574,7 @@ export class MapPanelComponent {
                     this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
                     this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
+                this.refreshTileGridControls();
                 this.refreshBackgroundControls();
                 while (this.mapsCollapsed.length < this.viewIndices.length) {
                     this.mapsCollapsed.push(false);
@@ -551,7 +619,18 @@ export class MapPanelComponent {
                 const numViews = this.stateService.numViews;
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
                     this.stateService.viewTileGridModeState.getValue(index));
+                this.refreshTileGridControls();
             })
+        );
+
+        this.subscriptions.push(
+            this.stateService.viewTileGridLevelState.appState.subscribe(_ => this.refreshTileGridControls())
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridColorState.appState.subscribe(_ => this.refreshTileGridControls())
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridOpacityState.appState.subscribe(_ => this.refreshTileGridControls())
         );
 
         this.subscriptions.push(
@@ -562,6 +641,17 @@ export class MapPanelComponent {
     /** Brings the floating maps dialog to the top of the dialog stack when shown. */
     onMapLayerDialogShow() {
         this.dialogStack.bringToFront(this.mapLayerDialog);
+    }
+
+    /** Refreshes independent tile-grid controls from their per-view AppState values. */
+    private refreshTileGridControls(): void {
+        const numViews = this.stateService.numViews;
+        this.tileGridLevels = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridLevel(index));
+        this.tileGridColors = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridColor(index));
+        this.tileGridOpacities = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridOpacity(index));
     }
 
     /** Rebuilds the background dropdown contents and resolved per-view selection state. */
@@ -855,6 +945,21 @@ export class MapPanelComponent {
         return `tile-grid-mode-${mode}-${viewIndex}`;
     }
 
+    /** Returns the stable test id for one tile-grid level input. */
+    getTileGridLevelTestId(viewIndex: number): string {
+        return `tile-grid-level-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one tile-grid colour picker. */
+    getTileGridColorTestId(viewIndex: number): string {
+        return `tile-grid-color-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one tile-grid opacity slider. */
+    getTileGridOpacityTestId(viewIndex: number): string {
+        return `tile-grid-opacity-${viewIndex}`;
+    }
+
     /** Returns the stable test id for one background toolbar button. */
     getBackgroundButtonTestId(viewIndex: number): string {
         return `background-button-${viewIndex}`;
@@ -880,6 +985,75 @@ export class MapPanelComponent {
     setTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.tileGridModes[viewIndex] = mode;
         this.viewState.setViewTileGridMode(viewIndex, mode);
+        this.refreshTileGridControls();
+    }
+
+    /** Returns the highest grid level supported by one coordinate mode. */
+    maxTileGridLevel(mode: TileGridMode): number {
+        return tileGridMaxLevel(mode);
+    }
+
+    /** Sets the independent line-grid level for one view. */
+    setTileGridLevel(viewIndex: number, level: number | null): void {
+        if (level === null) {
+            return;
+        }
+        this.viewState.setViewTileGridLevel(viewIndex, level);
+        this.refreshTileGridControls();
+    }
+
+    /** Sets the line-grid RGB colour for one view. */
+    setTileGridColor(viewIndex: number, color: string): void {
+        this.viewState.setViewTileGridColor(viewIndex, color);
+        this.refreshTileGridControls();
+    }
+
+    /** Sets the line-grid opacity percentage for one view. */
+    setTileGridOpacity(viewIndex: number, opacity: number | null): void {
+        if (opacity === null) {
+            return;
+        }
+        this.viewState.setViewTileGridOpacity(viewIndex, opacity);
+        this.refreshTileGridControls();
+    }
+
+    /** Returns the view/layer-qualified identity of one stylesheet option group. */
+    styleOptionGroupKey(node: StyleOptionNode, viewIndex: number): string {
+        return `${viewIndex}:${node.mapId}:${node.layerId}:${node.styleOptionGroupId}`;
+    }
+
+    /** Marks every option from the hovered or focused stylesheet group as active. */
+    activateStyleOptionGroup(node: StyleOptionNode, viewIndex: number): void {
+        this.activeStyleOptionGroup = this.styleOptionGroupKey(node, viewIndex);
+    }
+
+    /** Clears the group unless pointer or focus moved to another row in the same group. */
+    deactivateStyleOptionGroup(event: MouseEvent | FocusEvent, node: StyleOptionNode, viewIndex: number): void {
+        const groupKey = this.styleOptionGroupKey(node, viewIndex);
+        const relatedTarget = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null;
+        const relatedGroup = relatedTarget?.closest<HTMLElement>(".map-option-row")?.dataset["styleOptionGroup"];
+        if (relatedGroup !== groupKey && this.activeStyleOptionGroup === groupKey) {
+            this.activeStyleOptionGroup = null;
+        }
+    }
+
+    /** Returns whether one rendered option belongs to the current hover or focus group. */
+    isStyleOptionGroupActive(node: StyleOptionNode, viewIndex: number): boolean {
+        return this.activeStyleOptionGroup === this.styleOptionGroupKey(node, viewIndex);
+    }
+
+    /** Requests the existing guarded style editor for a map option's stylesheet. */
+    openStyleSheet(event: Event, node: StyleOptionNode): void {
+        event.preventDefault();
+        event.stopPropagation();
+        this.styleEditorRequestService.open(node.styleId);
+    }
+
+    /** Returns the stable editor-button test id for one style group in one view. */
+    styleOptionEditButtonTestId(node: StyleOptionNode, viewIndex: number): string {
+        const suffix = `${node.mapId}-${node.layerId}-${node.styleOptionGroupId}`
+            .replace(/[^a-zA-Z0-9_-]+/g, "-");
+        return `style-option-edit-${viewIndex}-${suffix}`;
     }
 
     /** Applies a manually chosen layer level and disables auto-level for that layer. */

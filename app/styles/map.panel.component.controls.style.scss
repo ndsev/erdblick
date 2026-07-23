@@ -141,6 +141,9 @@
 
 .tile-grid-toggle-row,
 .tile-grid-mode-row,
+.tile-grid-level-row,
+.tile-grid-color-row,
+.tile-grid-opacity-row,
 .background-toggle-row,
 .background-opacity-row,
 .background-details {
@@ -151,8 +154,27 @@
 
 .tile-grid-toggle-row,
 .tile-grid-mode-row,
+.tile-grid-level-row,
+.tile-grid-color-row,
 .background-toggle-row {
   justify-content: space-between;
+}
+
+.tile-grid-level-row .p-inputnumber-input {
+  width: 4rem;
+}
+
+.tile-grid-opacity-row {
+  display: grid;
+  grid-template-columns: max-content 4.5rem minmax(5rem, 1fr);
+
+  .tile-grid-opacity-input .p-inputnumber-input {
+    width: 4.5rem;
+  }
+
+  .tile-grid-opacity-slider {
+    width: 100%;
+  }
 }
 
 .tile-grid-radio-group {

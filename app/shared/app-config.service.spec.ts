@@ -521,4 +521,76 @@ describe("AppConfigService", () => {
         expect(config.locationSearch.minCharacters).toBe(2);
         expect(config.locationSearch.debounceMs).toBe(200);
     });
+
+    it("uses coordinates-enabled as a config-seeded local default", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({"coordinates-enabled": true});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    datasourceConfigUnavailable: false,
+                    erdblick: {"coordinates-enabled": false}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.coordinates.enabledByDefault).toBe(false);
+        expect(config.state).toEqual(expect.objectContaining({coordinatesEnabled: false}));
+    });
+
+    it.each([
+        ["JSON", '{"legal-terms":"JSON legal text"}', "JSON legal text"],
+        ["YAML", "legal-terms: |\n  YAML legal text\n", "YAML legal text\n"]
+    ])("loads and validates %s coordinate legal terms", async (_format, source, expectedText) => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    "coordinates-enabled": true,
+                    "coordinates-legal-terms": "/coordinates-legal-terms/terms.yaml"
+                });
+            }
+            if (url === "/coordinates-legal-terms/terms.yaml") {
+                return of(source);
+            }
+            return throwError(() => new Error("no server config"));
+        });
+
+        const config = await service.load();
+
+        expect(config.coordinates).toEqual({
+            enabledByDefault: false,
+            legalTermsUrl: "/coordinates-legal-terms/terms.yaml",
+            legalTerms: expectedText,
+            legalTermsError: null
+        });
+        expect(config.state).toEqual(expect.objectContaining({coordinatesEnabled: false}));
+    });
+
+    it("fails the coordinate legal gate closed when the document is invalid", async () => {
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({"coordinates-legal-terms": "/coordinates-legal-terms/invalid.yaml"});
+            }
+            if (url === "/coordinates-legal-terms/invalid.yaml") {
+                return of("legal-terms: '   '");
+            }
+            return throwError(() => new Error("no server config"));
+        });
+
+        const config = await service.load();
+
+        expect(config.coordinates.enabledByDefault).toBe(false);
+        expect(config.coordinates.legalTerms).toBeNull();
+        expect(config.coordinates.legalTermsError).toContain("invalid.yaml");
+        expect(errorSpy).toHaveBeenCalled();
+        errorSpy.mockRestore();
+    });
 });

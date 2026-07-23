@@ -304,6 +304,27 @@ export class MapViewStateService {
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
+    /** Sets the independent tile-grid level and refreshes affected overlays. */
+    setViewTileGridLevel(viewIndex: number, level: number): void {
+        this.mapInfo.setViewTileGridLevel(viewIndex, level);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
+    /** Sets the tile-grid line colour and refreshes affected overlays. */
+    setViewTileGridColor(viewIndex: number, color: string): void {
+        this.mapInfo.setViewTileGridColor(viewIndex, color);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
+    /** Sets the tile-grid opacity percentage and refreshes affected overlays. */
+    setViewTileGridOpacity(viewIndex: number, opacity: number): void {
+        this.mapInfo.setViewTileGridOpacity(viewIndex, opacity);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
     /** Persists an explicit layer level for one view and refreshes visible tiles. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.mapInfo.setMapLayerLevel(viewIndex, mapId, layerId, level);

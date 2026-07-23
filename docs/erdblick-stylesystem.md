@@ -4,6 +4,36 @@ Erdblick stylesheets are YAML presentation programs. Schema version 2 is
 planned into mapget `/filter` channels and rendered from immutable
 `TileSubsetLayer` values.
 
+![erdblick UI](screenshots/style-controls.png)
+
+## Managing Styles in the UI
+
+Most day-to-day style work happens directly inside the Styles dialog, where
+you can toggle, edit, and reset style sheets without touching files on disk:
+
+1. Open the Styles dialog via **Edit -> Styles Configurator**.
+2. Activate or deactivate style sheets to control which rules run.
+3. Use the pencil button for live YAML editing, validation, completion,
+   import, and export.
+4. Reset browser-stored versions from Preferences when required.
+
+Built-in styles edited locally show a **Modified** tag whose comparison dialog
+shows the shipped version. Styles supplied through `additionalStyles` show an
+**Additional** tag and can be compared with an overridden base style.
+
+The **Maps & Layers** panel also exposes per-layer style options. Hovering or
+focusing an option highlights the contiguous group supplied by the same style
+sheet. The first visible row in that group has a brush button which opens the
+sheet in the editor.
+
+## YAML Styles and Search Result Styles
+
+YAML style sheets are persistent project-wide rules loaded from the bundle,
+deployment configuration, additional style locations, or browser-imported
+YAML. Search result styles belong to one feature-search session and are stored
+with its search state. Both use the same rendering primitives and SIMFIL
+expression model.
+
 ## Document shape
 
 ```yaml
@@ -228,6 +258,9 @@ width-scale:
 
 When color and width depend on the same expression, use identical expression
 text. The style planner then projects one value for both scales.
+
+Per-layer overrides in the Maps & Layers panel map directly to these options. Behind the scenes, erdblick stores the values per `mapId/layerId/styleId` combination, which lets you run different variants across split views or specific layers without cloning the entire style file.
+Options from the same style are grouped and highlighted together on hover. Use the brush button on the first visible option in a group to open the owning style sheet.
 
 ## Point grouping and `$mergeCount`
 

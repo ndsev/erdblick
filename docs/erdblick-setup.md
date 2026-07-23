@@ -56,7 +56,7 @@ Whenever the YAML file changes, mapget applies the new sources immediately; erdb
 
 At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `config.json`.
 
-The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
+The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, `coordinates-enabled`, `coordinates-legal-terms`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
 
 The `state` key uses the same snapshot shape exported by Advanced Preferences, not URL query parameter names. It seeds the viewer before local browser storage and URL parameters are applied.
 
@@ -74,6 +74,8 @@ The `config/` directory in the erdblick source tree controls UI-side metadata:
     - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`. If `maxZoom` is omitted, erdblick now allows XYZ sources up to level 22; cap public providers explicitly when they stop earlier.
     - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, optional HTTP `headers`, optional `vendorParameters`, and `defaultOpacity`.
   - `defaultBackgroundLayerId`: optional id of the background enabled by default for new views.
+  - `coordinates-enabled`: optional boolean default for the browser-local **Show coordinates** preference. The bundled default is `true`.
+  - `coordinates-legal-terms`: optional browser-reachable JSON, YAML, or YML document containing a non-empty `legal-terms` string. Supplying it forces the initial coordinate display off until the user accepts the terms.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.
 - `images/backgrounds/*`: optional bundled XYZ raster tiles. The default config includes OpenStreetMap as the active background, an online Esri World Imagery entry for higher zoom satellite imagery, and a coarse bundled Blue Marble overview under `bundle/images/backgrounds/world-overview/...` for offline fallback. The `world-overview` path is kept stable for compatibility even though the user-facing layer name is now `Blue Marble`.
@@ -91,13 +93,15 @@ docker run --rm -it -p 8089:8089 --name erdblick \
 
 Adapt the target paths (`/srv/erdblick/...`) to match the layout used by your own packaging.
 
-If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, or background assets by itself.
+If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, background assets, or legal-term documents by itself.
 
 ## Serving styles and resources
 
 Style entries that do not start with `http`, `bundle`, or `/` are resolved under `bundle/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
 
 Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional style URLs are loaded exactly like other browser resources: every URL must already be reachable through the web server. Erdblick itself does not expand wildcards, scan directories, mount host paths, or resolve relative filesystem paths against a backend YAML file. If a host application such as MapViewer accepts relative or absolute filesystem paths in its own YAML config, that application resolves them and publishes browser-reachable URLs before erdblick reads `/config.erdblick`.
+
+Coordinate legal terms follow the same browser-resource rule. Configure `coordinates-legal-terms` with a URL whose response is either `{"legal-terms": "legal text"}` or equivalent YAML. Erdblick renders the value as plain text. If the document is missing, unreadable, or does not contain the required string, coordinate display remains disabled. Hosting products such as MapViewer may mount a local document and rewrite the configured filesystem path to a public URL.
 
 Additional styles are loaded after base styles. If an additional style has the same YAML `name:` as a base style, the additional style is active and the Styles dialog marks it with an **Additional** tag. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style. For colliding base/additional styles, the **Additional** tag opens a read-only comparison against the base style.
 

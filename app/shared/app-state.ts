@@ -20,6 +20,7 @@ export interface AppStateOptions<T> {
     urlFormEncode?: boolean;
     urlIncludeInVisualizationOnly?: boolean;
     snapshotPersist?: boolean;
+    configDefault?: boolean;
 }
 
 /**
@@ -299,6 +300,7 @@ export class AppState<T> extends BehaviorSubject<T> {
     readonly urlFormEncode: boolean;
     readonly urlIncludeInVisualizationOnly?: boolean;
     readonly snapshotPersist: boolean;
+    readonly configDefault: boolean;
 
     protected readonly preprocess?: AppStateToStorageFun<T>;
     protected readonly postprocess?: AppStateFromStorageFun<T>;
@@ -318,6 +320,7 @@ export class AppState<T> extends BehaviorSubject<T> {
         this.urlFormEncode = options.urlFormEncode ?? false;
         this.urlIncludeInVisualizationOnly = options.urlIncludeInVisualizationOnly;
         this.snapshotPersist = options.snapshotPersist ?? true;
+        this.configDefault = options.configDefault ?? this.snapshotPersist;
 
         if (pool.has(options.name)) {
             console.warn(`[AppState] Duplicate state name detected: ${options.name}. Overwriting previous instance.`);
@@ -340,6 +343,11 @@ export class AppState<T> extends BehaviorSubject<T> {
     /** Returns whether this state slot participates in snapshot import/export. */
     isSnapshotState(): boolean {
         return this.snapshotPersist;
+    }
+
+    /** Returns whether config-provided default state may seed this slot. */
+    isConfigDefaultState(): boolean {
+        return this.configDefault;
     }
 
     /** Validates a snapshot-import value against the state schema. */

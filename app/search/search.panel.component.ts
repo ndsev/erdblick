@@ -38,6 +38,12 @@ import {
     parseNdsCoordinateString,
     parsePackedTileId as parsePackedTileIdValue
 } from "../coords/nds-coordinate.util";
+import {
+    ExternalViewerLocation,
+    ExternalViewerProvider,
+    ExternalViewerService,
+    ResolvedExternalViewerLocation
+} from "./external-viewer.service";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
@@ -342,33 +348,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
 
-        /////////// Jump to Google Maps/OSM
-        label = "lat = ? | lon = ?"
-        if (latLonValid) {
-            label = this.parseWgs84Coordinates(value, false)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        /////////// Open in external viewers
+        const externalLocation = this.externalViewerLocation(value);
+        for (const provider of this.externalViewerService.providers) {
+            targetsArray.push(this.externalViewerTarget(provider, externalLocation));
         }
-        targetsArray.push({
-            id: "e:gm",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "Open WGS84 Lat-Lon in Google Maps",
-            label: label,
-            enabled: latLonValid,
-            jump: (value: string) => { return this.openInGM(value) },
-            validate: (value: string) => { return this.validateWGS84(value, false) }
-        });
-        targetsArray.push({
-            id: "e:osm",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "Open WGS84 Lat-Lon in Open Street Maps",
-            label: label,
-            enabled: latLonValid,
-            jump: (value: string) => { return this.openInOSM(value) },
-            validate: (value: string) => { return this.validateWGS84(value, false) }
-        });
         return targetsArray;
     }
 
@@ -384,7 +368,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
-                private locationSearchService: LocationSearchService) {
+                private locationSearchService: LocationSearchService,
+                private externalViewerService: ExternalViewerService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
         this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -997,49 +982,73 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
     }
 
-    /**
-     * Opens the parsed coordinates in Google Maps and returns them for local reuse.
-     */
-    openInGM(value: string): number[] | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
-        }
-        const result = this.parseWgs84Coordinates(value, false)?.coords;
-        if (result) {
-            const lat = result[0];
-            const lon = result[1];
-            window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
-            return result;
-        }
-        return;
+    /** Builds one omnibox action for a configured external map viewer. */
+    private externalViewerTarget(
+        provider: ExternalViewerProvider,
+        location: ResolvedExternalViewerLocation | undefined
+    ): SearchTarget {
+        return {
+            id: provider.id,
+            icon: "pi-map-marker",
+            color: "green",
+            name: provider.name,
+            label: location
+                ? this.externalViewerLabel(location)
+                : `lat = ? | lon = ?<br><span class="search-option-warning">Invalid coordinates</span>`,
+            enabled: location !== undefined,
+            acceptsEmptyInput: true,
+            saveToHistory: (input: string) => this.explicitExternalViewerLocation(input) !== undefined,
+            execute: (input: string) => {
+                const resolved = this.externalViewerLocation(input);
+                if (resolved) {
+                    this.externalViewerService.open(provider, resolved);
+                }
+            },
+            validate: (input: string) => this.externalViewerLocation(input) !== undefined
+        };
     }
 
-    /**
-     * Opens the parsed coordinates in OpenStreetMap and returns them for local reuse.
-     */
-    openInOSM(value: string): Rectangle | number[] | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
+    /** Formats the coordinate and fallback source shown below an external-viewer action. */
+    private externalViewerLabel(location: ResolvedExternalViewerLocation): string {
+        const sourceLabels = {
+            input: "search input",
+            marker: "current marker",
+            viewport: "viewport centre"
+        } as const;
+        return `lat = ${location.lat} | lon = ${location.lon} | ${sourceLabels[location.source]}`;
+    }
+
+    /** Resolves valid explicit coordinates or applies the shared marker/viewport fallback. */
+    private externalViewerLocation(value: string): ResolvedExternalViewerLocation | undefined {
+        const explicit = this.explicitExternalViewerLocation(value);
+        if (explicit) {
+            return this.externalViewerService.resolveLocation(explicit);
         }
-        const result = this.parseWgs84Coordinates(value, false)?.coords;
-        if (result) {
-            const lat = result[0];
-            const lon = result[1];
-            window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=16`, "_blank");
-            return result;
+        if (this.looksLikeCoordinateInput(value)) {
+            return undefined;
         }
-        return;
+        return this.externalViewerService.resolveLocation();
+    }
+
+    /** Returns a valid explicit latitude/longitude input without applying fallback behavior. */
+    private explicitExternalViewerLocation(value: string): ExternalViewerLocation | undefined {
+        const parsed = this.parseWgs84Coordinates(value, false);
+        if (!parsed || !this.validateWGS84(value, false)) {
+            return undefined;
+        }
+        return {lat: parsed.coords[0], lon: parsed.coords[1]};
+    }
+
+    /** Distinguishes malformed two-coordinate input from ordinary search text. */
+    private looksLikeCoordinateInput(value: string): boolean {
+        return (value.match(/-?\d+(?:\.\d+)?/g) ?? []).length >= 2;
     }
 
     /**
      * Re-evaluates which jump targets are currently executable for the active input.
      */
     validateMenuItems() {
-        this.searchItems.forEach(item =>
-            item.enabled = this.searchInputValue != "" && item.validate(this.searchInputValue)
-        );
+        this.searchItems.forEach(item => item.enabled = this.canRunTarget(item, this.searchInputValue));
     }
 
     /**
@@ -1136,13 +1145,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private refreshSearchMenu() {
         this.activeSearchItems = [];
         this.inactiveSearchItems = [];
-        if (!this.searchInputValue) {
-            this.inactiveSearchItems = this.searchItems;
-            this.visibleSearchHistory = this.searchHistory;
-            return;
-        }
         for (const searchItem of this.searchItems) {
-            if (searchItem.validate(this.searchInputValue)) {
+            if (this.canRunTarget(searchItem, this.searchInputValue)) {
                 this.activeSearchItems.push(searchItem);
             } else {
                 this.inactiveSearchItems.push(searchItem);
@@ -1183,10 +1187,26 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      * Persists the currently selected target and input so the central search-state flow executes it.
      */
     targetToHistory(target: SearchTarget) {
-        const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
-        if (entry) {
-            this.executeAndRememberSearchEntry(entry);
+        if (!this.canRunTarget(target, this.searchInputValue)) {
+            return;
         }
+        const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
+        if (entry && (target.saveToHistory?.(this.searchInputValue) ?? true)) {
+            this.executeAndRememberSearchEntry(entry);
+            return;
+        }
+        this.executeResolvedTarget(target, {
+            version: 2,
+            actionId: target.id,
+            input: this.searchInputValue.trim(),
+            actionName: target.name
+        });
+        this.dialog?.close(new Event("close-on-execute"));
+    }
+
+    /** Returns whether a target can run for the supplied input, including empty-input actions. */
+    private canRunTarget(target: SearchTarget, input: string): boolean {
+        return (!!input.trim() || target.acceptsEmptyInput === true) && target.validate(input);
     }
 
     /**
@@ -1345,7 +1365,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 return;
             }
 
-            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+            if (this.activeSearchItems.length) {
                 this.targetToHistory(this.activeSearchItems[0]);
             }
 

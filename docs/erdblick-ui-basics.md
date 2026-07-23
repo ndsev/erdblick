@@ -28,6 +28,8 @@ You can move around the map using a mix of mouse gestures, keyboard shortcuts, a
 - **2D / 3D toggle**: switch between flat Web Mercator-style rendering and the full 3D view.
 - **Focus buttons**: use the target icon in **Maps & Layers** to jump to a map or layer coverage area advertised by the backend.
 
+In 3D mode, rotation and tilt use the rendered surface under the pointer as their pivot when the picked layer supports depth-aware interaction. A ring and centre dot show the active pivot while rotating. GLTF content uses its interaction proxy, so the indicated point can follow the proxy rather than the exact visible mesh surface.
+
 In [split view](erdblick-split.md), navigation targets the currently focused pane. The focused view is outlined in blue. Use `Ctrl+Left` / `Ctrl+Right` to move focus explicitly.
 
 ## Main Bar
@@ -50,10 +52,10 @@ Use the **Maps & Layers** panel to:
 - open map-level metadata from the **`[{}]`** button
 - choose the loaded tile level for each feature layer
 - enable **AUTO** per layer so erdblick chooses the level automatically
-- adjust **per-layer style options** exposed by active styles
+- adjust **per-layer style options** exposed by active styles; hovering one highlights all options from that style sheet, and the brush button on the first highlighted row opens that sheet in the style editor
 - copy one view’s visibility and style-option state with **Sync visualization options**
 - toggle tile borders per view
-- switch the tile grid  mode between **NDS** and **XYZ**
+- configure tile-grid mode, level, colour, and opacity independently from the feature-layer levels
 - control the OSM overlay and its opacity per view
 - add the right-hand split view for side-by-side comparison
 
@@ -84,6 +86,8 @@ Click the diagnostics indicator to open its progress popover. From there you can
 - Once a marker exists, a second button focuses the active view on that stored marker.
 
 Marker state is shared across views, so split-view comparisons can reference the same point.
+
+Use **Edit -> Preferences -> Show coordinates** to hide or show the complete coordinate readout. This preference stays in browser-local state and is not added to shared URLs or exported snapshots. A deployment may require coordinate-display terms; the first enable attempt then opens **Accept Legal Terms**. Accepting remembers consent and enables the panel. Refusing leaves it disabled and asks again on a later enable attempt.
 
 ## Styles in the UI
 
@@ -119,11 +123,12 @@ The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets
 
 ## Preferences and Resets
 
-Open **Edit -> Settings** to access the main viewer preferences:
+Open **Edit -> Preferences** to access the main viewer preferences:
 
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
 - **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
+- **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **High/Low-Fi Tile Threshold** controls the visible-tile-count cutoff between high- and low-fidelity rendering

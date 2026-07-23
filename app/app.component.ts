@@ -51,6 +51,7 @@ declare let window: DebugWindow;
             }
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
+            <coordinates-legal-terms-dialog></coordinates-legal-terms-dialog>
             <survey></survey>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
             <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>

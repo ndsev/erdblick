@@ -9,6 +9,10 @@ import {FeatureSearchService} from "../search/feature.search.service";
 import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
 import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
+import {
+    ExternalViewerLocation,
+    ExternalViewerService
+} from "../search/external-viewer.service";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -63,12 +67,14 @@ export class RightClickMenuService {
     private sourceDataDialogVisible = false;
     private sourceDataShortcut: {tileId: number, mapId: string, layerId: string} | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
+    private externalViewerLocation: ExternalViewerLocation | null = null;
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService,
                 private featureSearchService: FeatureSearchService,
                 private infoMessageService: InfoMessageService,
-                private diagnostics: DiagnosticsFacadeService) {
+                private diagnostics: DiagnosticsFacadeService,
+                private externalViewerService: ExternalViewerService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
             this.sourceDataShortcut = null;
@@ -116,6 +122,12 @@ export class RightClickMenuService {
     /** Replaces the tile-scoped Performance Diagnostics entries for the current context. */
     setTileDiagnosticsOptions(options: TileDiagnosticsMenuOption[]): void {
         this.tileDiagnosticsOptions = [...options];
+        this.rebuildMenuItems();
+    }
+
+    /** Sets the exact WGS84 position represented by the currently open context menu. */
+    setExternalViewerLocation(location: ExternalViewerLocation | null): void {
+        this.externalViewerLocation = location;
         this.rebuildMenuItems();
     }
 
@@ -167,6 +179,9 @@ export class RightClickMenuService {
     /** Rebuilds context-menu items from the latest source-data, diagnostics, and search scopes. */
     private rebuildMenuItems(): void {
         const items: MenuItem[] = this.sourceDataMenuItems();
+        if (this.externalViewerLocation) {
+            items.push({separator: true}, this.externalViewerMenuItem(this.externalViewerLocation));
+        }
         if (this.tileDiagnosticsOptions.length) {
             items.push({separator: true});
             for (const option of this.tileDiagnosticsOptions) {
@@ -177,6 +192,19 @@ export class RightClickMenuService {
             items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
         }
         this.menuItems.next(items);
+    }
+
+    /** Builds the provider submenu for the exact right-click position. */
+    private externalViewerMenuItem(location: ExternalViewerLocation): MenuItem {
+        return {
+            label: "Open in…",
+            icon: "pi pi-external-link",
+            items: this.externalViewerService.providers.map(provider => ({
+                label: provider.name,
+                icon: "pi pi-map-marker",
+                command: () => this.externalViewerService.open(provider, location)
+            }))
+        };
     }
 
     /** Returns the source-data actions for the currently prepared context. */

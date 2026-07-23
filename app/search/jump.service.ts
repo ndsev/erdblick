@@ -38,6 +38,8 @@ export interface SearchTarget {
     name: string;
     label: string;
     enabled: boolean;
+    acceptsEmptyInput?: boolean;
+    saveToHistory?: (value: string) => boolean;
     payload?: unknown;
     jump?: (value: string, payload?: unknown) => number[] | Rectangle | undefined;
     execute?: (value: string, payload?: unknown) => void;

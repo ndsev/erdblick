@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
 import {z} from "zod";
+import * as jsyaml from "js-yaml";
 
 /** Background layer id used when neither URL nor stored state selects a layer. */
 export const DEFAULT_BACKGROUND_LAYER_ID = "osm";
@@ -128,6 +129,14 @@ export interface LocationSearchConfig {
     debounceMs: number;
 }
 
+/** Normalized coordinate-panel defaults and optional legal text. */
+export interface CoordinatesConfig {
+    enabledByDefault: boolean;
+    legalTermsUrl: string | null;
+    legalTerms: string | null;
+    legalTermsError: string | null;
+}
+
 /** Raw config shape before defaults are applied. */
 export interface RawAppConfig {
     extensionModules?: ExtensionModulesConfig;
@@ -138,6 +147,8 @@ export interface RawAppConfig {
     backgroundLayers?: RawBackgroundLayerConfig[];
     defaultBackgroundLayerId?: string | null;
     locationSearch?: RawLocationSearchConfig;
+    "coordinates-enabled"?: boolean;
+    "coordinates-legal-terms"?: string;
 }
 
 /** `/config` payload consumed from mapget/mapviewer. */
@@ -167,6 +178,7 @@ export interface AppConfig {
     backgroundLayers: BackgroundLayerConfig[];
     defaultBackgroundLayerId: string | null;
     locationSearch: LocationSearchConfig;
+    coordinates: CoordinatesConfig;
     serverConfig: AppServerConfigStatus;
 }
 
@@ -281,6 +293,10 @@ const LOCATION_SEARCH_SCHEMA = z.object({
     debounceMs: z.coerce.number().int().optional()
 });
 
+const COORDINATES_LEGAL_TERMS_SCHEMA = z.object({
+    "legal-terms": z.string().refine(value => value.trim().length > 0)
+});
+
 type RawLocationSearchConfig = z.infer<typeof LOCATION_SEARCH_SCHEMA>;
 type RawLocationSearchAdapterConfig = z.infer<typeof LOCATION_SEARCH_ADAPTER_SCHEMA>;
 type RawLocationSearchFieldSelector = z.infer<typeof LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA>;
@@ -296,7 +312,9 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     state: z.record(z.string(), z.unknown()).nullable().optional(),
     backgroundLayers: z.array(BACKGROUND_LAYER_SCHEMA).optional(),
     defaultBackgroundLayerId: z.string().nullable().optional(),
-    locationSearch: LOCATION_SEARCH_SCHEMA.optional()
+    locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
+    "coordinates-enabled": z.boolean().optional(),
+    "coordinates-legal-terms": z.string().min(1).optional()
 }).passthrough();
 
 const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
@@ -343,6 +361,12 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     backgroundLayers: DEFAULT_BACKGROUND_LAYERS,
     defaultBackgroundLayerId: DEFAULT_BACKGROUND_LAYER_ID,
     locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
+    coordinates: {
+        enabledByDefault: true,
+        legalTermsUrl: null,
+        legalTerms: null,
+        legalTermsError: null
+    },
     serverConfig: DEFAULT_SERVER_CONFIG_STATUS
 };
 
@@ -506,8 +530,9 @@ export class AppConfigService {
         const serverResult = await this.loadServerConfig();
         const mergedRawConfig = this.mergeServerErdblickConfig(staticRawConfig, serverResult.erdblickConfig);
         const normalized = this.normalizeConfig(mergedRawConfig, serverResult.serverConfig);
-        this.configSubject.next(normalized);
-        return normalized;
+        const resolved = await this.loadCoordinatesLegalTerms(normalized);
+        this.configSubject.next(resolved);
+        return resolved;
     }
 
     /** Loads the bundled static application configuration. */
@@ -628,6 +653,13 @@ export class AppConfigService {
             && serverErdblickConfig.defaultBackgroundLayerId.trim().length > 0) {
             merged.defaultBackgroundLayerId = serverErdblickConfig.defaultBackgroundLayerId.trim();
         }
+        if (typeof serverErdblickConfig["coordinates-enabled"] === "boolean") {
+            merged["coordinates-enabled"] = serverErdblickConfig["coordinates-enabled"];
+        }
+        if (typeof serverErdblickConfig["coordinates-legal-terms"] === "string"
+            && serverErdblickConfig["coordinates-legal-terms"].trim()) {
+            merged["coordinates-legal-terms"] = serverErdblickConfig["coordinates-legal-terms"].trim();
+        }
 
         const mergedModules: ExtensionModulesConfig = {...(merged.extensionModules ?? {})};
         if (serverErdblickConfig.extensionModules && isPlainObject(serverErdblickConfig.extensionModules)) {
@@ -656,7 +688,12 @@ export class AppConfigService {
         ];
         const surveys = this.normalizeSurveys(rawConfig.surveys);
         const extensionModules = this.normalizeExtensionModules(rawConfig.extensionModules);
-        const state = this.normalizeState(rawConfig.state);
+        const legalTermsUrl = rawConfig["coordinates-legal-terms"]?.trim() || null;
+        const enabledByDefault = legalTermsUrl ? false : rawConfig["coordinates-enabled"] ?? true;
+        const state = {
+            ...(this.normalizeState(rawConfig.state) ?? {}),
+            coordinatesEnabled: enabledByDefault
+        };
 
         const rawBackgroundLayers = rawConfig.backgroundLayers?.length
             ? rawConfig.backgroundLayers
@@ -678,8 +715,45 @@ export class AppConfigService {
             backgroundLayers,
             defaultBackgroundLayerId,
             locationSearch,
+            coordinates: {
+                enabledByDefault,
+                legalTermsUrl,
+                legalTerms: null,
+                legalTermsError: null
+            },
             serverConfig: {...serverConfig}
         };
+    }
+
+    /** Loads and validates the configured JSON/YAML coordinate legal-terms document. */
+    private async loadCoordinatesLegalTerms(config: AppConfig): Promise<AppConfig> {
+        const url = config.coordinates.legalTermsUrl;
+        if (!url) {
+            return config;
+        }
+        try {
+            const source = await firstValueFrom(this.httpClient.get(url, {responseType: "text"}));
+            const parsed = COORDINATES_LEGAL_TERMS_SCHEMA.safeParse(jsyaml.load(source));
+            if (!parsed.success) {
+                throw new Error("Expected a non-empty legal-terms string.");
+            }
+            return {
+                ...config,
+                coordinates: {
+                    ...config.coordinates,
+                    legalTerms: parsed.data["legal-terms"]
+                }
+            };
+        } catch (error) {
+            console.error(`[AppConfigService] Failed to load coordinate legal terms from ${url}`, error);
+            return {
+                ...config,
+                coordinates: {
+                    ...config.coordinates,
+                    legalTermsError: `Could not load coordinate legal terms from ${url}.`
+                }
+            };
+        }
     }
 
     /** Normalizes configured style entries. */

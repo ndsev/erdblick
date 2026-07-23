@@ -883,6 +883,9 @@ describe('AppStateService', () => {
         service.setBackgroundState(0, null, 42);
         service.viewTileBordersState.next(0, false);
         service.viewTileGridModeState.next(0, 'xyz');
+        service.viewTileGridLevelState.next(0, 18);
+        service.viewTileGridColorState.next(0, '123abc');
+        service.viewTileGridOpacityState.next(0, 64);
         service.mapLayerConfig('m1', 'layerA', false, 9);
         service.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
 
@@ -896,6 +899,9 @@ describe('AppStateService', () => {
         expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 42 });
         expect(service.viewTileBordersState.getValue(1)).toBe(false);
         expect(service.viewTileGridModeState.getValue(1)).toBe('xyz');
+        expect(service.viewTileGridLevelState.getValue(1)).toBe(18);
+        expect(service.viewTileGridColorState.getValue(1)).toBe('123abc');
+        expect(service.viewTileGridOpacityState.getValue(1)).toBe(64);
         expect(service.layerVisibilityState.getValue(1)).toEqual([true]);
         expect(service.layerVisibilityState.getValue(1)).not.toBe(service.layerVisibilityState.getValue(0));
         expect(service.layerZoomLevelState.getValue(1)).toEqual([7]);
@@ -943,6 +949,9 @@ describe('AppStateService', () => {
         service.setBackgroundState(1, null, 17);
         service.viewTileBordersState.next(1, false);
         service.viewTileGridModeState.next(1, 'xyz');
+        service.viewTileGridLevelState.next(1, 20);
+        service.viewTileGridColorState.next(1, 'fedcba');
+        service.viewTileGridOpacityState.next(1, 71);
         service.setMapLayerConfig('m1', 'layerA', [
             { autoLevel: true, visible: true, level: 13 },
             { autoLevel: false, visible: false, level: 5 }
@@ -959,6 +968,9 @@ describe('AppStateService', () => {
         expect(service.getBackgroundState(2)).toEqual({ layerId: null, opacity: 17 });
         expect(service.viewTileBordersState.getValue(2)).toBe(false);
         expect(service.viewTileGridModeState.getValue(2)).toBe('xyz');
+        expect(service.viewTileGridLevelState.getValue(2)).toBe(20);
+        expect(service.viewTileGridColorState.getValue(2)).toBe('fedcba');
+        expect(service.viewTileGridOpacityState.getValue(2)).toBe(71);
         expect(service.layerVisibilityState.getValue(2)).toEqual([false]);
         expect(service.layerVisibilityState.getValue(2)).not.toBe(service.layerVisibilityState.getValue(1));
         expect(service.layerZoomLevelState.getValue(2)).toEqual([5]);
@@ -1929,6 +1941,24 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('keeps coordinate preference and legal acceptance out of URLs and snapshots', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.coordinatesEnabledState.next(false);
+        service.coordinatesLegalTermsAcceptedState.next(true);
+
+        const snapshot = service.exportSnapshot();
+        const params = (service as any).serializeUrlV2();
+        expect(snapshot).not.toHaveProperty('coordinatesEnabled');
+        expect(snapshot).not.toHaveProperty('coordinatesLegalTermsAccepted');
+        expect(params).not.toHaveProperty('coordinatesEnabled');
+        expect(params).not.toHaveProperty('coordinatesLegalTermsAccepted');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('restores dialog visibility from dialogLayouts snapshot state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -2155,6 +2185,22 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('applies the coordinate config default without making it snapshot state', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        const errors = service.seedConfigDefaultState({coordinatesEnabled: false}, "coordinates-cfg");
+        expect(errors).toEqual([]);
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.coordinatesEnabledState.getValue()).toBe(false);
+        expect(service.exportSnapshot()).not.toHaveProperty('coordinatesEnabled');
 
         service.ngOnDestroy();
         routerStub.events.complete();

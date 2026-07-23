@@ -76,6 +76,9 @@ export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 export const MIN_MAP_ZOOM_STEP = 0.001;
 export const MAX_MAP_ZOOM_STEP = 1.0;
+export const DEFAULT_TILE_GRID_LEVEL = 13;
+export const DEFAULT_TILE_GRID_COLOR = "f5f5f5";
+export const DEFAULT_TILE_GRID_OPACITY = 39;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
@@ -261,6 +264,44 @@ export interface ViewSyncOptionDescriptor {
 
 /** Tile-grid overlay labeling mode used by the map panel and Deck overlay. */
 export type TileGridMode = "xyz" | "nds";
+
+/** Returns the highest meaningful grid level for the selected coordinate mode. */
+export function tileGridMaxLevel(mode: TileGridMode): number {
+    return mode === "nds" ? 15 : 22;
+}
+
+/** Clamps a configured grid level to the selected coordinate mode. */
+export function clampTileGridLevel(value: unknown, mode: TileGridMode): number {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+        ? Math.max(0, Math.min(tileGridMaxLevel(mode), Math.round(numeric)))
+        : DEFAULT_TILE_GRID_LEVEL;
+}
+
+/** Normalizes a PrimeNG colour-picker value to six lowercase RGB digits. */
+export function normalizeTileGridColor(value: unknown): string {
+    const normalized = String(value).replace(/^#/, "").toLowerCase();
+    return /^[0-9a-f]{6}$/.test(normalized) ? normalized : DEFAULT_TILE_GRID_COLOR;
+}
+
+/** Clamps tile-grid opacity to an integer percentage. */
+export function clampTileGridOpacity(value: unknown): number {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+        ? Math.max(0, Math.min(100, Math.round(numeric)))
+        : DEFAULT_TILE_GRID_OPACITY;
+}
+
+/** Converts persisted grid appearance values to the deck.gl RGBA tuple. */
+export function tileGridRgba(color: string, opacity: number): [number, number, number, number] {
+    const normalized = normalizeTileGridColor(color);
+    return [
+        Number.parseInt(normalized.slice(0, 2), 16),
+        Number.parseInt(normalized.slice(2, 4), 16),
+        Number.parseInt(normalized.slice(4, 6), 16),
+        Math.round(clampTileGridOpacity(opacity) * 255 / 100)
+    ];
+}
 
 /** Limits used while validating imported viewer snapshots. */
 interface SnapshotImportLimits {
@@ -702,6 +743,31 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'tgm'
     });
 
+    readonly viewTileGridLevelState = this.createMapViewState<number>({
+        name: "tileGridLevel",
+        defaultValue: DEFAULT_TILE_GRID_LEVEL,
+        schema: z.coerce.number().int().min(0).max(22),
+        urlParamName: "tgl"
+    });
+
+    readonly viewTileGridColorState = this.createMapViewState<string>({
+        name: "tileGridColor",
+        defaultValue: DEFAULT_TILE_GRID_COLOR,
+        schema: z.string(),
+        toStorage: (value: string) => normalizeTileGridColor(value),
+        fromStorage: (payload: unknown) => normalizeTileGridColor(payload),
+        urlParamName: "tgc"
+    });
+
+    readonly viewTileGridOpacityState = this.createMapViewState<number>({
+        name: "tileGridOpacity",
+        defaultValue: DEFAULT_TILE_GRID_OPACITY,
+        schema: z.coerce.number().min(0).max(100),
+        toStorage: (value: number) => clampTileGridOpacity(value),
+        fromStorage: (payload: unknown) => clampTileGridOpacity(payload),
+        urlParamName: "tgo"
+    });
+
     readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
         name: "zoomLevel",
         defaultValue: [],
@@ -735,6 +801,21 @@ export class AppStateService implements OnDestroy {
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
         schema: z.array(z.string())
+    });
+
+    readonly coordinatesEnabledState = this.createState<boolean>({
+        name: "coordinatesEnabled",
+        defaultValue: true,
+        schema: Boolish,
+        snapshotPersist: false,
+        configDefault: true
+    });
+
+    readonly coordinatesLegalTermsAcceptedState = this.createState<boolean>({
+        name: "coordinatesLegalTermsAccepted",
+        defaultValue: false,
+        schema: Boolish,
+        snapshotPersist: false
     });
 
     readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
@@ -1687,7 +1768,7 @@ export class AppStateService implements OnDestroy {
             return [];
         }
 
-        const normalizedResult = this.normalizeSnapshot(snapshot);
+        const normalizedResult = this.normalizeSnapshot(snapshot, true);
         if (normalizedResult.errors.length) {
             normalizedResult.errors.forEach(error =>
                 console.warn(`[AppStateService] Ignoring invalid config state: ${error}`));
@@ -1707,7 +1788,7 @@ export class AppStateService implements OnDestroy {
         try {
             for (const [key, value] of Object.entries(normalized)) {
                 const state = this.statePool.get(key);
-                if (!state || !state.isSnapshotState()) {
+                if (!state || !state.isConfigDefaultState()) {
                     continue;
                 }
                 state.applySnapshotValue(value);
@@ -1807,7 +1888,7 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Normalizes legacy snapshot shapes before schema validation is applied. */
-    private normalizeSnapshot(snapshot: unknown): SnapshotNormalizationResult {
+    private normalizeSnapshot(snapshot: unknown, forConfigDefault: boolean = false): SnapshotNormalizationResult {
         const limits = this.getSnapshotImportLimits();
         const errors: string[] = [];
         let serialized: string;
@@ -1842,7 +1923,10 @@ export class AppStateService implements OnDestroy {
                 errors.push(`Unknown snapshot state '${key}'.`);
                 continue;
             }
-            if (!state.isSnapshotState()) {
+            const stateIsAllowed = forConfigDefault
+                ? state.isConfigDefaultState()
+                : state.isSnapshotState();
+            if (!stateIsAllowed) {
                 delete normalized[key];
             }
         }
@@ -1856,7 +1940,10 @@ export class AppStateService implements OnDestroy {
             if (!state) {
                 continue;
             }
-            if (!state.isSnapshotState()) {
+            const stateIsAllowed = forConfigDefault
+                ? state.isConfigDefaultState()
+                : state.isSnapshotState();
+            if (!stateIsAllowed) {
                 continue;
             }
             try {
@@ -3464,6 +3551,9 @@ export class AppStateService implements OnDestroy {
         pruneViews(this.backgroundState);
         pruneViews(this.viewTileBordersState);
         pruneViews(this.viewTileGridModeState);
+        pruneViews(this.viewTileGridLevelState);
+        pruneViews(this.viewTileGridColorState);
+        pruneViews(this.viewTileGridOpacityState);
         pruneViews(this.cameraViewDataState);
         pruneViews(this.layerVisibilityState);
         pruneViews(this.layerZoomLevelState);

@@ -330,6 +330,8 @@ float tile_grid_line_mask(vec2 localCoords) {
         halfWidthPx + 0.5,
         distPxToHorizontal
     );
+    verticalMask *= smoothstep(1.0, 3.0, 1.0 / pixelSpanX);
+    horizontalMask *= smoothstep(1.0, 3.0, 1.0 / pixelSpanY);
     return max(verticalMask, horizontalMask);
 }`,
                 "fs:DECKGL_FILTER_COLOR": `${existingFilter}

@@ -23,6 +23,7 @@ import {oneDark} from "@codemirror/theme-one-dark";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {StyleValidationReportService} from "./style-validation-report.service";
 import {StyleValidationIssue, StyleValidationReport} from "./style-validation.model";
+import {StyleEditorRequestService} from "./style-editor-request.service";
 
 
 @Component({
@@ -375,6 +376,7 @@ export class StyleComponent implements OnDestroy {
     private readonly compareThemeCompartmentB = new Compartment();
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
+    private readonly styleEditorRequestSubscription: Subscription;
     stylesDialogTab: 'styles' | 'errors' = 'styles';
     styleIssueFilter: string = '';
     styleErrorsOnly: boolean = false;
@@ -401,9 +403,13 @@ export class StyleComponent implements OnDestroy {
                 public stateService: AppStateService,
                 public editorService: EditorService,
                 private dialogStack: DialogStackService,
-                private ngZone: NgZone) {
+                private ngZone: NgZone,
+                styleEditorRequestService: StyleEditorRequestService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
+        });
+        this.styleEditorRequestSubscription = styleEditorRequestService.requests.subscribe(styleId => {
+            this.showStyleEditor(styleId);
         });
     }
 
@@ -429,6 +435,7 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView?.destroy();
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
+        this.styleEditorRequestSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
     }
 
@@ -574,11 +581,28 @@ export class StyleComponent implements OnDestroy {
 
     /** Opens the style editor for one style and tracks dirty-state changes. */
     showStyleEditor(styleId: string) {
+        this.openStyleEditor(styleId);
+    }
+
+    /** Opens or reuses an editor session while preserving unsaved edits in another style. */
+    private openStyleEditor(styleId: string): boolean {
+        const currentTargetId = this.stateService.styleEditorTargetId;
+        const sameEditorSession = this.styleEditorVisible
+            && currentTargetId === styleId
+            && this.editorService.hasSession(this.styleEditorSessionId);
+        if (sameEditorSession) {
+            return true;
+        }
+        if (this.styleEditorVisible && this.sourceWasModified && currentTargetId && currentTargetId !== styleId) {
+            this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
+            return false;
+        }
         if (!this.prepareStyleEditorSession(styleId)) {
             this.messageService.showError(`Could not load style source for ${styleId}.`);
-            return;
+            return false;
         }
         this.styleEditorVisible = true;
+        return true;
     }
 
     /** Applies the current editor contents to the selected style. */
@@ -972,22 +996,9 @@ export class StyleComponent implements OnDestroy {
             return;
         }
 
-        const currentTargetId = this.stateService.styleEditorTargetId;
-        const sameEditorSession = this.styleEditorVisible
-            && currentTargetId === style.id
-            && this.editorService.hasSession(this.styleEditorSessionId);
-        if (!sameEditorSession) {
-            if (this.styleEditorVisible && this.sourceWasModified && currentTargetId && currentTargetId !== style.id) {
-                this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
-                return;
-            }
-            if (!this.prepareStyleEditorSession(style.id)) {
-                this.messageService.showError(`Could not load style source for ${style.id}.`);
-                return;
-            }
+        if (!this.openStyleEditor(style.id)) {
+            return;
         }
-
-        this.styleEditorVisible = true;
         this.revealStyleIssueLocation(issue);
     }
 

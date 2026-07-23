@@ -33,6 +33,7 @@ import {
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {environment} from "../environments/environment";
+import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
 
 @Component({
     selector: 'preferences',
@@ -304,6 +305,13 @@ import {environment} from "../environments/environment";
                                 optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
             <div class="button-container">
+                <label for="coordinates-enabled-setting">Show coordinates</label>
+                <p-toggleswitch inputId="coordinates-enabled-setting"
+                                data-testid="coordinates-enabled-setting"
+                                [ngModel]="coordinatesPolicy.effectiveEnabled"
+                                (ngModelChange)="coordinatesPolicy.requestEnabled($event)"/>
+            </div>
+            <div class="button-container">
                 <label>Collapse Dock automatically</label>
                 <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"></p-toggleswitch>
             </div>
@@ -393,6 +401,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public mapService: MapViewStateService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
+                public coordinatesPolicy: CoordinatesPolicyService,
                 private dialogStack: DialogStackService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;

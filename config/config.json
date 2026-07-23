@@ -2,6 +2,7 @@
   "extensionModules": {
     "distribVersions": "distribution_versions"
   },
+  "coordinates-enabled": true,
   "surveys": [],
   "styles": [
     {"url": "nds_live_display.yaml"},
