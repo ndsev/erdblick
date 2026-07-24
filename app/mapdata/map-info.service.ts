@@ -515,6 +515,17 @@ export class MapInfoService {
         this.layerStateChanged.next("tile-grid");
     }
 
+    /** Sets whether the tile grid follows the viewport-based auto-level heuristic. */
+    setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
+        this.maps.setViewTileGridAutoLevel(viewIndex, autoLevel);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Returns whether the tile grid currently follows the auto-level heuristic. */
+    isViewTileGridAutoLevelEnabled(viewIndex: number): boolean {
+        return this.maps.getViewTileGridAutoLevel(viewIndex);
+    }
+
     /** Sets the tile-grid line colour for one view. */
     setViewTileGridColor(viewIndex: number, color: string): void {
         this.maps.setViewTileGridColor(viewIndex, color);

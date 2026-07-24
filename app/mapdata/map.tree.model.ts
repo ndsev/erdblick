@@ -486,6 +486,16 @@ export class MapLayerTree {
             this.getViewTileGridMode(viewIndex));
     }
 
+    /** Persists whether the line grid follows the viewport-based auto-level heuristic. */
+    setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
+        this.stateService.viewTileGridAutoLevelState.next(viewIndex, autoLevel);
+    }
+
+    /** Returns whether the line grid follows the viewport-based auto-level heuristic. */
+    getViewTileGridAutoLevel(viewIndex: number): boolean {
+        return this.stateService.viewTileGridAutoLevelState.getValue(viewIndex);
+    }
+
     /** Persists the line-grid RGB colour for the given view. */
     setViewTileGridColor(viewIndex: number, color: string): void {
         this.stateService.viewTileGridColorState.next(viewIndex, normalizeTileGridColor(color));
@@ -770,6 +780,7 @@ export class MapLayerTree {
         const sourceTileBorders = this.getViewTileBorderState(viewIndex);
         const sourceTileGridMode = this.getViewTileGridMode(viewIndex);
         const sourceTileGridLevel = this.getViewTileGridLevel(viewIndex);
+        const sourceTileGridAutoLevel = this.getViewTileGridAutoLevel(viewIndex);
         const sourceTileGridColor = this.getViewTileGridColor(viewIndex);
         const sourceTileGridOpacity = this.getViewTileGridOpacity(viewIndex);
         for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
@@ -786,6 +797,10 @@ export class MapLayerTree {
             }
             if (this.getViewTileGridLevel(targetIndex) !== sourceTileGridLevel) {
                 this.setViewTileGridLevel(targetIndex, sourceTileGridLevel);
+                viewConfigChanged = true;
+            }
+            if (this.getViewTileGridAutoLevel(targetIndex) !== sourceTileGridAutoLevel) {
+                this.setViewTileGridAutoLevel(targetIndex, sourceTileGridAutoLevel);
                 viewConfigChanged = true;
             }
             if (this.getViewTileGridColor(targetIndex) !== sourceTileGridColor) {

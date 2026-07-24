@@ -23,26 +23,28 @@ import {filter} from "rxjs/operators";
     template: `
         @if (!appModeService.isVisualizationOnly) {
             <div class="view-ui-container" [ngClass]="{'mirrored': isPrimary()}" [attr.data-testid]="viewUiTestId()">
-                <div class="navigation-controls">
-                    <div class="nav-control-group">
-                        <p-button icon="pi pi-plus" data-testid="zoom-in-button" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
-                                  size="small" pTooltip="Zoom In (Q)" class="move-button"></p-button>
-                        <p-button icon="pi pi-minus" (onClick)="mapView()?.zoomOut()" [rounded]="true" severity="secondary"
-                                  size="small" pTooltip="Zoom Out (E)" class="move-button"></p-button>
-                    </div>
-                    <div class="nav-control-group">
-                        <p-button icon="pi pi-arrow-up" data-testid="move-up-button" (onClick)="mapView()?.moveUp()" [rounded]="true" severity="secondary"
-                                  size="small" pTooltip="Move Up (W)" class="move-button"></p-button>
-                        <div class="nav-horizontal">
-                            <p-button icon="pi pi-arrow-left" (onClick)="mapView()?.moveLeft()" [rounded]="true"
-                                      severity="secondary" size="small" pTooltip="Move Left (A)" class="move-button"></p-button>
-                            <p-button icon="pi pi-arrow-right" (onClick)="mapView()?.moveRight()" [rounded]="true"
-                                      severity="secondary" size="small" pTooltip="Move Right (D)" class="move-button"></p-button>
+                @if (!mapView()?.isFirstPersonViewActive()) {
+                    <div class="navigation-controls">
+                        <div class="nav-control-group">
+                            <p-button icon="pi pi-plus" data-testid="zoom-in-button" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
+                                      size="small" pTooltip="Zoom In (Q)" class="move-button"></p-button>
+                            <p-button icon="pi pi-minus" (onClick)="mapView()?.zoomOut()" [rounded]="true" severity="secondary"
+                                      size="small" pTooltip="Zoom Out (E)" class="move-button"></p-button>
                         </div>
-                        <p-button icon="pi pi-arrow-down" (onClick)="mapView()?.moveDown()" [rounded]="true"
-                                  severity="secondary" size="small" pTooltip="Move Down (S)" class="move-button"></p-button>
+                        <div class="nav-control-group">
+                            <p-button icon="pi pi-arrow-up" data-testid="move-up-button" (onClick)="mapView()?.moveUp()" [rounded]="true" severity="secondary"
+                                      size="small" pTooltip="Move Up (W)" class="move-button"></p-button>
+                            <div class="nav-horizontal">
+                                <p-button icon="pi pi-arrow-left" (onClick)="mapView()?.moveLeft()" [rounded]="true"
+                                          severity="secondary" size="small" pTooltip="Move Left (A)" class="move-button"></p-button>
+                                <p-button icon="pi pi-arrow-right" (onClick)="mapView()?.moveRight()" [rounded]="true"
+                                          severity="secondary" size="small" pTooltip="Move Right (D)" class="move-button"></p-button>
+                            </div>
+                            <p-button icon="pi pi-arrow-down" (onClick)="mapView()?.moveDown()" [rounded]="true"
+                                      severity="secondary" size="small" pTooltip="Move Down (S)" class="move-button"></p-button>
+                        </div>
                     </div>
-                </div>
+                }
                 <div class="compass-circle" (click)="mapView()?.resetOrientation()" pTooltip="Reset Orientation (R)">
                     <div class="compass-label north">N</div>
                     <div class="compass-label east">E</div>

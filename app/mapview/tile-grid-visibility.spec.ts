@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 import type {Viewport} from "../../build/libs/core/erdblick-core";
 import {
+    autoTileGridLevel,
     coarsenedTileLevel,
     tileGridExtentForLevel,
     tileGridVisibleCellCount
@@ -37,5 +38,13 @@ describe("tile-grid visibility helpers", () => {
 
         expect(ndsExtent?.colCount).toBe((ndsExtent?.rowCount ?? 0) * 2);
         expect(xyzExtent?.colCount).toBe(xyzExtent?.rowCount);
+    });
+
+    it.each(["nds", "xyz"] as const)("automatically selects the deepest practical %s grid level", mode => {
+        const effectiveLevel = autoTileGridLevel(VIEWPORT, mode);
+
+        expect(effectiveLevel).toBeLessThanOrEqual(mode === "nds" ? 15 : 22);
+        expect(tileGridVisibleCellCount(effectiveLevel, VIEWPORT, mode)).toBeLessThanOrEqual(64);
+        expect(tileGridVisibleCellCount(effectiveLevel + 1, VIEWPORT, mode)).toBeGreaterThan(64);
     });
 });

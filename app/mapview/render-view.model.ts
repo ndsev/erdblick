@@ -23,6 +23,12 @@ export interface RenderVector3 {
     z: number;
 }
 
+/** Exact selectable feature surface used as a 3D navigation or first-person camera target. */
+export interface RenderNavigationTarget {
+    position: [longitude: number, latitude: number, altitude: number];
+    featureIds: TileFeatureId[];
+}
+
 export type RenderBackend = "deck";
 
 export const MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT = "erdblick-map-view-layout-resize-prepare";
@@ -45,6 +51,7 @@ export interface IRenderSceneHandle {
 export interface IRenderView {
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<HoveredFeatureIds | undefined>;
+    readonly firstPersonViewActive: BehaviorSubject<boolean>;
 
     setup(): Promise<void>;
     destroy(options?: RenderViewDestroyOptions): Promise<void>;
@@ -61,10 +68,14 @@ export interface IRenderView {
 
     pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[];
     pickCartographic(screenPos: {x: number; y: number}): {lon: number; lat: number; alt: number} | undefined;
+    pickNavigationTarget(screenPos: {x: number; y: number}): RenderNavigationTarget | undefined;
 
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
     computeViewport(): Viewport | undefined;
+    enterFirstPersonView(target: RenderNavigationTarget): void;
+    exitFirstPersonView(): void;
+    isFirstPersonViewActive(): boolean;
 
     moveUp(): void;
     moveDown(): void;

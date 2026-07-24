@@ -13,6 +13,7 @@ import {
     ExternalViewerLocation,
     ExternalViewerService
 } from "../search/external-viewer.service";
+import type {RenderNavigationTarget} from "./render-view.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -48,6 +49,16 @@ export interface TileDiagnosticsMenuOption {
     layers: PerformanceDiagnosticsScope["layers"];
 }
 
+/** Transient first-person action offered by the context menu for one render view. */
+export type FirstPersonViewMenuContext =
+    | {viewIndex: number; active: true}
+    | {viewIndex: number; active: false; target: RenderNavigationTarget};
+
+/** View-scoped first-person request emitted when a context-menu action is selected. */
+export type FirstPersonViewMenuRequest =
+    | {viewIndex: number; action: "enter"; target: RenderNavigationTarget}
+    | {viewIndex: number; action: "exit"};
+
 @Injectable()
 /**
  * Owns the dynamic right-click menu content for the map view.
@@ -63,11 +74,13 @@ export class RightClickMenuService {
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
+    firstPersonViewRequests: Subject<FirstPersonViewMenuRequest> = new Subject<FirstPersonViewMenuRequest>();
     private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
     private sourceDataShortcut: {tileId: number, mapId: string, layerId: string} | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
     private externalViewerLocation: ExternalViewerLocation | null = null;
+    private firstPersonViewContext: FirstPersonViewMenuContext | null = null;
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService,
@@ -131,6 +144,12 @@ export class RightClickMenuService {
         this.rebuildMenuItems();
     }
 
+    /** Sets the ephemeral first-person action represented by the currently open context menu. */
+    setFirstPersonViewContext(context: FirstPersonViewMenuContext | null): void {
+        this.firstPersonViewContext = context;
+        this.rebuildMenuItems();
+    }
+
     /**
      * Chooses the best source-data tile candidate for the current context.
      * Preference is: explicit user choice, last inspected level, then deepest enabled tile.
@@ -179,6 +198,9 @@ export class RightClickMenuService {
     /** Rebuilds context-menu items from the latest source-data, diagnostics, and search scopes. */
     private rebuildMenuItems(): void {
         const items: MenuItem[] = this.sourceDataMenuItems();
+        if (this.firstPersonViewContext) {
+            items.push({separator: true}, this.firstPersonViewMenuItem(this.firstPersonViewContext));
+        }
         if (this.externalViewerLocation) {
             items.push({separator: true}, this.externalViewerMenuItem(this.externalViewerLocation));
         }
@@ -192,6 +214,29 @@ export class RightClickMenuService {
             items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
         }
         this.menuItems.next(items);
+    }
+
+    /** Builds the enter or exit first-person action for the view that opened the menu. */
+    private firstPersonViewMenuItem(context: FirstPersonViewMenuContext): MenuItem {
+        if (context.active) {
+            return {
+                label: "Exit First Person View",
+                icon: "pi pi-sign-out",
+                command: () => this.firstPersonViewRequests.next({
+                    viewIndex: context.viewIndex,
+                    action: "exit"
+                })
+            };
+        }
+        return {
+            label: "Show First Person View",
+            icon: "pi pi-eye",
+            command: () => this.firstPersonViewRequests.next({
+                viewIndex: context.viewIndex,
+                action: "enter",
+                target: context.target
+            })
+        };
     }
 
     /** Builds the provider submenu for the exact right-click position. */

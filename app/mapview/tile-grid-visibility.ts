@@ -1,7 +1,8 @@
 import type {Viewport} from "../../build/libs/core/erdblick-core";
-import type {TileGridMode} from "../shared/appstate.service";
+import {tileGridMaxLevel, type TileGridMode} from "../shared/appstate.service";
 
 const TILE_GRID_MAX_LEVEL = 22;
+const AUTO_TILE_GRID_MAX_VISIBLE_CELLS = 64;
 const WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
 
 /** Extent of the visible tile-grid region for one level, including wrap-aware column bookkeeping. */
@@ -48,6 +49,16 @@ export function coarsenedTileLevel(
         effectiveLevel -= 1;
     }
     return effectiveLevel;
+}
+
+/** Selects the deepest grid level whose visible cell count remains practical for inspection. */
+export function autoTileGridLevel(viewport: Viewport, mode: TileGridMode): number {
+    return coarsenedTileLevel(
+        tileGridMaxLevel(mode),
+        viewport,
+        AUTO_TILE_GRID_MAX_VISIBLE_CELLS,
+        mode
+    );
 }
 
 /** Returns the number of grid cells that would be visible for a level in the supplied viewport. */

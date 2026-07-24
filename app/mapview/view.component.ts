@@ -23,13 +23,19 @@ import {JumpTargetService} from "../search/jump.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {ContextMenu} from "primeng/contextmenu";
-import {RightClickMenuService, SourceDataDropdownOption, TileDiagnosticsMenuOption} from "./rightclickmenu.service";
+import {
+    FirstPersonViewMenuRequest,
+    RightClickMenuService,
+    SourceDataDropdownOption,
+    TileDiagnosticsMenuOption
+} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
 import {
     IRenderView,
-    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT
+    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
+    RenderNavigationTarget
 } from "./render-view.model";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
@@ -52,6 +58,7 @@ import {
 interface PreparedContextMenuPosition {
     screenPos: {x: number; y: number};
     cartographic: {lon: number; lat: number; alt: number};
+    navigationTarget?: RenderNavigationTarget;
 }
 
 
@@ -136,6 +143,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     private modeSubscription?: Subscription;
     private hoverSubscription?: Subscription;
+    private firstPersonViewActiveSubscription?: Subscription;
+    private firstPersonViewRequestSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
@@ -239,6 +248,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewerContextMenu?.hide();
             })
         );
+        this.firstPersonViewRequestSubscription = this.menuService.firstPersonViewRequests.subscribe(request => {
+            if (request.viewIndex !== this.viewIndex()) {
+                return;
+            }
+            this.applyFirstPersonViewRequest(request);
+        });
 
         this.mediaQueryList = window.matchMedia('(max-width: 56em)');
         this.isNarrow = this.mediaQueryList.matches;
@@ -313,6 +328,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
+        this.firstPersonViewActiveSubscription?.unsubscribe();
+        this.firstPersonViewActiveSubscription = undefined;
         if (this.mapView) {
             this.layerController?.detachScene();
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
@@ -361,6 +378,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();
+        this.firstPersonViewActiveSubscription?.unsubscribe();
+        this.firstPersonViewRequestSubscription?.unsubscribe();
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }
@@ -398,6 +417,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 return;
             }
             this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
+            this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
+                this.cdr.markForCheck();
+            });
             this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
                 this.featureIdsContent = [];
                 if (!result || !result.featureIds.length) {
@@ -586,6 +608,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.menuService.tileIdsForSourceData.next([]);
             this.menuService.setTileDiagnosticsOptions([]);
         }
+        this.prepareFirstPersonViewContextMenu(contextPosition);
         this.menuService.setExternalViewerLocation(contextPosition
             ? {lon: contextPosition.cartographic.lon, lat: contextPosition.cartographic.lat}
             : null);
@@ -609,8 +632,50 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             x: event.clientX - canvasRect.left,
             y: event.clientY - canvasRect.top
         };
-        const cartographic = this.mapView.pickCartographic(screenPos);
-        return cartographic ? {screenPos, cartographic} : null;
+        const navigationTarget = this.is2DMode ? undefined : this.mapView.pickNavigationTarget(screenPos);
+        const cartographic = navigationTarget
+            ? {
+                lon: navigationTarget.position[0],
+                lat: navigationTarget.position[1],
+                alt: navigationTarget.position[2]
+            }
+            : this.mapView.pickCartographic(screenPos);
+        return cartographic ? {screenPos, cartographic, navigationTarget} : null;
+    }
+
+    /** Applies a view-scoped ephemeral first-person request without persisting it in app state. */
+    private applyFirstPersonViewRequest(request: FirstPersonViewMenuRequest): void {
+        if (!this.mapView) {
+            return;
+        }
+        this.ngZone.runOutsideAngular(() => {
+            if (request.action === "enter") {
+                this.mapView?.enterFirstPersonView(request.target);
+            } else {
+                this.mapView?.exitFirstPersonView();
+            }
+        });
+        this.cdr.markForCheck();
+    }
+
+    /** Prepares enter only for an exact 3D feature target, while exit remains available over empty space. */
+    private prepareFirstPersonViewContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
+        if (!this.mapView) {
+            this.menuService.setFirstPersonViewContext(null);
+            return;
+        }
+        const viewIndex = this.viewIndex();
+        if (this.mapView.isFirstPersonViewActive()) {
+            this.menuService.setFirstPersonViewContext({viewIndex, active: true});
+        } else if (!this.is2DMode && contextPosition?.navigationTarget) {
+            this.menuService.setFirstPersonViewContext({
+                viewIndex,
+                active: false,
+                target: contextPosition.navigationTarget
+            });
+        } else {
+            this.menuService.setFirstPersonViewContext(null);
+        }
     }
 
     /** Copies the event coordinates we need because the original pointer event may no longer be usable later. */
@@ -773,6 +838,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.menuService.preferredTileIdForSourceData = null;
         this.menuService.setFeatureSearchScope(null);
         this.menuService.setExternalViewerLocation(null);
+        this.menuService.setFirstPersonViewContext(null);
         if (clearOutline) {
             this.menuService.tileOutline.next(null);
         }

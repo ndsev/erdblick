@@ -4,7 +4,6 @@ import {MapViewStateService} from "../mapview/map-view-state.service";
 import {
     AppStateService,
     DEFAULT_TILE_GRID_COLOR,
-    DEFAULT_TILE_GRID_LEVEL,
     DEFAULT_TILE_GRID_OPACITY,
     SelectedSourceData,
     TileGridMode,
@@ -168,39 +167,55 @@ interface MetadataLayerOption {
                                             </div>
                                             <div class="tile-grid-level-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
                                                 <label [for]="'tile-grid-level-' + index">Level</label>
-                                                <p-inputNumber [ngModel]="tileGridLevels[index]"
-                                                               (ngModelChange)="setTileGridLevel(index, $event)"
-                                                               [showButtons]="true"
-                                                               [min]="0"
-                                                               [max]="maxTileGridLevel(tileGridModes[index])"
-                                                               [inputId]="'tile-grid-level-' + index"
-                                                               [disabled]="!tileBordersEnabled[index]"
-                                                               [attr.data-testid]="getTileGridLevelTestId(index)"/>
+                                                <div class="tile-grid-level-controls">
+                                                    <p-inputNumber [ngModel]="displayTileGridLevel(index)"
+                                                                   (ngModelChange)="onTileGridLevelChanged(index, $event)"
+                                                                   [showButtons]="true"
+                                                                   [min]="0"
+                                                                   [max]="maxTileGridLevel(tileGridModes[index])"
+                                                                   buttonLayout="horizontal"
+                                                                   spinnerMode="horizontal"
+                                                                   [inputId]="'tile-grid-level-' + index"
+                                                                   decrementButtonClass="p-button-secondary"
+                                                                   incrementButtonClass="p-button-secondary"
+                                                                   incrementButtonIcon="pi pi-plus"
+                                                                   decrementButtonIcon="pi pi-minus"
+                                                                   pTooltip="Change grid level"
+                                                                   tooltipPosition="bottom"
+                                                                   [disabled]="!tileBordersEnabled[index]"
+                                                                   [attr.data-testid]="getTileGridLevelTestId(index)"
+                                                                   tabindex="0"/>
+                                                    <p-button onEnterClick
+                                                              (click)="toggleTileGridAutoLevel(index)"
+                                                              [styleClass]="tileGridAutoLevels[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
+                                                              [style]="{'min-width': '3.75em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
+                                                              label="AUTO"
+                                                              pTooltip="Automatically select the grid level"
+                                                              tooltipPosition="bottom"
+                                                              [disabled]="!tileBordersEnabled[index]"
+                                                              [attr.data-testid]="getTileGridAutoLevelTestId(index)"
+                                                              tabindex="0"/>
+                                                </div>
                                             </div>
-                                            <div class="tile-grid-color-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
-                                                <span>Colour</span>
-                                                <p-colorpicker [ngModel]="tileGridColors[index]"
+                                            <div class="tile-grid-appearance-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
+                                                <p-colorpicker class="tile-grid-color-picker"
+                                                               [ngModel]="tileGridColors[index]"
                                                                (ngModelChange)="setTileGridColor(index, $event)"
                                                                format="hex"
+                                                               appendTo="body"
+                                                               [overlayOptions]="{autoZIndex: true, baseZIndex: 30010}"
                                                                [disabled]="!tileBordersEnabled[index]"
                                                                [attr.data-testid]="getTileGridColorTestId(index)"/>
-                                            </div>
-                                            <div class="tile-grid-opacity-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
-                                                <span>Opacity</span>
-                                                <p-inputNumber class="tile-grid-opacity-input"
-                                                               [ngModel]="tileGridOpacities[index]"
-                                                               (ngModelChange)="setTileGridOpacity(index, $event)"
-                                                               suffix="%"
-                                                               [min]="0"
-                                                               [max]="100"
-                                                               [disabled]="!tileBordersEnabled[index]"/>
+                                                <span class="tile-grid-opacity-value">{{ tileGridOpacities[index] }}%</span>
                                                 <p-slider class="tile-grid-opacity-slider"
                                                           [ngModel]="tileGridOpacities[index]"
                                                           (ngModelChange)="setTileGridOpacity(index, $event)"
+                                                          orientation="horizontal"
                                                           [min]="0"
                                                           [max]="100"
                                                           [disabled]="!tileBordersEnabled[index]"
-                                                          [attr.data-testid]="getTileGridOpacityTestId(index)"/>
+                                                          [attr.data-testid]="getTileGridOpacityTestId(index)"
+                                                          tabindex="-1"/>
                                             </div>
                                         </div>
                                     </p-popover>
@@ -503,7 +518,7 @@ export class MapPanelComponent {
     lastEnabledBackgroundLayerIds: Array<string | null> = [];
     tileBordersEnabled: boolean[] = [];
     tileGridModes: TileGridMode[] = [];
-    tileGridLevels: number[] = [DEFAULT_TILE_GRID_LEVEL];
+    tileGridAutoLevels: boolean[] = [false];
     tileGridColors: string[] = [DEFAULT_TILE_GRID_COLOR];
     tileGridOpacities: number[] = [DEFAULT_TILE_GRID_OPACITY];
     activeStyleOptionGroup: string | null = null;
@@ -627,6 +642,9 @@ export class MapPanelComponent {
             this.stateService.viewTileGridLevelState.appState.subscribe(_ => this.refreshTileGridControls())
         );
         this.subscriptions.push(
+            this.stateService.viewTileGridAutoLevelState.appState.subscribe(_ => this.refreshTileGridControls())
+        );
+        this.subscriptions.push(
             this.stateService.viewTileGridColorState.appState.subscribe(_ => this.refreshTileGridControls())
         );
         this.subscriptions.push(
@@ -646,8 +664,8 @@ export class MapPanelComponent {
     /** Refreshes independent tile-grid controls from their per-view AppState values. */
     private refreshTileGridControls(): void {
         const numViews = this.stateService.numViews;
-        this.tileGridLevels = Array.from({length: numViews}, (_, index) =>
-            this.mapService.maps.getViewTileGridLevel(index));
+        this.tileGridAutoLevels = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridAutoLevel(index));
         this.tileGridColors = Array.from({length: numViews}, (_, index) =>
             this.mapService.maps.getViewTileGridColor(index));
         this.tileGridOpacities = Array.from({length: numViews}, (_, index) =>
@@ -950,6 +968,11 @@ export class MapPanelComponent {
         return `tile-grid-level-${viewIndex}`;
     }
 
+    /** Returns the stable test id for one tile-grid auto-level button. */
+    getTileGridAutoLevelTestId(viewIndex: number): string {
+        return `tile-grid-auto-level-${viewIndex}`;
+    }
+
     /** Returns the stable test id for one tile-grid colour picker. */
     getTileGridColorTestId(viewIndex: number): string {
         return `tile-grid-color-${viewIndex}`;
@@ -993,13 +1016,28 @@ export class MapPanelComponent {
         return tileGridMaxLevel(mode);
     }
 
-    /** Sets the independent line-grid level for one view. */
-    setTileGridLevel(viewIndex: number, level: number | null): void {
-        if (level === null) {
+    /** Applies a manually chosen grid level and disables automatic level selection. */
+    onTileGridLevelChanged(viewIndex: number, level: number | null): void {
+        if (level === null || !Number.isFinite(level)) {
             return;
         }
-        this.viewState.setViewTileGridLevel(viewIndex, level);
+        if (this.viewState.isViewTileGridAutoLevelEnabled(viewIndex)) {
+            this.viewState.setViewTileGridAutoLevel(viewIndex, false);
+        }
+        this.viewState.setViewTileGridLevel(viewIndex, Math.max(0, Math.floor(level)));
         this.refreshTileGridControls();
+    }
+
+    /** Toggles automatic viewport-based level selection for one grid. */
+    toggleTileGridAutoLevel(viewIndex: number): void {
+        const nextState = !this.viewState.isViewTileGridAutoLevelEnabled(viewIndex);
+        this.viewState.setViewTileGridAutoLevel(viewIndex, nextState);
+        this.refreshTileGridControls();
+    }
+
+    /** Returns the grid level currently shown or rendered for one view. */
+    displayTileGridLevel(viewIndex: number): number {
+        return this.viewState.getEffectiveViewTileGridLevel(viewIndex);
     }
 
     /** Sets the line-grid RGB colour for one view. */

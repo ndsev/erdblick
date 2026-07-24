@@ -750,6 +750,13 @@ export class AppStateService implements OnDestroy {
         urlParamName: "tgl"
     });
 
+    readonly viewTileGridAutoLevelState = this.createMapViewState<boolean>({
+        name: "tileGridAutoLevel",
+        defaultValue: false,
+        schema: Boolish,
+        urlParamName: "tga"
+    });
+
     readonly viewTileGridColorState = this.createMapViewState<string>({
         name: "tileGridColor",
         defaultValue: DEFAULT_TILE_GRID_COLOR,
@@ -3552,6 +3559,7 @@ export class AppStateService implements OnDestroy {
         pruneViews(this.viewTileBordersState);
         pruneViews(this.viewTileGridModeState);
         pruneViews(this.viewTileGridLevelState);
+        pruneViews(this.viewTileGridAutoLevelState);
         pruneViews(this.viewTileGridColorState);
         pruneViews(this.viewTileGridOpacityState);
         pruneViews(this.cameraViewDataState);

@@ -61,4 +61,42 @@ describe("RightClickMenuService", () => {
         service.setExternalViewerLocation(null);
         expect(service.menuItems.getValue().some(item => item.label === "Open in…")).toBe(false);
     });
+
+    it("requests first-person entry only for the exact prepared feature target", () => {
+        const {service} = createRightClickMenuService();
+        const target = {
+            position: [8.5, 49.1, 125] as [number, number, number],
+            featureIds: [{featureId: "road-1", mapTileKey: "map/layer/1"}]
+        };
+        const requests: unknown[] = [];
+        const subscription = service.firstPersonViewRequests.subscribe(request => requests.push(request));
+
+        try {
+            expect(service.menuItems.getValue().some(item => item.label === "Show First Person View")).toBe(false);
+
+            service.setFirstPersonViewContext({viewIndex: 2, active: false, target});
+            const enterItem = service.menuItems.getValue().find(item => item.label === "Show First Person View");
+            enterItem?.command?.({} as never);
+
+            expect(requests).toEqual([{viewIndex: 2, action: "enter", target}]);
+        } finally {
+            subscription.unsubscribe();
+        }
+    });
+
+    it("offers first-person exit without requiring a picked position", () => {
+        const {service} = createRightClickMenuService();
+        const requests: unknown[] = [];
+        const subscription = service.firstPersonViewRequests.subscribe(request => requests.push(request));
+
+        try {
+            service.setFirstPersonViewContext({viewIndex: 1, active: true});
+            const exitItem = service.menuItems.getValue().find(item => item.label === "Exit First Person View");
+            exitItem?.command?.({} as never);
+
+            expect(requests).toEqual([{viewIndex: 1, action: "exit"}]);
+        } finally {
+            subscription.unsubscribe();
+        }
+    });
 });

@@ -884,6 +884,7 @@ describe('AppStateService', () => {
         service.viewTileBordersState.next(0, false);
         service.viewTileGridModeState.next(0, 'xyz');
         service.viewTileGridLevelState.next(0, 18);
+        service.viewTileGridAutoLevelState.next(0, true);
         service.viewTileGridColorState.next(0, '123abc');
         service.viewTileGridOpacityState.next(0, 64);
         service.mapLayerConfig('m1', 'layerA', false, 9);
@@ -900,6 +901,7 @@ describe('AppStateService', () => {
         expect(service.viewTileBordersState.getValue(1)).toBe(false);
         expect(service.viewTileGridModeState.getValue(1)).toBe('xyz');
         expect(service.viewTileGridLevelState.getValue(1)).toBe(18);
+        expect(service.viewTileGridAutoLevelState.getValue(1)).toBe(true);
         expect(service.viewTileGridColorState.getValue(1)).toBe('123abc');
         expect(service.viewTileGridOpacityState.getValue(1)).toBe(64);
         expect(service.layerVisibilityState.getValue(1)).toEqual([true]);
@@ -950,6 +952,7 @@ describe('AppStateService', () => {
         service.viewTileBordersState.next(1, false);
         service.viewTileGridModeState.next(1, 'xyz');
         service.viewTileGridLevelState.next(1, 20);
+        service.viewTileGridAutoLevelState.next(1, true);
         service.viewTileGridColorState.next(1, 'fedcba');
         service.viewTileGridOpacityState.next(1, 71);
         service.setMapLayerConfig('m1', 'layerA', [
@@ -969,6 +972,7 @@ describe('AppStateService', () => {
         expect(service.viewTileBordersState.getValue(2)).toBe(false);
         expect(service.viewTileGridModeState.getValue(2)).toBe('xyz');
         expect(service.viewTileGridLevelState.getValue(2)).toBe(20);
+        expect(service.viewTileGridAutoLevelState.getValue(2)).toBe(true);
         expect(service.viewTileGridColorState.getValue(2)).toBe('fedcba');
         expect(service.viewTileGridOpacityState.getValue(2)).toBe(71);
         expect(service.layerVisibilityState.getValue(2)).toEqual([false]);
