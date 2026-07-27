@@ -149,6 +149,9 @@ export class MapInfoService {
     async reloadDataSources(): Promise<boolean> {
         try {
             const response = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources?blocking=false", {
+                // Catalog validators from older mapget servers can collide after a restart.
+                // Fetching the authoritative snapshot must therefore bypass the HTTP cache.
+                cache: "no-store",
                 observe: "response"
             }));
             const result = Array.isArray(response.body) ? response.body : [];

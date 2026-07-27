@@ -196,6 +196,10 @@ export class MapTileStreamClient {
     private usingLegacyPullFallback: boolean = false;
     private readonly ownsParser: boolean;
     private protocolMismatchReported: boolean = false;
+    /** Counts successful websocket connections so the first context frame can identify reconnects. */
+    private openedSocketCount: number = 0;
+    /** True until the current socket identifies its datasource-catalog revision. */
+    private awaitingSocketSourcesRevision: boolean = false;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
@@ -205,7 +209,7 @@ export class MapTileStreamClient {
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
     onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
     onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
-    onSourcesRevisionChanged: ((revision: number) => void) | null = null;
+    onSourcesRevisionChanged: ((revision: number, reconnected: boolean) => void) | null = null;
     onOpen: (() => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
@@ -260,8 +264,8 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Registers the callback that receives datasource-catalog revision updates from request-context frames. */
-    withSourcesRevisionChangedCallback(callback: (revision: number) => void) {
+    /** Registers revision updates and identifies the first context received after a websocket reconnect. */
+    withSourcesRevisionChangedCallback(callback: (revision: number, reconnected: boolean) => void) {
         this.onSourcesRevisionChanged = callback;
         return this;
     }
@@ -357,6 +361,8 @@ export class MapTileStreamClient {
         this.supportsRequestContextFrames = false;
         this.pullClientId = null;
         this.sourcesRevision = null;
+        this.openedSocketCount = 0;
+        this.awaitingSocketSourcesRevision = false;
         this.stopPullLoops();
         this.clearPendingFrames();
         this.resetCompletionPromise();
@@ -420,15 +426,24 @@ export class MapTileStreamClient {
     }
 
     /** Stores the newest datasource-catalog revision and optionally notifies consumers. */
-    private updateSourcesRevision(revision: number, notify: boolean): void {
+    private updateSourcesRevision(revision: number, notify: boolean, reconnected: boolean = false): void {
         const nextRevision = Math.max(0, Math.floor(revision));
         const previousRevision = this.sourcesRevision;
         this.sourcesRevision = previousRevision === null
             ? nextRevision
             : Math.max(previousRevision, nextRevision);
-        if (notify && (previousRevision === null || nextRevision > previousRevision)) {
-            this.onSourcesRevisionChanged?.(nextRevision);
+        if (notify && (reconnected || previousRevision === null || nextRevision > previousRevision)) {
+            this.onSourcesRevisionChanged?.(nextRevision, reconnected);
         }
+    }
+
+    /** Starts a new connection-scoped revision sequence and records whether this is a reconnect. */
+    private prepareForOpenedSocket(): void {
+        this.openedSocketCount++;
+        this.awaitingSocketSourcesRevision = true;
+        // Revisions are process-local; retaining the previous socket's maximum
+        // would hide equal or lower revisions after a backend restart.
+        this.sourcesRevision = null;
     }
 
     /** Returns aggregated compression metrics for `/interactive/payload` responses. */
@@ -724,6 +739,7 @@ export class MapTileStreamClient {
                     return;
                 }
                 opened = true;
+                this.prepareForOpenedSocket();
                 this.protocolMismatchReported = false;
                 this.onOpen?.();
                 resolve();
@@ -1012,7 +1028,10 @@ export class MapTileStreamClient {
                         this.supportsRequestContextFrames = true;
                         this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
                         if (Number.isFinite(payload.sourcesRevision)) {
-                            this.updateSourcesRevision(Number(payload.sourcesRevision), true);
+                            const reconnected = this.awaitingSocketSourcesRevision
+                                && this.openedSocketCount > 1;
+                            this.awaitingSocketSourcesRevision = false;
+                            this.updateSourcesRevision(Number(payload.sourcesRevision), true, reconnected);
                         }
                         if (Number.isFinite(payload.clientId)) {
                             const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));

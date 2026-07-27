@@ -170,6 +170,39 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it('reports a repeated revision after reconnecting to a restarted backend', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const observedRevisions: Array<{revision: number; reconnected: boolean}> = [];
+        try {
+            client.withSourcesRevisionChangedCallback((revision, reconnected) => {
+                observedRevisions.push({revision, reconnected});
+            });
+
+            tileStream.prepareForOpenedSocket();
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3,
+                sourcesRevision: 49
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            tileStream.prepareForOpenedSocket();
+            expect(client.getSourcesRevision()).toBeNull();
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4,
+                sourcesRevision: 49
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(observedRevisions).toEqual([
+                {revision: 49, reconnected: false},
+                {revision: 49, reconnected: true}
+            ]);
+        } finally {
+            client.destroy();
+        }
+    });
+
     it('rejects stale payload frames after datasource metadata changes', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;

@@ -122,6 +122,8 @@ export class MapTileStreamService {
     private readonly searchResultEntryFrameBudgetMs = 12;
     private sourceCatalogReloadPromise: Promise<void> | null = null;
     private sourceCatalogRefreshTargetRevision: number | null = null;
+    /** Guarantees an authoritative refresh after an older connection's in-flight reload completes. */
+    private sourceCatalogReloadAfterCurrent: boolean = false;
     private backendProtocolMismatchActive = false;
 
     constructor(
@@ -160,8 +162,8 @@ export class MapTileStreamService {
         this.tileStream.onSourceCatalogChanged = (change) => {
             this.ngZone.runOutsideAngular(() => this.handleSourceCatalogChanged(change));
         };
-        this.tileStream.onSourcesRevisionChanged = (revision) => {
-            this.ngZone.runOutsideAngular(() => this.handleSourcesRevisionChanged(revision));
+        this.tileStream.onSourcesRevisionChanged = (revision, reconnected) => {
+            this.ngZone.runOutsideAngular(() => this.handleSourcesRevisionChanged(revision, reconnected));
         };
         this.tileStream.onOpen = () => {
             this.ngZone.run(() => {
@@ -509,23 +511,30 @@ export class MapTileStreamService {
     }
 
     /** Refreshes `/sources` when request-context frames prove our catalog snapshot is stale. */
-    private handleSourcesRevisionChanged(revision: number): void {
+    private handleSourcesRevisionChanged(revision: number, reconnected: boolean): void {
         const currentRevision = this.mapInfo.sourceCatalogRevision;
-        if (currentRevision !== null && currentRevision >= revision) {
+        if (!reconnected && currentRevision !== null && currentRevision >= revision) {
             return;
         }
-        this.requestSourceCatalogRefresh(revision);
+        // Catalog revisions are process-local. The first context frame after a
+        // reconnect must discard targets from the previous backend incarnation.
+        this.requestSourceCatalogRefresh(revision, reconnected);
     }
 
-    /** Coalesces heavyweight `/sources` refreshes and retries once when the first snapshot was too early. */
-    private requestSourceCatalogRefresh(targetRevision: number | null = null): void {
+    /** Coalesces `/sources` refreshes while keeping revision targets scoped to one backend connection. */
+    private requestSourceCatalogRefresh(targetRevision: number | null = null, resetRevisionEpoch: boolean = false): void {
         if (targetRevision !== null && Number.isFinite(targetRevision)) {
             const normalizedRevision = Math.max(0, Math.floor(targetRevision));
-            this.sourceCatalogRefreshTargetRevision = this.sourceCatalogRefreshTargetRevision === null
+            this.sourceCatalogRefreshTargetRevision = resetRevisionEpoch || this.sourceCatalogRefreshTargetRevision === null
                 ? normalizedRevision
                 : Math.max(this.sourceCatalogRefreshTargetRevision, normalizedRevision);
+        } else if (resetRevisionEpoch) {
+            this.sourceCatalogRefreshTargetRevision = null;
         }
         if (this.sourceCatalogReloadPromise) {
+            // The running fetch may belong to the previous backend process. A
+            // second fetch is required even if its response happens to look current.
+            this.sourceCatalogReloadAfterCurrent ||= resetRevisionEpoch;
             return;
         }
         this.sourceCatalogReloadPromise = this.reloadSourceCatalogUntilCaughtUp()
@@ -533,6 +542,12 @@ export class MapTileStreamService {
             .catch(err => console.error("Failed to refresh datasource catalog.", err))
             .finally(() => {
                 this.sourceCatalogReloadPromise = null;
+                if (this.sourceCatalogReloadAfterCurrent) {
+                    this.sourceCatalogReloadAfterCurrent = false;
+                    this.sourceCatalogRefreshTargetRevision = null;
+                    this.requestSourceCatalogRefresh();
+                    return;
+                }
                 const pendingRevision = this.sourceCatalogRefreshTargetRevision;
                 if (pendingRevision !== null) {
                     const currentRevision = this.mapInfo.sourceCatalogRevision;
