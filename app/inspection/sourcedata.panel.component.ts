@@ -11,6 +11,7 @@ import {
 } from "../mapdata/tilestream";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
+import {sourceDataTreePresentation} from "./sourcedata-tree.presentation";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -24,6 +25,12 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
                 <strong>Error</strong><br>{{ errorMessage }}
             </div>
         } @else {
+            @if (sqlQuery) {
+                <details class="source-data-sql-query" data-testid="source-data-sql-query">
+                    <summary>SQL query</summary>
+                    <code>{{ sqlQuery }}</code>
+                </details>
+            }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
@@ -44,12 +51,13 @@ export class SourceDataPanelComponent {
 
     loading: boolean = true;
     errorMessage: string = "";
+    sqlQuery: string | undefined;
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
         { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
         { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
-        { key: "address", header: "Address", width: '100px', transform: this.addressFormatter.bind(this) },
+        { key: "displayAddress", header: "Address", width: '100px', transform: this.addressFormatter.bind(this) },
         { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter.bind(this) }
     ]
 
@@ -66,6 +74,7 @@ export class SourceDataPanelComponent {
             this.loading = true;
             this.treeData = [];
             this.errorMessage = "";
+            this.sqlQuery = undefined;
 
             this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
                 .then(layer => {
@@ -74,9 +83,10 @@ export class SourceDataPanelComponent {
 
                     layer.delete();
 
-                    const treeData = this.treeDataFromRoot(root);
-                    if (treeData.length) {
-                        this.treeData = treeData;
+                    const presentation = sourceDataTreePresentation(root);
+                    this.sqlQuery = presentation.sqlQuery;
+                    if (presentation.treeData.length) {
+                        this.treeData = presentation.treeData;
                         this.selectItemWithAddress(this.panel().sourceData!.address);
                     } else {
                         this.treeData = [];
@@ -180,22 +190,6 @@ export class SourceDataPanelComponent {
         return loadedLayer;
     }
 
-    /** Normalizes the parser output so the tree always receives a list of visible root nodes. */
-    private treeDataFromRoot(root: any): TreeTableNode[] {
-        if (!root) {
-            return [];
-        }
-        if (Array.isArray(root.children)) {
-            return root.children.filter((node: any) => this.hasTreeNodeContent(node));
-        }
-        return this.hasTreeNodeContent(root) ? [root] : [];
-    }
-
-    /** Filters parser artifacts that do not contribute visible data to the tree. */
-    private hasTreeNodeContent(node: any): boolean {
-        return !!node && (node.data !== undefined || (Array.isArray(node.children) && node.children.length > 0));
-    }
-
     /** Builds a user-facing empty-state message for a tile without source data. */
     private noSourceDataMessage(mapTileKey: string): string {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
@@ -203,16 +197,11 @@ export class SourceDataPanelComponent {
         return `No source data for tile ${tileId} (${layerName}) of map ${mapId}.`;
     }
 
-    /**
-     * Set an error message that gets displayed.
-     * Unsets the tree to an empty array.
-     *
-     * @param message Error message
-     */
     /** Replaces the tree with an error state and notifies the parent panel. */
     setError(message: string) {
         this.loading = false;
         this.treeData = [];
+        this.sqlQuery = undefined;
         this.errorMessage = message;
         this.error.emit(message);
     }
@@ -245,7 +234,7 @@ export class SourceDataPanelComponent {
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
-    /** Formats both scalar and bit-range source-data addresses for the table cell. */
+    /** Formats a presentation address without affecting canonical selection addresses. */
     addressFormatter(colKey: string, rowData: any): string {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";

@@ -52,10 +52,8 @@ export interface MapInfoItem extends Record<string, any> {
     status?: DataSourceCatalogStatus | string;
     statusMessage?: string;
     progress?: number | null;
-    sourceId?: string;
     configIndex?: number;
     type?: string;
-    configuredMapId?: string;
 }
 
 /** Normalizes legacy and catalog-aware `/sources` entries into a known datasource state. */

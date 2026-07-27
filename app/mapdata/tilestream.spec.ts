@@ -238,7 +238,7 @@ describe('MapTileStreamClient', () => {
                 revision: 44,
                 reason: 'status',
                 source: {
-                    sourceId: 'source-a',
+                    configIndex: 7,
                     status: 'initializing',
                     statusMessage: 'Loading layers',
                     progress: 0.5
@@ -250,7 +250,7 @@ describe('MapTileStreamClient', () => {
                 revision: 44,
                 reason: 'status',
                 source: {
-                    sourceId: 'source-a',
+                    configIndex: 7,
                     status: 'initializing',
                     statusMessage: 'Loading layers',
                     progress: 0.5
@@ -277,7 +277,7 @@ describe('MapTileStreamClient', () => {
                 revision: 45,
                 reason: 'status',
                 source: {
-                    sourceId: 'source-a',
+                    configIndex: 7,
                     status: 'initializing'
                 }
             }), MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE);
@@ -287,7 +287,7 @@ describe('MapTileStreamClient', () => {
                 revision: 45,
                 reason: 'status',
                 source: {
-                    sourceId: 'source-a',
+                    configIndex: 7,
                     status: 'initializing',
                     statusMessage: undefined,
                     progress: null

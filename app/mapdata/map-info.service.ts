@@ -21,7 +21,7 @@ import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
-    sourceId: string;
+    configIndex: number;
     status?: string;
     statusMessage?: string;
     progress?: number | null;
@@ -188,10 +188,10 @@ export class MapInfoService {
 
     /** Applies a lightweight source-status update from the interactive stream without reloading `/sources`. */
     applySourceCatalogChange(update: SourceCatalogEntryUpdate, revision: number | null = null): boolean {
-        if (!update.sourceId) {
+        if (!Number.isInteger(update.configIndex) || update.configIndex < 0) {
             return false;
         }
-        const index = this.sourceCatalogEntries.findIndex(entry => entry.sourceId === update.sourceId);
+        const index = this.sourceCatalogEntries.findIndex(entry => entry.configIndex === update.configIndex);
         if (index < 0) {
             return false;
         }
@@ -222,7 +222,9 @@ export class MapInfoService {
 
     /** Returns true when a lightweight update announces readiness but the local entry still lacks full metadata. */
     sourceCatalogChangeNeedsRefresh(update: SourceCatalogEntryUpdate): boolean {
-        const entry = this.sourceCatalogEntries.find(sourceEntry => sourceEntry.sourceId === update.sourceId);
+        const entry = this.sourceCatalogEntries.find(
+            sourceEntry => sourceEntry.configIndex === update.configIndex
+        );
         if (!entry) {
             return true;
         }

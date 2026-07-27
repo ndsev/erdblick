@@ -21,7 +21,7 @@ export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 export const MAP_TILE_STREAM_SEARCH_STATUS_TYPE = "mapget.search.status";
 export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 2;
-export const MAP_TILE_STREAM_PROTOCOL_MINOR = 0;
+export const MAP_TILE_STREAM_PROTOCOL_MINOR = 1;
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 
@@ -102,7 +102,7 @@ export interface MapTileStreamTransportCompressionStats {
 
 /** Lightweight datasource status object optionally embedded in a source-catalog change frame. */
 export interface MapTileStreamSourceCatalogChangeSource {
-    sourceId: string;
+    configIndex: number;
     status?: string;
     statusMessage?: string;
     progress?: number | null;
@@ -272,15 +272,17 @@ export class MapTileStreamClient {
             return undefined;
         }
         const sourceRecord = source as Record<string, unknown>;
-        const sourceId = sourceRecord["sourceId"];
+        const configIndex = sourceRecord["configIndex"];
         const status = sourceRecord["status"];
         const statusMessage = sourceRecord["statusMessage"];
         const progress = sourceRecord["progress"];
-        if (typeof sourceId !== "string" || !sourceId.length) {
+        if (typeof configIndex !== "number"
+            || !Number.isInteger(configIndex)
+            || configIndex < 0) {
             return undefined;
         }
         return {
-            sourceId,
+            configIndex,
             status: typeof status === "string" ? status : undefined,
             statusMessage: typeof statusMessage === "string" ? statusMessage : undefined,
             progress: typeof progress === "number" && Number.isFinite(progress)

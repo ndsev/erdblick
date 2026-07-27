@@ -37,6 +37,19 @@ Once the panel is open:
 - switch between raw layers with the dropdown when a tile exposes several SourceData entries
 - inspect metadata-only layers such as service definition or registry metadata without leaving the same overall workflow
 
+SQL-backed SourceData additionally exposes the executed query in a collapsible
+**SQL query** section. Query rows appear directly as **Result row 1**, **Result
+row 2**, and so on, rather than through an extra `rows > index` hierarchy.
+Decoded array fields remain expandable arrays. Structural table, row, and
+scalar-cell ranges are omitted from the Address column. Decoded blob offsets
+are shown relative to the blob start, while erdblick retains the canonical
+absolute addresses internally for source-reference selection.
+
+NDS.Classic maps expose the complete physical Tile Content Index as the
+tile-zero metadata layer `Metadata-Classic-tileContentIndexTable`. Results from
+multiple product databases are presented together and identify their physical
+source per row.
+
 When SourceData is opened from a feature node, erdblick tries to preselect the matching address range in the raw tree so you can line up the interpreted feature view with the original payload faster.
 
 ## Hints for Efficient Debugging

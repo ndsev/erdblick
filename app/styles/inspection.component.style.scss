@@ -30,6 +30,35 @@ body.dialog-dragging * {
   font-size: 0.9em;
 }
 
+sourcedata-panel {
+  .source-data-sql-query {
+    background: color-mix(in srgb, var(--p-primary-color) 7%, var(--p-content-background));
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.35em;
+    flex: 0 0 auto;
+    margin: 0.15em 0.5em 0.35em;
+    overflow: hidden;
+
+    summary {
+      cursor: pointer;
+      font-size: 0.85em;
+      font-weight: 700;
+      padding: 0.3em 0.5em;
+      user-select: none;
+    }
+
+    code {
+      border-top: 1px solid var(--p-content-border-color);
+      display: block;
+      font-size: 0.8em;
+      max-height: 8em;
+      overflow: auto;
+      padding: 0.45em 0.6em;
+      white-space: pre;
+    }
+  }
+}
+
 inspection-tree {
   .section-style {
     background-color: var(--p-highlight-background);
@@ -91,6 +120,20 @@ inspection-tree {
 
       &.inspection-hover-strong > td {
         background: color-mix(in srgb, var(--p-primary-color) 22%, transparent);
+      }
+
+      &.source-data-sql-result-row > td {
+        background: color-mix(in srgb, var(--p-primary-color) 9%, var(--p-content-background));
+        border-top: 1px solid color-mix(
+          in srgb,
+          var(--p-primary-color) 35%,
+          var(--p-content-border-color)
+        );
+      }
+
+      &.source-data-sql-result-row > td:first-child {
+        box-shadow: inset 3px 0 0 color-mix(in srgb, var(--p-primary-color) 65%, transparent);
+        font-weight: 700;
       }
 
       &:hover {
