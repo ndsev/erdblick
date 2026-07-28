@@ -29,6 +29,12 @@ export interface RenderNavigationTarget {
     featureIds: TileFeatureId[];
 }
 
+/** Logical feature result returned by bounded rendered-object picking operations. */
+export interface RenderedFeaturePickResult {
+    /** Unique exact feature identities in renderer traversal order. */
+    featureIds: TileFeatureId[];
+}
+
 export type RenderBackend = "deck";
 
 export const MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT = "erdblick-map-view-layout-resize-prepare";
@@ -58,6 +64,7 @@ export interface IRenderView {
     isAvailable(): boolean;
     requestRender(): void;
     prepareForLayoutResize(targetCssSize: {width: number; height: number}): void;
+    setDesktopDrillPickingEnabled(enabled: boolean): void;
 
     getCanvasClientRect(): DOMRect;
     getCameraHeadingDegrees(): number;
@@ -66,9 +73,13 @@ export interface IRenderView {
     getSceneMode(): unknown;
     getSceneHandle(): IRenderSceneHandle;
 
-    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[];
     pickCartographic(screenPos: {x: number; y: number}): {lon: number; lat: number; alt: number} | undefined;
     pickNavigationTarget(screenPos: {x: number; y: number}): RenderNavigationTarget | undefined;
+    drillPickFeatures(
+        screenPos: {x: number; y: number},
+        radius: number,
+        maxObjects: number
+    ): RenderedFeaturePickResult;
 
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;

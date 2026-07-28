@@ -26,6 +26,11 @@ interface Wgs84Point {
     z?: number;
 }
 
+export interface MultiInspectionResult {
+    foundFeatureCount: number;
+    inspectedFeatureCount: number;
+}
+
 /**
  * Owns selected and hovered feature interaction state, including focus/zoom navigation.
  */
@@ -140,6 +145,104 @@ export class InspectionSelectionService {
                 this.hoverIdsTopic.next(hoverIds);
             }
         });
+    }
+
+    /**
+     * Opens one inspection per exact rendered-feature hit, bounded by the configured panel limit.
+     * The warning reports logical features after merged-object expansion, not raw render objects.
+     */
+    inspectFeatureIds(
+        tileFeatureIds: TileFeatureId[],
+        lockNewPanels = false
+    ): MultiInspectionResult {
+        const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
+        const foundFeatureCount = featureIds.length;
+        if (!foundFeatureCount) {
+            return {foundFeatureCount: 0, inspectedFeatureCount: 0};
+        }
+
+        if (foundFeatureCount === 1) {
+            const currentPanels = this.stateService.selection;
+            const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
+            const reusableFeaturePanel = currentPanels.some(panel =>
+                panel.sourceData === undefined && !panel.locked
+            );
+            if (featureAlreadyInspected
+                || reusableFeaturePanel
+                || currentPanels.length < this.stateService.inspectionsLimit) {
+                const panelId = this.stateService.setSelection(
+                    [featureIds[0]],
+                    undefined,
+                    lockNewPanels
+                );
+                if (lockNewPanels && panelId !== undefined) {
+                    this.stateService.setInspectionPanelLockedState(panelId, true);
+                }
+            }
+        } else {
+            // Match the existing merged-feature flow: preserve pinned/source-data panels and
+            // create one new inspection panel for each candidate that still fits.
+            this.stateService.unsetUnlockedSelections();
+            let remainingSlots = Math.max(
+                0,
+                this.stateService.inspectionsLimit - this.stateService.selection.length
+            );
+            for (const featureId of featureIds) {
+                if (this.panelsContainFeature(this.stateService.selection, featureId)) {
+                    continue;
+                }
+                if (remainingSlots <= 0) {
+                    break;
+                }
+                const panelId = this.stateService.setSelection([featureId], undefined, true);
+                if (panelId !== undefined) {
+                    remainingSlots -= 1;
+                    if (lockNewPanels) {
+                        this.stateService.setInspectionPanelLockedState(panelId, true);
+                    }
+                }
+            }
+        }
+
+        const inspectedFeatureCount = featureIds.filter(featureId =>
+            this.panelsContainFeature(this.stateService.selection, featureId)
+        ).length;
+        if (inspectedFeatureCount < foundFeatureCount) {
+            this.messageService.showWarning(
+                `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
+                "Decrease the selection or increase your max inspections limit to see more."
+            );
+        }
+        return {foundFeatureCount, inspectedFeatureCount};
+    }
+
+    /** Deduplicates full map-tile/feature identities without changing traversal order. */
+    private uniqueTileFeatureIds(tileFeatureIds: TileFeatureId[]): TileFeatureId[] {
+        const result: TileFeatureId[] = [];
+        const seen = new Set<string>();
+        for (const featureId of tileFeatureIds) {
+            const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
+            if (seen.has(identity)) {
+                continue;
+            }
+            seen.add(identity);
+            result.push(featureId);
+        }
+        return result;
+    }
+
+    /** Returns whether any regular inspection panel already represents the exact feature identity. */
+    private panelsContainFeature(
+        panels: InspectionPanelModel<TileFeatureId>[],
+        featureId: TileFeatureId
+    ): boolean {
+        return panels.some(panel =>
+            panel.sourceData === undefined &&
+            panel.features.some(existing =>
+                existing.mapTileKey === featureId.mapTileKey &&
+                existing.featureId === featureId.featureId
+            )
+        );
     }
 
     /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */

@@ -3,7 +3,11 @@ import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
 import {Color, HeightReference, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {
+    AppStateService,
+    SelectedSourceData,
+    type TileFeatureId
+} from "../shared/appstate.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {InfoMessageService} from "../shared/info.service";
@@ -14,6 +18,7 @@ import {
     ExternalViewerService
 } from "../search/external-viewer.service";
 import type {RenderNavigationTarget} from "./render-view.model";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -59,6 +64,12 @@ export type FirstPersonViewMenuRequest =
     | {viewIndex: number; action: "enter"; target: RenderNavigationTarget}
     | {viewIndex: number; action: "exit"};
 
+/** One flat context-menu row retaining its topmost concrete tile hit. */
+interface PickedFeatureMenuRow {
+    identity: string;
+    feature: TileFeatureId;
+}
+
 @Injectable()
 /**
  * Owns the dynamic right-click menu content for the map view.
@@ -81,13 +92,15 @@ export class RightClickMenuService {
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
     private externalViewerLocation: ExternalViewerLocation | null = null;
     private firstPersonViewContext: FirstPersonViewMenuContext | null = null;
+    private pickedFeatureRows: PickedFeatureMenuRow[] = [];
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService,
                 private featureSearchService: FeatureSearchService,
                 private infoMessageService: InfoMessageService,
                 private diagnostics: DiagnosticsFacadeService,
-                private externalViewerService: ExternalViewerService) {
+                private externalViewerService: ExternalViewerService,
+                private inspectionSelection: InspectionSelectionService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
             this.sourceDataShortcut = null;
@@ -150,6 +163,27 @@ export class RightClickMenuService {
         this.rebuildMenuItems();
     }
 
+    /** Replaces the ordered first-section rows from one bounded desktop drill-pick. */
+    setPickedFeatures(features: TileFeatureId[]): void {
+        const rows: PickedFeatureMenuRow[] = [];
+        const seen = new Set<string>();
+        for (const feature of features) {
+            const [mapId, layerId] = coreLib.parseMapTileKey(feature.mapTileKey) as [
+                string,
+                string,
+                number
+            ];
+            const identity = JSON.stringify([mapId, layerId, feature.featureId]);
+            if (seen.has(identity)) {
+                continue;
+            }
+            seen.add(identity);
+            rows.push({identity, feature});
+        }
+        this.pickedFeatureRows = rows;
+        this.rebuildMenuItems();
+    }
+
     /**
      * Chooses the best source-data tile candidate for the current context.
      * Preference is: explicit user choice, last inspected level, then deepest enabled tile.
@@ -197,11 +231,19 @@ export class RightClickMenuService {
 
     /** Rebuilds context-menu items from the latest source-data, diagnostics, and search scopes. */
     private rebuildMenuItems(): void {
-        const items: MenuItem[] = this.sourceDataMenuItems();
+        const items: MenuItem[] = [];
+        if (this.pickedFeatureRows.length) {
+            items.push(
+                ...this.pickedFeatureRows.map((row, index) =>
+                    this.pickedFeatureMenuItem(row, index)),
+                {separator: true}
+            );
+        }
+        items.push(...this.sourceDataMenuItems());
         if (this.firstPersonViewContext) {
             items.push({separator: true}, this.firstPersonViewMenuItem(this.firstPersonViewContext));
         }
-        if (this.externalViewerLocation) {
+        if (this.externalViewerLocation && this.externalViewerService.providers.length) {
             items.push({separator: true}, this.externalViewerMenuItem(this.externalViewerLocation));
         }
         if (this.tileDiagnosticsOptions.length) {
@@ -214,6 +256,17 @@ export class RightClickMenuService {
             items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
         }
         this.menuItems.next(items);
+    }
+
+    /** Builds one direct feature-inspection row in rendered hit order. */
+    private pickedFeatureMenuItem(row: PickedFeatureMenuRow, index: number): MenuItem {
+        return {
+            id: row.identity,
+            automationId: `inspect-picked-feature-${index}`,
+            label: row.feature.featureId,
+            icon: "pi pi-search",
+            command: () => this.inspectionSelection.inspectFeatureIds([row.feature])
+        };
     }
 
     /** Builds the enter or exit first-person action for the view that opened the menu. */

@@ -109,7 +109,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.stateService.markedPositionState
         ]).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
-            if (markedPosition.length === 2) {
+            if (markedPosition.length >= 2) {
                 this.longitude = markedPosition[0];
                 this.latitude = markedPosition[1];
                 if (this.isMarkerEnabled) {

@@ -6,7 +6,9 @@ import {StyleService} from "../styledata/style.service";
 import {
     ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
     clampMapZoomStep,
+    DEFAULT_DRILL_PICK_RADIUS,
     DEFAULT_MAP_ZOOM_STEP,
+    MAX_DRILL_PICK_RADIUS,
     MAX_MAP_ZOOM_STEP,
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
@@ -14,6 +16,7 @@ import {
     MAX_LOCATION_SEARCH_RESULT_LIMIT,
     PREFERENCES_DIALOG_LAYOUT_ID,
     MIN_MAP_ZOOM_STEP,
+    MIN_DRILL_PICK_RADIUS,
     AppStateService,
     DEFAULT_LOW_FI_TILE_THRESHOLD,
     DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
@@ -90,6 +93,36 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
                               label=""
                               icon="pi pi-check"
                               [disabled]="!inspectionsLimitChanged"></p-button>
+                </div>
+            </div>
+            <p-divider></p-divider>
+            <div class="slider-container">
+                <label for="drill-pick-radius-input">Drill Pick Radius (px)
+                    <i class="pi pi-info-circle"
+                       pTooltip="Pixel radius used by feature drill-picking."
+                       tooltipPosition="top"></i>
+                </label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input id="drill-pick-radius-input"
+                               data-testid="drill-pick-radius-input"
+                               class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="drillPickRadiusInput"
+                               (ngModelChange)="onDrillPickRadiusInputChange($event)"
+                               (keydown.enter)="applyDrillPickRadius()"/>
+                        <p-slider [(ngModel)]="drillPickRadiusInput"
+                                  (ngModelChange)="onDrillPickRadiusSliderChange($event)"
+                                  class="w-full"
+                                  [min]="MIN_DRILL_PICK_RADIUS"
+                                  [max]="MAX_DRILL_PICK_RADIUS"></p-slider>
+                    </div>
+                    <p-button (click)="applyDrillPickRadius()"
+                              data-testid="apply-drill-pick-radius"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!drillPickRadiusChanged"></p-button>
                 </div>
             </div>
             <p-divider></p-divider>
@@ -348,6 +381,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number | string = 0;
     limitSimultaneousInspectionsInput: number | string = 0;
+    drillPickRadiusInput: number | string = DEFAULT_DRILL_PICK_RADIUS;
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     deckAntialiasingEnabledSetting: boolean = true;
@@ -359,6 +393,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
+    drillPickRadiusChanged: boolean = false;
     locationSearchResultLimitChanged: boolean = false;
     lowFiTileThresholdChanged: boolean = false;
     renderWorkerCountChanged: boolean = false;
@@ -408,6 +443,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.drillPickRadiusState.subscribe(radius => {
+            this.drillPickRadiusInput = radius;
         }));
         this.subscriptions.push(this.stateService.locationSearchResultLimitState.subscribe(limit => {
             this.locationSearchResultLimitInput = limit;
@@ -524,6 +562,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     onDialogShow() {
         this.tilesToLoadInput = this.stateService.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
+        this.drillPickRadiusInput = this.stateService.drillPickRadius;
         this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
         this.mapZoomStepInput = this.stateService.mapZoomStep;
         this.lowFiTileThresholdInput = this.stateService.lowFiTileThreshold;
@@ -533,6 +572,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.stateService.renderBlockVertexLimit;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
+        this.drillPickRadiusChanged = false;
         this.locationSearchResultLimitChanged = false;
         this.lowFiTileThresholdChanged = false;
         this.renderWorkerCountChanged = false;
@@ -743,6 +783,23 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.messageService.showSuccess("Successfully updated inspections limit!");
     }
 
+    /** Commits the pixel radius used by point drill-picking. */
+    protected applyDrillPickRadius() {
+        if (!this.drillPickRadiusChanged) {
+            return;
+        }
+        const radius = Number(this.drillPickRadiusInput);
+        if (!Number.isFinite(radius) || !Number.isInteger(radius)
+            || radius < MIN_DRILL_PICK_RADIUS || radius > MAX_DRILL_PICK_RADIUS) {
+            this.messageService.showError(
+                `Please enter a valid drill pick radius (${MIN_DRILL_PICK_RADIUS}-${MAX_DRILL_PICK_RADIUS})!`
+            );
+            return;
+        }
+        this.stateService.drillPickRadius = radius;
+        this.drillPickRadiusChanged = false;
+    }
+
     /** Commits the location result limit after validating the pending input. */
     protected applyLocationSearchResultLimit() {
         if (!this.locationSearchResultLimitChanged) {
@@ -767,6 +824,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onInspectionsLimitSliderChange(value: number) {
         this.limitSimultaneousInspectionsInput = value;
         this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    /** Tracks slider edits for the point drill-pick radius. */
+    protected onDrillPickRadiusSliderChange(value: number) {
+        this.drillPickRadiusInput = value;
+        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.stateService.drillPickRadius);
     }
 
     /** Tracks slider edits for the location-search result limit. */
@@ -809,6 +872,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onInspectionsLimitInputChange(value: number | string) {
         this.limitSimultaneousInspectionsInput = value;
         this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+    }
+
+    /** Tracks free-form edits for the point drill-pick radius. */
+    protected onDrillPickRadiusInputChange(value: number | string) {
+        this.drillPickRadiusInput = value;
+        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.stateService.drillPickRadius);
     }
 
     /** Tracks free-form edits for the location-search result limit. */
@@ -892,6 +961,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
+    protected readonly MIN_DRILL_PICK_RADIUS = MIN_DRILL_PICK_RADIUS;
+    protected readonly MAX_DRILL_PICK_RADIUS = MAX_DRILL_PICK_RADIUS;
     protected readonly MAX_LOCATION_SEARCH_RESULT_LIMIT = MAX_LOCATION_SEARCH_RESULT_LIMIT;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;

@@ -5,24 +5,30 @@ import type {FeatureSearchService} from "../search/feature.search.service";
 import type {AppStateService} from "../shared/appstate.service";
 import type {InfoMessageService} from "../shared/info.service";
 import type {ExternalViewerService} from "../search/external-viewer.service";
+import type {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import {coreLib} from "../integrations/wasm";
 import {RightClickMenuService} from "./rightclickmenu.service";
 
 /** Creates the right-click service with the dependencies not used by ownership tests stubbed out. */
 function createRightClickMenuService() {
     const externalViewerService = {
         providers: [
-            {id: "one", name: "Viewer One", buildUrl: vi.fn()},
-            {id: "two", name: "Viewer Two", buildUrl: vi.fn()}
+            {id: "one", name: "Viewer One", urlTemplate: "https://one.test/{lat}/{lon}"},
+            {id: "two", name: "Viewer Two", urlTemplate: "https://two.test/{lat}/{lon}"}
         ],
         open: vi.fn()
+    };
+    const inspectionSelection = {
+        inspectFeatureIds: vi.fn()
     };
     const service = new RightClickMenuService(
         {} as AppStateService,
         {} as FeatureSearchService,
         {showInfo: vi.fn()} as unknown as InfoMessageService,
         {openPerformanceDialog: vi.fn()} as unknown as DiagnosticsFacadeService,
-        externalViewerService as unknown as ExternalViewerService);
-    return {service, externalViewerService};
+        externalViewerService as unknown as ExternalViewerService,
+        inspectionSelection as unknown as InspectionSelectionService);
+    return {service, externalViewerService, inspectionSelection};
 }
 
 describe("RightClickMenuService", () => {
@@ -98,5 +104,42 @@ describe("RightClickMenuService", () => {
         } finally {
             subscription.unsubscribe();
         }
+    });
+
+    it("shows flat feature-id rows grouped by map, layer, and feature identity", () => {
+        const {service, inspectionSelection} = createRightClickMenuService();
+        const firstTile = coreLib.getTileIdFromPosition(11, 48, 13);
+        const secondTile = coreLib.getTileIdFromPosition(12, 48, 13);
+        const topmost = {
+            mapTileKey: coreLib.getTileFeatureLayerKey("map-a", "layer-a", firstTile),
+            featureId: "same"
+        };
+        const repeatedTile = {
+            mapTileKey: coreLib.getTileFeatureLayerKey("map-a", "layer-a", secondTile),
+            featureId: "same"
+        };
+        const otherMap = {
+            mapTileKey: coreLib.getTileFeatureLayerKey("map-b", "layer-a", firstTile),
+            featureId: "same"
+        };
+        const otherFeature = {
+            mapTileKey: coreLib.getTileFeatureLayerKey("map-a", "layer-a", firstTile),
+            featureId: "other"
+        };
+
+        service.setPickedFeatures([topmost, repeatedTile, otherMap, otherFeature]);
+
+        const items = service.menuItems.getValue();
+        expect(items.slice(0, 3).map(item => item.label)).toEqual(["same", "same", "other"]);
+        expect(new Set(items.slice(0, 3).map(item => item.id)).size).toBe(3);
+        expect(items[3].separator).toBe(true);
+        items[0].command?.({} as never);
+        items[1].command?.({} as never);
+
+        expect(inspectionSelection.inspectFeatureIds).toHaveBeenNthCalledWith(1, [topmost]);
+        expect(inspectionSelection.inspectFeatureIds).toHaveBeenNthCalledWith(2, [otherMap]);
+
+        service.setPickedFeatures([]);
+        expect(service.menuItems.getValue()[0].label).toBe("Inspect Source Data for Tile");
     });
 });

@@ -5,9 +5,13 @@ import {
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
     DECK_MAP_NEAR_Z_MULTIPLIER,
+    featurePivotDistanceMeters,
+    isFeaturePivotUsable,
     longitudeInNearestWorld,
+    MIN_FEATURE_PIVOT_DISTANCE_METERS,
     type DeckMapCameraState,
-    viewStateKeepingAnchor
+    viewStateKeepingAnchor,
+    viewStateKeepingSafeFeatureAnchor
 } from "./deck-camera-navigation";
 
 const VIEWPORT_WIDTH = 1280;
@@ -177,5 +181,74 @@ describe("deck camera navigation", () => {
 
         expect(reprojectedPivot[0]).toBeCloseTo(pixel[0], 2);
         expect(reprojectedPivot[1]).toBeCloseTo(pixel[1], 2);
+    });
+
+    it("stops an anchored zoom at the last safe state before crossing an elevated pivot", () => {
+        const currentState = {...BASE_CAMERA, zoom: 14, pitch: 55};
+        const before = createDeckMapViewport(
+            currentState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const pixel: [number, number] = [480, 310];
+        const pivot = before.unproject(pixel, {targetZ: 500}) as [number, number, number];
+
+        const requestedState = viewStateKeepingSafeFeatureAnchor(
+            currentState,
+            {...currentState, zoom: 16},
+            pivot,
+            pixel,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const after = createDeckMapViewport(
+            requestedState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const projected = after.project(pivot);
+
+        expect(requestedState.zoom).toBeGreaterThan(currentState.zoom);
+        expect(requestedState.zoom).toBeLessThan(16);
+        expect(isFeaturePivotUsable(after, pivot)).toBe(true);
+        expect(featurePivotDistanceMeters(after, pivot))
+            .toBeGreaterThanOrEqual(MIN_FEATURE_PIVOT_DISTANCE_METERS);
+        expect(Math.abs(projected[0] - pixel[0])).toBeLessThan(1);
+        expect(Math.abs(projected[1] - pixel[1])).toBeLessThan(1);
+    });
+
+    it("always allows feature-anchored zoom-out recovery", () => {
+        const currentState = {...BASE_CAMERA, zoom: 15, pitch: 55};
+        const before = createDeckMapViewport(
+            currentState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const pixel: [number, number] = [480, 310];
+        const pivot = before.unproject(pixel, {targetZ: 500}) as [number, number, number];
+
+        const zoomedOut = viewStateKeepingSafeFeatureAnchor(
+            currentState,
+            {...currentState, zoom: 13},
+            pivot,
+            pixel,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const after = createDeckMapViewport(
+            zoomedOut,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+
+        expect(zoomedOut.zoom).toBe(13);
+        expect(Math.abs(after.project(pivot)[0] - pixel[0])).toBeLessThan(1);
+        expect(Math.abs(after.project(pivot)[1] - pixel[1])).toBeLessThan(1);
     });
 });

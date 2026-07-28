@@ -69,6 +69,9 @@ const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
 const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
+export const DEFAULT_DRILL_PICK_RADIUS = 1;
+export const MIN_DRILL_PICK_RADIUS = 1;
+export const MAX_DRILL_PICK_RADIUS = 10;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 512;
 export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
@@ -485,7 +488,7 @@ export class AppStateService implements OnDestroy {
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        schema: z.array(z.coerce.number()).max(2),
+        schema: z.array(z.coerce.number()).max(3),
         toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
         fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
         urlParamName: 'mp',
@@ -927,6 +930,12 @@ export class AppStateService implements OnDestroy {
         name: 'inspectionsLimitState',
         defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
+    });
+
+    readonly drillPickRadiusState = this.createState<number>({
+        name: 'drillPickRadius',
+        defaultValue: DEFAULT_DRILL_PICK_RADIUS,
+        schema: z.coerce.number().int().min(MIN_DRILL_PICK_RADIUS).max(MAX_DRILL_PICK_RADIUS)
     });
 
     readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
@@ -2221,6 +2230,15 @@ export class AppStateService implements OnDestroy {
         const normalized = Math.min(MAX_SIMULTANEOUS_INSPECTIONS, Math.max(1, Math.trunc(numeric)));
         this.inspectionsLimitState.next(normalized);
     };
+    get drillPickRadius() {return this.drillPickRadiusState.getValue();}
+    set drillPickRadius(val: number) {
+        const numeric = Number(val);
+        if (!Number.isFinite(numeric)) {
+            return;
+        }
+        const normalized = Math.min(MAX_DRILL_PICK_RADIUS, Math.max(MIN_DRILL_PICK_RADIUS, Math.trunc(numeric)));
+        this.drillPickRadiusState.next(normalized);
+    };
     get inspectionComparison() {return this.inspectionComparisonState.getValue();}
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
@@ -3245,7 +3263,7 @@ export class AppStateService implements OnDestroy {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
             const latitude = GeoMath.toDegrees(position.latitude);
-            this.markedPosition = [longitude, latitude];
+            this.markedPosition = [longitude, latitude, position.height];
         } else {
             this.markedPosition = [];
         }

@@ -137,6 +137,13 @@ export interface CoordinatesConfig {
     legalTermsError: string | null;
 }
 
+/** One configured external map viewer shared by the context menu and search palette. */
+export interface ExternalViewerConfig {
+    id: string;
+    name: string;
+    urlTemplate: string;
+}
+
 /** Raw config shape before defaults are applied. */
 export interface RawAppConfig {
     extensionModules?: ExtensionModulesConfig;
@@ -147,6 +154,7 @@ export interface RawAppConfig {
     backgroundLayers?: RawBackgroundLayerConfig[];
     defaultBackgroundLayerId?: string | null;
     locationSearch?: RawLocationSearchConfig;
+    externalViewers?: unknown[];
     "coordinates-enabled"?: boolean;
     "coordinates-legal-terms"?: string;
 }
@@ -178,6 +186,7 @@ export interface AppConfig {
     backgroundLayers: BackgroundLayerConfig[];
     defaultBackgroundLayerId: string | null;
     locationSearch: LocationSearchConfig;
+    externalViewers: ExternalViewerConfig[];
     coordinates: CoordinatesConfig;
     serverConfig: AppServerConfigStatus;
 }
@@ -293,6 +302,12 @@ const LOCATION_SEARCH_SCHEMA = z.object({
     debounceMs: z.coerce.number().int().optional()
 });
 
+const EXTERNAL_VIEWER_SCHEMA = z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    urlTemplate: z.string().min(1)
+});
+
 const COORDINATES_LEGAL_TERMS_SCHEMA = z.object({
     "legal-terms": z.string().refine(value => value.trim().length > 0)
 });
@@ -313,6 +328,7 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     backgroundLayers: z.array(BACKGROUND_LAYER_SCHEMA).optional(),
     defaultBackgroundLayerId: z.string().nullable().optional(),
     locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
+    externalViewers: z.array(z.unknown()).optional(),
     "coordinates-enabled": z.boolean().optional(),
     "coordinates-legal-terms": z.string().min(1).optional()
 }).passthrough();
@@ -361,6 +377,7 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     backgroundLayers: DEFAULT_BACKGROUND_LAYERS,
     defaultBackgroundLayerId: DEFAULT_BACKGROUND_LAYER_ID,
     locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
+    externalViewers: [],
     coordinates: {
         enabledByDefault: true,
         legalTermsUrl: null,
@@ -605,6 +622,7 @@ export class AppConfigService {
             surveys: staticConfig.surveys ? [...staticConfig.surveys] : undefined,
             state: staticConfig.state ? {...staticConfig.state} : staticConfig.state ?? null,
             backgroundLayers: staticConfig.backgroundLayers ? [...staticConfig.backgroundLayers] : undefined,
+            externalViewers: staticConfig.externalViewers ? [...staticConfig.externalViewers] : undefined,
             locationSearch: staticConfig.locationSearch
                 ? {
                     ...staticConfig.locationSearch,
@@ -629,6 +647,9 @@ export class AppConfigService {
         }
         if (Array.isArray(serverErdblickConfig.backgroundLayers) && serverErdblickConfig.backgroundLayers.length > 0) {
             merged.backgroundLayers = [...serverErdblickConfig.backgroundLayers];
+        }
+        if (Array.isArray(serverErdblickConfig.externalViewers)) {
+            merged.externalViewers = [...serverErdblickConfig.externalViewers];
         }
         if (serverErdblickConfig.locationSearch && isPlainObject(serverErdblickConfig.locationSearch)) {
             const mergedLocationSearch: RawLocationSearchConfig = {
@@ -705,6 +726,7 @@ export class AppConfigService {
             backgroundLayers
         );
         const locationSearch = this.normalizeLocationSearch(rawConfig.locationSearch);
+        const externalViewers = this.normalizeExternalViewers(rawConfig.externalViewers);
 
         return {
             extensionModules,
@@ -715,6 +737,7 @@ export class AppConfigService {
             backgroundLayers,
             defaultBackgroundLayerId,
             locationSearch,
+            externalViewers,
             coordinates: {
                 enabledByDefault,
                 legalTermsUrl,
@@ -857,6 +880,51 @@ export class AppConfigService {
             transparent: layer.transparent ?? false,
             vendorParameters: layer.vendorParameters ?? {}
         };
+    }
+
+    /** Validates external-viewer templates once so runtime actions only substitute coordinates. */
+    private normalizeExternalViewers(rawViewers: unknown[] | undefined): ExternalViewerConfig[] {
+        if (!rawViewers) {
+            return [];
+        }
+        const viewers: ExternalViewerConfig[] = [];
+        const seenIds = new Set<string>();
+        rawViewers.forEach((rawViewer, index) => {
+            const parsed = EXTERNAL_VIEWER_SCHEMA.safeParse(rawViewer);
+            if (!parsed.success) {
+                console.warn(`[AppConfigService] Ignoring invalid externalViewers entry ${index + 1}.`);
+                return;
+            }
+            const viewer = {
+                id: parsed.data.id.trim(),
+                name: parsed.data.name.trim(),
+                urlTemplate: parsed.data.urlTemplate.trim()
+            };
+            const sampleUrl = viewer.urlTemplate
+                .replaceAll("{lat}", "0")
+                .replaceAll("{lon}", "0");
+            let protocol = "";
+            try {
+                protocol = new URL(sampleUrl).protocol;
+            } catch {
+                // The warning below also covers malformed and relative templates.
+            }
+            if (!viewer.id
+                || !viewer.name
+                || !viewer.urlTemplate.includes("{lat}")
+                || !viewer.urlTemplate.includes("{lon}")
+                || (protocol !== "http:" && protocol !== "https:")
+                || seenIds.has(viewer.id)) {
+                console.warn(
+                    `[AppConfigService] Ignoring external viewer '${viewer.id || index + 1}': ` +
+                    "expected a unique id and an HTTP(S) URL template containing {lat} and {lon}."
+                );
+                return;
+            }
+            seenIds.add(viewer.id);
+            viewers.push(viewer);
+        });
+        return viewers;
     }
 
     /** Normalizes configured location-search providers and behavior knobs. */

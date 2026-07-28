@@ -1,5 +1,6 @@
 import {
-    AppStateService
+    AppStateService,
+    type TileFeatureId
 } from "../shared/appstate.service";
 import {
     AfterViewInit,
@@ -59,9 +60,8 @@ interface PreparedContextMenuPosition {
     screenPos: {x: number; y: number};
     cartographic: {lon: number; lat: number; alt: number};
     navigationTarget?: RenderNavigationTarget;
+    featureIds: TileFeatureId[];
 }
-
-
 
 @Component({
     selector: 'map-view',
@@ -254,11 +254,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
             this.applyFirstPersonViewRequest(request);
         });
-
         this.mediaQueryList = window.matchMedia('(max-width: 56em)');
         this.isNarrow = this.mediaQueryList.matches;
         this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
             this.isNarrow = event.matches;
+            this.mapView?.setDesktopDrillPickingEnabled(!event.matches);
             this.cdr.markForCheck();
         };
         this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
@@ -348,6 +348,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
                 this.layerController!
             );
+        mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
         if (setupGeneration !== this.viewerSetupGeneration) {
@@ -599,9 +600,20 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
     private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
         this.menuService.closeAllContextMenus();
+        const screenPos = this.contextMenuScreenPosition(event);
+        const featureIds = screenPos && this.mapView
+            ? this.mapView.drillPickFeatures(
+                screenPos,
+                this.stateService.drillPickRadius,
+                this.stateService.inspectionsLimit
+            ).featureIds
+            : [];
+        this.menuService.setPickedFeatures(featureIds);
         let contextPosition: PreparedContextMenuPosition | null = null;
         try {
-            contextPosition = this.contextMenuPosition(event);
+            contextPosition = screenPos
+                ? this.contextMenuPosition(screenPos, featureIds)
+                : null;
             this.prepareSourceDataContextMenu(contextPosition);
         } catch (error) {
             console.error("Failed to prepare source-data context menu.", error);
@@ -621,17 +633,27 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         menu.show(this.contextMenuShowEvent(event) as MouseEvent);
     }
 
-    /** Resolves the screen and WGS84 position represented by a context-menu event. */
-    private contextMenuPosition(event: {clientX: number; clientY: number}): PreparedContextMenuPosition | null {
+    /** Converts a context-menu client position to CSS pixels relative to the render canvas. */
+    private contextMenuScreenPosition(event: {clientX: number; clientY: number}): {x: number; y: number} | null {
         if (!this.mapView) {
             return null;
         }
         this.stateService.focusedView = this.viewIndex();
         const canvasRect = this.mapView.getCanvasClientRect();
-        const screenPos = {
+        return {
             x: event.clientX - canvasRect.left,
             y: event.clientY - canvasRect.top
         };
+    }
+
+    /** Resolves the WGS84 position represented by a context-menu canvas position. */
+    private contextMenuPosition(
+        screenPos: {x: number; y: number},
+        featureIds: TileFeatureId[]
+    ): PreparedContextMenuPosition | null {
+        if (!this.mapView) {
+            return null;
+        }
         const navigationTarget = this.is2DMode ? undefined : this.mapView.pickNavigationTarget(screenPos);
         const cartographic = navigationTarget
             ? {
@@ -640,7 +662,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 alt: navigationTarget.position[2]
             }
             : this.mapView.pickCartographic(screenPos);
-        return cartographic ? {screenPos, cartographic, navigationTarget} : null;
+        return cartographic ? {screenPos, cartographic, navigationTarget, featureIds} : null;
     }
 
     /** Applies a view-scoped ephemeral first-person request without persisting it in app state. */
@@ -714,7 +736,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
-        const {screenPos, cartographic} = contextPosition;
+        const {featureIds, cartographic} = contextPosition;
 
         const tileIds = Array.from({length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT}, (_, level) => {
             const tileId = coreLib.getTileIdFromPosition(cartographic.lon, cartographic.lat, level);
@@ -725,7 +747,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 disabled: this.mapService.findSourceDataMapsForTileId(tileId).length === 0
             };
         });
-        const preferredPickedTileId = this.preferredPickedTileId(screenPos, tileIds);
+        const preferredPickedTileId = this.preferredPickedTileId(featureIds, tileIds);
         const preferredVisibleLevelTileId = this.preferredVisibleLevelTileId(tileIds);
         this.menuService.preferredTileIdForSourceData =
             preferredPickedTileId ??
@@ -797,22 +819,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Chooses the deepest available source-data tile among the features picked under the cursor. */
     private preferredPickedTileId(
-        screenPos: {x: number; y: number},
+        featureIds: TileFeatureId[],
         tileIds: SourceDataDropdownOption[]
     ): number | null {
-        if (!this.mapView) {
-            return null;
-        }
         const availableTileIds = new Set(
             tileIds
                 .filter(tileId => !tileId.disabled)
                 .map(tileId => Number(tileId.id))
         );
         let bestTileId: number | null = null;
-        for (const featureId of this.mapView.pickFeature(screenPos)) {
-            if (!featureId) {
-                continue;
-            }
+        for (const featureId of featureIds) {
             const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, number];
             if (!availableTileIds.has(tileId)) {
                 continue;
@@ -839,6 +855,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.menuService.setFeatureSearchScope(null);
         this.menuService.setExternalViewerLocation(null);
         this.menuService.setFirstPersonViewContext(null);
+        this.menuService.setPickedFeatures([]);
         if (clearOutline) {
             this.menuService.tileOutline.next(null);
         }

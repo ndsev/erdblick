@@ -302,6 +302,26 @@ describe('AppStateService', () => {
         expect(service.tileSubsetRenderWorkerCount).toBe(32);
         expect(service.renderBlockVertexLimit).toBe(256);
         expect(service.debugRenderBlocks).toBe(true);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists a bounded drill-pick radius without adding it to shared URLs', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(service.drillPickRadius).toBe(1);
+
+        service.drillPickRadius = 7.8;
+        expect(service.drillPickRadius).toBe(7);
+
+        service.drillPickRadius = -100;
+        expect(service.drillPickRadius).toBe(1);
+
+        service.drillPickRadius = 100;
+        expect(service.drillPickRadius).toBe(10);
+        expect(service.exportSnapshot()).toHaveProperty('drillPickRadius', 10);
+        expect((service as any).serializeUrlV2()).not.toHaveProperty('drillPickRadius');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -765,18 +785,35 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.markedPositionState.next([11.141985707869166, 48.002375728153766]);
+        service.markedPositionState.next([11.141985707869166, 48.002375728153766, 125.123456789]);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
                 v2: '1',
-                mp: '11.14198571,48.00237573',
+                mp: '11.14198571,48.00237573,125.12345679',
             }),
             queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('preserves feature altitude when setting a marker position', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
+
+        expect(service.markedPosition).toEqual([11.25, 48.5, 127.75]);
         service.ngOnDestroy();
         routerStub.events.complete();
     });

@@ -2,7 +2,10 @@ import {
     MapController,
     WebMercatorViewport
 } from "@deck.gl/core";
-import {longitudeInNearestWorld} from "./deck-camera-navigation";
+import {
+    longitudeInNearestWorld,
+    viewStateKeepingSafeFeatureAnchor
+} from "./deck-camera-navigation";
 
 export type NavigationPivot = [
     longitude: number,
@@ -222,19 +225,21 @@ export class PivotMapController extends MapController {
 
                 const stockState = super.zoom(params);
                 const zoom = stockState.getViewportProps().zoom;
-                const viewport = this.makeViewport({
-                    ...this.getViewportProps(),
-                    zoom
-                });
+                const currentProps = this.getViewportProps();
+                const viewport = this.makeViewport(currentProps);
                 if (!(viewport instanceof WebMercatorViewport)) {
                     return stockState;
                 }
 
-                const localPivot = pivotInViewportWorld(pivot, viewport);
-                return this._getUpdatedState({
-                    zoom,
-                    ...viewport.panByPosition3D(localPivot, params.pos)
-                });
+                return this._getUpdatedState(viewStateKeepingSafeFeatureAnchor(
+                    currentProps,
+                    {...currentProps, zoom},
+                    pivot,
+                    params.pos,
+                    viewport.width,
+                    viewport.height,
+                    viewport.orthographic
+                ));
             }
 
             /**
@@ -344,13 +349,17 @@ export class PivotMapController extends MapController {
                     return stockState;
                 }
                 const currentPivot = pivotInViewportWorld(pivot, currentViewport);
-                const nextPivot = pivotInViewportWorld(pivot, nextViewport);
                 const projected = currentViewport.project(currentPivot);
                 emitNavigationPivot(pivot, false);
-                return this._getUpdatedState({
-                    ...stockState.getViewportProps(),
-                    ...nextViewport.panByPosition3D(nextPivot, [projected[0], projected[1]])
-                });
+                return this._getUpdatedState(viewStateKeepingSafeFeatureAnchor(
+                    this.getViewportProps(),
+                    stockState.getViewportProps(),
+                    pivot,
+                    [projected[0], projected[1]],
+                    currentViewport.width,
+                    currentViewport.height,
+                    currentViewport.orthographic
+                ));
             }
         };
     }

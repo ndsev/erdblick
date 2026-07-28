@@ -272,6 +272,104 @@ describe("AppConfigService", () => {
         expect(config.surveys[0].id).toBe("tooling-days-2026");
     });
 
+    it("replaces configured external viewers in server order and accepts an explicit empty list", async () => {
+        const staticViewers = [
+            {
+                id: "static",
+                name: "Static Viewer",
+                urlTemplate: "https://static.test/?lat={lat}&lon={lon}"
+            }
+        ];
+        const serverViewers = [
+            {
+                id: "second",
+                name: "Second Viewer",
+                urlTemplate: "https://second.test/{lon}/{lat}"
+            },
+            {
+                id: "first",
+                name: "First Viewer",
+                urlTemplate: "https://first.test/{lat}/{lon}"
+            }
+        ];
+        const replacementHarness = createService();
+        replacementHarness.httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({externalViewers: staticViewers});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {erdblick: {externalViewers: serverViewers}} satisfies ServerConfigResponse
+            }));
+        });
+
+        const replacement = await replacementHarness.service.load();
+
+        expect(replacement.externalViewers.map(viewer => viewer.id)).toEqual(["second", "first"]);
+
+        const emptyHarness = createService();
+        emptyHarness.httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({externalViewers: staticViewers});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {erdblick: {externalViewers: []}} satisfies ServerConfigResponse
+            }));
+        });
+
+        expect((await emptyHarness.service.load()).externalViewers).toEqual([]);
+    });
+
+    it("drops duplicate, malformed, and non-HTTP external viewers without rejecting valid entries", async () => {
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    externalViewers: [
+                        {
+                            id: "valid",
+                            name: "Valid",
+                            urlTemplate: "https://viewer.test/{lat}/{lon}"
+                        },
+                        {
+                            id: "valid",
+                            name: "Duplicate",
+                            urlTemplate: "https://duplicate.test/{lat}/{lon}"
+                        },
+                        {
+                            id: "unsafe",
+                            name: "Unsafe",
+                            urlTemplate: "javascript:open({lat},{lon})"
+                        },
+                        {
+                            id: "missing-lon",
+                            name: "Missing longitude",
+                            urlTemplate: "https://viewer.test/{lat}"
+                        }
+                    ]
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        try {
+            const config = await service.load();
+
+            expect(config.externalViewers).toEqual([
+                {
+                    id: "valid",
+                    name: "Valid",
+                    urlTemplate: "https://viewer.test/{lat}/{lon}"
+                }
+            ]);
+            expect(warning).toHaveBeenCalledTimes(4);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
     it("uses the built-in offline location provider by default", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
