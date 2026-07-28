@@ -111,11 +111,11 @@ describe("RightClickMenuService", () => {
         const firstTile = coreLib.getTileIdFromPosition(11, 48, 13);
         const secondTile = coreLib.getTileIdFromPosition(12, 48, 13);
         const topmost = {
-            mapTileKey: coreLib.getTileFeatureLayerKey("map-a", "layer-a", firstTile),
+            mapTileKey: coreLib.getTileFeatureLayerKey("NDS.Live/Islands/map-a", "layer-a", firstTile),
             featureId: "same"
         };
         const repeatedTile = {
-            mapTileKey: coreLib.getTileFeatureLayerKey("map-a", "layer-a", secondTile),
+            mapTileKey: coreLib.getTileFeatureLayerKey("NDS.Live/Islands/map-a", "layer-a", secondTile),
             featureId: "same"
         };
         const otherMap = {
@@ -123,7 +123,7 @@ describe("RightClickMenuService", () => {
             featureId: "same"
         };
         const otherFeature = {
-            mapTileKey: coreLib.getTileFeatureLayerKey("map-a", "layer-a", firstTile),
+            mapTileKey: coreLib.getTileFeatureLayerKey("NDS.Live/Islands/map-a", "layer-a", firstTile),
             featureId: "other"
         };
 
@@ -131,6 +131,8 @@ describe("RightClickMenuService", () => {
 
         const items = service.menuItems.getValue();
         expect(items.slice(0, 3).map(item => item.label)).toEqual(["same", "same", "other"]);
+        expect(items.slice(0, 3).map(item => item["mapIdLabel"])).toEqual(["map-a", "map-b", "map-a"]);
+        expect(items.slice(0, 3).map(item => item.icon)).toEqual([undefined, undefined, undefined]);
         expect(new Set(items.slice(0, 3).map(item => item.id)).size).toBe(3);
         expect(items[3].separator).toBe(true);
         items[0].command?.({} as never);

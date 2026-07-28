@@ -98,7 +98,27 @@ interface PreparedContextMenuPosition {
         }
         @if (!appModeService.isVisualizationOnly && !isNarrow) {
             <p-contextMenu #viewerContextMenu [model]="menuItems" (onShow)="onContextMenuShow()"
-                           (onHide)="onContextMenuHide()" appendTo="body"/>
+                           (onHide)="onContextMenuHide()" appendTo="body">
+                <ng-template #item let-item>
+                    <a pRipple class="p-contextmenu-item-link"
+                       [attr.data-automationid]="item.automationId"
+                       [attr.title]="item.title">
+                        @if (item.icon) {
+                            <span class="p-contextmenu-item-icon" [ngClass]="item.icon"></span>
+                        }
+                        @if (item.mapIdLabel) {
+                            <p-tag class="picked-feature-map-tag"
+                                   severity="contrast"
+                                   [rounded]="true"
+                                   [value]="item.mapIdLabel"/>
+                        }
+                        <span class="p-contextmenu-item-label">{{ item.label }}</span>
+                        @if (item.items?.length) {
+                            <span class="p-contextmenu-submenu-icon pi pi-angle-right"></span>
+                        }
+                    </a>
+                </ng-template>
+            </p-contextMenu>
         }
         @if (!appModeService.isVisualizationOnly) {
             <sourcedatadialog></sourcedatadialog>

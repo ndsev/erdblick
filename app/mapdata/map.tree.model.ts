@@ -253,6 +253,108 @@ export class GroupTreeNode {
     }
 }
 
+type MapTreeSourceNode = GroupTreeNode | MapTreeNode | LayerTreeNode | StyleOptionNode;
+
+/**
+ * Presentation-only tree node consumed by the map panel while a filter is active.
+ * Mutable map, layer, and style-option state remains shared with the canonical source node.
+ */
+export interface MapTreeViewNode {
+    id: string;
+    key: string;
+    type: string;
+    expanded?: boolean;
+    children?: MapTreeViewNode[];
+    visible?: boolean[];
+    viewConfig?: LayerViewConfig[];
+    value?: Array<boolean | number | string>;
+}
+
+/** Returns the source children of a branch node without manufacturing children for leaves. */
+function mapTreeNodeChildren(node: MapTreeSourceNode): MapTreeSourceNode[] | undefined {
+    if ("children" in node) {
+        return node.children;
+    }
+    return undefined;
+}
+
+/** Matches the identifiers rendered by the map tree and the human label of style options. */
+function mapTreeNodeMatches(node: MapTreeSourceNode, query: string): boolean {
+    if ("layerId" in node) {
+        return node.id.toLocaleLowerCase().includes(query)
+            || node.info.label.toLocaleLowerCase().includes(query);
+    }
+    return node.id.toLocaleLowerCase().includes(query);
+}
+
+/** Clones a complete display subtree while retaining references to its underlying control state. */
+function cloneMapTreeSubtree(node: MapTreeSourceNode): MapTreeViewNode {
+    const children = mapTreeNodeChildren(node);
+    if (children === undefined) {
+        return {...node};
+    }
+    return {
+        ...node,
+        children: children.map(child => cloneMapTreeSubtree(child))
+    };
+}
+
+/**
+ * Filters one branch recursively.
+ * Ancestors of descendant matches are expanded only in the cloned presentation tree.
+ */
+function filterMapTreeNode(node: MapTreeSourceNode, query: string): MapTreeViewNode | null {
+    // Lenient matching keeps a directly matched map or branch complete, just like PrimeNG's tree filter.
+    if (mapTreeNodeMatches(node, query)) {
+        return cloneMapTreeSubtree(node);
+    }
+
+    const children = mapTreeNodeChildren(node);
+    if (!children?.length) {
+        return null;
+    }
+
+    const filteredChildren: MapTreeViewNode[] = [];
+    for (const child of children) {
+        const filteredChild = filterMapTreeNode(child, query);
+        if (filteredChild !== null) {
+            filteredChildren.push(filteredChild);
+        }
+    }
+    if (!filteredChildren.length) {
+        return null;
+    }
+
+    return {
+        ...node,
+        children: filteredChildren,
+        expanded: true
+    };
+}
+
+/**
+ * Builds the map panel's filtered view without changing datasource or per-view map state.
+ * An empty query returns the canonical root nodes so their normal expansion state is restored.
+ */
+export function filterMapTreeNodes(
+    nodes: Array<GroupTreeNode | MapTreeNode>,
+    filterText: string
+): MapTreeViewNode[] {
+    const query = filterText.trim().toLocaleLowerCase();
+    if (!query) {
+        return nodes;
+    }
+
+    const filteredNodes: MapTreeViewNode[] = [];
+    for (const node of nodes) {
+        const filteredNode = filterMapTreeNode(node, query);
+        if (filteredNode !== null) {
+            filteredNodes.push(filteredNode);
+        }
+    }
+    return filteredNodes;
+}
+
 export interface SyncViewsResult {
     styleOptionChanges: Array<[StyleOptionNode, number]>;
     viewConfigChanged: boolean;

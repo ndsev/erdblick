@@ -3,13 +3,23 @@ import {BehaviorSubject} from "rxjs";
 import {
     dataSourceCatalogStatus,
     dataSourceProgressPercent,
+    filterMapTreeNodes,
+    GroupTreeNode,
     isDataSourceCatalogEntryReady,
+    LayerInfoItem,
     MapLayerTree,
     MapInfoItem,
+    MapTreeNode,
+    MapTreeViewNode,
+    StyleOptionNode,
     sortDataSourceCatalogEntries
 } from './map.tree.model';
 import type {AppStateService} from "../shared/appstate.service";
-import type {ErdblickStyle, StyleService} from "../styledata/style.service";
+import type {
+    ErdblickStyle,
+    FeatureStyleOptionWithStringType,
+    StyleService
+} from "../styledata/style.service";
 
 function source(mapId: string, configIndex?: number, status?: string): MapInfoItem {
     return {
@@ -24,6 +34,82 @@ function source(mapId: string, configIndex?: number, status?: string): MapInfoIt
         ...(configIndex === undefined ? {} : {configIndex}),
         ...(status === undefined ? {} : {status})
     };
+}
+
+/** Creates one feature-layer metadata entry for map-tree filtering tests. */
+function featureLayer(layerId: string): LayerInfoItem {
+    return {
+        layerId,
+        type: "Features",
+        canRead: true,
+        canWrite: false,
+        coverage: [],
+        featureTypes: [],
+        version: {major: 1, minor: 0, patch: 0},
+        zoomLevels: [13]
+    };
+}
+
+/** Creates one boolean style option with distinct machine and display names. */
+function styleOption(id: string, label: string): FeatureStyleOptionWithStringType {
+    return {
+        id,
+        label,
+        description: label,
+        type: "Bool",
+        defaultValue: false,
+        internal: false
+    };
+}
+
+/** Builds a collapsed group/map/layer hierarchy with two layers and two road options. */
+function filterTreeFixture() {
+    const mapInfo = source("Vendor/PrimaryMap");
+    mapInfo.layers = {
+        Roads: featureLayer("Roads"),
+        Buildings: featureLayer("Buildings")
+    };
+    const mapNode = new MapTreeNode(mapInfo);
+    const roads = mapNode.layers.get("Roads")!;
+    roads.children = [
+        new StyleOptionNode(
+            mapInfo.mapId,
+            roads.id,
+            styleOption("road-labels", "Show Road Names"),
+            "customer/roads",
+            "roads",
+            true
+        ),
+        new StyleOptionNode(
+            mapInfo.mapId,
+            roads.id,
+            styleOption("road-shields", "Show Route Shields"),
+            "customer/roads",
+            "roads",
+            false
+        )
+    ];
+
+    const group = new GroupTreeNode("Vendor");
+    group.children = [mapNode];
+    group.expanded = false;
+    group.visible = [true, false];
+    mapNode.expanded = false;
+    mapNode.visible = [true, false];
+    roads.expanded = false;
+    roads.viewConfig = [
+        {autoLevel: true, level: 13, visible: true},
+        {autoLevel: false, level: 12, visible: false}
+    ];
+    return {nodes: [group], group, mapNode, roads};
+}
+
+/** Flattens stable presentation keys in rendered tree order. */
+function flattenedMapTreeKeys(nodes: MapTreeViewNode[]): string[] {
+    return nodes.flatMap(node => [
+        node.key,
+        ...flattenedMapTreeKeys(node.children ?? [])
+    ]);
 }
 
 describe('datasource catalog tree helpers', () => {
@@ -54,6 +140,69 @@ describe('datasource catalog tree helpers', () => {
         expect(dataSourceProgressPercent({...source('fraction'), progress: 0.42})).toBe(42);
         expect(dataSourceProgressPercent({...source('percent'), progress: 73})).toBe(73);
         expect(dataSourceProgressPercent({...source('missing'), progress: null})).toBeNull();
+    });
+});
+
+describe("map tree presentation filtering", () => {
+    it("returns the canonical tree for an empty query", () => {
+        const fixture = filterTreeFixture();
+
+        expect(filterMapTreeNodes(fixture.nodes, "   ")).toBe(fixture.nodes);
+    });
+
+    it("matches map ids case-insensitively and retains the complete map subtree", () => {
+        const fixture = filterTreeFixture();
+        const result = filterMapTreeNodes(fixture.nodes, "PRIMARYmap");
+        const filteredMap = result[0].children?.[0];
+        const filteredRoads = filteredMap?.children?.[0];
+
+        expect(result.map(node => node.id)).toEqual(["Vendor"]);
+        expect(filteredMap?.id).toBe("Vendor/PrimaryMap");
+        expect(filteredMap?.children?.map(node => node.id)).toEqual(["Roads", "Buildings"]);
+        expect(result[0].visible).toBe(fixture.group.visible);
+        expect(filteredMap?.visible).toBe(fixture.mapNode.visible);
+        expect(filteredRoads?.viewConfig).toBe(fixture.roads.viewConfig);
+    });
+
+    it("keeps only the expanded ancestor path to a matching layer", () => {
+        const fixture = filterTreeFixture();
+        const result = filterMapTreeNodes(fixture.nodes, "build");
+        const filteredMap = result[0].children?.[0];
+
+        expect(result[0].expanded).toBe(true);
+        expect(filteredMap?.expanded).toBe(true);
+        expect(filteredMap?.children?.map(node => node.id)).toEqual(["Buildings"]);
+        expect(fixture.group.expanded).toBe(false);
+        expect(fixture.mapNode.expanded).toBe(false);
+    });
+
+    it("matches style-option labels and ids while leaving source expansion unchanged", () => {
+        const fixture = filterTreeFixture();
+        const labelResult = filterMapTreeNodes(fixture.nodes, "road names");
+        const filteredRoads = labelResult[0].children?.[0].children?.[0];
+        const idResult = filterMapTreeNodes(fixture.nodes, "road-shields");
+
+        expect(filteredRoads?.id).toBe("Roads");
+        expect(filteredRoads?.expanded).toBe(true);
+        expect(filteredRoads?.children?.map(node => node.id)).toEqual(["road-labels"]);
+        expect(idResult[0].children?.[0].children?.[0].children?.map(node => node.id))
+            .toEqual(["road-shields"]);
+        expect(fixture.roads.expanded).toBe(false);
+    });
+
+    it("returns no roots when no displayed identifier or option label matches", () => {
+        const fixture = filterTreeFixture();
+
+        expect(filterMapTreeNodes(fixture.nodes, "not-present")).toEqual([]);
+    });
+
+    it("preserves unique logical keys across equivalent filtered projections", () => {
+        const fixture = filterTreeFixture();
+        const firstKeys = flattenedMapTreeKeys(filterMapTreeNodes(fixture.nodes, "primary"));
+        const secondKeys = flattenedMapTreeKeys(filterMapTreeNodes(fixture.nodes, "primarymap"));
+
+        expect(secondKeys).toEqual(firstKeys);
+        expect(new Set(firstKeys).size).toBe(firstKeys.length);
     });
 });
 

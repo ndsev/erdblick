@@ -18,11 +18,25 @@ import {AppModeService} from "../shared/app-mode.service";
 import {
     CoverageRectItem,
     dataSourceCatalogStatus,
+    filterMapTreeNodes,
     MapInfoItem,
+    MapTreeViewNode,
     removeGroupPrefix,
     StyleOptionNode
 } from "./map.tree.model";
-import {Subscription} from "rxjs";
+import {
+    BehaviorSubject,
+    combineLatest,
+    distinctUntilChanged,
+    filter,
+    map,
+    Observable,
+    of,
+    startWith,
+    Subscription,
+    switchMap,
+    timer
+} from "rxjs";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
@@ -35,6 +49,7 @@ import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {InfoMessageService} from "../shared/info.service";
 import {StyleEditorRequestService} from "../styledata/style-editor-request.service";
+import {StyleService} from "../styledata/style.service";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -50,6 +65,14 @@ interface MetadataLayerOption {
     mapTileKey: string;
 }
 
+/** Map-tree data projected for display without changing the canonical map or datasource state. */
+interface MapPanelTreeView {
+    size: number;
+    nodes: MapTreeViewNode[];
+}
+
+/** Mirrors PrimeNG TreeTable's default delay so rapid typing produces one applied map filter. */
+const MAP_FILTER_DELAY_MS = 300;
 
 @Component({
     selector: 'map-panel',
@@ -64,6 +87,23 @@ interface MetadataLayerOption {
                   'border-bottom-left-radius': '0 !important' }">
             <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
                       (mousedown)="$event.stopPropagation()"/>
+            <ng-container *ngIf="mapTreeView$ | async as mapTreeView">
+            <div class="map-filter" data-testid="map-filter">
+                <p-iconfield class="input-container">
+                    <p-inputicon class="pi pi-filter"/>
+                    <input class="filter-input" data-testid="map-filter-input" type="text" pInputText
+                           placeholder="Filter maps, layers, and options"
+                           aria-label="Filter maps, layers, and options"
+                           [ngModel]="mapFilterText"
+                           (ngModelChange)="updateMapFilter($event)"
+                           (keydown.escape)="clearMapFilter(); $event.stopPropagation()"/>
+                    @if (mapFilterText) {
+                        <i onEnterClick class="pi pi-times clear-icon" data-testid="map-filter-clear"
+                           role="button" tabindex="0" aria-label="Clear map filter"
+                           (click)="clearMapFilter()"></i>
+                    }
+                </p-iconfield>
+            </div>
             <p-accordion data-testid="map-tabs" [(value)]="mapAccordionValue" [multiple]="true">
                 @for (index of viewIndices; track index) {
                     <p-accordion-panel class="map-tab" [value]="index" [attr.data-testid]="getMapTabTestId(index)">
@@ -289,17 +329,19 @@ interface MetadataLayerOption {
                         </p-accordion-header>
 
                         <p-accordion-content>
-                            <ng-container *ngIf="mapService.maps$ | async as mapGroups">
-                                @if (!mapGroups.size) {
-                                    <div style="margin-top: 0.75em">
+                            @if (mapAccordionValue.includes(index)) {
+                            @if (!mapTreeView.size) {
+                                    <div class="map-tree-message">
                                         No maps loaded.
                                     </div>
-                                } @else {
-                                    
-                                }
-                           
-                            <div *ngIf="mapGroups.size" class="maps-container">
-                                <p-tree [value]="mapGroups.nodes">
+                            } @else if (!mapTreeView.nodes.length) {
+                                <div class="map-tree-message" data-testid="map-filter-empty">
+                                    No matching maps, layers, or options.
+                                </div>
+                            } @else {
+                            <div class="maps-container">
+                                <p-tree [value]="mapTreeView.nodes" [trackBy]="trackMapTreeNode"
+                                        [attr.data-testid]="'map-tree-' + index">
                                     <!-- Template for Group nodes -->
                                     <ng-template let-node pTemplate="Group">
                                         <div class="flex-container map-group-row">
@@ -369,11 +411,11 @@ interface MetadataLayerOption {
                                                 </label>
                                             </span>
                                             <div class="map-controls">
-                                                <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
+                                                <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id))"
                                                           label="" pTooltip="Focus on map" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0"
-                                                          *ngIf="flatCoverage(node).length">
+                                                          *ngIf="mapCoverage(node.id).length">
                                                     <span class="material-symbols-outlined"
                                                           style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                                         </p-button>
@@ -479,7 +521,8 @@ interface MetadataLayerOption {
                                     <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
                                 </p-tree>
                             </div>
-                            </ng-container>
+                            }
+                            }
                         </p-accordion-content>
                     </p-accordion-panel>
                 }
@@ -492,6 +535,7 @@ interface MetadataLayerOption {
                         </span>
                 </p-button>
             }
+            </ng-container>
         </app-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
@@ -504,6 +548,32 @@ interface MetadataLayerOption {
  */
 export class MapPanelComponent {
     protected readonly wmsExperimentalTooltip = WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP;
+
+    mapFilterText = "";
+    private readonly mapFilterTextChanges = new BehaviorSubject("");
+    private readonly appliedMapFilterTextChanges = this.mapFilterTextChanges.pipe(
+        map(filterText => filterText.trim()),
+        switchMap(filterText => filterText
+            ? timer(MAP_FILTER_DELAY_MS).pipe(map(() => filterText))
+            : of(filterText)
+        ),
+        distinctUntilChanged()
+    );
+    readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
+        this.mapService.maps$,
+        this.appliedMapFilterTextChanges,
+        this.styleService.styleGroups,
+        this.stateService.numViewsState,
+        this.mapService.layerStateChanged.pipe(
+            filter(reason => reason === "visibility"),
+            startWith("visibility")
+        )
+    ]).pipe(
+        map(([mapTree, filterText]) => ({
+            size: mapTree.size,
+            nodes: filterMapTreeNodes(mapTree.nodes, filterText)
+        }))
+    );
 
     subscriptions: Subscription[] = [];
     viewIndices: number[] = [];
@@ -543,7 +613,8 @@ export class MapPanelComponent {
                 private readonly dialogStack: DialogStackService,
                 private readonly featureSearchService: FeatureSearchService,
                 private readonly infoMessageService: InfoMessageService,
-                private readonly styleEditorRequestService: StyleEditorRequestService) {
+                private readonly styleEditorRequestService: StyleEditorRequestService,
+                private readonly styleService: StyleService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
@@ -660,6 +731,23 @@ export class MapPanelComponent {
     onMapLayerDialogShow() {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
+
+    /** Applies one presentation filter to the map trees rendered for every view. */
+    updateMapFilter(filterText: string) {
+        this.mapFilterText = filterText;
+        this.mapFilterTextChanges.next(filterText);
+    }
+
+    /** Clears the session-local map-tree filter and restores the canonical tree presentation. */
+    clearMapFilter() {
+        this.updateMapFilter("");
+    }
+
+    /** Keeps PrimeNG tree components attached to the same logical nodes across filter projections. */
+    readonly trackMapTreeNode = (
+        _index: number,
+        node: MapTreeViewNode
+    ): string => node.key;
 
     /** Refreshes independent tile-grid controls from their per-view AppState values. */
     private refreshTileGridControls(): void {
@@ -853,16 +941,15 @@ export class MapPanelComponent {
         );
     }
 
-    /** Flattens one tree node's direct child coverage rectangles into a single array. */
-    flatCoverage(node: any): (number | CoverageRectItem)[] {
-        if (!node || !node.children) {
+    /** Collects full map coverage from the canonical tree, independent of the filtered presentation. */
+    mapCoverage(mapId: string): (number | CoverageRectItem)[] {
+        const mapNode = this.mapService.maps.maps.get(mapId);
+        if (!mapNode) {
             return [];
         }
         const coverage: (number | CoverageRectItem)[] = [];
-        for (const child of node.children) {
-            if (child.info && Array.isArray(child.info.coverage)) {
-                coverage.push(...child.info.coverage);
-            }
+        for (const child of mapNode.children) {
+            coverage.push(...child.info.coverage);
         }
         return coverage;
     }

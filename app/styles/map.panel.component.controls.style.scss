@@ -80,6 +80,40 @@
     }
   }
 
+  .map-filter {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    flex: 0 0 auto;
+    padding: 0 0.25em 0.25em 0.25em;
+    background: var(--p-content-background);
+    border-bottom: 1px solid var(--p-content-border-color);
+
+    .input-container {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: 100%;
+
+      .filter-input {
+        width: 100%;
+        height: 1.75em;
+        border: solid 1px var(--p-content-border-color);
+        border-radius: 6px;
+        direction: ltr;
+      }
+
+      .clear-icon {
+        cursor: pointer;
+      }
+    }
+  }
+
+  .map-tree-message {
+    margin: 0.75em 0.5em;
+  }
+
   .p-tree {
     padding: 0.25em;
 

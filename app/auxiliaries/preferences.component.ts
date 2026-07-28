@@ -45,327 +45,354 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
                     [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
                     [persistLayout]="true" [layoutId]="dialogLayoutId"
                     (onShow)="onDialogShow()">
-            <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
-            <div class="slider-container">
-                <label [for]="tilesToLoadInput">Max Tiles to Load
-                    <i class="pi pi-info-circle"
-                       pTooltip="Caps how many visible map tiles may be requested and rendered at once. Lower values reduce load; higher values allow more tiles before throttling."
-                       tooltipPosition="top"></i>
-                </label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="tilesToLoadInput"
-                               (ngModelChange)="onTilesToLoadInputChange($event)"
-                               (keydown.enter)="applyTileLimits()"/>
-                        <p-slider [(ngModel)]="tilesToLoadInput"
-                                  (ngModelChange)="onTilesToLoadSliderChange($event)"
-                                  class="w-full"
-                                  [min]="0"
-                                  [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
-                    </div>
-                    <p-button (click)="applyTileLimits()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!tilesToLoadChanged"></p-button>
-                </div>
+            <p-tabs value="general" class="preferences-tabs" data-testid="preferences-tabs" scrollable>
+                <p-tablist>
+                    <p-tab value="general" data-testid="preferences-tab-general">General</p-tab>
+                    <p-tab value="inspection" data-testid="preferences-tab-inspection">Inspect & Search</p-tab>
+                    <p-tab value="rendering" data-testid="preferences-tab-rendering">Rendering</p-tab>
+                    <p-tab value="storage" data-testid="preferences-tab-storage">Storage</p-tab>
+                </p-tablist>
+                <p-tabpanels>
+                    <p-tabpanel value="general">
+                        <div class="slider-container">
+                            <label [for]="mapZoomStepInput">Zoom Speed
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Controls mouse-wheel zoom sensitivity and the Q/E / +/- zoom step."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="mapZoomStepInput"
+                                           (ngModelChange)="onMapZoomStepInputChange($event)"
+                                           (keydown.enter)="applyMapZoomStep()"/>
+                                    <p-slider [(ngModel)]="mapZoomStepInput"
+                                              (ngModelChange)="onMapZoomStepSliderChange($event)"
+                                              class="w-full"
+                                              [min]="MIN_MAP_ZOOM_STEP"
+                                              [max]="MAX_MAP_ZOOM_STEP"
+                                              [step]="0.05"></p-slider>
+                                </div>
+                                <p-button (click)="applyMapZoomStep()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!mapZoomStepChanged"></p-button>
+                            </div>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="button-container">
+                            <label>Dark Mode</label>
+                            <p-selectButton [options]="darkModeOptions"
+                                            [(ngModel)]="darkModeSetting"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            (ngModelChange)="setDarkMode($event)"></p-selectButton>
+                        </div>
+                        <div class="button-container">
+                            <label for="coordinates-enabled-setting">Show coordinates</label>
+                            <p-toggleswitch inputId="coordinates-enabled-setting"
+                                            data-testid="coordinates-enabled-setting"
+                                            [ngModel]="coordinatesPolicy.effectiveEnabled"
+                                            (ngModelChange)="coordinatesPolicy.requestEnabled($event)"/>
+                        </div>
+                        <div class="button-container">
+                            <label>Collapse Dock automatically</label>
+                            <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"></p-toggleswitch>
+                        </div>
+                    </p-tabpanel>
+
+                    <p-tabpanel value="inspection">
+                        <div class="slider-container">
+                            <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="limitSimultaneousInspectionsInput"
+                                           (ngModelChange)="onInspectionsLimitInputChange($event)"
+                                           (keydown.enter)="applyInspectionsLimits()"/>
+                                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput"
+                                              (ngModelChange)="onInspectionsLimitSliderChange($event)"
+                                              class="w-full"
+                                              [min]="1"
+                                              [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                                </div>
+                                <p-button (click)="applyInspectionsLimits()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!inspectionsLimitChanged"></p-button>
+                            </div>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="slider-container">
+                            <label for="drill-pick-radius-input">Drill Pick Radius (px)
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Pixel radius used by feature drill-picking."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input id="drill-pick-radius-input"
+                                           data-testid="drill-pick-radius-input"
+                                           class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="drillPickRadiusInput"
+                                           (ngModelChange)="onDrillPickRadiusInputChange($event)"
+                                           (keydown.enter)="applyDrillPickRadius()"/>
+                                    <p-slider [(ngModel)]="drillPickRadiusInput"
+                                              (ngModelChange)="onDrillPickRadiusSliderChange($event)"
+                                              class="w-full"
+                                              [min]="MIN_DRILL_PICK_RADIUS"
+                                              [max]="MAX_DRILL_PICK_RADIUS"></p-slider>
+                                </div>
+                                <p-button (click)="applyDrillPickRadius()"
+                                          data-testid="apply-drill-pick-radius"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!drillPickRadiusChanged"></p-button>
+                            </div>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="button-container">
+                            <label>Expand inspection trees by default</label>
+                            <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
+                        </div>
+                        <div class="button-container value-presentation-container">
+                            <label for="inspection-value-presentation">Inspection value bubbles</label>
+                            <p-multiSelect inputId="inspection-value-presentation"
+                                           class="value-presentation-select"
+                                           [options]="inspectionValuePresentationOptions"
+                                           [ngModel]="inspectionValuePresentationSelection"
+                                           optionLabel="label"
+                                           optionValue="value"
+                                           [filter]="false"
+                                           [showToggleAll]="false"
+                                           [maxSelectedLabels]="1"
+                                           selectedItemsLabel="{0} options"
+                                           placeholder="Plain"
+                                           appendTo="body"
+                                           (ngModelChange)="onInspectionValuePresentationChange($event)">
+                            </p-multiSelect>
+                        </div>
+                        <div class="button-container value-presentation-container">
+                            <label for="source-data-default-columns">Source data columns</label>
+                            <p-multiSelect inputId="source-data-default-columns"
+                                           class="value-presentation-select"
+                                           [options]="sourceDataColumnOptions"
+                                           [ngModel]="sourceDataColumnSelection"
+                                           optionLabel="label"
+                                           optionValue="value"
+                                           [filter]="false"
+                                           [showToggleAll]="false"
+                                           [maxSelectedLabels]="1"
+                                           selectedItemsLabel="{0} columns"
+                                           placeholder="Key and value only"
+                                           appendTo="body"
+                                           (ngModelChange)="onSourceDataColumnSelectionChange($event)">
+                            </p-multiSelect>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="slider-container">
+                            <label [for]="locationSearchResultLimitInput">Location Matches</label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="locationSearchResultLimitInput"
+                                           (ngModelChange)="onLocationSearchResultLimitInputChange($event)"
+                                           (keydown.enter)="applyLocationSearchResultLimit()"/>
+                                    <p-slider [(ngModel)]="locationSearchResultLimitInput"
+                                              (ngModelChange)="onLocationSearchResultLimitSliderChange($event)"
+                                              class="w-full"
+                                              [min]="1"
+                                              [max]="MAX_LOCATION_SEARCH_RESULT_LIMIT"></p-slider>
+                                </div>
+                                <p-button (click)="applyLocationSearchResultLimit()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!locationSearchResultLimitChanged"></p-button>
+                            </div>
+                        </div>
+                    </p-tabpanel>
+
+                    <p-tabpanel value="rendering">
+                        <div class="slider-container">
+                            <label [for]="tilesToLoadInput">Max Tiles to Load
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Caps how many visible map tiles may be requested and rendered at once. Lower values reduce load; higher values allow more tiles before throttling."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="tilesToLoadInput"
+                                           (ngModelChange)="onTilesToLoadInputChange($event)"
+                                           (keydown.enter)="applyTileLimits()"/>
+                                    <p-slider [(ngModel)]="tilesToLoadInput"
+                                              (ngModelChange)="onTilesToLoadSliderChange($event)"
+                                              class="w-full"
+                                              [min]="0"
+                                              [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                                </div>
+                                <p-button (click)="applyTileLimits()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!tilesToLoadChanged"></p-button>
+                            </div>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="button-container">
+                            <label>Tile pull compression
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Use only when the bandwith is low"
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-selectButton [options]="toggleOptions"
+                                            [(ngModel)]="tilePullCompressionEnabledSetting"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
+                        </div>
+                        <div class="button-container">
+                            <label>WebGL antialiasing
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-selectButton [options]="toggleOptions"
+                                            [(ngModel)]="deckAntialiasingEnabledSetting"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
+                        </div>
+                        <div class="slider-container">
+                            <label for="low-fi-tile-threshold-input">High/Low-Fi Tile Threshold
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Visible tile count where the view switches from high-fi to low-fi rendering. Higher values preserve detailed rendering longer but can cost more."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input id="low-fi-tile-threshold-input"
+                                           class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="lowFiTileThresholdInput"
+                                           (ngModelChange)="onLowFiTileThresholdInputChange($event)"
+                                           (keydown.enter)="applyLowFiTileThreshold()"/>
+                                    <p-slider [(ngModel)]="lowFiTileThresholdInput"
+                                              (ngModelChange)="onLowFiTileThresholdSliderChange($event)"
+                                              class="w-full"
+                                              [min]="MIN_LOW_FI_TILE_THRESHOLD"
+                                              [max]="MAX_LOW_FI_TILE_THRESHOLD"></p-slider>
+                                </div>
+                                <p-button (click)="applyLowFiTileThreshold()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!lowFiTileThresholdChanged"></p-button>
+                            </div>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="slider-container">
+                            <label for="render-worker-count-input">Render Workers
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Number of parallel TileSubsetLayer WASM workers. Zero selects half of the available logical CPUs automatically."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input id="render-worker-count-input"
+                                           class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="renderWorkerCountInput"
+                                           (ngModelChange)="onRenderWorkerCountInputChange($event)"
+                                           (keydown.enter)="applyRenderWorkerCount()"/>
+                                    <p-slider [(ngModel)]="renderWorkerCountInput"
+                                              (ngModelChange)="onRenderWorkerCountSliderChange($event)"
+                                              class="w-full"
+                                              [min]="AUTO_TILE_SUBSET_RENDER_WORKER_COUNT"
+                                              [max]="MAX_TILE_SUBSET_RENDER_WORKER_COUNT"></p-slider>
+                                    <small>{{ renderWorkerCountDescription }}</small>
+                                </div>
+                                <p-button (click)="applyRenderWorkerCount()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!renderWorkerCountChanged"></p-button>
+                            </div>
+                        </div>
+                        <div class="slider-container">
+                            <label for="render-block-vertex-limit-input">Render Block Vertex Limit
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Soft maximum source-geometry vertex count for a multi-tile Morton render block. A single tile is always allowed."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input id="render-block-vertex-limit-input"
+                                           class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="renderBlockVertexLimitInput"
+                                           (ngModelChange)="onRenderBlockVertexLimitInputChange($event)"
+                                           (keydown.enter)="applyRenderBlockVertexLimit()"/>
+                                    <p-slider [(ngModel)]="renderBlockVertexLimitInput"
+                                              (ngModelChange)="onRenderBlockVertexLimitSliderChange($event)"
+                                              class="w-full"
+                                              [min]="MIN_RENDER_BLOCK_VERTEX_LIMIT"
+                                              [max]="MAX_RENDER_BLOCK_VERTEX_LIMIT"
+                                              [step]="256"></p-slider>
+                                </div>
+                                <p-button (click)="applyRenderBlockVertexLimit()"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!renderBlockVertexLimitChanged"></p-button>
+                            </div>
+                        </div>
+                        <div class="button-container">
+                            <label>Debug Render Blocks
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Draw the actual Morton block boundaries, tile count, and source-geometry vertex count."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-toggleswitch
+                                [(ngModel)]="stateService.debugRenderBlocks"></p-toggleswitch>
+                        </div>
+                    </p-tabpanel>
+
+                    <p-tabpanel value="storage">
+                        <div class="button-container">
+                            <label>Storage for Viewer properties and search history</label>
+                            <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
+                        </div>
+                        <div class="button-container">
+                            <label>Storage for imported styles</label>
+                            <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
+                        </div>
+                        <div class="button-container">
+                            <label>Storage for modified built-in styles</label>
+                            <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="button-container">
+                            <label>Advanced Preferences</label>
+                            <p-button (click)="openAdvancedPreferences()"
+                                      label="Advanced"
+                                      icon="pi pi-sliders-h"></p-button>
+                        </div>
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
+            <div class="preferences-actions">
+                <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
             </div>
-            <p-divider></p-divider>
-            <div class="slider-container">
-                <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="limitSimultaneousInspectionsInput"
-                               (ngModelChange)="onInspectionsLimitInputChange($event)"
-                               (keydown.enter)="applyInspectionsLimits()"/>
-                        <p-slider [(ngModel)]="limitSimultaneousInspectionsInput"
-                                  (ngModelChange)="onInspectionsLimitSliderChange($event)"
-                                  class="w-full"
-                                  [min]="1"
-                                  [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
-                    </div>
-                    <p-button (click)="applyInspectionsLimits()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!inspectionsLimitChanged"></p-button>
-                </div>
-            </div>
-            <p-divider></p-divider>
-            <div class="slider-container">
-                <label for="drill-pick-radius-input">Drill Pick Radius (px)
-                    <i class="pi pi-info-circle"
-                       pTooltip="Pixel radius used by feature drill-picking."
-                       tooltipPosition="top"></i>
-                </label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input id="drill-pick-radius-input"
-                               data-testid="drill-pick-radius-input"
-                               class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="drillPickRadiusInput"
-                               (ngModelChange)="onDrillPickRadiusInputChange($event)"
-                               (keydown.enter)="applyDrillPickRadius()"/>
-                        <p-slider [(ngModel)]="drillPickRadiusInput"
-                                  (ngModelChange)="onDrillPickRadiusSliderChange($event)"
-                                  class="w-full"
-                                  [min]="MIN_DRILL_PICK_RADIUS"
-                                  [max]="MAX_DRILL_PICK_RADIUS"></p-slider>
-                    </div>
-                    <p-button (click)="applyDrillPickRadius()"
-                              data-testid="apply-drill-pick-radius"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!drillPickRadiusChanged"></p-button>
-                </div>
-            </div>
-            <p-divider></p-divider>
-            <div class="button-container">
-                <label>Expand inspection trees by default</label>
-                <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
-            </div>
-            <div class="button-container value-presentation-container">
-                <label for="inspection-value-presentation">Inspection value bubbles</label>
-                <p-multiSelect inputId="inspection-value-presentation"
-                               class="value-presentation-select"
-                               [options]="inspectionValuePresentationOptions"
-                               [ngModel]="inspectionValuePresentationSelection"
-                               optionLabel="label"
-                               optionValue="value"
-                               [filter]="false"
-                               [showToggleAll]="false"
-                               [maxSelectedLabels]="1"
-                               selectedItemsLabel="{0} options"
-                               placeholder="Plain"
-                               appendTo="body"
-                               (ngModelChange)="onInspectionValuePresentationChange($event)">
-                </p-multiSelect>
-            </div>
-            <div class="button-container value-presentation-container">
-                <label for="source-data-default-columns">Source data columns</label>
-                <p-multiSelect inputId="source-data-default-columns"
-                               class="value-presentation-select"
-                               [options]="sourceDataColumnOptions"
-                               [ngModel]="sourceDataColumnSelection"
-                               optionLabel="label"
-                               optionValue="value"
-                               [filter]="false"
-                               [showToggleAll]="false"
-                               [maxSelectedLabels]="1"
-                               selectedItemsLabel="{0} columns"
-                               placeholder="Key and value only"
-                               appendTo="body"
-                               (ngModelChange)="onSourceDataColumnSelectionChange($event)">
-                </p-multiSelect>
-            </div>
-            <p-divider></p-divider>
-            <div class="slider-container">
-                <label [for]="locationSearchResultLimitInput">Location Matches</label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="locationSearchResultLimitInput"
-                               (ngModelChange)="onLocationSearchResultLimitInputChange($event)"
-                               (keydown.enter)="applyLocationSearchResultLimit()"/>
-                        <p-slider [(ngModel)]="locationSearchResultLimitInput"
-                                  (ngModelChange)="onLocationSearchResultLimitSliderChange($event)"
-                                  class="w-full"
-                                  [min]="1"
-                                  [max]="MAX_LOCATION_SEARCH_RESULT_LIMIT"></p-slider>
-                    </div>
-                    <p-button (click)="applyLocationSearchResultLimit()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!locationSearchResultLimitChanged"></p-button>
-                </div>
-            </div>
-            <p-divider></p-divider>
-            <div class="slider-container">
-                <label [for]="mapZoomStepInput">Zoom Speed
-                    <i class="pi pi-info-circle"
-                       pTooltip="Controls mouse-wheel zoom sensitivity and the Q/E / +/- zoom step."
-                       tooltipPosition="top"></i>
-                </label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="mapZoomStepInput"
-                               (ngModelChange)="onMapZoomStepInputChange($event)"
-                               (keydown.enter)="applyMapZoomStep()"/>
-                        <p-slider [(ngModel)]="mapZoomStepInput"
-                                  (ngModelChange)="onMapZoomStepSliderChange($event)"
-                                  class="w-full"
-                                  [min]="MIN_MAP_ZOOM_STEP"
-                                  [max]="MAX_MAP_ZOOM_STEP"
-                                  [step]="0.05"></p-slider>
-                    </div>
-                    <p-button (click)="applyMapZoomStep()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!mapZoomStepChanged"></p-button>
-                </div>
-            </div>
-            <p-divider></p-divider>
-            <div class="button-container">
-                <label>Tile pull compression
-                    <i class="pi pi-info-circle" pTooltip="Use only when the bandwith is low" tooltipPosition="top"></i>
-                </label>
-                <p-selectButton [options]="toggleOptions"
-                                [(ngModel)]="tilePullCompressionEnabledSetting"
-                                optionLabel="label"
-                                optionValue="value"
-                                (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
-            </div>
-            <div class="button-container">
-                <label>WebGL antialiasing
-                    <i class="pi pi-info-circle"
-                       pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
-                       tooltipPosition="top"></i>
-                </label>
-                <p-selectButton [options]="toggleOptions"
-                                [(ngModel)]="deckAntialiasingEnabledSetting"
-                                optionLabel="label"
-                                optionValue="value"
-                                (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
-            </div>
-            <div class="slider-container">
-                <label for="low-fi-tile-threshold-input">High/Low-Fi Tile Threshold
-                    <i class="pi pi-info-circle"
-                       pTooltip="Visible tile count where the view switches from high-fi to low-fi rendering. Higher values preserve detailed rendering longer but can cost more."
-                       tooltipPosition="top"></i>
-                </label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input id="low-fi-tile-threshold-input"
-                               class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="lowFiTileThresholdInput"
-                               (ngModelChange)="onLowFiTileThresholdInputChange($event)"
-                               (keydown.enter)="applyLowFiTileThreshold()"/>
-                        <p-slider [(ngModel)]="lowFiTileThresholdInput"
-                                  (ngModelChange)="onLowFiTileThresholdSliderChange($event)"
-                                  class="w-full"
-                                  [min]="MIN_LOW_FI_TILE_THRESHOLD"
-                                  [max]="MAX_LOW_FI_TILE_THRESHOLD"></p-slider>
-                    </div>
-                    <p-button (click)="applyLowFiTileThreshold()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!lowFiTileThresholdChanged"></p-button>
-                </div>
-            </div>
-            <p-divider></p-divider>
-            <div class="slider-container">
-                <label for="render-worker-count-input">Render Workers
-                    <i class="pi pi-info-circle"
-                       pTooltip="Number of parallel TileSubsetLayer WASM workers. Zero selects half of the available logical CPUs automatically."
-                       tooltipPosition="top"></i>
-                </label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input id="render-worker-count-input"
-                               class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="renderWorkerCountInput"
-                               (ngModelChange)="onRenderWorkerCountInputChange($event)"
-                               (keydown.enter)="applyRenderWorkerCount()"/>
-                        <p-slider [(ngModel)]="renderWorkerCountInput"
-                                  (ngModelChange)="onRenderWorkerCountSliderChange($event)"
-                                  class="w-full"
-                                  [min]="AUTO_TILE_SUBSET_RENDER_WORKER_COUNT"
-                                  [max]="MAX_TILE_SUBSET_RENDER_WORKER_COUNT"></p-slider>
-                        <small>{{ renderWorkerCountDescription }}</small>
-                    </div>
-                    <p-button (click)="applyRenderWorkerCount()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!renderWorkerCountChanged"></p-button>
-                </div>
-            </div>
-            <div class="slider-container">
-                <label for="render-block-vertex-limit-input">Render Block Vertex Limit
-                    <i class="pi pi-info-circle"
-                       pTooltip="Soft maximum source-geometry vertex count for a multi-tile Morton render block. A single tile is always allowed."
-                       tooltipPosition="top"></i>
-                </label>
-                <div class="slider-controls">
-                    <div style="display: inline-block">
-                        <input id="render-block-vertex-limit-input"
-                               class="tiles-input w-full"
-                               type="text"
-                               pInputText
-                               [(ngModel)]="renderBlockVertexLimitInput"
-                               (ngModelChange)="onRenderBlockVertexLimitInputChange($event)"
-                               (keydown.enter)="applyRenderBlockVertexLimit()"/>
-                        <p-slider [(ngModel)]="renderBlockVertexLimitInput"
-                                  (ngModelChange)="onRenderBlockVertexLimitSliderChange($event)"
-                                  class="w-full"
-                                  [min]="MIN_RENDER_BLOCK_VERTEX_LIMIT"
-                                  [max]="MAX_RENDER_BLOCK_VERTEX_LIMIT"
-                                  [step]="256"></p-slider>
-                    </div>
-                    <p-button (click)="applyRenderBlockVertexLimit()"
-                              label=""
-                              icon="pi pi-check"
-                              [disabled]="!renderBlockVertexLimitChanged"></p-button>
-                </div>
-            </div>
-            <div class="button-container">
-                <label>Debug Render Blocks
-                    <i class="pi pi-info-circle"
-                       pTooltip="Draw the actual Morton block boundaries, tile count, and source-geometry vertex count."
-                       tooltipPosition="top"></i>
-                </label>
-                <p-toggleswitch
-                    [(ngModel)]="stateService.debugRenderBlocks"></p-toggleswitch>
-            </div>
-            <p-divider></p-divider>
-            <div class="button-container">
-                <label>Dark Mode</label>
-                <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label"
-                                optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
-            </div>
-            <div class="button-container">
-                <label for="coordinates-enabled-setting">Show coordinates</label>
-                <p-toggleswitch inputId="coordinates-enabled-setting"
-                                data-testid="coordinates-enabled-setting"
-                                [ngModel]="coordinatesPolicy.effectiveEnabled"
-                                (ngModelChange)="coordinatesPolicy.requestEnabled($event)"/>
-            </div>
-            <div class="button-container">
-                <label>Collapse Dock automatically</label>
-                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"></p-toggleswitch>
-            </div>
-            <p-divider></p-divider>
-            <div class="button-container">
-                <label>Storage for Viewer properties and search history</label>
-                <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
-            </div>
-            <div class="button-container">
-                <label>Storage for imported styles</label>
-                <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
-            </div>
-            <div class="button-container">
-                <label>Storage for modified built-in styles</label>
-                <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
-            </div>
-            <div class="button-container">
-                <label>Advanced Preferences</label>
-                <p-button (click)="openAdvancedPreferences()" label="Advanced" icon="pi pi-sliders-h"></p-button>
-            </div>
-            <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </app-dialog>
     `,
     standalone: false

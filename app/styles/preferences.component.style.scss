@@ -67,6 +67,24 @@
   .p-divider-horizontal {
     margin: 0.75em 0;
   }
+
+  .preferences-tabs {
+    .p-tab {
+      font-size: 0.9em;
+      margin: 0;
+      padding: 0.5em 0.75em;
+    }
+
+    .p-tabpanels {
+      padding: 0.5em 0 0;
+    }
+  }
+
+  .preferences-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.5em;
+  }
 }
 
 .editor-dialog {

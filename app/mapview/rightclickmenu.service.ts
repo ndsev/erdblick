@@ -68,6 +68,7 @@ export type FirstPersonViewMenuRequest =
 interface PickedFeatureMenuRow {
     identity: string;
     feature: TileFeatureId;
+    mapIdLabel: string;
 }
 
 @Injectable()
@@ -178,7 +179,11 @@ export class RightClickMenuService {
                 continue;
             }
             seen.add(identity);
-            rows.push({identity, feature});
+            rows.push({
+                identity,
+                feature,
+                mapIdLabel: mapId.slice(mapId.lastIndexOf("/") + 1)
+            });
         }
         this.pickedFeatureRows = rows;
         this.rebuildMenuItems();
@@ -264,7 +269,7 @@ export class RightClickMenuService {
             id: row.identity,
             automationId: `inspect-picked-feature-${index}`,
             label: row.feature.featureId,
-            icon: "pi pi-search",
+            mapIdLabel: row.mapIdLabel,
             command: () => this.inspectionSelection.inspectFeatureIds([row.feature])
         };
     }
