@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -194,7 +195,7 @@ std::string geometryCoordinatePath(const model_ptr<Geometry>& geometry, uint32_t
 using InspectionNode = InspectionConverter::InspectionNode;
 using ValueBubble = InspectionConverter::InspectionNode::ValueBubble;
 
-constexpr auto kMaxPropagatedBubbles = 12U;
+constexpr auto kMaxAggregateValues = 100U;
 
 /** Return the non-array base value type for scalar propagation decisions. */
 InspectionConverter::ValueType baseValueType(InspectionConverter::ValueType type)
@@ -363,6 +364,78 @@ ValueBubble makeGroupedBubble(std::deque<ValueBubble> children)
     return group;
 }
 
+/** Return the filtering rank used when choosing which child summaries survive propagation. */
+uint8_t bubbleContributionRank(ValueBubble const& bubble, bool isCountField)
+{
+    return static_cast<uint8_t>((isCountField ? 4U : 0U)
+        | (isCompleteValidityBubble(bubble) ? 2U : 0U)
+        | (isEmptyBitmaskBubble(bubble) ? 1U : 0U));
+}
+
+/**
+ * Keep at most `remaining` scalar values from a bubble tree.
+ *
+ * Group shells are retained so sibling pairs remain visually disjoint, while
+ * nested aggregate content is truncated before it can grow quadratically.
+ */
+std::optional<ValueBubble> takeBubblePrefix(
+    ValueBubble bubble,
+    size_t& remaining,
+    bool& truncated)
+{
+    if (bubble.children_.empty()) {
+        if (remaining == 0) {
+            truncated = true;
+            return std::nullopt;
+        }
+        --remaining;
+        return bubble;
+    }
+
+    auto children = std::move(bubble.children_);
+    bubble.children_.clear();
+    for (size_t index = 0; index < children.size(); ++index) {
+        if (remaining == 0) {
+            truncated = true;
+            break;
+        }
+        if (auto child = takeBubblePrefix(std::move(children[index]), remaining, truncated)) {
+            bubble.children_.push_back(std::move(*child));
+        }
+    }
+    if (bubble.children_.empty()) {
+        return std::nullopt;
+    }
+
+    bubble.label_.clear();
+    for (auto const& child : bubble.children_) {
+        if (!bubble.label_.empty()) {
+            bubble.label_ += " ";
+        }
+        bubble.label_ += child.label_;
+    }
+    bubble.targetNodeId_ = firstBubbleTarget(bubble.children_.front());
+    return bubble;
+}
+
+/** Result returned to a parent while keeping truncation separate from real value bubbles. */
+struct BubblePropagation {
+    std::deque<ValueBubble> bubbles_;
+    bool truncated_ = false;
+};
+
+/** Add the visual overflow marker to a row-local summary without propagating it as a value. */
+void setNodeValueBubbles(
+    InspectionNode& node,
+    std::deque<ValueBubble> const& bubbles,
+    bool truncated)
+{
+    node.valueBubbles_ = bubbles;
+    if (truncated) {
+        node.valueBubbles_.push_back(makeValueBubble("…", node.nodeId_, "overflow", "overflow"));
+    }
+}
+
 InspectionNode const* directChildByKey(InspectionNode const& node, std::string_view key);
 
 /** Return whether a child node is a true boolean flag. */
@@ -498,7 +571,12 @@ std::optional<ValueBubble> booleanArrayBitsBubbleForNode(InspectionNode const& n
     auto hasTrueValue = false;
     auto targetNodeId = node.nodeId_;
     std::string label;
+    size_t valueCount = 0;
     for (auto const& child : node.children_) {
+        if (valueCount == kMaxAggregateValues) {
+            label += " …";
+            break;
+        }
         auto const childValue = child.value_.as<bool>();
         if (!label.empty()) {
             label += " ";
@@ -508,6 +586,7 @@ std::optional<ValueBubble> booleanArrayBitsBubbleForNode(InspectionNode const& n
             targetNodeId = child.nodeId_;
             hasTrueValue = true;
         }
+        ++valueCount;
     }
 
     return makeValueBubble(
@@ -854,30 +933,46 @@ std::string relationRowHoverId(model_ptr<Relation> const& relation, std::string 
     return relationHoverId;
 }
 
-/** Compute propagated scalar bubbles bottom-up and return this node's contribution to its parent. */
-std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::string_view parentKey = {})
+/** Compute bounded scalar summaries bottom-up and return this node's contribution to its parent. */
+BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_view parentKey = {})
 {
-    struct ChildContribution {
-        ValueBubble bubble_;
-        bool isCountField_ = false;
-        bool isCompleteValidity_ = false;
-        bool isEmptyBitmask_ = false;
-    };
-
-    std::vector<ChildContribution> childContributions;
+    node.valueBubbles_.clear();
+    std::deque<ValueBubble> childContributions;
+    auto remainingValues = static_cast<size_t>(kMaxAggregateValues);
+    auto childContributionsTruncated = false;
+    std::optional<uint8_t> bestContributionRank;
     auto const key = inspectionKeyString(node);
     for (auto& child : node.children_) {
-        auto childBubbles = buildPropagatedValueBubbles(child, key);
+        auto childPropagation = buildPropagatedValueBubbles(child, key);
+        if (childPropagation.bubbles_.empty()) {
+            continue;
+        }
         auto const isCountField = isLikelyZserioCountField(inspectionKeyString(child));
-        for (auto& bubble : childBubbles) {
-            auto const isCompleteValidity = isCompleteValidityBubble(bubble);
-            auto const isEmptyBitmask = isEmptyBitmaskBubble(bubble);
-            childContributions.push_back(ChildContribution{
-                .bubble_ = std::move(bubble),
-                .isCountField_ = isCountField,
-                .isCompleteValidity_ = isCompleteValidity,
-                .isEmptyBitmask_ = isEmptyBitmask
-            });
+        auto childRank = std::numeric_limits<uint8_t>::max();
+        for (auto const& bubble : childPropagation.bubbles_) {
+            childRank = std::min(childRank, bubbleContributionRank(bubble, isCountField));
+        }
+        if (!bestContributionRank || childRank < *bestContributionRank) {
+            bestContributionRank = childRank;
+            childContributions.clear();
+            remainingValues = kMaxAggregateValues;
+            childContributionsTruncated = false;
+        }
+        if (childRank != *bestContributionRank) {
+            continue;
+        }
+
+        childContributionsTruncated |= childPropagation.truncated_;
+        for (auto& bubble : childPropagation.bubbles_) {
+            if (bubbleContributionRank(bubble, isCountField) != childRank) {
+                continue;
+            }
+            if (auto retained = takeBubblePrefix(
+                    std::move(bubble),
+                    remainingValues,
+                    childContributionsTruncated)) {
+                childContributions.push_back(std::move(*retained));
+            }
         }
     }
 
@@ -894,26 +989,26 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::s
 
     if (isValidityNode(node)) {
         node.valueBubbles_ = validityBubblesForNode(node);
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
     }
 
     auto daysOfWeekBubbles = daysOfWeekBubblesForNode(node);
     if (!daysOfWeekBubbles.empty()) {
         node.valueBubbles_ = std::move(daysOfWeekBubbles);
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
     }
 
     auto monthsOfYearBubbles = monthsOfYearBubblesForNode(node);
     if (!monthsOfYearBubbles.empty()) {
         node.valueBubbles_ = std::move(monthsOfYearBubbles);
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
     }
 
     auto booleanArrayBitsBubble = booleanArrayBitsBubbleForNode(node);
     if (booleanArrayBitsBubble) {
         node.valueBubbles_.push_back(*booleanArrayBitsBubble);
         if (auto propagated = propagatedBooleanArrayBubbleForNode(node)) {
-            return std::deque<ValueBubble>{std::move(*propagated)};
+            return {.bubbles_ = {std::move(*propagated)}};
         }
         return {};
     }
@@ -921,66 +1016,48 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::s
     auto relationBubble = relationBubbleForNode(node);
     if (relationBubble) {
         node.valueBubbles_.push_back(std::move(*relationBubble));
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
     }
 
     auto scalarBubble = scalarBubbleForNode(node);
     if (scalarBubble) {
-        return std::deque<ValueBubble>{std::move(*scalarBubble)};
+        return {.bubbles_ = {std::move(*scalarBubble)}};
     }
 
     if (baseValueType(node.type_) == InspectionConverter::ValueType::Section) {
         return {};
     }
 
-    auto const hasNonCountContribution = std::ranges::any_of(
-        childContributions,
-        [](auto const& contribution) { return !contribution.isCountField_; });
-    auto const hasStrongContribution = std::ranges::any_of(
-        childContributions,
-        [hasNonCountContribution](auto const& contribution) {
-            return !(hasNonCountContribution && contribution.isCountField_)
-                && !contribution.isCompleteValidity_;
-        });
-    auto const hasNonEmptyBitmaskContribution = std::ranges::any_of(
-        childContributions,
-        [hasNonCountContribution, hasStrongContribution](auto const& contribution) {
-            auto const wouldKeep = !(hasNonCountContribution && contribution.isCountField_)
-                && !(hasStrongContribution && contribution.isCompleteValidity_);
-            return wouldKeep && !contribution.isEmptyBitmask_;
-        });
-    for (auto& contribution : childContributions) {
-        if (hasNonCountContribution && contribution.isCountField_) {
-            continue;
-        }
-        if (hasStrongContribution && contribution.isCompleteValidity_) {
-            continue;
-        }
-        if (hasNonEmptyBitmaskContribution && contribution.isEmptyBitmask_) {
-            continue;
-        }
-        node.valueBubbles_.push_back(std::move(contribution.bubble_));
+    sortValidityBubblesFirst(childContributions);
+    if (childContributions.empty()) {
+        return {};
     }
-    sortValidityBubblesFirst(node.valueBubbles_);
+    setNodeValueBubbles(node, childContributions, childContributionsTruncated);
 
-    if (node.valueBubbles_.empty()) {
-        return {};
-    }
-    if (node.valueBubbles_.size() > kMaxPropagatedBubbles) {
-        // Keep the row-local summary visible, but do not bubble very wide
-        // aggregates further upward into less specific parent rows.
-        return {};
-    }
     if (isTransparentPropagationContainer(inspectionKeyString(node))) {
-        return node.valueBubbles_;
+        return {
+            .bubbles_ = std::move(childContributions),
+            .truncated_ = childContributionsTruncated
+        };
     }
-    if (containsUngroupedBubble(node.valueBubbles_)) {
-        return node.valueBubbles_;
+    if (containsUngroupedBubble(childContributions)) {
+        return {
+            .bubbles_ = std::move(childContributions),
+            .truncated_ = childContributionsTruncated
+        };
     }
-    if (node.valueBubbles_.size() == 1) {
-        return std::deque<ValueBubble>{node.valueBubbles_.front()};
+    if (childContributions.size() == 1) {
+        return {
+            .bubbles_ = std::move(childContributions),
+            .truncated_ = childContributionsTruncated
+        };
     }
-    return std::deque<ValueBubble>{makeGroupedBubble(node.valueBubbles_)};
+    std::deque<ValueBubble> grouped;
+    grouped.push_back(makeGroupedBubble(std::move(childContributions)));
+    return {
+        .bubbles_ = std::move(grouped),
+        .truncated_ = childContributionsTruncated
+    };
 }
 
 }

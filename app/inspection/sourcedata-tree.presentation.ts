@@ -30,6 +30,18 @@ export interface SourceDataTreePresentation {
     treeData: TreeTableNode[];
 }
 
+/** Opens every root and follows only unambiguous one-child paths below it. */
+export function expandSingleChildSourceDataPaths(nodes: TreeTableNode[]): void {
+    for (const root of nodes) {
+        let current: TreeTableNode | undefined = root;
+        current.expanded = true;
+        while (current.children?.length === 1) {
+            current = current.children[0];
+            current.expanded = true;
+        }
+    }
+}
+
 /** Adapts the shared flat C++ inspection model to PrimeNG's `data/children` tree shape. */
 function asTreeTableNode(node: SourceDataInspectionNode): TreeTableNode {
     const {children, ...data} = node;

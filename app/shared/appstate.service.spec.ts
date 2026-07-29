@@ -1422,6 +1422,33 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('keeps SourceData column defaults and per-panel overrides out of the URL', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 7,
+            features: [],
+            locked: false,
+            size: [30, 20],
+            color: '#ffffff',
+            undocked: false
+        }];
+
+        service.sourceDataInspectionDefaultColumns = ["schemaType"];
+        service.setInspectionTreeHiddenColumns(7, ["displayAddress"]);
+
+        expect(service.sourceDataInspectionDefaultColumns).toEqual(["schemaType"]);
+        expect(service.getInspectionTreeHiddenColumns(7)).toEqual(["displayAddress"]);
+        expect(service.sourceDataInspectionDefaultColumnsState.serialize(true)).toBeUndefined();
+        expect(service.inspectionTreeHiddenColumnsState.serialize(true)).toBeUndefined();
+
+        service.selection = [];
+        expect(service.getInspectionTreeHiddenColumns(7)).toBeUndefined();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('focuses inspection panels when selections create, reuse, or target an existing panel', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;

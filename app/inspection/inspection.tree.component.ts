@@ -232,6 +232,7 @@ export class FeatureFilterOptions {
                                         </span>
                                     } @else if (col.key === "value" && isFeatureIdValueRow(rowData)) {
                                         <a href=""
+                                           class="inspection-cell-primary-value"
                                            (click)="onFeatureIdLinkClick($event, rowData)"
                                            (mouseenter)="onNodeValueHover(rowData, col.key)"
                                            (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
@@ -243,7 +244,8 @@ export class FeatureFilterOptions {
                                            [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                         </a>
                                     } @else {
-                                        <span (click)="onNodeClick($event, rowData, col.key)"
+                                        <span class="inspection-cell-primary-value"
+                                              (click)="onNodeClick($event, rowData, col.key)"
                                               (mouseenter)="onNodeValueHover(rowData, col.key)"
                                               (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
                                               style="cursor: pointer"
@@ -291,8 +293,8 @@ export class FeatureFilterOptions {
                                                 <p-button class="source-data-button"
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
-                                                          label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          pTooltip="Go to {{item.qualifier?.trim()}} source data."
+                                                          [label]="sourceDataReferenceLabel(item)"
+                                                          [pTooltip]="sourceDataReferenceTooltip(item)"
                                                           [tooltipOptions]="{appendTo: 'body'}"
                                                           tooltipPosition="bottom" />
                                             }
@@ -362,6 +364,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     geoJson = input<string>();
     enableSourceDataNavigation = input<boolean>(true);
     featureIds = input<string[]>([]);
+    defaultVisibleColumnKeys = input<readonly string[] | undefined>(undefined);
 
     /** Returns columns currently participating in the table layout. */
     protected visibleColumns(): Column[] {
@@ -386,6 +389,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         } else {
             this.hiddenColumnKeys.add(column.key);
         }
+        this.stateService.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
         this.refreshLayout();
         this.cdr.markForCheck();
     }
@@ -442,6 +446,29 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 public stateService: AppStateService,
                 private messageService: InfoMessageService,
                 private featureSearchService: FeatureSearchService) {
+        effect(() => {
+            const columns = this.columns();
+            const savedHiddenColumns = this.stateService.getInspectionTreeHiddenColumns(this.panelId());
+            const defaultVisibleColumns = this.defaultVisibleColumnKeys();
+            const visibleByDefault = defaultVisibleColumns === undefined
+                ? undefined
+                : new Set(defaultVisibleColumns);
+
+            this.hiddenColumnKeys.clear();
+            for (const column of columns) {
+                if (!column.toggleable) {
+                    continue;
+                }
+                const hidden = savedHiddenColumns
+                    ? savedHiddenColumns.includes(column.key)
+                    : visibleByDefault !== undefined && !visibleByDefault.has(column.key);
+                if (hidden) {
+                    this.hiddenColumnKeys.add(column.key);
+                }
+            }
+            this.refreshLayout();
+            this.cdr.markForCheck();
+        });
         effect(() => {
             this.savePanelExpansionState();
             this.data = this.treeData();
@@ -1460,6 +1487,24 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         } catch (e) {
             this.messageService.showError(`Encountered error: ${e}`);
         }
+    }
+
+    /** Returns the compact qualifier initial used by a source-data navigation button. */
+    protected sourceDataReferenceLabel(sourceDataRef: any): string {
+        const qualifier = typeof sourceDataRef?.qualifier === "string"
+            ? sourceDataRef.qualifier.trim()
+            : "";
+        return qualifier ? qualifier[0].toUpperCase() : "S";
+    }
+
+    /** Describes source-data navigation even when the backend supplied no qualifier. */
+    protected sourceDataReferenceTooltip(sourceDataRef: any): string {
+        const qualifier = typeof sourceDataRef?.qualifier === "string"
+            ? sourceDataRef.qualifier.trim()
+            : "";
+        return qualifier
+            ? `Go to ${qualifier} source data.`
+            : "Go to source data.";
     }
 
     /** Maps inspection value types to the CSS classes used by the table template. */

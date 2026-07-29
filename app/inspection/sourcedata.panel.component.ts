@@ -1,6 +1,6 @@
 import {Component, output, input, effect, ViewChild} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
-import {InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
@@ -11,7 +11,10 @@ import {
 } from "../mapdata/tilestream";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
-import {sourceDataTreePresentation} from "./sourcedata-tree.presentation";
+import {
+    expandSingleChildSourceDataPaths,
+    sourceDataTreePresentation
+} from "./sourcedata-tree.presentation";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -34,6 +37,7 @@ import {sourceDataTreePresentation} from "./sourcedata-tree.presentation";
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
+                             [defaultVisibleColumnKeys]="stateService.sourceDataInspectionDefaultColumns"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -80,7 +84,8 @@ export class SourceDataPanelComponent {
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private mapService: MapInfoService) {
+    constructor(private mapService: MapInfoService,
+                public stateService: AppStateService) {
         effect(() => {
             if (!this.panel().sourceData) {
                 return;
@@ -265,27 +270,30 @@ export class SourceDataPanelComponent {
 
     /** Expands and highlights the row that covers the requested source-data address, if present. */
     selectItemWithAddress(address?: bigint) {
-        let addressInRange: (address: any) => boolean | undefined;
-        if (address !== undefined) {
-            if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
-                const searchAddress = {
-                    offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
-                    size: address & BigInt(0xFFFFFFFF),
-                }
+        if (address === undefined) {
+            expandSingleChildSourceDataPaths(this.treeData);
+            this.firstHighlightedItemIndex = 0;
+            return;
+        }
 
-                const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
-                const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
+        let addressInRange: (candidate: any) => boolean;
+        if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
+            const searchAddress = {
+                offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
+                size: address & BigInt(0xFFFFFFFF),
+            }
 
-                addressInRange = (address: any) => {
-                    return address.offset >= addressLow &&
-                        address.offset + address.size <= addressHigh &&
-                        (address.size != 0 || addressLow == addressHigh);
-                }
-            } else {
-                const searchAddress = address;
-                addressInRange = (address: any) => {
-                    return address == searchAddress;
-                }
+            const addressLow = searchAddress.offset;
+            const addressHigh = addressLow + searchAddress.size;
+
+            addressInRange = (candidate: any) => {
+                return candidate.offset >= addressLow &&
+                    candidate.offset + candidate.size <= addressHigh &&
+                    (candidate.size != 0 || addressLow == addressHigh);
+            }
+        } else {
+            addressInRange = (candidate: any) => {
+                return candidate == address;
             }
         }
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
@@ -300,7 +308,7 @@ export class SourceDataPanelComponent {
                 node.data.styleClass = "highlight";
             }
 
-            if (node.data.address && addressInRange && addressInRange(node.data.address)) {
+            if (node.data.address && addressInRange(node.data.address)) {
                 highlight = true;
 
                 if (!firstHighlightedItemIndex) {
@@ -313,15 +321,6 @@ export class SourceDataPanelComponent {
                 });
             }
 
-            if (address === undefined && node.children && node.children.length < 5) {
-                node.expanded = true;
-                for (const child of node.children) {
-                    if (child.children && child.children.length < 5) {
-                        child.expanded = true;
-                    }
-                }
-            }
-
             if (node.children) {
                 node.children.forEach((item: TreeTableNode, index) => {
                     select(item, [...parents, node], highlight, 1 + virtualRowIndex + index);
@@ -332,19 +331,6 @@ export class SourceDataPanelComponent {
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });
-
-        if (address === undefined) {
-            for (const item of this.treeData) {
-                if (item.children) {
-                    item.expanded = true;
-                    for (const child of item.children) {
-                        if (child.children && child.children.length < 5) {
-                            child.expanded = true;
-                        }
-                    }
-                }
-            }
-        }
 
         this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
     }

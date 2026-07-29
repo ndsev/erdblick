@@ -1,5 +1,9 @@
 import {describe, expect, it} from "vitest";
-import {sourceDataTreePresentation} from "./sourcedata-tree.presentation";
+import {TreeTableNode} from "primeng/api";
+import {
+    expandSingleChildSourceDataPaths,
+    sourceDataTreePresentation
+} from "./sourcedata-tree.presentation";
 
 describe("sourceDataTreePresentation", () => {
     it("extracts an SQL query and flattens result rows into named sections", () => {
@@ -151,5 +155,30 @@ describe("sourceDataTreePresentation", () => {
             kind: "scalar"
         }]);
         expect(result.treeData[0].children?.[0].data?.value).toBe(50);
+    });
+
+    it("expands roots only through unambiguous single-child paths", () => {
+        const branch: TreeTableNode = {
+            data: {key: "branch"},
+            children: [
+                {data: {key: "left"}, children: [{data: {key: "left-child"}}]},
+                {data: {key: "right"}}
+            ]
+        };
+        const chainLeaf: TreeTableNode = {data: {key: "leaf"}};
+        const chainChild: TreeTableNode = {data: {key: "child"}, children: [chainLeaf]};
+        const roots: TreeTableNode[] = [
+            {data: {key: "chain"}, children: [chainChild]},
+            branch
+        ];
+
+        expandSingleChildSourceDataPaths(roots);
+
+        expect(roots[0].expanded).toBe(true);
+        expect(chainChild.expanded).toBe(true);
+        expect(chainLeaf.expanded).toBe(true);
+        expect(branch.expanded).toBe(true);
+        expect(branch.children[0].expanded).toBeUndefined();
+        expect(branch.children[1].expanded).toBeUndefined();
     });
 });

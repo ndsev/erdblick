@@ -113,6 +113,23 @@ import {environment} from "../environments/environment";
                                (ngModelChange)="onInspectionValuePresentationChange($event)">
                 </p-multiSelect>
             </div>
+            <div class="button-container value-presentation-container">
+                <label for="source-data-default-columns">Source data columns</label>
+                <p-multiSelect inputId="source-data-default-columns"
+                               class="value-presentation-select"
+                               [options]="sourceDataColumnOptions"
+                               [ngModel]="sourceDataColumnSelection"
+                               optionLabel="label"
+                               optionValue="value"
+                               [filter]="false"
+                               [showToggleAll]="false"
+                               [maxSelectedLabels]="1"
+                               selectedItemsLabel="{0} columns"
+                               placeholder="Key and value only"
+                               appendTo="body"
+                               (ngModelChange)="onSourceDataColumnSelectionChange($event)">
+                </p-multiSelect>
+            </div>
             <p-divider></p-divider>
             <div class="slider-container">
                 <label [for]="locationSearchResultLimitInput">Location Matches</label>
@@ -354,7 +371,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         {label: "Vary Value Outlines", value: "outlines"},
         {label: "Vary Background Striping", value: "striping"}
     ];
+    readonly sourceDataColumnOptions = [
+        {label: "Address", value: "displayAddress"},
+        {label: "Type", value: "schemaType"}
+    ];
     inspectionValuePresentationSelection: string[] = [];
+    sourceDataColumnSelection: string[] = [];
     private mediaQueryList?: MediaQueryList;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly DARK_MODE_KEY = 'ui.darkMode';
@@ -417,6 +439,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.inspectionValueVaryStripingState.subscribe(() => {
             this.syncInspectionValuePresentationSelection();
         }));
+        this.subscriptions.push(this.stateService.sourceDataInspectionDefaultColumnsState.subscribe(columns => {
+            this.sourceDataColumnSelection = [...columns];
+        }));
         this.syncInspectionValuePresentationSelection();
     }
 
@@ -465,6 +490,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.inspectionValueVaryColors = selection.has("colors");
         this.stateService.inspectionValueVaryOutlines = selection.has("outlines");
         this.stateService.inspectionValueVaryStriping = selection.has("striping");
+    }
+
+    /** Applies which optional SourceData columns new inspection panels show initially. */
+    onSourceDataColumnSelectionChange(values: string[] | null | undefined): void {
+        this.sourceDataColumnSelection = [...(values ?? [])];
+        this.stateService.sourceDataInspectionDefaultColumns = this.sourceDataColumnSelection;
     }
 
     /** Restores the persisted dark-mode preference during component startup. */

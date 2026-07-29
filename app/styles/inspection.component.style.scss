@@ -184,6 +184,18 @@ inspection-tree {
     gap: 0.25em;
   }
 
+  .inspection-cell-primary-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .source-data-ref-container {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
   .inspection-value-cell-content {
     min-width: 0;
     overflow: hidden;

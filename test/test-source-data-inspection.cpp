@@ -48,3 +48,39 @@ TEST_CASE(
     REQUIRE(detailsNode.at("children").at(0).value("nodeId", std::string{}) ==
             "0:details/0:speed");
 }
+
+TEST_CASE(
+    "SourceData inspection bounds wide aggregate summaries",
+    "[erdblick.inspection][sourcedata]")
+{
+    auto layerInfo = mapget::LayerInfo::fromJson(nlohmann::json::parse(R"json(
+        {
+            "layerId": "SourceData-Test",
+            "type": "SourceData"
+        }
+    )json"));
+    auto strings = std::make_shared<mapget::StringPool>("SourceDataInspection");
+    auto model = std::make_shared<mapget::TileSourceDataLayer>(
+        mapget::TileId{},
+        "SourceDataInspection",
+        "TestMap",
+        layerInfo,
+        strings);
+
+    auto root = model->newCompound(1);
+    auto values = model->newCompound(150);
+    for (auto index = 0; index < 150; ++index) {
+        REQUIRE(values->object()->addField(
+            "value" + std::to_string(index),
+            static_cast<int64_t>(index)));
+    }
+    REQUIRE(root->object()->addField("values", values));
+    model->addRoot(root);
+
+    auto result = erdblick::TileSourceDataLayer(model).toObject();
+    auto const& valuesNode = result.at("children").front();
+    REQUIRE(valuesNode.at("children").size() == 150);
+    REQUIRE(valuesNode.at("valueBubbles").size() == 101);
+    REQUIRE(valuesNode.at("valueBubbles").back().value("label", std::string{}) == "…");
+    REQUIRE(valuesNode.at("valueBubbles").back().value("kind", std::string{}) == "overflow");
+}

@@ -847,6 +847,19 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly sourceDataInspectionDefaultColumnsState = this.createState<string[]>({
+        name: 'sourceDataInspectionDefaultColumns',
+        defaultValue: [],
+        schema: z.array(z.enum(["displayAddress", "schemaType"]))
+    });
+
+    readonly inspectionTreeHiddenColumnsState = this.createState<Record<string, string[]>>({
+        name: 'inspectionTreeHiddenColumns',
+        defaultValue: {},
+        schema: z.record(z.string(), z.array(z.string())),
+        snapshotPersist: false
+    });
+
     readonly inspectionValueVaryColorsState = this.createState<boolean>({
         name: 'inspectionValueVaryColors',
         defaultValue: true,
@@ -965,6 +978,7 @@ export class AppStateService implements OnDestroy {
             const panelIds = panels.map(panel => panel.id);
             this.pruneInspectionDialogLayout(panelIds);
             this.pruneInspectionTreeExpansionStates(panelIds);
+            this.pruneInspectionTreeHiddenColumns(panelIds);
             this.sanitizeFocusedInspectionPanel(panels);
         });
     }
@@ -2117,6 +2131,14 @@ export class AppStateService implements OnDestroy {
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
     set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
+    get sourceDataInspectionDefaultColumns() {
+        return this.sourceDataInspectionDefaultColumnsState.getValue();
+    }
+    set sourceDataInspectionDefaultColumns(val: string[]) {
+        const allowed = new Set(["displayAddress", "schemaType"]);
+        this.sourceDataInspectionDefaultColumnsState.next(
+            [...new Set(val.filter(column => allowed.has(column)))]);
+    }
     get inspectionValueVaryColors() {return this.inspectionValueVaryColorsState.getValue();}
     set inspectionValueVaryColors(val: boolean) {this.inspectionValueVaryColorsState.next(!!val);}
     get inspectionValueVaryOutlines() {return this.inspectionValueVaryOutlinesState.getValue();}
@@ -2620,6 +2642,21 @@ export class AppStateService implements OnDestroy {
         return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
     }
 
+    /** Persists the optional columns hidden by the user in one inspection panel. */
+    setInspectionTreeHiddenColumns(panelId: number, hiddenColumns: Iterable<string>): void {
+        const states = this.inspectionTreeHiddenColumnsState.getValue();
+        this.inspectionTreeHiddenColumnsState.next({
+            ...states,
+            [panelId]: [...new Set(hiddenColumns)]
+        });
+    }
+
+    /** Returns a panel's persisted hidden columns, or undefined when defaults still apply. */
+    getInspectionTreeHiddenColumns(panelId: number): string[] | undefined {
+        const hiddenColumns = this.inspectionTreeHiddenColumnsState.getValue()[panelId];
+        return hiddenColumns ? [...hiddenColumns] : undefined;
+    }
+
     /** Clones an optional inspection-tree expansion snapshot. */
     private cloneInspectionTreeExpansionSnapshot(
         snapshot?: InspectionTreeExpansionSnapshot
@@ -2960,6 +2997,17 @@ export class AppStateService implements OnDestroy {
             if (!activeIds.has(panelId)) {
                 this.inspectionTreeExpansionStates.delete(panelId);
             }
+        }
+    }
+
+    /** Removes persisted column overrides for inspection panels that no longer exist. */
+    private pruneInspectionTreeHiddenColumns(activePanelIds: number[]): void {
+        const activeIds = new Set(activePanelIds.map(String));
+        const current = this.inspectionTreeHiddenColumnsState.getValue();
+        const retained = Object.fromEntries(
+            Object.entries(current).filter(([panelId]) => activeIds.has(panelId)));
+        if (Object.keys(retained).length !== Object.keys(current).length) {
+            this.inspectionTreeHiddenColumnsState.next(retained);
         }
     }
 
