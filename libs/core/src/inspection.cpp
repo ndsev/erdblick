@@ -191,32 +191,6 @@ std::string geometryCoordinatePath(const model_ptr<Geometry>& geometry, uint32_t
     return fmt::format("coordinates[{}]", pointIndex);
 }
 
-/** Resolve the layer's configured high-fidelity stage with safe fallbacks for legacy metadata. */
-uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
-{
-    auto const layerInfo = layer.layerInfo();
-    auto const stages = std::max<uint32_t>(1U, layerInfo ? layerInfo->stages_ : 1U);
-    auto const fallback = stages > 1U ? 1U : 0U;
-    auto const configured = layerInfo ? layerInfo->highFidelityStage_ : fallback;
-    return std::min(stages - 1U, configured);
-}
-
-/** Resolve the display label for a geometry stage using layer metadata when present. */
-std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
-{
-    auto const layerInfo = layer.layerInfo();
-    if (layerInfo && stage < layerInfo->stageLabels_.size()) {
-        return layerInfo->stageLabels_[stage];
-    }
-    return fmt::format("Stage {}", stage);
-}
-
-/** Hide stage labels for baseline/high-fi geometry and show them only for add-on stages. */
-bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
-{
-    return stage > highFidelityStage(layer);
-}
-
 using InspectionNode = InspectionConverter::InspectionNode;
 using ValueBubble = InspectionConverter::InspectionNode::ValueBubble;
 
@@ -1077,18 +1051,13 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto geomCollection = featurePtr->geomOrNull())
     {
         auto scope = push(convertString("Geometry"), RawPath{"geometry"}, ValueType::Section);
-        const auto highFiStage = highFidelityStage(featurePtr->model());
         const auto exportAsGeometryCollection = geomCollection->numGeometries() > 1;
         uint32_t exportGeometryIndex = 0;
         uint32_t displayGeometryIndex = 0;
         geomCollection->forEachGeometry(
-            [this, &exportGeometryIndex, &displayGeometryIndex, highFiStage, exportAsGeometryCollection]
+            [this, &exportGeometryIndex, &displayGeometryIndex, exportAsGeometryCollection]
             (model_ptr<Geometry> const& geom) -> bool {
             const auto currentExportGeometryIndex = exportGeometryIndex++;
-            const auto geometryStage = geom->model().stage().value_or(0U);
-            if (geometryStage < highFiStage) {
-                return true;
-            }
             const auto geometryObjectPath = exportAsGeometryCollection
                 ? fmt::format("geometries[{}]", currentExportGeometryIndex)
                 : std::string{};
@@ -1413,20 +1382,13 @@ void InspectionConverter::convertValidity(
         }
 
         if (auto geom = v.simpleGeometry()) {
-            auto const highFiStage = highFidelityStage(v.model());
-            auto const geometryStage = geom->model().stage().value_or(0U);
-            if (geometryStage >= highFiStage) {
-                convertGeometry(JsValue("simpleGeometry"), geom);
-            }
+            convertGeometry(JsValue("simpleGeometry"), geom);
             return true;
         }
 
-        if (auto geometryStage = v.geometryStage()) {
-            push("geometryStage", "geometryStage", ValueType::Number)->value_ = JsValue(*geometryStage);
-            if (shouldDisplayStageLabel(v.model(), *geometryStage)) {
-                push("geometryStageLabel", "geometryStageLabel", ValueType::String)->value_ =
-                    convertString(stageLabel(v.model(), *geometryStage));
-            }
+        if (auto geometryName = v.geometryName()) {
+            push("geometryName", "geometryName", ValueType::String)->value_ =
+                convertString(*geometryName);
         }
 
         auto renderOffset = [this, &v](Point const& data, std::string_view const& name)

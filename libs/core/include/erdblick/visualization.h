@@ -1,4 +1,3 @@
 #pragma once
 
-#include "visualization-base.h"
-#include "visualization-deck.h"
+#include "subset-renderer.h"

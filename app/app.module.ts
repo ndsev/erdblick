@@ -24,7 +24,6 @@ import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
 import {MapInfoService} from "./mapdata/map-info.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
-import {MapRenderService} from "./mapdata/map-render.service";
 import {InspectionSelectionService} from "./inspection/inspection-selection.service";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
@@ -166,7 +165,6 @@ export const initializeServices = () => {
     const styleService = inject(StyleService);
     const tileStream = inject(MapTileStreamService);
     const inspectionSelection = inject(InspectionSelectionService);
-    const mapRender = inject(MapRenderService);
     const coordService = inject(CoordinatesService);
     inject(FeatureSearchService);
 
@@ -187,7 +185,6 @@ export const initializeServices = () => {
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
         inspectionSelection.initialize();
-        mapRender.initialize();
     })();
 }
 
@@ -307,7 +304,6 @@ export const initializeServices = () => {
         MapInfoService,
         MapTileStreamService,
         InspectionSelectionService,
-        MapRenderService,
         MessageService,
         ConfirmationService,
         InfoMessageService,

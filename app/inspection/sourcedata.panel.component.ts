@@ -3,7 +3,7 @@ import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
     MapTileRequestStatus,

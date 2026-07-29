@@ -86,8 +86,6 @@ public:
     [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
     /** Report whether the style should start enabled in the UI. */
     [[nodiscard]] bool defaultEnabled() const;
-    /** Return the minimum data stage required before this style should render. */
-    [[nodiscard]] uint32_t minimumStage() const;
     /** Return the bitmask of highlight modes for which this style has explicit rules. */
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
     /** Check whether the style declares rules for the given highlight mode. */
@@ -150,7 +148,6 @@ private:
     StyleValidationReport validationReport_;
     bool valid_ = false;
     bool enabled_ = true;
-    uint32_t stage_ = 0;
     std::string name_;
     std::optional<std::regex> layerAffinity_;
     std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> ruleIndicesByModeAndFidelity_{};

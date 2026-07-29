@@ -54,9 +54,20 @@ When you hover validity-aware nodes in the tree, erdblick tries to highlight the
 
 `COMPLETE` means the attribute applies to the complete referenced geometry or feature scope.
 
-Validity details can include `geometryStage` and `geometryStageLabel` when a validity points at geometry from a staged payload. The label is shown for add-on/high-stage geometry where the stage name helps explain why a validity appears only after additional tile data has loaded.
+Validity details can include a semantic geometry name when a validity refers
+to a particular geometry such as `centerline` or `boundary`. Geometry names
+describe the source model; they do not encode presentation fidelity.
 
 Search result selections can point at the same validity targets. When a feature-search result was produced in attribute scope, selecting the result focuses the owning feature and highlights the matched attribute or validity when that target is available.
+
+### Inspection data boundary
+
+Map rendering keeps only immutable filter subsets. When a panel needs the
+complete feature, erdblick requests that canonical ID through mapget's
+feature-restricted `/tiles` path. Cross-tile relation endpoints may first be
+resolved with `/locate`, then fetched from their owning tile. The complete
+feature wrapper is released with the inspection; it is never inserted into a
+viewport tile cache.
 
 ### Searching From Inspection
 

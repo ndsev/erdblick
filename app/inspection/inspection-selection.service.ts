@@ -1,8 +1,12 @@
-import {Injectable} from "@angular/core";
+import {Injectable, NgZone} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
-import {featureSetContains, featureSetsEqual, FeatureWrapper} from "../mapdata/features.model";
+import {
+    featureSetContains,
+    featureSetsEqual,
+    FeatureWrapper
+} from "../mapdata/feature-inspection.model";
 import {Feature} from "../../build/libs/core/erdblick-core";
 import {
     AppStateService,
@@ -29,6 +33,9 @@ interface Wgs84Point {
 export class InspectionSelectionService {
     readonly hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
+    readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
+    readonly selectionIdsTopic =
+        new BehaviorSubject<InspectionPanelModel<TileFeatureId>[]>([]);
 
     private selectionConversionRevision = 0;
     private hoverConversionRevision = 0;
@@ -39,7 +46,8 @@ export class InspectionSelectionService {
         private readonly tileStream: MapTileStreamService,
         private readonly viewState: MapViewStateService,
         private readonly keyboardService: KeyboardService,
-        private readonly messageService: InfoMessageService
+        private readonly messageService: InfoMessageService,
+        private readonly ngZone: NgZone
     ) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
@@ -47,6 +55,7 @@ export class InspectionSelectionService {
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
         this.stateService.selectionState.subscribe(async selected => {
+            this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
             const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             const pendingPanelUpdates: Array<{
@@ -63,7 +72,7 @@ export class InspectionSelectionService {
                 }
                 let features: FeatureWrapper[];
                 try {
-                    features = await this.tileStream.loadFeatures(selection.features, {allowIncomplete: true});
+                    features = await this.tileStream.loadFeatures(selection.features);
                 } catch (error) {
                     console.error(`Failed to resolve inspection selection for panel ${selection.id}.`, error);
                     continue;
@@ -88,56 +97,48 @@ export class InspectionSelectionService {
             if (revision !== this.selectionConversionRevision) {
                 return;
             }
-            pendingPanelUpdates.forEach(update => {
-                update.panel.locked = update.selection.locked;
-                update.panel.focused = update.selection.focused;
-                update.panel.color = update.selection.color;
-                update.panel.size = update.selection.size;
-                update.panel.undocked = update.selection.undocked ?? false;
+            // Restricted feature loading can complete from a transport
+            // callback outside Angular. Publish the resolved model in-zone so
+            // both docked and floating inspection views are checked.
+            this.ngZone.run(() => {
+                pendingPanelUpdates.forEach(update => {
+                    update.panel.locked = update.selection.locked;
+                    update.panel.focused = update.selection.focused;
+                    update.panel.color = update.selection.color;
+                    update.panel.size = update.selection.size;
+                    update.panel.undocked = update.selection.undocked ?? false;
+                });
+                this.selectionIdsTopic.next(convertedSelections.map(panel => ({
+                    id: panel.id,
+                    locked: panel.locked,
+                    focused: panel.focused,
+                    size: panel.size,
+                    features: panel.features.map(feature => feature.key()),
+                    sourceData: panel.sourceData,
+                    color: panel.color,
+                    undocked: panel.undocked
+                })));
+                this.selectionTopic.next(convertedSelections);
             });
-            this.selectionTopic.next(convertedSelections);
         });
         this.selectionTopic.subscribe(selectedPanels => {
-            const nextSelectedTileKeys = new Set<string>();
-            for (const panel of selectedPanels) {
-                for (const feature of panel.features) {
-                    nextSelectedTileKeys.add(feature.mapTileKey);
-                }
-                const sourceDataTileKey = panel.sourceData?.mapTileKey;
-                if (sourceDataTileKey) {
-                    nextSelectedTileKeys.add(sourceDataTileKey);
-                }
-            }
-            this.tileStream.setSelectedTileKeys(nextSelectedTileKeys);
-
             const hoveredFeatures = this.hoverTopic.getValue();
             if (hoveredFeatures.length) {
                 this.hoverTopic.next(hoveredFeatures.filter(hoveredFeature =>
                     !selectedPanels.some(panel =>
                         panel.features.some(feature => feature.equals(hoveredFeature)))));
             }
-        });
-        this.tileStream.tileDataChanged.subscribe(change => {
-            this.lastHoverRequestSignature = "";
-            if (change.reason === "loaded" && this.selectionStateReferencesTile(change.tileKey)) {
-                this.reprojectCurrentSelection();
+            const selectedIdentities = new Set(
+                this.selectionIdsTopic.getValue()
+                    .flatMap(panel => panel.features)
+                    .map(feature => `${feature.mapTileKey}\n${feature.featureId}`)
+            );
+            const hoverIds = this.hoverIdsTopic.getValue().filter(feature =>
+                !selectedIdentities.has(`${feature.mapTileKey}\n${feature.featureId}`)
+            );
+            if (hoverIds.length !== this.hoverIdsTopic.getValue().length) {
+                this.hoverIdsTopic.next(hoverIds);
             }
-        });
-    }
-
-
-    /** Re-emits persisted selection after late tile arrivals so empty reload panels can hydrate. */
-    private reprojectCurrentSelection(): void {
-        this.stateService.selectionState.next([...this.stateService.selectionState.getValue()]);
-    }
-
-    /** Checks whether a tile-data update belongs to one of the persisted selected features/source-data rows. */
-    private selectionStateReferencesTile(tileKey: string): boolean {
-        return this.stateService.selectionState.getValue().some(panel => {
-            if (panel.sourceData && panel.sourceData.mapTileKey === tileKey) {
-                return true;
-            }
-            return panel.features.some(feature => feature.mapTileKey === tileKey);
         });
     }
 
@@ -152,11 +153,33 @@ export class InspectionSelectionService {
             return;
         }
         this.lastHoverRequestSignature = requestSignature;
+        const selectedIdentities = new Set(
+            this.stateService.selectionState.getValue()
+                .flatMap(panel => panel.features)
+                .map(feature => `${feature.mapTileKey}\n${feature.featureId}`)
+        );
+        this.hoverIdsTopic.next(
+            tileFeatureIds
+                .filter((id): id is TileFeatureId => !!id)
+                .filter(id =>
+                    !selectedIdentities.has(`${id.mapTileKey}\n${id.featureId}`)
+                )
+        );
         const revision = ++this.hoverConversionRevision;
         const features = await this.tileStream.loadFeatures(tileFeatureIds);
         if (revision !== this.hoverConversionRevision) {
             return;
         }
+        const selectedIdentitiesAfterLocate = new Set(
+            this.selectionIdsTopic.getValue()
+                .flatMap(panel => panel.features)
+                .map(feature => `${feature.mapTileKey}\n${feature.featureId}`)
+        );
+        this.hoverIdsTopic.next(features
+            .map(feature => feature.key())
+            .filter(feature => !selectedIdentitiesAfterLocate.has(
+                `${feature.mapTileKey}\n${feature.featureId}`
+            )));
         if (!features.length) {
             this.hoverTopic.next(features);
             return;
@@ -179,8 +202,7 @@ export class InspectionSelectionService {
 
     /** Loads a feature and centers the target view on its reported center point. */
     async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
-        // Feature centers and bounding radii are only reliable after every advertised stage has arrived.
-        const features = await this.tileStream.loadFeatures([tileFeatureId], {requireAllStages: true});
+        const features = await this.tileStream.loadFeatures([tileFeatureId]);
         if (!features.length) {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
@@ -244,7 +266,12 @@ export class InspectionSelectionService {
 
         const targetViews: number[] = [];
         for (let i = 0; i < this.stateService.numViews; ++i) {
-            if (this.tileStream.viewShowsFeatureTile(i, featureTile, true)) {
+            if (this.viewState.showsFeatureSearchTileInView(
+                i,
+                featureTile.mapName,
+                featureTile.layerName,
+                featureTile.tileId
+            )) {
                 targetViews.push(i);
             }
         }

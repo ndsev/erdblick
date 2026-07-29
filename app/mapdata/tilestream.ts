@@ -15,15 +15,34 @@ export const MAP_TILE_STREAM_TYPE_FEATURES = 2;
 export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
-export const MAP_TILE_STREAM_TYPE_SEARCH_RESULTS = 7;
+export const MAP_TILE_STREAM_TYPE_SUBSETS = 7;
 export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
-export const MAP_TILE_STREAM_SEARCH_STATUS_TYPE = "mapget.search.status";
-export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 2;
-export const MAP_TILE_STREAM_PROTOCOL_MINOR = 1;
+export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
+// These framing constants must be importable before the asynchronous WASM
+// module exists (notably by protocol tests). Runtime initialization verifies
+// them against mapget's authoritative compiled version.
+export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 3;
+export const MAP_TILE_STREAM_PROTOCOL_MINOR = 0;
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
+
+/** Fail fast if the TypeScript framing constants drift from mapget's ABI. */
+export function assertMapTileStreamProtocolVersion(): void {
+    const actualMajor =
+        coreLib.tileLayerStreamProtocolMajor();
+    const actualMinor =
+        coreLib.tileLayerStreamProtocolMinor();
+    if (actualMajor !== MAP_TILE_STREAM_PROTOCOL_MAJOR ||
+        actualMinor !== MAP_TILE_STREAM_PROTOCOL_MINOR) {
+        throw new Error(
+            `Tile-stream protocol build mismatch: TypeScript expects ` +
+            `${MAP_TILE_STREAM_PROTOCOL_MAJOR}.${MAP_TILE_STREAM_PROTOCOL_MINOR}, ` +
+            `but WASM exports ${actualMajor}.${actualMinor}.`
+        );
+    }
+}
 
 export interface MapTileStreamStatusRequest {
     index: number;
@@ -42,21 +61,21 @@ export interface MapTileStreamStatusPayload {
     message?: string;
 }
 
-export interface MapTileStreamSearchStatusPayload {
-    type: typeof MAP_TILE_STREAM_SEARCH_STATUS_TYPE;
-    searchId: string;
-    refresh?: number;
-    requestKey?: string;
+export interface MapTileStreamFilterStatusPayload {
+    type: typeof MAP_TILE_STREAM_FILTER_STATUS_TYPE;
+    filterId: string;
+    generation: number;
     mapId?: string;
     layerId?: string;
+    sourceId?: string;
     state: string;
-    tilesQueued?: number;
-    tilesLoaded?: number;
-    tilesSearched?: number;
-    tilesConsidered?: number;
-    tilesCompleted?: number;
-    matches?: number;
-    chunksEmitted?: number;
+    outputTilesRequested?: number;
+    sourceTilesQueued?: number;
+    sourceTilesLoaded?: number;
+    sourceTilesEvaluated?: number;
+    outputTilesReady?: number;
+    outputTilesEmitted?: number;
+    entriesEmitted?: number;
     error?: string;
 }
 export enum TileLoadState {
@@ -204,10 +223,10 @@ export class MapTileStreamClient {
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
     onSourceData: ((payload: Uint8Array) => void) | null = null;
-    onSearchResults: ((payload: Uint8Array) => void) | null = null;
+    onSubsets: ((payload: Uint8Array) => void) | null = null;
     onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
-    onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
+    onFilterStatus: ((status: MapTileStreamFilterStatusPayload) => void) | null = null;
     onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
     onSourcesRevisionChanged: ((revision: number, reconnected: boolean) => void) | null = null;
     onOpen: (() => void) | null = null;
@@ -234,9 +253,9 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Registers the callback that receives search-result payload frames without the transport header. */
-    withSearchResultsCallback(callback: (payload: Uint8Array) => void) {
-        this.onSearchResults = callback;
+    /** Registers the callback that receives subset payload frames without the transport header. */
+    withSubsetsCallback(callback: (payload: Uint8Array) => void) {
+        this.onSubsets = callback;
         return this;
     }
 
@@ -253,8 +272,8 @@ export class MapTileStreamClient {
     }
 
     /** Registers the callback that receives parsed server-side search status payloads. */
-    withSearchStatusCallback(callback: (status: MapTileStreamSearchStatusPayload) => void) {
-        this.onSearchStatus = callback;
+    withFilterStatusCallback(callback: (status: MapTileStreamFilterStatusPayload) => void) {
+        this.onFilterStatus = callback;
         return this;
     }
 
@@ -531,7 +550,9 @@ export class MapTileStreamClient {
      * Sends the current logical interactive tile request if it differs from the last one.
      * Large requests are chunked across multiple websocket messages but still share one request id.
      */
-    async updateRequest(tileLayerRequests: any[]) {
+    async updateRequest(
+        tileLayerRequests: any[]
+    ): Promise<"sent" | "unchanged" | "failed"> {
         const stringPoolOffsets = this.parser!.getFieldDictOffsets();
         const requestBodyBase = {
             requests: tileLayerRequests,
@@ -542,7 +563,7 @@ export class MapTileStreamClient {
 
         // Ensure that the new request is different from the previous one.
         if (this.lastTilesRequestBody === newRequestBody) {
-            return false;
+            return "unchanged";
         }
         this.lastTilesRequestBody = newRequestBody;
         const previousRequestId = this.latestRequestedRequestId;
@@ -555,12 +576,12 @@ export class MapTileStreamClient {
                 requestId);
             this.sendSerializedRequests(requestPayloads);
             await this.waitForSend();
-            return true;
+            return "sent";
         } catch (err) {
             this.lastTilesRequestBody = null;
             this.latestRequestedRequestId = previousRequestId;
             console.error("Failed to send interactive tile request.", err);
-            return false;
+            return "failed";
         }
     }
 
@@ -999,9 +1020,9 @@ export class MapTileStreamClient {
                     if (!this.matchesCurrentRequest(payload.requestId)) {
                         return;
                     }
-                    if (payload.type === MAP_TILE_STREAM_SEARCH_STATUS_TYPE) {
-                        if (this.onSearchStatus) {
-                            this.onSearchStatus(payload as unknown as MapTileStreamSearchStatusPayload);
+                    if (payload.type === MAP_TILE_STREAM_FILTER_STATUS_TYPE) {
+                        if (this.onFilterStatus) {
+                            this.onFilterStatus(payload as unknown as MapTileStreamFilterStatusPayload);
                         }
                         return;
                     }
@@ -1072,7 +1093,7 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
-                // Field dictionaries are node-keyed prerequisites for feature/search payloads.
+                // Field dictionaries are string-pool-keyed prerequisites for feature/subset payloads.
                 // They can legitimately arrive after a newer request context has superseded
                 // their original request, while the already-accepted feature payload still
                 // remains cached. Keep them additive across request churn; datasource reloads
@@ -1106,12 +1127,17 @@ export class MapTileStreamClient {
                 return;
             }
 
-            if (type === MAP_TILE_STREAM_TYPE_SEARCH_RESULTS) {
-                if (!this.acceptsCurrentPayloadFrame()) {
-                    return;
-                }
-                if (this.onSearchResults) {
-                    this.onSearchResults(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
+            if (type === MAP_TILE_STREAM_TYPE_SUBSETS) {
+                // A pull response can cross a same-generation coverage update:
+                // the server has already marked its subset tile forwarded,
+                // while the newer request-context frame may be processed first.
+                // Unlike complete feature/source-data frames, every subset
+                // carries filterId + generation + tile identity and the owning
+                // FilterSubscriptionRef applies the exact current-coverage
+                // gate. Rejecting it by untagged request context here loses a
+                // valid result permanently.
+                if (this.onSubsets) {
+                    this.onSubsets(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
                 return;
             }
@@ -1138,7 +1164,11 @@ export class MapTileStreamClient {
             return true;
         }
         if (requestId === undefined) {
-            return true;
+            // Protocol-3 servers tag every logical request status.  Reject
+            // untagged frames once that capability has been observed so an
+            // unrelated control/error frame cannot complete the active
+            // request or overwrite its terminal diagnostics.
+            return !this.supportsRequestContextFrames;
         }
         return requestId === this.latestRequestedRequestId;
     }

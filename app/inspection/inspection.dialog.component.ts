@@ -3,7 +3,7 @@ import {Popover} from "primeng/popover";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {AppStateService, InspectionComparisonOption, InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {FeaturePanelComponent} from "./feature.panel.component";

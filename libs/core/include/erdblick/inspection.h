@@ -153,7 +153,7 @@ public:
         std::optional<std::string> targetGeoJsonPath = std::nullopt);
     /** Convert one relation and attach hover metadata if applicable. */
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
-    /** Convert one geometry node, including stage/name metadata and points. */
+    /** Convert one geometry node, including its semantic name and points. */
     void convertGeometry(
         JsValue const& key,
         mapget::model_ptr<mapget::Geometry> const& r,

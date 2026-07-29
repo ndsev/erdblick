@@ -81,42 +81,6 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
-    if (auto stage = styleYaml["stage"]) {
-        if (!stage.IsScalar()) {
-            validationReport_.addIssue(
-                "error",
-                "schema",
-                "stylesheet-failed",
-                "Style sheet stage must be a scalar integer.",
-                locationForNode(stage));
-            validationReport_.markStylesheetFailed();
-            return;
-        }
-        try {
-            auto parsedStage = stage.as<int>();
-            if (parsedStage < 0) {
-                validationReport_.addIssue(
-                    "error",
-                    "schema",
-                    "stylesheet-failed",
-                    "Style sheet stage must be non-negative.",
-                    locationForNode(stage));
-                validationReport_.markStylesheetFailed();
-                return;
-            }
-            stage_ = static_cast<uint32_t>(parsedStage);
-        } catch (YAML::Exception const& e) {
-            validationReport_.addIssue(
-                "error",
-                "schema",
-                "stylesheet-failed",
-                "Could not parse style sheet stage: " + e.msg,
-                locationFromMark(e.mark));
-            validationReport_.markStylesheetFailed();
-            return;
-        }
-    }
-
     if (auto layer = styleYaml["layer"]) {
         if (!layer.IsScalar()) {
             validationReport_.addIssue(
@@ -279,11 +243,6 @@ bool FeatureLayerStyle::defaultEnabled() const
     return enabled_;
 }
 
-uint32_t FeatureLayerStyle::minimumStage() const
-{
-    return stage_;
-}
-
 std::string const& FeatureLayerStyle::name() const {
     return name_;
 }
@@ -306,7 +265,7 @@ bool FeatureLayerStyle::hasExplicitLowFidelityRules() const
 bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) const
 {
     return std::ranges::any_of(rules_, [mode](auto const& rule) {
-        return rule.mode() == mode && rule.aspect() == FeatureStyleRule::Relation;
+        return rule.mode() == mode && rule.scope() == FeatureStyleRule::Relation;
     });
 }
 

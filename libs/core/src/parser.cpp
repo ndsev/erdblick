@@ -19,6 +19,7 @@
 #include "simfil/model/model.h"
 #include "simfil/simfil.h"
 #include "parser.h"
+#include "style-filter-plan.h"
 
 using namespace mapget;
 
@@ -1341,8 +1342,8 @@ NativeJsValue TileLayerParser::getFieldDictOffsets()
 {
     auto offsets = reader_->stringPoolCache()->stringPoolOffsets();
     auto result = JsValue::Dict();
-    for (auto const& [nodeId, highestFieldId] : offsets)
-        result.set(nodeId, JsValue(highestFieldId));
+    for (auto const& [stringPoolId, highestFieldId] : offsets)
+        result.set(stringPoolId, JsValue(highestFieldId));
     return *result;
 }
 
@@ -1364,7 +1365,9 @@ TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& b
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); }));
+        [this](auto&& stringPoolId) {
+            return cachedStrings_->getStringPool(stringPoolId);
+        }));
     return result;
 }
 
@@ -1376,19 +1379,23 @@ TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array co
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); }));
+        [this](auto&& stringPoolId) {
+            return cachedStrings_->getStringPool(stringPoolId);
+        }));
     return result;
 }
 
-TileSearchResultLayer TileLayerParser::readTileSearchResultLayer(SharedUint8Array const& buffer)
+TileSubsetLayer TileLayerParser::readTileSubsetLayer(SharedUint8Array const& buffer)
 {
-    auto result = TileSearchResultLayer(std::make_shared<mapget::TileSearchResultLayer>(
+    auto result = TileSubsetLayer(std::make_shared<mapget::TileSubsetLayer>(
         buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); }));
+        [this](auto&& stringPoolId) {
+            return cachedStrings_->getStringPool(stringPoolId);
+        }));
     return result;
 }
 
@@ -1397,37 +1404,14 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     // Parse just the TileLayer part of the blob, which is the base class of
     // e.g. the TileFeatureLayer. The base class blob always precedes the
     // blob from the derived class.
-    size_t bytesRead = 0;
     TileLayer tileLayer(
         buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
-        },
-        &bytesRead
-    );
+        });
     int32_t numFeatures = -1;
-    uint32_t stage = 0;
     auto layerInfo = tileLayer.info();
-    auto const& bytes = buffer.bytes();
-    if (tileLayer.layerInfo() &&
-        tileLayer.layerInfo()->type_ == LayerType::Features &&
-        tileLayer.layerInfo()->stages_ > 1 &&
-        bytesRead < bytes.size())
-    {
-        // TileFeatureLayer serializes stage as std::optional<uint32_t>:
-        // one byte "hasValue" marker, followed by 4-byte little-endian value.
-        // Staged layers always set stage, but keep a safe fallback to zero.
-        const auto hasSerializedStage = bytes[bytesRead];
-        if (hasSerializedStage == 1U && bytesRead + 1 + sizeof(uint32_t) <= bytes.size()) {
-            const auto stageOffset = bytesRead + 1;
-            stage =
-                static_cast<uint32_t>(bytes[stageOffset]) |
-                (static_cast<uint32_t>(bytes[stageOffset + 1]) << 8U) |
-                (static_cast<uint32_t>(bytes[stageOffset + 2]) << 16U) |
-                (static_cast<uint32_t>(bytes[stageOffset + 3]) << 24U);
-        }
-    }
     auto allScalarFields = JsValue::Dict();
     if (layerInfo.is_object()) {
         numFeatures = layerInfo.value<int32_t>("Size/Features#features", -1);
@@ -1439,16 +1423,109 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     }
     return {
         tileLayer.id().toString(),
-        tileLayer.nodeId(),
+        tileLayer.stringPoolId(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         tileLayer.tileId().value(),
-        stage,
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",
         numFeatures,
         *allScalarFields
     };
+}
+
+TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMetadata(
+    SharedUint8Array const& buffer)
+{
+    auto metadata = mapget::TileSubsetLayer::readMetadata(
+        buffer.bytes(),
+        [this](auto&& mapId, auto&& layerId)
+        {
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
+        });
+    auto dependencies = JsValue::List();
+    for (auto const& dependency : metadata.dependencies_) {
+        dependencies.push(JsValue::Dict({
+            {"sourceTileKey", JsValue(dependency.sourceTileKey_.toString())},
+            {"mapId", JsValue(dependency.sourceTileKey_.mapId_)},
+            {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
+            {"tileId", JsValue(dependency.sourceTileKey_.tileId_.value())},
+            {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
+        }));
+    }
+    auto issues = JsValue::List();
+    for (auto const& issue : metadata.issues_) {
+        nlohmann::json scope = issue.scope_;
+        issues.push(JsValue::Dict({
+            {"channelId", JsValue(issue.channelId_)},
+            {"expression", JsValue(issue.expression_)},
+            {"scope", JsValue(scope.get<std::string>())},
+            {"message", JsValue(issue.message_)},
+            {"occurrenceCount",
+             JsValue(static_cast<double>(issue.occurrenceCount_))},
+        }));
+    }
+    return {
+        readTileLayerMetadata(buffer),
+        std::move(metadata.identity_.filterId_),
+        metadata.identity_.generation_,
+        *dependencies,
+        *issues,
+        metadata.glbAttachmentName_.value_or(std::string{}),
+    };
+}
+
+NativeJsValue TileLayerParser::planStyleFilter(
+    FeatureLayerStyle const& style,
+    std::string const& mapId,
+    std::string const& layerId,
+    int highlightMode,
+    int fidelity)
+{
+    auto info = resolveMapLayerInfo(mapId, layerId);
+    if (!info) {
+        StyleFilterPlan plan;
+        plan.valid = false;
+        plan.issues.push_back({
+            0,
+            "No LayerInfo is available for '" +
+                mapId + "/" + layerId + "'."});
+        return plan.toJsValue();
+    }
+    if (highlightMode <
+            static_cast<int>(
+                FeatureStyleRule::NoHighlight) ||
+        highlightMode >
+            static_cast<int>(
+                FeatureStyleRule::SelectionHighlight))
+    {
+        StyleFilterPlan plan;
+        plan.valid = false;
+        plan.issues.push_back(
+            {0, "Invalid highlight mode."});
+        return plan.toJsValue();
+    }
+    if (fidelity <
+            static_cast<int>(
+                FeatureStyleRule::AnyFidelity) ||
+        fidelity >
+            static_cast<int>(
+                FeatureStyleRule::LowFidelity))
+    {
+        StyleFilterPlan plan;
+        plan.valid = false;
+        plan.issues.push_back(
+            {0, "Invalid rule fidelity."});
+        return plan.toJsValue();
+    }
+    return erdblick::planStyleFilter(
+        style,
+        *info,
+        static_cast<FeatureStyleRule::HighlightMode>(
+            highlightMode),
+        static_cast<FeatureStyleRule::Fidelity>(
+            fidelity))
+        .toJsValue();
 }
 
 void TileLayerParser::setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info) {
@@ -1538,9 +1615,11 @@ void TileLayerParser::getDataSourceInfo(SharedUint8Array& out, std::string const
     out.writeToArray("[" + infoIt->second.toJson().dump() + "]");
 }
 
-void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nodeId)
+void TileLayerParser::getFieldDict(
+    SharedUint8Array& out,
+    std::string const& stringPoolId)
 {
-    auto fieldDict = cachedStrings_->getStringPool(nodeId);
+    auto fieldDict = cachedStrings_->getStringPool(stringPoolId);
     std::ostringstream outStream;
     fieldDict->write(outStream, 0);
     out.writeToArray(outStream.str());
@@ -1549,8 +1628,9 @@ void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nod
 void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 {
     size_t bytesRead;
-    auto nodeId = mapget::StringPool::readDataSourceNodeId(buffer.bytes(), 0, &bytesRead);
-    auto fieldDict = cachedStrings_->getStringPool(nodeId);
+    auto stringPoolId =
+        mapget::StringPool::readDataSourceStringPoolId(buffer.bytes(), 0, &bytesRead);
+    auto fieldDict = cachedStrings_->getStringPool(stringPoolId);
     (void) fieldDict->read(buffer.bytes(), bytesRead);
 }
 

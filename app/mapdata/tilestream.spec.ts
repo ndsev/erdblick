@@ -6,6 +6,8 @@ import {
     MAP_TILE_STREAM_TYPE_FIELDS,
     MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
     MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
+    MAP_TILE_STREAM_TYPE_STATUS,
+    MAP_TILE_STREAM_TYPE_SUBSETS,
     MapTileStreamClient
 } from './tilestream';
 
@@ -243,11 +245,73 @@ describe('MapTileStreamClient', () => {
 
             expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
 
-            const frame = jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {nodeId: "stale-but-required"});
+            const frame = jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {stringPoolId: "stale-but-required"});
             await tileStream.handleFrame(frame, MAP_TILE_STREAM_TYPE_FIELDS);
 
             expect(parser.readFieldDictUpdate).toHaveBeenCalledOnce();
             expect(fieldsCallback).toHaveBeenCalledWith(frame);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('accepts self-identifying subset frames across request-context supersession', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const subsetsCallback = vi.fn();
+        try {
+            client.withSubsetsCallback(subsetsCallback);
+            tileStream.latestRequestedRequestId = 5;
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+
+            const frame = jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {
+                filterId: "styled:0/map/layer",
+                generation: 1,
+                tileId: 42
+            });
+            await tileStream.handleFrame(frame, MAP_TILE_STREAM_TYPE_SUBSETS);
+
+            expect(subsetsCallback).toHaveBeenCalledOnce();
+            expect(subsetsCallback).toHaveBeenCalledWith(
+                frame.slice(MAP_TILE_STREAM_HEADER_SIZE)
+            );
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('rejects untagged statuses after observing protocol-3 request contexts', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const statusCallback = vi.fn();
+        try {
+            client.withStatusCallback(statusCallback);
+            tileStream.latestRequestedRequestId = 3;
+            await tileStream.handleFrame(jsonFrame(
+                MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
+                {
+                    type: 'mapget.tiles.request-context',
+                    requestId: 3
+                }
+            ), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            await tileStream.handleFrame(jsonFrame(
+                MAP_TILE_STREAM_TYPE_STATUS,
+                {
+                    type: 'mapget.tiles.status',
+                    allDone: true,
+                    requests: [],
+                    message: 'untagged control frame'
+                }
+            ), MAP_TILE_STREAM_TYPE_STATUS);
+
+            expect(statusCallback).not.toHaveBeenCalled();
+            expect(client.getDebugState().lastStatusPayload).toBeNull();
         } finally {
             client.destroy();
         }

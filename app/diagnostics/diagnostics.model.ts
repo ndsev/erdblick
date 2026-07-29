@@ -7,11 +7,6 @@ export interface ProgressCounter {
     total: number;
 }
 
-/** Named progress stage shown in the pipeline progress widget. */
-export interface StageProgressCounter extends ProgressCounter {
-    label: string;
-}
-
 /** Miscellaneous loading metrics shown as compact bubbles in the progress HUD. */
 export interface LoadingStatBubbles {
     downstreamBytesPerSecond: number;
@@ -31,7 +26,6 @@ export interface LoadingStatBubbles {
 
 /** Full tile-pipeline progress model consumed by diagnostics widgets. */
 export interface TilePipelineProgress {
-    stages: StageProgressCounter[];
     backend: ProgressCounter;
     rendered: ProgressCounter;
     bubbles: LoadingStatBubbles;

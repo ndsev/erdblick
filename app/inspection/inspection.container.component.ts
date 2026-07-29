@@ -1,7 +1,7 @@
 import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {Subscription} from "rxjs";
 import {DockedPanelDragController, DockedPanelDragOffset} from "../shared/docked-panel-drag.controller";
 
@@ -79,7 +79,15 @@ export class InspectionContainerComponent implements OnDestroy {
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            const hasDockedPanels = this.dockedPanels.length > 0 || this.stateService.hasDockedSurface();
+            // Restricted feature loading is asynchronous. Keep the dock open
+            // while a docked id selection is waiting for its FeatureWrapper;
+            // otherwise the selectionTopic's initial empty value immediately
+            // auto-collapses the dock opened by setSelection().
+            const hasPendingDockedPanels = this.mapService.selectionIdsTopic.getValue()
+                .some(panel => !panel.undocked);
+            const hasDockedPanels = this.dockedPanels.length > 0 ||
+                hasPendingDockedPanels ||
+                this.stateService.hasDockedSurface();
             this.stateService.isDockOpen = this.stateService.isDockOpen &&
                 (!this.stateService.isDockAutoCollapsible || hasDockedPanels);
         }));

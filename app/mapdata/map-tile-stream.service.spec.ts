@@ -1,9 +1,10 @@
-import {Subject} from 'rxjs';
-import {describe, expect, it, vi} from 'vitest';
-import {MapTileStreamService} from './map-tile-stream.service';
+import "@angular/compiler";
+import {Subject} from "rxjs";
+import {describe, expect, it, vi} from "vitest";
+import {MapTileStreamService} from "./map-tile-stream.service";
 
-describe('MapTileStreamService source catalog refresh', () => {
-    it('reloads again when a backend reconnect races an in-flight catalog fetch', async () => {
+describe("MapTileStreamService source catalog refresh", () => {
+    it("reloads again when a backend reconnect races an in-flight catalog fetch", async () => {
         let finishFirstReload!: () => void;
         const firstReload = new Promise<boolean>(resolve => {
             finishFirstReload = () => resolve(true);
@@ -18,7 +19,6 @@ describe('MapTileStreamService source catalog refresh', () => {
         const service = new MapTileStreamService(
             {tilePullCompressionEnabledState: new Subject<boolean>()} as any,
             mapInfo as any,
-            {viewStateChanged: new Subject<void>()} as any,
             {} as any,
             {
                 run: (callback: () => unknown) => callback(),
@@ -38,5 +38,27 @@ describe('MapTileStreamService source catalog refresh', () => {
         finishFirstReload();
 
         await vi.waitFor(() => expect(mapInfo.reloadDataSources).toHaveBeenCalledTimes(2));
+    });
+});
+
+describe("MapTileStreamService viewport timing", () => {
+    it("freezes the end-to-end timer only once presentation reports completion", () => {
+        const service = Object.create(
+            MapTileStreamService.prototype
+        ) as MapTileStreamService;
+        const internal = service as any;
+        internal.viewportLoadStartedAtMs = 100;
+        internal.viewportCompletedAtMs = null;
+        const now = vi.spyOn(performance, "now")
+            .mockReturnValueOnce(250)
+            .mockReturnValue(400);
+
+        expect(service.currentViewportRenderSeconds()).toBeCloseTo(0.15);
+        service.markCurrentViewportRendered();
+        expect(service.currentViewportRenderSeconds()).toBeCloseTo(0.3);
+
+        service.markCurrentViewportRendered();
+        expect(service.currentViewportRenderSeconds()).toBeCloseTo(0.3);
+        now.mockRestore();
     });
 });

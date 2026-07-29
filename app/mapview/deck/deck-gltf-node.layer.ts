@@ -17,8 +17,6 @@ import {parse} from "@loaders.gl/core";
 import {GLTFLoader, postProcessGLTF, type GLTFPostprocessed, type GLTFWithBuffers} from "@loaders.gl/gltf";
 import {Matrix4} from "@math.gl/core";
 
-import {FeatureTile} from "../../mapdata/features.model";
-
 const GLTF_NODE_UNIFORM_BLOCK = `\
 uniform gltfNodeUniforms {
   vec3 tilePosition;
@@ -277,6 +275,14 @@ type ParsedTileGltfSnapshot = {
     center: [number, number, number];
 };
 
+/** Attachment-backed input used by the per-device parsed GLTF cache. */
+export interface DeckTileGltfAttachmentSource {
+    readonly cacheKey: string;
+    readonly attachmentName: string;
+    readonly tilePosition: [number, number, number];
+    readBytes(): Promise<Uint8Array | null>;
+}
+
 /** Parsed and normalized tile GLTF attachment cached per deck device and tile version. */
 export interface DeckTileGltfAsset {
     readonly cacheKey: string;
@@ -351,13 +357,14 @@ export type DeckGltfPickProxyLayerProps = LayerProps & {
     contributions: DeckGltfPickProxyStyleContribution[];
     coordinateOrigin: [number, number, number];
     tileKey: string;
+    subsetPickResolver?: (pickIndex: number) => unknown;
 };
 
 const gltfAssetCacheByDevice = new WeakMap<Device, Map<string, DeckTileGltfAssetCacheEntry>>();
 const ZERO_PICKING_COLOR: [number, number, number] = [0, 0, 0];
 
-function gltfAssetCacheKey(tile: FeatureTile): string {
-    return `${tile.mapTileKey}:${tile.dataVersion}`;
+function gltfAssetCacheKey(source: DeckTileGltfAttachmentSource): string {
+    return source.cacheKey;
 }
 
 /** Returns the per-device GLTF asset cache shared by visible and picking layers. */
@@ -411,17 +418,24 @@ function buildModelOptions(layerId: string): ParseGLTFOptions {
     };
 }
 
-async function readTileGltfSnapshot(tile: FeatureTile): Promise<ParsedTileGltfSnapshot | null> {
-    return await tile.getGlbAttachmentSnapshot();
+async function readTileGltfSnapshot(
+    source: DeckTileGltfAttachmentSource
+): Promise<ParsedTileGltfSnapshot | null> {
+    const bytes = await source.readBytes();
+    return bytes ? {
+        name: source.attachmentName,
+        bytes,
+        center: source.tilePosition
+    } : null;
 }
 
 /** Parses one tile attachment into the immutable GLTF asset snapshot shared by all layer states. */
 async function buildTileGltfAsset(
     device: Device,
-    tile: FeatureTile,
+    source: DeckTileGltfAttachmentSource,
     cacheKey: string
 ): Promise<DeckTileGltfAsset | null> {
-    const snapshot = await readTileGltfSnapshot(tile);
+    const snapshot = await readTileGltfSnapshot(source);
     if (!snapshot) {
         return null;
     }
@@ -869,10 +883,10 @@ function destroyLayerScenegraphState(state: LayerScenegraphState): void {
 
 /** Retains the parsed GLTF asset for one tile on a specific deck device. */
 export async function retainDeckTileGltfAsset(
-    tile: FeatureTile,
+    source: DeckTileGltfAttachmentSource,
     device: Device
 ): Promise<DeckTileGltfAsset | null> {
-    const cacheKey = gltfAssetCacheKey(tile);
+    const cacheKey = gltfAssetCacheKey(source);
     const cache = getDeviceCache(device);
     const cachedEntry = cache.get(cacheKey);
     if (cachedEntry) {
@@ -883,7 +897,7 @@ export async function retainDeckTileGltfAsset(
     const entry: DeckTileGltfAssetCacheEntry = {
         refCount: 1,
         asset: undefined,
-        promise: buildTileGltfAsset(device, tile, cacheKey).then((asset) => {
+        promise: buildTileGltfAsset(device, source, cacheKey).then((asset) => {
             entry.asset = asset;
             return asset;
         })
@@ -894,7 +908,7 @@ export async function retainDeckTileGltfAsset(
 
 /** Releases one retained GLTF asset reference and destroys it once the last user goes away. */
 export function releaseDeckTileGltfAsset(
-    tile: FeatureTile,
+    source: DeckTileGltfAttachmentSource,
     device: Device | null | undefined
 ): void {
     if (!device) {
@@ -904,7 +918,7 @@ export function releaseDeckTileGltfAsset(
     if (!cache) {
         return;
     }
-    const cacheKey = gltfAssetCacheKey(tile);
+    const cacheKey = gltfAssetCacheKey(source);
     const entry = cache.get(cacheKey);
     if (!entry) {
         return;

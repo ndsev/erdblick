@@ -2,7 +2,7 @@
 
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
-#include "mapget/model/searchresultlayer.h"
+#include "mapget/model/subsetlayer.h"
 #include "interop/js-object.h"
 #include "buffer.h"
 #include "mapget/model/sourcedata.h"
@@ -27,12 +27,6 @@ struct TileFeatureLayer
 
     /** Retrieves the signed packed NDS.Live tile ID. */
     int32_t tileId() const;
-
-    /**
-     * Retrieves the staged-loading index for the tile layer.
-     * Returns 0 when no explicit stage is stored.
-     */
-    uint32_t stage() const;
 
     /**
      * Gets the number of features in the tile.
@@ -65,19 +59,11 @@ struct TileFeatureLayer
      */
     mapget::model_ptr<mapget::Feature> find(const std::string& id) const;
 
-    /**
-     * Attach an overlay tile to this tile.
-     */
-    void attachOverlay(TileFeatureLayer const& overlay);
-
-    /** Report whether the tile exposes a tile-level GLB attachment. */
+    /** Report whether the tile names a tile-level GLB attachment. */
     [[nodiscard]] bool hasGlbAttachment() const;
 
     /** Return the attachment name for the tile-level GLB, or empty string when absent. */
     [[nodiscard]] std::string glbAttachmentName() const;
-
-    /** Copy the tile-level GLB bytes into a JS-visible buffer. */
-    bool copyGlbAttachment(SharedUint8Array& output) const;
 
     /**
      * Finds the index of a feature based on its type and ID parts.
@@ -153,66 +139,95 @@ struct TileSourceDataLayer
     std::shared_ptr<mapget::TileSourceDataLayer> model_;
 };
 
-/** Wrapper class around the mapget `TileSearchResultLayer` smart pointer. */
-struct TileSearchResultLayer
+/** Wrapper around one immutable server-evaluated `mapget::TileSubsetLayer`. */
+struct TileSubsetLayer
 {
-    /** Constructor accepting a shared pointer to the original `TileSearchResultLayer` class. */
-    TileSearchResultLayer(std::shared_ptr<mapget::TileSearchResultLayer> self);
+    /** Adopt one parsed subset value. */
+    explicit TileSubsetLayer(std::shared_ptr<mapget::TileSubsetLayer> self);
 
-    /** Retrieves the ID of the source tile as a string. */
+    /** Return the inherited output tile key. */
     std::string id() const;
 
-    /** Retrieves the source node id. */
-    std::string nodeId() const;
+    /** Return the serialized string-pool namespace. */
+    std::string stringPoolId() const;
 
-    /** Retrieves the source map id. */
+    /** Return the source map id. */
     std::string mapId() const;
 
-    /** Retrieves the source layer id. */
+    /** Return the source layer id. */
     std::string layerId() const;
 
-    /** Retrieves the signed packed NDS.Live source tile id. */
+    /** Return the signed packed output tile id. */
     int32_t tileId() const;
 
-    /** Retrieves the staged-loading index of the source feature tile. */
-    uint32_t stage() const;
+    /** Return the transport subscription identity. */
+    std::string filterId() const;
 
-    /** Number of search result roots. */
-    uint32_t numResults() const;
+    /** Return the transport generation. */
+    uint64_t generation() const;
 
-    /** Result field expressions aligned with every result values array. */
-    NativeJsValue resultFields() const;
+    /** Return the number of ordered channels. */
+    uint32_t numChannels() const;
 
-    /** Layer metadata such as search id, refresh, and result count. */
+    /** Return the number of terminal entries across all channels. */
+    uint32_t numEntries() const;
+
+    /** Return the inherited source and subset-local numeric metadata. */
     NativeJsValue info() const;
 
-    /** Compact entries consumed by the TypeScript search UI and low-fi marker path. */
-    NativeJsValue resultEntries() const;
+    /** Return every consulted source dependency, including empty tiles. */
+    NativeJsValue dependencies() const;
 
-    /** Exact result entries for a bounded half-open result-index range, including per-result display positions. */
-    NativeJsValue resultEntryRange(uint32_t offset, uint32_t limit) const;
+    /** Return structured server-side evaluation issues. */
+    NativeJsValue issues() const;
 
-    /** Compact result entries for tree/density ingress without expensive per-result geometry-center conversion. */
-    NativeJsValue resultEntryRangeCompact(uint32_t offset, uint32_t limit) const;
+    /** Return the optional attachment name, or an empty string. */
+    std::string glbAttachmentName() const;
+
+    /** Return one channel's concrete scope and ordered projection schemas. */
+    NativeJsValue channelSchema(uint32_t channelOrdinal) const;
 
     /**
-     * Summarize withFields and trace values without materializing all samples in TypeScript.
-     * @param histogramLimit Maximum number of histogram buckets returned per value stream.
-     * @param distinctLimit Maximum number of distinct strings tracked per value stream.
+     * Return a bounded range of terminal rows for consumer-owned ingestion.
+     *
+     * Values are aligned with `channelSchema()`'s active entry schema. Exact
+     * display positions are optional because broad searches normally use the
+     * much cheaper output-tile center for density aggregation.
      */
-    NativeJsValue valueSummaries(uint32_t histogramLimit, uint32_t distinctLimit) const;
+    NativeJsValue entryRange(
+        uint32_t channelOrdinal,
+        uint32_t offset,
+        uint32_t limit,
+        bool includePosition) const;
 
-    /** JSON representation for diagnostics and tests. */
+    /** Summarize one channel's projected values and request traces. */
+    NativeJsValue valueSummaries(
+        uint32_t channelOrdinal,
+        uint32_t histogramLimit,
+        uint32_t distinctLimit) const;
+
+    /**
+     * Resolve one renderer picking tuple against this exact immutable subset.
+     *
+     * `endpointRole` is zero for the terminal/representative feature, one for
+     * a relation source, and two for a relation target.
+     */
+    NativeJsValue resolvePick(
+        uint32_t channelOrdinal,
+        uint32_t entryOrdinal,
+        uint32_t endpointRole) const;
+
+    /** Return a compact JSON representation for diagnostics and tests. */
     std::string toJson() const;
 
     /** Copy serialized SIMFIL diagnostics into a JS-visible byte buffer. */
     bool copyDiagnostics(SharedUint8Array& output) const;
 
     /** Release the wrapped smart pointer. */
-    ~TileSearchResultLayer();
+    ~TileSubsetLayer();
 
-    /** Shared pointer to the underlying `mapget::TileSearchResultLayer`. */
-    mapget::TileSearchResultLayer::Ptr model_;
+    /** Shared pointer retained for render jobs and picking lifetime. */
+    mapget::TileSubsetLayer::Ptr model_;
 };
 
 } // namespace erdblick

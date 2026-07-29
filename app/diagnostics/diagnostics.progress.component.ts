@@ -17,15 +17,15 @@ interface ProgressBar {
             <div class="diagnostics-progress-list">
                 @for (bar of progressBars; track bar.key) {
                     <div class="diagnostics-progress-item">
-                        <span class="diagnostics-stage-label">
+                        <span class="diagnostics-progress-label">
                             @if (bar.icon) {
                                 <i [class]="bar.icon" aria-hidden="true"></i>
                             }
                             {{ bar.label }}
                         </span>
-                        <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(bar.counter) + '%'">
+                        <div class="diagnostics-progress-bar" [style.--diagnostics-progress]="progressPercent(bar.counter) + '%'">
                             <p-progressBar [value]="progressPercent(bar.counter)" [dt]="bar.color" [showValue]="false"></p-progressBar>
-                            <span class="diagnostics-stage-bar-value">
+                            <span class="diagnostics-progress-bar-value">
                                 {{ bar.counter.done }} / {{ bar.counter.total }}
                             </span>
                         </div>
@@ -73,14 +73,6 @@ export class DiagnosticsProgressComponent {
 
     /** Returns the ordered list of progress bars shown in the widget. */
     get progressBars(): ProgressBar[] {
-        const stageCounters = this.progress?.stages ?? [];
-        const stageBars = stageCounters.map((counter, stage) => ({
-            key: `stage-${stage}`,
-            label: counter.label,
-            counter,
-            icon: 'pi pi-download',
-            color: {value: {background: '{cyan.500}'}}
-        }));
         return [
             {
                 key: 'backend',
@@ -88,7 +80,6 @@ export class DiagnosticsProgressComponent {
                 counter: this.progress?.backend ?? {done: 0, total: 0},
                 color: {value: {background: '{blue.500}'}}
             },
-            ...stageBars,
             {
                 key: 'rendered',
                 label: 'Rendered',

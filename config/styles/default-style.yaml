@@ -1,5 +1,5 @@
 name: DefaultStyle
-version: 1.0
+version: 2
 options:
   - label: Show Meshes/Polygons
     id: showMesh
@@ -33,7 +33,13 @@ rules:
   - geometry: ["point"]
     point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
     filter: showPoint
-    color-expression: "$mergeCount > 1 and 'red' or 'moccasin'"
+    color-scale:
+      mode: categorical
+      expression: "$mergeCount > 1"
+      stops:
+        - [false, moccasin]
+        - [true, red]
+      fallback: moccasin
     label-text-expression: "$mergeCount > 1 and ($mergeCount as string) or ''"
     label-color: black
     label-font: "12px Helvetica"
@@ -53,7 +59,7 @@ rules:
     width: 4.0
     mode: hover
     offset: [0, 0, -0.01]
-  - aspect: attribute
+  - scope: attribute
     attribute-validity-geom: required
     geometry: ["line"]
     color: green

@@ -15,7 +15,6 @@ export enum ViewRecalculationReason {
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
     NumViews = "num-views",
-    PinLowFi = "pin-lowfi",
     StyleChange = "style-change",
     SyncOptions = "sync-options",
     TileBorder = "tile-border",
@@ -56,7 +55,6 @@ export class MapViewStateService {
             this.mapInfo.reapplySyncOptionsForAllViews();
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
-        this.stateService.pinLowFiToMaxLodState.subscribe(() => this.requestViewRecalculation(ViewRecalculationReason.PinLowFi));
         this.stateService.lowFiTileThresholdState.subscribe(() =>
             this.requestViewRecalculation(ViewRecalculationReason.FidelityThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
@@ -92,7 +90,6 @@ export class MapViewStateService {
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
                 this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt,
-                this.stateService.pinLowFiToMaxLod,
                 this.stateService.lowFiTileThreshold
             );
         });
@@ -374,7 +371,13 @@ export class MapViewStateService {
         }
         for (let index = advertisedLevels.length - 1; index >= 0; index--) {
             const candidateLevel = advertisedLevels[index];
-            const visibleTileCount = coreLib.getNumTileIds(viewport, candidateLevel);
+            const visibleTileCount = coreLib.getNumTileIdsForBounds(
+                viewport.south,
+                viewport.west,
+                viewport.width,
+                viewport.height,
+                candidateLevel
+            );
             if (visibleTileCount <= MapViewStateService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES) {
                 return candidateLevel;
             }

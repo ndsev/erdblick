@@ -1,10 +1,8 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject, filter, Subject, take} from "rxjs";
+import {BehaviorSubject, filter, Subject, Subscription, take} from "rxjs";
 import {
     FeatureSearchAttributeScopeCandidate,
-    SearchCoverageChangedPayload,
     SearchResultTileEntry,
-    SearchResultTileEvictedPayload,
     SearchResultTilePayload
 } from "../mapdata/map-runtime.model";
 import {MapInfoService} from "../mapdata/map-info.service";
@@ -26,7 +24,7 @@ import {
     SearchValueSummary
 } from "./search.model";
 import {GeoMath} from "../integrations/geo";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
 import {
     AppStateService,
     FEATURE_SEARCH_DIALOG_LAYOUT_ID,
@@ -43,7 +41,7 @@ import {
     FeatureSearchStateEntry,
     normalizeFeatureSearchFeatureTypes
 } from "../shared/feature-search-state";
-import {MapTileStreamSearchStatusPayload} from "../mapdata/tilestream";
+import type {MapTileStreamFilterStatusPayload} from "../mapdata/tilestream";
 import {
     SearchResultDensityIndex,
     SearchResultPoint,
@@ -55,6 +53,18 @@ import type {
     SearchCompletionResultMessage
 } from "./search-completion.worker.protocol";
 import {featureSearchDefinitionFromImportPayload} from "./feature-search-export.util";
+import {FrameBudgetLoop} from "../shared/frame-budget-loop";
+import {
+    StyledMapgetLayer,
+    type StyledMapgetLayerEvent
+} from "../mapdata/styled-mapget-layer.model";
+import type {FilterTileState} from "../mapdata/filter-tile-state.model";
+import type {MapgetLayer} from "../mapdata/mapget-layer.model";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {
+    compileFeatureSearchStyle,
+    type CompiledFeatureSearchStyle
+} from "./feature-search-style";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -155,6 +165,32 @@ interface SearchResultTileContribution {
 interface SearchTileValueSummaries {
     resultFields: SearchResultFieldValueSummary[];
     traces: SearchTraceValueSummary[];
+}
+
+interface SearchStyledPresentation {
+    key: string;
+    sessionId: string;
+    mapgetLayer: MapgetLayer;
+    compiled: CompiledFeatureSearchStyle;
+    styledLayer: StyledMapgetLayer;
+    subscription: Subscription;
+    definitionSignature: string;
+    coverageSignature: string;
+    coverageOrder: Map<number, number>;
+}
+
+interface SearchSubsetIngestionTask {
+    presentationKey: string;
+    searchId: string;
+    sourceTileKey: string;
+    state: FilterTileState;
+    valueVersion: number;
+    generation: number;
+    offset: number;
+    resultCount: number;
+    resultFields: string[];
+    projectedFieldIndices: number[];
+    includeExactPositions: boolean;
 }
 
 export interface FeatureSearchOverlayLayer {
@@ -349,15 +385,24 @@ export class FeatureSearchService {
     private pendingProgressEmissionSessionIds = new Set<string>();
     private resultDataRebuildRaf: number | null = null;
     private progressEmissionRaf: number | null = null;
+    private readonly searchPresentations = new Map<string, SearchStyledPresentation>();
+    private readonly pendingCoverageRefreshIds = new Set<string>();
+    private searchPresentationReconcileQueued = false;
+    readonly searchPresentationsChanged = new Subject<void>();
+    private readonly subsetIngestionLoop = new FrameBudgetLoop<SearchSubsetIngestionTask>(
+        (task, deadline) => this.ingestSearchSubsetTask(task, deadline),
+        10
+    );
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
     /**
-     * Initializes marker styling and listens for staged tile updates that can unblock pending searches.
+     * Initializes marker styling and reconciles persisted subset searches.
      */
     constructor(private mapInfo: MapInfoService,
                 private searchSchema: FeatureSearchSchemaService,
                 private tileStream: MapTileStreamService,
+                private viewState: MapViewStateService,
                 private stateService: AppStateService) {
         this.stateService.ready.pipe(
             filter((ready): ready is true => ready),
@@ -372,17 +417,13 @@ export class FeatureSearchService {
             }
             this.reconcilePersistedFeatureSearchState(entries);
         });
-        this.tileStream.searchResultTileReceived.subscribe(payload => {
-            this.addServerSearchResultTile(payload);
-        });
-        this.tileStream.searchResultTileEvicted.subscribe(payload => {
-            this.removeServerSearchResultTile(payload);
-        });
-        this.tileStream.searchStatusReceived.subscribe(status => {
-            this.applyServerSearchStatus(status);
-        });
-        this.tileStream.searchCoverageChanged.subscribe(payload => {
-            this.applySearchCoverageChanged(payload);
+        this.viewState.viewStateChanged.subscribe(() => {
+            for (const session of this.searchSessions) {
+                if (session.definition.autoUpdate) {
+                    this.pendingCoverageRefreshIds.add(session.id);
+                }
+            }
+            this.scheduleSearchPresentationReconcile();
         });
         this.mapInfo.layerStateChanged.subscribe(reason => {
             if (reason === "datasources" && this.stateService.ready.getValue()) {
@@ -760,21 +801,10 @@ export class FeatureSearchService {
 
     /** Returns enabled feature map/layers that currently have loaded non-empty data in a specific view. */
     featureSearchLayersWithDataForView(viewIndex: number): FeatureSearchMapLayerRef[] {
-        const selected = new Map<string, FeatureSearchMapLayerRef>();
-        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= this.stateService.numViews) {
-            return [];
-        }
-        for (const tile of this.tileStream.loadedTileLayers.values()) {
-            if (!tile.hasData() || tile.numFeatures <= 0 || !this.tileStream.viewShowsFeatureTile(viewIndex, tile)) {
-                continue;
-            }
-            selected.set(JSON.stringify([tile.mapName, tile.layerName]), {
-                mapId: tile.mapName,
-                layerId: tile.layerName
-            });
-        }
-        return Array.from(selected.values())
-            .sort((lhs, rhs) => lhs.mapId.localeCompare(rhs.mapId) || lhs.layerId.localeCompare(rhs.layerId));
+        // Source occupancy now belongs to view-owned subset dependencies. The
+        // action merely needs eligible visible layers; excluding an unknown
+        // layer here would make the result depend on presentation timing.
+        return this.featureSearchLayersForView(viewIndex);
     }
 
     /** Reconciles persisted feature-search definitions with live runtime sessions. */
@@ -1342,14 +1372,23 @@ export class FeatureSearchService {
         return session;
     }
 
-    /** Synchronizes the UI/session search state into MapTileStreamService's interactive request data plane. */
+    /**
+     * Reconciles each logical search into one ordinary StyledMapgetLayer per
+     * selected source layer. Those subscriptions feed both list ingestion and
+     * every selected view; no search-result transport or second map subscription
+     * exists.
+     */
     private syncSearchRequestsToMapService(options: {
         forceGenerationIds?: Iterable<string>;
         updateCoverageIds?: Iterable<string>;
     } = {}): void {
         const forceGenerationIds = new Set(options.forceGenerationIds ?? []);
+        const updateCoverageIds = new Set(options.updateCoverageIds ?? []);
         for (const id of this.pendingForcedGenerationIds) {
             forceGenerationIds.add(id);
+        }
+        for (const id of this.pendingCoverageRefreshIds) {
+            updateCoverageIds.add(id);
         }
         const resolvedDefinitions: FeatureSearchResolvedDefinition[] = [];
         for (const session of this.searchSessions.filter(session => session.definition.enabled)) {
@@ -1363,13 +1402,304 @@ export class FeatureSearchService {
                 this.pendingForcedGenerationIds.delete(id);
             }
         }
-        this.tileStream.setFeatureSearchDefinitions(
+        for (const id of updateCoverageIds) {
+            this.pendingCoverageRefreshIds.delete(id);
+        }
+        this.reconcileSearchPresentations(
             resolvedDefinitions,
-            {
-                ...options,
-                forceGenerationIds
-            }
+            forceGenerationIds,
+            updateCoverageIds
         );
+    }
+
+    /** Search presentations currently visible in one logical view. */
+    searchStyledLayersForView(viewIndex: number): StyledMapgetLayer[] {
+        const result: StyledMapgetLayer[] = [];
+        for (const presentation of this.searchPresentations.values()) {
+            const session = this.getInternalSession(presentation.sessionId);
+            if (!session ||
+                !session.definition.enabled ||
+                !session.definition.showResultsOnMap ||
+                !session.definition.selectedViewIndices.includes(viewIndex)) {
+                continue;
+            }
+            result.push(presentation.styledLayer);
+        }
+        return result;
+    }
+
+    /** Whether one search subset should contribute its full style geometry in a view. */
+    shouldRenderSearchStyledLayer(
+        viewIndex: number,
+        layer: StyledMapgetLayer,
+        tileId: number
+    ): boolean {
+        const presentation = [...this.searchPresentations.values()]
+            .find(candidate => candidate.styledLayer === layer);
+        const session = presentation
+            ? this.getInternalSession(presentation.sessionId)
+            : undefined;
+        if (!session ||
+            !session.definition.enabled ||
+            !session.definition.showResultsOnMap ||
+            !session.definition.selectedViewIndices.includes(viewIndex) ||
+            !session.definition.renderStrategy.showHighFiGeometry ||
+            session.definition.searchStyleRules.length === 0) {
+            return false;
+        }
+        const strategy = session.definition.renderStrategy;
+        return !strategy.showLowFiDots ||
+            this.viewState.prefersHighFidelityForSearchResultTile(
+                viewIndex,
+                session.id,
+                tileId,
+                strategy.highFidelityMaxVisibleTiles
+            );
+    }
+
+    private scheduleSearchPresentationReconcile(): void {
+        if (this.searchPresentationReconcileQueued) {
+            return;
+        }
+        this.searchPresentationReconcileQueued = true;
+        queueMicrotask(() => {
+            this.searchPresentationReconcileQueued = false;
+            this.syncSearchRequestsToMapService();
+        });
+    }
+
+    private reconcileSearchPresentations(
+        definitions: readonly FeatureSearchResolvedDefinition[],
+        forceGenerationIds: ReadonlySet<string>,
+        updateCoverageIds: ReadonlySet<string>
+    ): void {
+        const desiredKeys = new Set<string>();
+        for (const definition of definitions) {
+            for (const ref of definition.selectedMapLayers) {
+                const mapgetLayer = this.mapInfo.mapgetLayer(ref.mapId, ref.layerId);
+                if (!mapgetLayer) {
+                    continue;
+                }
+                const featureTypes = this.searchFeatureTypesForMapgetLayer(
+                    definition,
+                    mapgetLayer
+                );
+                if (featureTypes === null) {
+                    continue;
+                }
+                const key = this.searchPresentationKey(definition.id, mapgetLayer);
+                desiredKeys.add(key);
+                const definitionSignature = JSON.stringify({
+                    query: definition.backendQuery,
+                    scope: definition.concreteScope,
+                    featureTypes,
+                    resultFields: definition.resultFields,
+                    rules: definition.searchStyleRules
+                });
+                let presentation = this.searchPresentations.get(key);
+                if (!presentation ||
+                    presentation.mapgetLayer !== mapgetLayer ||
+                    presentation.definitionSignature !== definitionSignature) {
+                    if (presentation) {
+                        this.destroySearchPresentation(presentation);
+                    }
+                    try {
+                        presentation = this.createSearchPresentation(
+                            key,
+                            definition,
+                            mapgetLayer,
+                            featureTypes,
+                            definitionSignature
+                        );
+                        this.searchPresentations.set(key, presentation);
+                    } catch (error) {
+                        const session = this.getInternalSession(definition.id);
+                        session?.errors.add(
+                            error instanceof Error ? error.message : String(error)
+                        );
+                        continue;
+                    }
+                } else if (forceGenerationIds.has(definition.id)) {
+                    presentation.styledLayer.refresh();
+                }
+
+                presentation.styledLayer.setSuspended(definition.paused);
+                const shouldUpdateCoverage =
+                    !presentation.coverageSignature ||
+                    definition.autoUpdate ||
+                    updateCoverageIds.has(definition.id);
+                if (shouldUpdateCoverage) {
+                    const coverage = this.searchCoverage(
+                        definition,
+                        presentation.mapgetLayer
+                    );
+                    const signature = JSON.stringify(coverage.tileIds);
+                    if (signature !== presentation.coverageSignature) {
+                        presentation.coverageSignature = signature;
+                        presentation.coverageOrder = new Map(
+                            coverage.tileIds.map((tileId, index) => [tileId, index])
+                        );
+                        presentation.styledLayer.setCoverage(
+                            coverage.tileIds,
+                            coverage.priorityTileIds
+                        );
+                        this.applySearchCoverageSnapshot(definition.id);
+                    }
+                }
+            }
+        }
+
+        for (const [key, presentation] of [...this.searchPresentations]) {
+            if (desiredKeys.has(key)) {
+                continue;
+            }
+            this.searchPresentations.delete(key);
+            this.destroySearchPresentation(presentation);
+        }
+        this.searchPresentationsChanged.next();
+    }
+
+    private createSearchPresentation(
+        key: string,
+        definition: FeatureSearchResolvedDefinition,
+        mapgetLayer: MapgetLayer,
+        featureTypes: string[],
+        definitionSignature: string
+    ): SearchStyledPresentation {
+        const compiled = compileFeatureSearchStyle(
+            definition,
+            mapgetLayer,
+            this.mapInfo,
+            featureTypes
+        );
+        const styledLayer = new StyledMapgetLayer(
+            {
+                viewIndex: -1,
+                mapId: mapgetLayer.mapId,
+                layerId: mapgetLayer.layerId,
+                presentationKind: "search",
+                presentationInstanceId: definition.id
+            },
+            mapgetLayer,
+            compiled.style,
+            {},
+            this.mapInfo,
+            this.tileStream,
+            coreLib.HighlightMode.NO_HIGHLIGHT,
+            coreLib.RuleFidelity.ANY,
+            compiled.filterPlan
+        );
+        const presentation: SearchStyledPresentation = {
+            key,
+            sessionId: definition.id,
+            mapgetLayer,
+            compiled,
+            styledLayer,
+            subscription: new Subscription(),
+            definitionSignature,
+            coverageSignature: "",
+            coverageOrder: new Map()
+        };
+        presentation.subscription = styledLayer.events.subscribe(event =>
+            this.handleSearchStyledLayerEvent(presentation, event)
+        );
+        return presentation;
+    }
+
+    private destroySearchPresentation(presentation: SearchStyledPresentation): void {
+        this.subsetIngestionLoop.cancel(
+            task => task.presentationKey === presentation.key
+        );
+        presentation.subscription.unsubscribe();
+        presentation.styledLayer.dispose();
+        presentation.compiled.style.featureLayerStyle.delete?.();
+        const session = this.getInternalSession(presentation.sessionId);
+        for (const sourceTileKey of [
+            ...(session?.searchResultTilesBySourceKey.keys() ?? [])
+        ]) {
+            const contribution =
+                session?.searchResultTilesBySourceKey.get(sourceTileKey);
+            if (contribution?.sourceMapId === presentation.mapgetLayer.mapId &&
+                contribution.sourceLayerId === presentation.mapgetLayer.layerId) {
+                this.removeServerSearchResultTile({
+                    searchId: presentation.sessionId,
+                    sourceTileKey
+                });
+            }
+        }
+    }
+
+    private searchPresentationKey(searchId: string, layer: MapgetLayer): string {
+        return `${searchId}\n${layer.mapId}\n${layer.layerId}`;
+    }
+
+    private searchFeatureTypesForMapgetLayer(
+        definition: FeatureSearchResolvedDefinition,
+        layer: MapgetLayer
+    ): string[] | null {
+        const layerTypes = (layer.info.featureTypes ?? [])
+            .map(featureType => featureType.name)
+            .filter((name): name is string => !!name);
+        if (!definition.selectedFeatureTypes.length) {
+            return layerTypes;
+        }
+        const selected = new Set(definition.selectedFeatureTypes);
+        const result = layerTypes.filter(type => selected.has(type));
+        return result.length ? result : null;
+    }
+
+    /** Stable union of selected-view coverage; request order remains significant. */
+    private searchCoverage(
+        definition: FeatureSearchResolvedDefinition,
+        layer: MapgetLayer
+    ): {tileIds: number[]; priorityTileIds: number[]} {
+        const tileIds: number[] = [];
+        const seen = new Set<number>();
+        for (const viewIndex of definition.selectedViewIndices) {
+            const levels = definition.selectedTileLevels.length
+                ? definition.selectedTileLevels
+                : [this.viewState.autoSearchTileLevel(
+                    viewIndex,
+                    layer.mapId,
+                    layer.layerId
+                )].filter((level): level is number => level !== null);
+            for (const level of levels) {
+                for (const tileId of this.viewState.visibleSearchTileIdsForLevel(
+                    viewIndex,
+                    level
+                )) {
+                    if (seen.has(tileId)) {
+                        continue;
+                    }
+                    seen.add(tileId);
+                    tileIds.push(tileId);
+                }
+            }
+        }
+        return {tileIds, priorityTileIds: []};
+    }
+
+    private applySearchCoverageSnapshot(searchId: string): void {
+        const session = this.getInternalSession(searchId);
+        if (!session) {
+            return;
+        }
+        let total = 0;
+        let completed = 0;
+        for (const presentation of this.searchPresentations.values()) {
+            if (presentation.sessionId !== searchId) {
+                continue;
+            }
+            total += presentation.styledLayer.tileStates.size;
+            completed += [...presentation.styledLayer.tileStates.values()]
+                .filter(state => state.status === "ready").length;
+        }
+        session.progressTotal = Math.max(1, total);
+        session.progressDone = total === 0 ? 1 : completed;
+        session.backendComplete = session.paused || completed >= total;
+        this.updateSearchResultIngressProgress(session);
+        this.updateSessionCompletion(session);
+        this.progress.next(session);
     }
 
     /** Clears only result-side state; the persisted search definition and UI surface stay intact. */
@@ -1782,26 +2112,27 @@ export class FeatureSearchService {
             return contribution.valueSummary;
         }
 
-        const searchResultLayer = uint8ArrayToWasm(wasmBlob => {
-            return this.mapInfo.tileLayerParser.readTileSearchResultLayer(wasmBlob);
+        const subsetLayer = uint8ArrayToWasm(wasmBlob => {
+            return this.mapInfo.tileLayerParser.readTileSubsetLayer(wasmBlob);
         }, contribution.layerBlob);
-        if (!searchResultLayer) {
+        if (!subsetLayer) {
             return null;
         }
 
         try {
-            const rawSummaries = searchResultLayer.valueSummaries(
+            const rawSummaries = subsetLayer.valueSummaries(
+                0,
                 FeatureSearchService.VALUE_SUMMARY_HISTOGRAM_LIMIT,
                 FeatureSearchService.VALUE_SUMMARY_DISTINCT_LIMIT
             );
             contribution.valueSummary = this.normalizeTileValueSummaries(rawSummaries);
             return contribution.valueSummary;
         } finally {
-            searchResultLayer.delete();
+            subsetLayer.delete();
         }
     }
 
-    /** Normalizes one native `TileSearchResultLayer.valueSummaries()` return value. */
+    /** Normalizes one native `TileSubsetLayer.valueSummaries()` return value. */
     private normalizeTileValueSummaries(value: unknown): SearchTileValueSummaries {
         const record = this.recordFromUnknown(value);
         const rawResultFields = Array.isArray(record?.["resultFields"]) ? record["resultFields"] : [];
@@ -2235,6 +2566,279 @@ export class FeatureSearchService {
         this.completionTimers.delete(ownerId);
     }
 
+    /** Routes one directly owned search subset into list ingestion and progress. */
+    private handleSearchStyledLayerEvent(
+        presentation: SearchStyledPresentation,
+        event: StyledMapgetLayerEvent
+    ): void {
+        const session = this.getInternalSession(presentation.sessionId);
+        if (!session) {
+            return;
+        }
+        if (event.type === "generation") {
+            for (const key of [...session.progressByRequestKey.keys()]) {
+                if (key.startsWith(`${presentation.styledLayer.filterRef.filterId}\n`)) {
+                    session.progressByRequestKey.delete(key);
+                }
+            }
+            session.backendComplete = false;
+            session.complete = false;
+            this.applySearchCoverageSnapshot(session.id);
+            return;
+        }
+        if (event.type === "status") {
+            this.applyFilterSearchStatus(presentation, event.status);
+            return;
+        }
+        if (event.type === "error") {
+            session.errors.add(event.message);
+            this.progress.next(session);
+            return;
+        }
+        if (event.type === "tile-removed") {
+            this.subsetIngestionLoop.cancel(task =>
+                task.presentationKey === presentation.key &&
+                task.sourceTileKey === event.state.mapTileKey
+            );
+            this.removeServerSearchResultTile({
+                searchId: session.id,
+                sourceTileKey: event.state.mapTileKey
+            });
+            this.applySearchCoverageSnapshot(session.id);
+            return;
+        }
+        if (event.type !== "tile-ready") {
+            return;
+        }
+
+        const state = event.state;
+        const subsetBlob = state.subsetBlob;
+        if (!subsetBlob) {
+            return;
+        }
+        const subset = uint8ArrayToWasm(
+            data => this.mapInfo.tileLayerParser.readTileSubsetLayer(data),
+            subsetBlob
+        );
+        if (!subset) {
+            session.errors.add(
+                `Failed to decode search subset '${state.mapTileKey}'.`
+            );
+            this.progress.next(session);
+            return;
+        }
+        let schema: {
+            scope: "feature" | "attribute" | "relation" | "group";
+            featureFields: string[];
+            entryFields: string[];
+            entryCount: number;
+        };
+        let diagnostics: Uint8Array | null;
+        try {
+            schema = subset.channelSchema(
+                presentation.compiled.channelOrdinal
+            ) as typeof schema;
+            diagnostics = uint8ArrayFromWasm(
+                buffer => subset.copyDiagnostics(buffer)
+            );
+        } finally {
+            subset.delete();
+        }
+        const projectedFields = schema.scope === "feature"
+            ? schema.featureFields
+            : schema.entryFields;
+        const projectedFieldIndices = presentation.compiled.resultFields
+            .map(field => projectedFields.indexOf(field));
+        const resultCount = Math.max(0, Math.floor(Number(schema.entryCount ?? 0)));
+        const requestOrder =
+            presentation.coverageOrder.get(state.tileId)
+            ?? Number.MAX_SAFE_INTEGER;
+        const payloadBase: SearchResultTilePayload = {
+            searchId: session.id,
+            refresh: session.refresh,
+            mapId: state.mapId,
+            layerId: state.layerId,
+            tileId: state.tileId,
+            sourceTileKey: state.mapTileKey,
+            sourceMapId: state.mapId,
+            sourceLayerId: state.layerId,
+            sourceTileId: state.tileId,
+            requestOrder,
+            resultCount,
+            resultFields: presentation.compiled.resultFields,
+            layerBlob: subsetBlob,
+            diagnostics,
+            entries: [],
+            entryOffset: 0,
+            entriesComplete: resultCount === 0
+        };
+        this.subsetIngestionLoop.cancel(task =>
+            task.presentationKey === presentation.key &&
+            task.sourceTileKey === state.mapTileKey
+        );
+        this.addServerSearchResultTile(payloadBase);
+        if (resultCount > 0) {
+            this.subsetIngestionLoop.enqueue({
+                presentationKey: presentation.key,
+                searchId: session.id,
+                sourceTileKey: state.mapTileKey,
+                state,
+                valueVersion: state.valueVersion,
+                generation: state.deliveredGeneration,
+                offset: 0,
+                resultCount,
+                resultFields: presentation.compiled.resultFields,
+                projectedFieldIndices,
+                includeExactPositions:
+                    session.definition.renderStrategy.showHighFiResultDots
+            });
+        }
+        this.applySearchCoverageSnapshot(session.id);
+    }
+
+    /** Drains one bounded subset row range; stale tile generations self-cancel. */
+    private ingestSearchSubsetTask(
+        task: SearchSubsetIngestionTask,
+        _deadline: number
+    ): boolean {
+        const presentation = this.searchPresentations.get(task.presentationKey);
+        const session = this.getInternalSession(task.searchId);
+        const subsetBlob = task.state.subsetBlob;
+        if (!presentation || !session || !subsetBlob ||
+            task.state.status !== "ready" ||
+            task.state.valueVersion !== task.valueVersion ||
+            task.state.deliveredGeneration !== task.generation) {
+            return true;
+        }
+        const limit = Math.min(2000, task.resultCount - task.offset);
+        const subset = uint8ArrayToWasm(
+            data => this.mapInfo.tileLayerParser.readTileSubsetLayer(data),
+            subsetBlob
+        );
+        if (!subset) {
+            session.errors.add(
+                `Failed to decode search subset '${task.sourceTileKey}'.`
+            );
+            this.progress.next(session);
+            return true;
+        }
+        let entries: SearchResultTileEntry[];
+        try {
+            const rawEntries = subset.entryRange(
+                presentation.compiled.channelOrdinal,
+                task.offset,
+                limit,
+                task.includeExactPositions
+            ) as SearchResultTileEntry[];
+            entries = (Array.isArray(rawEntries) ? rawEntries : []).map(entry => {
+                const projectedValues = Array.isArray(entry.values) ? entry.values : [];
+                return {
+                    ...entry,
+                    mapTileKey: entry.mapTileKey || task.sourceTileKey,
+                    values: task.projectedFieldIndices.map(index =>
+                        index >= 0 && index < projectedValues.length
+                            ? projectedValues[index]
+                            : null
+                    )
+                };
+            });
+        } finally {
+            subset.delete();
+        }
+        const batchOffset = task.offset;
+        task.offset += limit;
+        this.addServerSearchResultTile({
+            searchId: session.id,
+            refresh: session.refresh,
+            mapId: task.state.mapId,
+            layerId: task.state.layerId,
+            tileId: task.state.tileId,
+            sourceTileKey: task.sourceTileKey,
+            sourceMapId: task.state.mapId,
+            sourceLayerId: task.state.layerId,
+            sourceTileId: task.state.tileId,
+            requestOrder:
+                presentation.coverageOrder.get(task.state.tileId)
+                ?? Number.MAX_SAFE_INTEGER,
+            resultCount: task.resultCount,
+            resultFields: task.resultFields,
+            layerBlob: subsetBlob,
+            diagnostics: null,
+            entries,
+            entryOffset: batchOffset,
+            entriesComplete: task.offset >= task.resultCount
+        });
+        return task.offset >= task.resultCount;
+    }
+
+    /** Aggregates protocol-3 filter progress across a search's source layers. */
+    private applyFilterSearchStatus(
+        presentation: SearchStyledPresentation,
+        status: MapTileStreamFilterStatusPayload
+    ): void {
+        const session = this.getInternalSession(presentation.sessionId);
+        if (!session ||
+            status.generation !== presentation.styledLayer.generation) {
+            return;
+        }
+        if (status.error) {
+            session.errors.add(status.error);
+        }
+        const terminal =
+            status.state === "Success" ||
+            status.state === "Failed" ||
+            status.state === "Aborted";
+        const queued = this.nonNegativeNumber(
+            status.outputTilesRequested,
+            presentation.styledLayer.tileStates.size
+        );
+        const emitted = this.nonNegativeNumber(
+            status.outputTilesEmitted,
+            0
+        );
+        const key = [
+            status.filterId,
+            status.generation
+        ].join("\n");
+        session.progressByRequestKey.set(key, {
+            tilesQueued: queued,
+            tilesSearched: terminal ? queued : Math.min(queued, emitted),
+            chunksEmitted: emitted,
+            chunksReported: true,
+            matches: this.nonNegativeNumber(status.entriesEmitted, 0),
+            terminal
+        });
+        const progressEntries = [...session.progressByRequestKey.values()];
+        const total = progressEntries.reduce(
+            (sum, item) => sum + item.tilesQueued,
+            0
+        );
+        const done = progressEntries.reduce(
+            (sum, item) => sum + item.tilesSearched,
+            0
+        );
+        session.progressTotal = Math.max(1, total);
+        session.progressDone = Math.min(session.progressTotal, done);
+        session.backendComplete =
+            session.paused ||
+            (progressEntries.length > 0 &&
+                progressEntries.every(item => item.terminal));
+        session.totalFeatureCount = progressEntries.reduce(
+            (sum, item) => sum + item.matches,
+            0
+        );
+        this.updateSearchResultIngressProgress(session);
+        const becameComplete = this.updateSessionCompletion(session);
+        if (becameComplete) {
+            session.endTime = Date.now();
+            session.timeElapsed = this.formatTime(
+                session.endTime - session.startTime
+            );
+            this.updateDiagnosticsForCompletedSearch(session);
+        }
+        this.progress.next(session);
+    }
+
     /** Integrates one streamed mapget search-result tile into the matching session. */
     private addServerSearchResultTile(payload: SearchResultTilePayload): void {
         const session = this.getInternalSession(payload.searchId);
@@ -2358,7 +2962,7 @@ export class FeatureSearchService {
     }
 
     /** Removes UI-visible result data for one source tile that left the desired search area. */
-    private removeServerSearchResultTile(payload: SearchResultTileEvictedPayload): void {
+    private removeServerSearchResultTile(payload: {searchId: string; sourceTileKey: string}): void {
         const session = this.getInternalSession(payload.searchId);
         if (!session || !session.searchResultTilesBySourceKey.delete(payload.sourceTileKey)) {
             return;
@@ -2368,119 +2972,6 @@ export class FeatureSearchService {
         this.updateSearchResultIngressProgress(session);
         this.updateSessionCompletion(session);
         this.scheduleSessionResultDataRebuild(session);
-    }
-
-    /** Applies mapget's server-side search progress status to the matching UI session. */
-    private applyServerSearchStatus(status: MapTileStreamSearchStatusPayload): void {
-        const session = this.getInternalSession(status.searchId);
-        if (!session) {
-            return;
-        }
-        const refresh = Number(status.refresh ?? 0);
-        if (refresh < session.refresh) {
-            return;
-        }
-        if (refresh > session.refresh) {
-            this.resetSessionForServerRefresh(session, refresh);
-        }
-
-        if (status.error) {
-            session.errors.add(status.error);
-        }
-
-        if (status.state === "Aborted") {
-            this.progress.next(session);
-            return;
-        }
-
-        const isTerminal = status.state === "Success" || status.state === "Failed";
-        const key = this.serverSearchStatusKey(status);
-        const isRequestStart = status.state === "Open";
-        const previous = isRequestStart ? undefined : session.progressByRequestKey.get(key);
-        const queuedRaw = this.nonNegativeNumber(status.tilesQueued, previous?.tilesQueued ?? 0);
-        const queued = isTerminal && queuedRaw === 0 ? Math.max(1, previous?.tilesQueued ?? 0) : queuedRaw;
-        const searched = this.nonNegativeNumber(status.tilesSearched, previous?.tilesSearched ?? 0);
-        const chunksReported = status.chunksEmitted !== undefined || (!isRequestStart && !!previous?.chunksReported);
-        const chunksEmitted = chunksReported
-            ? this.nonNegativeNumber(status.chunksEmitted, previous?.chunksEmitted ?? 0)
-            : (previous?.chunksEmitted ?? 0);
-        const matches = this.nonNegativeNumber(status.matches, previous?.matches ?? 0);
-        session.progressByRequestKey.set(key, {
-            tilesQueued: queued,
-            tilesSearched: isTerminal ? queued : Math.min(queued, searched),
-            chunksEmitted,
-            chunksReported,
-            matches,
-            terminal: isTerminal
-        });
-
-        const progressEntries = Array.from(session.progressByRequestKey.values());
-        const diffProgressTotal = progressEntries.reduce((sum, item) => sum + item.tilesQueued, 0);
-        session.progressTotal = Math.max(
-            1,
-            this.nonNegativeNumber(status.tilesConsidered, diffProgressTotal)
-        );
-        const completedTiles = this.nonNegativeNumber(status.tilesCompleted, 0);
-        const searchedDiffTiles = progressEntries.reduce((sum, item) => sum + item.tilesSearched, 0);
-        // `tilesCompleted` is the stable full-area baseline; `tilesSearched` adds
-        // in-flight progress from the current differential request before mapget
-        // has committed those tiles into the local completed set.
-        session.progressDone = Math.min(
-            session.progressTotal,
-            Math.max(completedTiles, Math.min(session.progressTotal, completedTiles + searchedDiffTiles))
-        );
-        session.backendComplete = session.paused || (progressEntries.length > 0 && progressEntries.every(item => item.terminal));
-        this.updateSearchResultIngressProgress(session);
-        session.totalFeatureCount = progressEntries.reduce((sum, item) => sum + item.matches, 0);
-        const becameComplete = this.updateSessionCompletion(session);
-        if (becameComplete) {
-            session.endTime = Date.now();
-            session.timeElapsed = this.formatTime(session.endTime - session.startTime);
-            this.updateDiagnosticsForCompletedSearch(session);
-        }
-        this.progress.next(session);
-    }
-
-    /** Resets frontend-only progress when auto-update adopts a new visible search tile set. */
-    private applySearchCoverageChanged(payload: SearchCoverageChangedPayload): void {
-        const session = this.getInternalSession(payload.searchId);
-        if (!session) {
-            return;
-        }
-        const refresh = Number(payload.refresh ?? 0);
-        if (refresh < session.refresh) {
-            return;
-        }
-        if (refresh > session.refresh) {
-            this.resetSessionForServerRefresh(session, refresh);
-        }
-
-        session.progressByRequestKey.clear();
-        const total = this.nonNegativeNumber(payload.tilesConsidered, 0);
-        const completed = this.nonNegativeNumber(payload.tilesCompleted, 0);
-        session.progressTotal = Math.max(1, total);
-        session.progressDone = total === 0
-            ? 1
-            : Math.min(session.progressTotal, completed);
-        this.updateSearchResultIngressProgress(session);
-        session.backendComplete = session.paused || completed >= total;
-        const becameComplete = this.updateSessionCompletion(session);
-        if (becameComplete) {
-            session.endTime = Date.now();
-            session.timeElapsed = this.formatTime(session.endTime - session.startTime);
-            this.updateDiagnosticsForCompletedSearch(session);
-        }
-        this.progress.next(session);
-    }
-
-    /** Groups mapget search statuses by concrete backend request so per-layer statuses aggregate instead of replacing each other. */
-    private serverSearchStatusKey(status: MapTileStreamSearchStatusPayload): string {
-        return [
-            status.mapId || "",
-            status.layerId || "",
-            status.requestKey || "",
-            status.refresh ?? 0
-        ].join("\n");
     }
 
     private nonNegativeNumber(value: unknown, fallback: number): number {

@@ -6,6 +6,7 @@
 #include "mapget/model/feature.h"
 #include "mapget/model/point.h"
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -17,6 +18,37 @@
 
 namespace
 {
+
+/** Recover the source descriptor ordinal from a stable relation identity. */
+std::optional<uint32_t> relationIndexForSource(
+    std::string_view relationId,
+    std::string_view sourceFeatureId)
+{
+    auto const marker =
+        std::string(":") +
+        std::string(sourceFeatureId) +
+        "#";
+    auto const markerPosition =
+        relationId.find(marker);
+    if (markerPosition == std::string_view::npos) {
+        return std::nullopt;
+    }
+    auto const begin =
+        relationId.data() +
+        markerPosition +
+        marker.size();
+    auto const end = relationId.data() +
+        relationId.size();
+    uint32_t ordinal = 0;
+    auto const parsed =
+        std::from_chars(begin, end, ordinal);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr == begin)
+    {
+        return std::nullopt;
+    }
+    return ordinal;
+}
 
 /** Render binary source-data blobs as readable integers when possible, hex otherwise. */
 auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
@@ -65,68 +97,71 @@ auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
     return JsValue();
 }
 
-/** Returns the last GLB attachment found along the staged overlay chain, if any. */
-auto findGlbAttachment(std::shared_ptr<mapget::TileFeatureLayer> const& layer) -> mapget::TileGlbAttachment const*
+/** Pick a representative WGS84 center for one copied subset geometry collection. */
+auto subsetGeometryCenter(
+    mapget::model_ptr<mapget::GeometryCollection> const& collection)
+    -> std::optional<mapget::Point>
 {
-    auto const* attachment = static_cast<mapget::TileGlbAttachment const*>(nullptr);
-    auto current = layer;
-    while (current) {
-        if (auto const* candidate = current->glbAttachment()) {
-            attachment = candidate;
-        }
-        current = current->overlay();
+    if (!collection) {
+        return std::nullopt;
     }
-    return attachment;
-}
-
-/** Pick a representative WGS84 center for copied search-result geometry. */
-auto searchResultGeometryCenter(mapget::model_ptr<mapget::SearchResult> const& result) -> mapget::Point
-{
-    if (!result) {
-        return {};
-    }
-    auto geometryCollection = result->geometry();
-    if (!geometryCollection) {
-        return {};
-    }
-
-    mapget::model_ptr<mapget::Geometry> geometry;
-    geometryCollection->forEachGeometryAtPreferredStage(
-        std::nullopt,
-        [&geometry](auto&& candidate)
-        {
-            geometry = candidate;
-            return false;
+    std::optional<mapget::Point> result;
+    collection->forEachGeometry(
+        [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
+            if (!geometry) {
+                return true;
+            }
+            switch (geometry->geomType()) {
+            case mapget::GeomType::AABB: {
+                auto const origin = geometry->aabbOrigin();
+                auto const size = geometry->aabbSize();
+                result = mapget::Point{
+                    origin.x + size.x * 0.5,
+                    origin.y + size.y * 0.5,
+                    origin.z + size.z * 0.5};
+                break;
+            }
+            case mapget::GeomType::GltfNodeIndex: {
+                auto const origin = geometry->gltfNodeAabbOrigin();
+                auto const size = geometry->gltfNodeAabbSize();
+                result = mapget::Point{
+                    origin.x + size.x * 0.5,
+                    origin.y + size.y * 0.5,
+                    origin.z + size.z * 0.5};
+                break;
+            }
+            default: {
+                auto selfContained = geometry->toSelfContained();
+                if (!selfContained.points_.empty()) {
+                    result = erdblick::geometryCenter(selfContained);
+                }
+                break;
+            }
+            }
+            return !result.has_value();
         });
-    if (!geometry) {
-        geometryCollection->forEachGeometry(
-            [&geometry](auto&& candidate)
-            {
-                geometry = candidate;
-                return false;
-            });
-    }
-    if (!geometry) {
-        return {};
-    }
-
-    switch (geometry->geomType()) {
-    case mapget::GeomType::AABB: {
-        auto const origin = geometry->aabbOrigin();
-        auto const size = geometry->aabbSize();
-        return {origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
-    }
-    case mapget::GeomType::GltfNodeIndex: {
-        auto const origin = geometry->gltfNodeAabbOrigin();
-        auto const size = geometry->gltfNodeAabbSize();
-        return {origin.x + size.x * 0.5, origin.y + size.y * 0.5, origin.z + size.z * 0.5};
-    }
-    default:
-        return erdblick::geometryCenter(geometry->toSelfContained());
-    }
+    return result;
 }
 
-/** Accumulate compact diagnostics for one value stream. */
+/** Convert one projected scalar array into ordinary JavaScript values. */
+auto projectedValues(mapget::model_ptr<mapget::Array> const& values)
+    -> erdblick::JsValue
+{
+    auto result = erdblick::JsValue::List();
+    if (!values) {
+        return result;
+    }
+    for (uint32_t index = 0; index < values->size(); ++index) {
+        auto value = values->at(index);
+        result.push(
+            value
+                ? jsonToJsValue(value->toJson())
+                : erdblick::JsValue());
+    }
+    return result;
+}
+
+/** Accumulate compact diagnostics for one projected value stream. */
 struct ValueSummary
 {
     uint64_t count = 0;
@@ -149,60 +184,45 @@ struct ValueSummary
     std::unordered_map<std::string, uint64_t> histogram;
 };
 
-/** Extract string-like SIMFIL scalar values without forcing JSON conversion. */
-auto nodeStringValue(simfil::ModelNode const& node) -> std::string
-{
-    auto const value = node.value();
-    if (auto const* str = std::get_if<std::string>(&value)) {
-        return *str;
-    }
-    if (auto const* strView = std::get_if<std::string_view>(&value)) {
-        return std::string(*strView);
-    }
-    return {};
-}
-
-/** Add one finite numeric scalar to the min/max/average accumulator. */
 void addNumeric(ValueSummary& summary, double value)
 {
     if (!std::isfinite(value)) {
         return;
     }
-    summary.numericCount++;
+    ++summary.numericCount;
     summary.numericSum += value;
     summary.numericMin = std::min(summary.numericMin, value);
     summary.numericMax = std::max(summary.numericMax, value);
 }
 
-/** Track string histograms with a hard distinct-value cap. */
-void addHistogram(ValueSummary& summary, std::string value, uint32_t distinctLimit)
+void addHistogram(
+    ValueSummary& summary,
+    std::string value,
+    uint32_t distinctLimit)
 {
-    if (distinctLimit == 0) {
-        summary.histogramDropped++;
-        summary.distinctLimitReached = true;
+    if (auto existing = summary.histogram.find(value);
+        existing != summary.histogram.end())
+    {
+        ++existing->second;
         return;
     }
-
-    if (auto existing = summary.histogram.find(value); existing != summary.histogram.end()) {
-        existing->second++;
-        return;
-    }
-
     if (summary.histogram.size() >= distinctLimit) {
-        summary.histogramDropped++;
+        ++summary.histogramDropped;
         summary.distinctLimitReached = true;
         return;
     }
     summary.histogram.emplace(std::move(value), 1);
 }
 
-/** Format numeric samples for the histogram without hiding exact integer values. */
 std::string numericHistogramValue(double value)
 {
-    if (std::isfinite(value)
-        && std::floor(value) == value
-        && value >= static_cast<double>(std::numeric_limits<int64_t>::min())
-        && value <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+    if (std::isfinite(value) &&
+        std::floor(value) == value &&
+        value >= static_cast<double>(
+            std::numeric_limits<int64_t>::min()) &&
+        value <= static_cast<double>(
+            std::numeric_limits<int64_t>::max()))
+    {
         return std::to_string(static_cast<int64_t>(value));
     }
     auto stream = std::ostringstream();
@@ -211,73 +231,79 @@ std::string numericHistogramValue(double value)
     return stream.str();
 }
 
-/** Accumulate one model node sample into a value summary. */
-void summarizeNode(ValueSummary& summary, simfil::ModelNode::Ptr const& node, uint32_t distinctLimit)
+void summarizeNode(
+    ValueSummary& summary,
+    simfil::ModelNode::Ptr const& node,
+    uint32_t distinctLimit)
 {
-    summary.count++;
+    ++summary.count;
     if (!node) {
-        summary.missing++;
+        ++summary.missing;
         return;
     }
-
     switch (node->type()) {
     case simfil::ValueType::Undef:
-        summary.missing++;
+        ++summary.missing;
         break;
     case simfil::ValueType::Null:
-        summary.nulls++;
+        ++summary.nulls;
         break;
     case simfil::ValueType::Bool:
-        summary.booleans++;
+        ++summary.booleans;
         break;
-    case simfil::ValueType::Int:
-        summary.integers++;
-        addNumeric(summary, static_cast<double>(std::get<int64_t>(node->value())));
-        addHistogram(summary, std::to_string(std::get<int64_t>(node->value())), distinctLimit);
+    case simfil::ValueType::Int: {
+        ++summary.integers;
+        auto const value = std::get<int64_t>(node->value());
+        addNumeric(summary, static_cast<double>(value));
+        addHistogram(summary, std::to_string(value), distinctLimit);
         break;
-    case simfil::ValueType::Float:
-        summary.numbers++;
-        addNumeric(summary, std::get<double>(node->value()));
-        addHistogram(summary, numericHistogramValue(std::get<double>(node->value())), distinctLimit);
+    }
+    case simfil::ValueType::Float: {
+        ++summary.numbers;
+        auto const value = std::get<double>(node->value());
+        addNumeric(summary, value);
+        addHistogram(
+            summary,
+            numericHistogramValue(value),
+            distinctLimit);
         break;
+    }
     case simfil::ValueType::String: {
-        auto value = nodeStringValue(*node);
-        if (value == "object") {
-            summary.objects++;
+        auto const value = node->value();
+        auto text = std::string{};
+        if (auto string = std::get_if<std::string>(&value)) {
+            text = *string;
         }
-        else if (value == "list") {
-            summary.lists++;
+        else if (
+            auto string = std::get_if<std::string_view>(&value))
+        {
+            text = std::string(*string);
         }
-        else if (value == "blob") {
-            summary.blobs++;
-        }
-        else {
-            summary.strings++;
-            addHistogram(summary, std::move(value), distinctLimit);
-        }
+        ++summary.strings;
+        addHistogram(summary, std::move(text), distinctLimit);
         break;
     }
     case simfil::ValueType::Bytes:
-        summary.blobs++;
+        ++summary.blobs;
         break;
     case simfil::ValueType::TransientObject:
     case simfil::ValueType::Object:
-        summary.objects++;
+        ++summary.objects;
         break;
     case simfil::ValueType::Array:
-        summary.lists++;
+        ++summary.lists;
         break;
     default:
-        summary.unknown++;
+        ++summary.unknown;
         break;
     }
 }
 
-/** Convert one summary to the JS diagnostics object used by the search panel. */
-auto summaryToJsValue(ValueSummary const& summary, uint32_t histogramLimit) -> erdblick::JsValue
+auto summaryToJsValue(
+    ValueSummary const& summary,
+    uint32_t histogramLimit) -> erdblick::JsValue
 {
     using erdblick::JsValue;
-
     auto result = JsValue::Dict({
         {"count", JsValue(static_cast<double>(summary.count))},
         {"missing", JsValue(static_cast<double>(summary.missing))},
@@ -292,66 +318,52 @@ auto summaryToJsValue(ValueSummary const& summary, uint32_t histogramLimit) -> e
             {"blob", JsValue(static_cast<double>(summary.blobs))},
             {"unknown", JsValue(static_cast<double>(summary.unknown))},
         })},
-        {"otherCount", JsValue(static_cast<double>(summary.histogramDropped))},
-        {"distinctLimitReached", JsValue(summary.distinctLimitReached)},
+        {"otherCount",
+         JsValue(static_cast<double>(summary.histogramDropped))},
+        {"distinctLimitReached",
+         JsValue(summary.distinctLimitReached)},
     });
-
     if (summary.numericCount > 0) {
         result.set("numeric", JsValue::Dict({
-            {"count", JsValue(static_cast<double>(summary.numericCount))},
+            {"count",
+             JsValue(static_cast<double>(summary.numericCount))},
             {"min", JsValue(summary.numericMin)},
             {"max", JsValue(summary.numericMax)},
             {"sum", JsValue(summary.numericSum)},
-            {"average", JsValue(summary.numericSum / static_cast<double>(summary.numericCount))},
+            {"average",
+             JsValue(
+                 summary.numericSum /
+                 static_cast<double>(summary.numericCount))},
         }));
     }
 
-    std::vector<std::pair<std::string, uint64_t>> histogramEntries;
-    histogramEntries.reserve(summary.histogram.size());
-    for (auto const& entry : summary.histogram) {
-        histogramEntries.emplace_back(entry);
-    }
+    std::vector<std::pair<std::string, uint64_t>> entries(
+        summary.histogram.begin(),
+        summary.histogram.end());
     std::sort(
-        histogramEntries.begin(),
-        histogramEntries.end(),
-        [](auto const& left, auto const& right)
-        {
-            if (left.second != right.second) {
-                return left.second > right.second;
-            }
-            return left.first < right.first;
+        entries.begin(),
+        entries.end(),
+        [](auto const& left, auto const& right) {
+            return left.second != right.second
+                ? left.second > right.second
+                : left.first < right.first;
         });
-
     auto histogram = JsValue::List();
-    uint64_t otherCount = summary.histogramDropped;
-    for (size_t index = 0; index < histogramEntries.size(); ++index) {
-        auto const& [value, count] = histogramEntries[index];
+    auto otherCount = summary.histogramDropped;
+    for (size_t index = 0; index < entries.size(); ++index) {
         if (index >= histogramLimit) {
-            otherCount += count;
+            otherCount += entries[index].second;
             continue;
         }
         histogram.push(JsValue::Dict({
-            {"value", JsValue(value)},
-            {"count", JsValue(static_cast<double>(count))},
+            {"value", JsValue(entries[index].first)},
+            {"count",
+             JsValue(static_cast<double>(entries[index].second))},
         }));
     }
     result.set("histogram", histogram);
     result.set("otherCount", JsValue(static_cast<double>(otherCount)));
     return result;
-}
-
-/** Keep histogram parameters bounded before native summary work starts. */
-auto normalizedSummaryLimits(uint32_t histogramLimit, uint32_t distinctLimit) -> std::pair<uint32_t, uint32_t>
-{
-    auto const normalizedHistogramLimit = std::clamp<uint32_t>(
-        histogramLimit == 0 ? 16U : histogramLimit,
-        1U,
-        256U);
-    auto const normalizedDistinctLimit = std::clamp<uint32_t>(
-        distinctLimit == 0 ? 512U : distinctLimit,
-        1U,
-        8192U);
-    return {normalizedHistogramLimit, normalizedDistinctLimit};
 }
 
 }
@@ -379,11 +391,6 @@ std::string TileFeatureLayer::id() const
 int32_t TileFeatureLayer::tileId() const
 {
     return model_->tileId().value();
-}
-
-uint32_t TileFeatureLayer::stage() const
-{
-    return model_->stage().value_or(0U);
 }
 
 /**
@@ -430,37 +437,16 @@ mapget::model_ptr<mapget::Feature> TileFeatureLayer::find(const std::string& id)
     return model_->find(id);
 }
 
-void TileFeatureLayer::attachOverlay(TileFeatureLayer const& overlay)
-{
-    if (!model_ || !overlay.model_) {
-        return;
-    }
-    model_->attachOverlay(overlay.model_);
-}
-
 bool TileFeatureLayer::hasGlbAttachment() const
 {
-    return findGlbAttachment(model_) != nullptr;
+    return model_ && model_->glbAttachmentName().has_value();
 }
 
 std::string TileFeatureLayer::glbAttachmentName() const
 {
-    if (auto const* attachment = findGlbAttachment(model_)) {
-        return attachment->name_;
-    }
-    return {};
-}
-
-bool TileFeatureLayer::copyGlbAttachment(SharedUint8Array& output) const
-{
-    auto const* attachment = findGlbAttachment(model_);
-    if (!attachment) {
-        return false;
-    }
-    output.writeToArray(
-        reinterpret_cast<char const*>(attachment->bytes_.data()),
-        reinterpret_cast<char const*>(attachment->bytes_.data() + attachment->bytes_.size()));
-    return true;
+    return model_ && model_->glbAttachmentName()
+        ? *model_->glbAttachmentName()
+        : std::string{};
 }
 
 /**
@@ -691,203 +677,468 @@ std::string TileSourceDataLayer::getError() const
     return model_->error() ? *model_->error() : "";
 }
 
-TileSearchResultLayer::TileSearchResultLayer(std::shared_ptr<mapget::TileSearchResultLayer> self)
+TileSubsetLayer::TileSubsetLayer(std::shared_ptr<mapget::TileSubsetLayer> self)
     : model_(std::move(self)) {}
 
-std::string TileSearchResultLayer::id() const
+std::string TileSubsetLayer::id() const
 {
     return model_->id().toString();
 }
 
-std::string TileSearchResultLayer::nodeId() const
+std::string TileSubsetLayer::stringPoolId() const
 {
-    return model_->nodeId();
+    return model_->stringPoolId();
 }
 
-std::string TileSearchResultLayer::mapId() const
+std::string TileSubsetLayer::mapId() const
 {
     return model_->mapId();
 }
 
-std::string TileSearchResultLayer::layerId() const
+std::string TileSubsetLayer::layerId() const
 {
     return model_->layerInfo() ? model_->layerInfo()->layerId_ : "";
 }
 
-int32_t TileSearchResultLayer::tileId() const
+int32_t TileSubsetLayer::tileId() const
 {
     return model_->tileId().value();
 }
 
-uint32_t TileSearchResultLayer::stage() const
+std::string TileSubsetLayer::filterId() const
 {
-    return model_->stage().value_or(0U);
+    return model_->filterId();
 }
 
-uint32_t TileSearchResultLayer::numResults() const
+uint64_t TileSubsetLayer::generation() const
+{
+    return model_->generation();
+}
+
+uint32_t TileSubsetLayer::numChannels() const
 {
     return static_cast<uint32_t>(model_->size());
 }
 
-NativeJsValue TileSearchResultLayer::resultFields() const
+uint32_t TileSubsetLayer::numEntries() const
 {
-    auto result = JsValue::List();
-    for (auto const& field : model_->resultFields()) {
-        result.push(JsValue(field));
-    }
-    return *result;
+    uint64_t count = 0;
+    model_->forEachChannel([&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
+        count += channel->entryCount();
+        return count <= std::numeric_limits<uint32_t>::max();
+    });
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(count, std::numeric_limits<uint32_t>::max()));
 }
 
-NativeJsValue TileSearchResultLayer::info() const
+NativeJsValue TileSubsetLayer::info() const
 {
     return *jsonToJsValue(model_->info());
 }
 
-NativeJsValue TileSearchResultLayer::resultEntries() const
+NativeJsValue TileSubsetLayer::dependencies() const
 {
-    return resultEntryRange(0, 0);
+    auto result = JsValue::List();
+    for (auto const& dependency : model_->dependencies()) {
+        result.push(JsValue::Dict({
+            {"sourceTileKey", JsValue(dependency.sourceTileKey_.toString())},
+            {"mapId", JsValue(dependency.sourceTileKey_.mapId_)},
+            {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
+            {"tileId", JsValue(dependency.sourceTileKey_.tileId_.value())},
+            {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
+        }));
+    }
+    return *result;
 }
 
-namespace {
+NativeJsValue TileSubsetLayer::issues() const
+{
+    auto result = JsValue::List();
+    for (auto const& issue : model_->issues()) {
+        nlohmann::json scope = issue.scope_;
+        result.push(JsValue::Dict({
+            {"channelId", JsValue(issue.channelId_)},
+            {"expression", JsValue(issue.expression_)},
+            {"scope", JsValue(scope.get<std::string>())},
+            {"message", JsValue(issue.message_)},
+            {"occurrenceCount", JsValue(static_cast<double>(issue.occurrenceCount_))},
+        }));
+    }
+    return *result;
+}
 
-NativeJsValue resultEntryRangeForLayer(
-    mapget::TileSearchResultLayer const& model,
+std::string TileSubsetLayer::glbAttachmentName() const
+{
+    return model_->glbAttachmentName().value_or(std::string{});
+}
+
+NativeJsValue TileSubsetLayer::channelSchema(
+    uint32_t channelOrdinal) const
+{
+    auto channel = model_->at(channelOrdinal);
+    if (!channel) {
+        return *JsValue::Undefined();
+    }
+    auto featureFields = JsValue::List();
+    for (auto const& field : channel->featureFields()) {
+        featureFields.push(JsValue(field));
+    }
+    auto entryFields = JsValue::List();
+    for (auto const& field : channel->entryFields()) {
+        entryFields.push(JsValue(field));
+    }
+    nlohmann::json scope = channel->scope();
+    return *JsValue::Dict({
+        {"channelId", JsValue(channel->channelId())},
+        {"scope", JsValue(scope.get<std::string>())},
+        {"featureFields", featureFields},
+        {"entryFields", entryFields},
+        {"entryCount",
+         JsValue(static_cast<double>(channel->entryCount()))},
+    });
+}
+
+NativeJsValue TileSubsetLayer::entryRange(
+    uint32_t channelOrdinal,
     uint32_t offset,
     uint32_t limit,
-    bool includePosition)
+    bool includePosition) const
 {
-    auto entries = JsValue::List();
-    auto const layerInfo = model.info();
-    auto const sourceMapId = layerInfo.value("sourceMapId", model.mapId());
-    auto const sourceLayerId = layerInfo.value(
-        "sourceLayerId",
-        model.layerInfo() ? model.layerInfo()->layerId_ : std::string{});
-    auto const sourceTileId = layerInfo.value("sourceTileId", model.tileId().value());
-    auto const sourceTileKey = mapget::MapTileKey(
-        mapget::LayerType::Features,
-        sourceMapId,
-        sourceLayerId,
-        mapget::TileId::fromValue(sourceTileId)).toString();
-
-    auto const begin = std::min<size_t>(offset, model.size());
+    auto channel = model_->at(channelOrdinal);
+    if (!channel) {
+        return *JsValue::List();
+    }
+    auto const count = channel->entryCount();
+    auto const begin = std::min<size_t>(offset, count);
     auto const end = limit == 0
-        ? model.size()
-        : std::min<size_t>(model.size(), begin + static_cast<size_t>(limit));
-
-    for (size_t index = begin; index < end; ++index) {
-        auto result = model.at(index);
-        if (!result) {
-            continue;
+        ? count
+        : std::min<size_t>(
+              count,
+              begin + static_cast<size_t>(limit));
+    auto entries = JsValue::List();
+    auto append = [&](
+                      size_t index,
+                      mapget::model_ptr<mapget::FeatureId> const& featureId,
+                      mapget::model_ptr<mapget::GeometryCollection> const& geometry,
+                      mapget::model_ptr<mapget::Array> const& values,
+                      std::optional<uint32_t> attributeIndex = std::nullopt,
+                      std::optional<bool> hasValidity = std::nullopt,
+                      uint32_t validityIndex = 0,
+                      uint32_t validityCount = 1) {
+        if (index < begin || index >= end || !featureId) {
+            return;
         }
-
         auto entry = JsValue::Dict({
-            {"mapTileKey", JsValue(sourceTileKey)},
-            {"featureId", JsValue(result->featureId() ? result->featureId()->toString() : std::string{})},
+            {"mapTileKey", JsValue(model_->id().toString())},
+            {"featureId", JsValue(featureId->toString())},
             {"resultIndex", JsValue(static_cast<double>(index))},
+            {"values", projectedValues(values)},
         });
         if (includePosition) {
-            auto const center = searchResultGeometryCenter(result);
-            auto const cartesian = wgsToCartesian<mapget::Point>(center);
-            entry.set("position", JsValue::Dict({
-                {"cartesian", JsValue(cartesian)},
-                {"cartographic", JsValue(center)}
-            }));
+            if (auto center = subsetGeometryCenter(geometry)) {
+                auto const cartesian =
+                    wgsToCartesian<mapget::Point>(*center);
+                entry.set("position", JsValue::Dict({
+                    {"cartesian", JsValue(cartesian)},
+                    {"cartographic", JsValue(*center)},
+                }));
+            }
         }
-        if (auto attributeIndex = result->attributeIndex()) {
-            entry.set("attributeIndex", JsValue(static_cast<double>(*attributeIndex)));
+        if (attributeIndex) {
+            entry.set("attributeIndex", JsValue(*attributeIndex));
         }
-        if (auto validityIndex = result->validityIndex()) {
-            entry.set("validityIndex", JsValue(static_cast<double>(*validityIndex)));
-        }
-        if (auto validityCount = result->validityCount()) {
-            entry.set("validityCount", JsValue(static_cast<double>(*validityCount)));
+        if (hasValidity) {
+            entry.set("hasValidity", JsValue(*hasValidity));
+            entry.set("validityIndex", JsValue(validityIndex));
+            entry.set("validityCount", JsValue(validityCount));
         }
         entries.push(entry);
-    }
+    };
 
+    size_t index = 0;
+    switch (channel->scope()) {
+    case mapget::Scope::Feature:
+        channel->forEachFeatureEntry(
+            [&](mapget::model_ptr<mapget::FeatureEntry> const& entry) {
+                append(
+                    index++,
+                    entry->featureId(),
+                    entry->geometry(),
+                    entry->values());
+                return index < end;
+            });
+        break;
+    case mapget::Scope::Attribute:
+        channel->forEachAttributeValidityEntry(
+            [&](mapget::model_ptr<mapget::AttributeValidityEntry> const& entry) {
+                auto const current = index++;
+                if (current < begin || current >= end) {
+                    return index < end;
+                }
+                append(
+                    current,
+                    entry->featureId(),
+                    entry->geometry(),
+                    entry->values(),
+                    entry->attributeIndex(),
+                    entry->hasValidity(),
+                    entry->validityIndex(),
+                    entry->validityCount());
+                return index < end;
+            });
+        break;
+    case mapget::Scope::Relation:
+        channel->forEachRelationEntry(
+            [&](mapget::model_ptr<mapget::RelationEntry> const& entry) {
+                auto source = entry->source();
+                append(
+                    index++,
+                    source
+                        ? source->featureId()
+                        : mapget::model_ptr<mapget::FeatureId>{},
+                    entry->sourceGeometry(),
+                    entry->values());
+                return index < end;
+            });
+        break;
+    case mapget::Scope::Group:
+        channel->forEachGroupEntry(
+            [&](mapget::model_ptr<mapget::GroupEntry> const& entry) {
+                append(
+                    index++,
+                    entry->representativeFeatureId(),
+                    entry->geometry(),
+                    entry->values());
+                return index < end;
+            });
+        break;
+    }
     return *entries;
 }
 
-} // namespace
-
-NativeJsValue TileSearchResultLayer::resultEntryRange(uint32_t offset, uint32_t limit) const
+NativeJsValue TileSubsetLayer::valueSummaries(
+    uint32_t channelOrdinal,
+    uint32_t histogramLimit,
+    uint32_t distinctLimit) const
 {
-    return resultEntryRangeForLayer(*model_, offset, limit, true);
-}
-
-NativeJsValue TileSearchResultLayer::resultEntryRangeCompact(uint32_t offset, uint32_t limit) const
-{
-    return resultEntryRangeForLayer(*model_, offset, limit, false);
-}
-
-NativeJsValue TileSearchResultLayer::valueSummaries(uint32_t histogramLimit, uint32_t distinctLimit) const
-{
-    auto const [normalizedHistogramLimit, normalizedDistinctLimit] = normalizedSummaryLimits(
-        histogramLimit,
-        distinctLimit);
+    auto channel = model_->at(channelOrdinal);
+    if (!channel) {
+        return *JsValue::Undefined();
+    }
+    histogramLimit = std::clamp<uint32_t>(
+        histogramLimit == 0 ? 16U : histogramLimit,
+        1U,
+        256U);
+    distinctLimit = std::clamp<uint32_t>(
+        distinctLimit == 0 ? 512U : distinctLimit,
+        1U,
+        8192U);
+    auto const fields =
+        channel->scope() == mapget::Scope::Feature
+            ? channel->featureFields()
+            : channel->entryFields();
+    auto summaries = std::vector<ValueSummary>(fields.size());
+    auto summarize = [&](mapget::model_ptr<mapget::Array> const& values) {
+        for (size_t field = 0; field < fields.size(); ++field) {
+            summarizeNode(
+                summaries[field],
+                values && field < values->size()
+                    ? values->at(static_cast<int64_t>(field))
+                    : simfil::ModelNode::Ptr{},
+                distinctLimit);
+        }
+    };
+    switch (channel->scope()) {
+    case mapget::Scope::Feature:
+        channel->forEachFeatureEntry([&](auto const& entry) {
+            summarize(entry->values());
+            return true;
+        });
+        break;
+    case mapget::Scope::Attribute:
+        channel->forEachAttributeValidityEntry([&](auto const& entry) {
+            summarize(entry->values());
+            return true;
+        });
+        break;
+    case mapget::Scope::Relation:
+        channel->forEachRelationEntry([&](auto const& entry) {
+            summarize(entry->values());
+            return true;
+        });
+        break;
+    case mapget::Scope::Group:
+        channel->forEachGroupEntry([&](auto const& entry) {
+            summarize(entry->values());
+            return true;
+        });
+        break;
+    }
 
     auto resultFields = JsValue::List();
-    auto const& fields = model_->resultFields();
-    auto fieldSummaries = std::vector<ValueSummary>(fields.size());
-    for (size_t resultIndex = 0; resultIndex < model_->size(); ++resultIndex) {
-        auto searchResult = model_->at(resultIndex);
-        auto values = searchResult ? searchResult->values() : mapget::model_ptr<simfil::Array>{};
-        for (size_t fieldIndex = 0; fieldIndex < fields.size(); ++fieldIndex) {
-            if (!values || fieldIndex >= values->size()) {
-                summarizeNode(fieldSummaries[fieldIndex], {}, normalizedDistinctLimit);
-                continue;
-            }
-            summarizeNode(
-                fieldSummaries[fieldIndex],
-                values->at(static_cast<int64_t>(fieldIndex)),
-                normalizedDistinctLimit);
-        }
-    }
-
-    for (size_t fieldIndex = 0; fieldIndex < fields.size(); ++fieldIndex) {
+    for (size_t index = 0; index < fields.size(); ++index) {
         resultFields.push(JsValue::Dict({
             {"source", JsValue("resultField")},
-            {"index", JsValue(static_cast<double>(fieldIndex))},
-            {"expression", JsValue(fields[fieldIndex])},
-            {"summary", summaryToJsValue(fieldSummaries[fieldIndex], normalizedHistogramLimit)},
+            {"index", JsValue(static_cast<double>(index))},
+            {"expression", JsValue(fields[index])},
+            {"summary",
+             summaryToJsValue(summaries[index], histogramLimit)},
         }));
     }
-
     auto traces = JsValue::List();
-    for (size_t traceIndex = 0; traceIndex < model_->traceCount(); ++traceIndex) {
+    for (size_t traceIndex = 0;
+         traceIndex < model_->traceCount();
+         ++traceIndex)
+    {
         auto trace = model_->traceAt(traceIndex);
         if (!trace) {
             continue;
         }
-
         auto summary = ValueSummary{};
         if (auto values = trace->values()) {
-            for (uint32_t valueIndex = 0; valueIndex < values->size(); ++valueIndex) {
-                summarizeNode(summary, values->at(valueIndex), normalizedDistinctLimit);
+            for (uint32_t index = 0; index < values->size(); ++index) {
+                summarizeNode(
+                    summary,
+                    values->at(index),
+                    distinctLimit);
             }
         }
-
         traces.push(JsValue::Dict({
             {"source", JsValue("trace")},
             {"name", JsValue(trace->name())},
             {"calls", JsValue(static_cast<double>(trace->calls()))},
-            {"totalus", JsValue(static_cast<double>(trace->totalUs().count()))},
-            {"summary", summaryToJsValue(summary, normalizedHistogramLimit)},
+            {"totalus",
+             JsValue(
+                 static_cast<double>(
+                     trace->totalUs().count()))},
+            {"summary",
+             summaryToJsValue(summary, histogramLimit)},
         }));
     }
-
     return *JsValue::Dict({
         {"resultFields", resultFields},
         {"traces", traces},
     });
 }
 
-std::string TileSearchResultLayer::toJson() const
+NativeJsValue TileSubsetLayer::resolvePick(
+    uint32_t channelOrdinal,
+    uint32_t entryOrdinal,
+    uint32_t endpointRole) const
+{
+    auto channel = model_->at(channelOrdinal);
+    if (!channel) {
+        return *JsValue::Undefined();
+    }
+
+    auto result = JsValue::Dict({
+        {"channelOrdinal", JsValue(channelOrdinal)},
+        {"entryOrdinal", JsValue(entryOrdinal)},
+        {"endpointRole", JsValue(endpointRole)},
+        {"channelId", JsValue(channel->channelId())},
+    });
+    auto setFeatureId = [&](mapget::model_ptr<mapget::FeatureId> const& id) {
+        if (id) {
+            result.set("featureId", JsValue(id->toString()));
+            result.set("featureType", JsValue(std::string(id->typeId())));
+        }
+    };
+
+    switch (channel->scope()) {
+    case mapget::Scope::Feature: {
+        uint32_t current = 0;
+        channel->forEachFeatureEntry([&](mapget::model_ptr<mapget::FeatureEntry> const& entry) {
+            if (current++ != entryOrdinal) {
+                return true;
+            }
+            setFeatureId(entry->featureId());
+            return false;
+        });
+        break;
+    }
+    case mapget::Scope::Attribute: {
+        uint32_t current = 0;
+        channel->forEachAttributeValidityEntry(
+            [&](mapget::model_ptr<mapget::AttributeValidityEntry> const& entry) {
+                if (current++ != entryOrdinal) {
+                    return true;
+                }
+                setFeatureId(entry->featureId());
+                if (auto index = entry->attributeIndex()) {
+                    result.set("attributeIndex", JsValue(*index));
+                }
+                result.set("hasValidity", JsValue(entry->hasValidity()));
+                result.set("validityIndex", JsValue(entry->validityIndex()));
+                result.set("validityCount", JsValue(entry->validityCount()));
+                return false;
+            });
+        break;
+    }
+    case mapget::Scope::Relation: {
+        uint32_t current = 0;
+        channel->forEachRelationEntry([&](mapget::model_ptr<mapget::RelationEntry> const& entry) {
+            if (current++ != entryOrdinal) {
+                return true;
+            }
+            auto endpoint = endpointRole == 2 ? entry->target() : entry->source();
+            setFeatureId(endpoint ? endpoint->featureId() : mapget::model_ptr<mapget::FeatureId>{});
+            if (auto source = entry->source(); source && source->featureId()) {
+                auto const sourceFeatureId =
+                    source->featureId()->toString();
+                result.set(
+                    "relationSourceFeatureId",
+                    JsValue(sourceFeatureId));
+                if (auto relationIndex =
+                        relationIndexForSource(
+                            entry->relationId(),
+                            sourceFeatureId))
+                {
+                    result.set(
+                        "relationIndex",
+                        JsValue(*relationIndex));
+                }
+            }
+            result.set("relationId", JsValue(entry->relationId()));
+            result.set("relationName", JsValue(entry->name()));
+            result.set("twoway", JsValue(entry->twoway()));
+            return false;
+        });
+        break;
+    }
+    case mapget::Scope::Group: {
+        uint32_t current = 0;
+        channel->forEachGroupEntry([&](mapget::model_ptr<mapget::GroupEntry> const& entry) {
+            if (current++ != entryOrdinal) {
+                return true;
+            }
+            setFeatureId(entry->representativeFeatureId());
+            auto members = JsValue::List();
+            if (auto memberIds = entry->memberFeatureIds()) {
+                for (uint32_t index = 0; index < memberIds->size(); ++index) {
+                    auto node = memberIds->at(index);
+                    auto member = node
+                        ? model_->resolve<mapget::FeatureId>(*node)
+                        : mapget::model_ptr<mapget::FeatureId>{};
+                    if (member) {
+                        members.push(JsValue(member->toString()));
+                    }
+                }
+            }
+            result.set("memberFeatureIds", members);
+            return false;
+        });
+        break;
+    }
+    }
+    return *result;
+}
+
+std::string TileSubsetLayer::toJson() const
 {
     return model_->toJson().dump(2);
 }
 
-bool TileSearchResultLayer::copyDiagnostics(SharedUint8Array& output) const
+bool TileSubsetLayer::copyDiagnostics(SharedUint8Array& output) const
 {
     std::stringstream stream;
     auto written = model_->diagnostics().write(stream);
@@ -898,6 +1149,6 @@ bool TileSearchResultLayer::copyDiagnostics(SharedUint8Array& output) const
     return true;
 }
 
-TileSearchResultLayer::~TileSearchResultLayer() = default;
+TileSubsetLayer::~TileSubsetLayer() = default;
 
 } // namespace erdblick

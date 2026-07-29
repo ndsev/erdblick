@@ -80,7 +80,11 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 <!-- --8<-- [start:feature-search] -->
 Running **Search Loaded Features** opens a persistent feature-search session. Each session owns its query, selected map layers, selected views, streamed result set, visualization settings, diagnostics, and browser-state entry.
 
-The backend search runs through mapget. It searches the selected map/layer coverage for the current visible tiles, loads the source tile stages required for evaluation, and streams `TileSearchResultLayer` chunks back to erdblick. Results can appear while the backend is still searching and while the result tree is still being built.
+The backend search is an ordinary mapget `/filter` presentation. It evaluates
+the selected map/layer coverage and streams immutable `TileSubsetLayer`
+results. The same subset feeds styled map geometry and frame-budgeted result
+list ingestion, so matches can appear while backend work and tree construction
+are still in progress.
 
 Important controls:
 
@@ -88,7 +92,7 @@ Important controls:
 - **Enabled toggle** - disables a search without deleting it. A disabled search keeps its query and results visible but does not run, auto-update, or accept query edits until it is enabled again.
 - **Query input** - edit the Simfil expression inline. Press `Enter` to rerun. If the text differs from the active search, the refresh action becomes **Rerun search**.
 - **Map Layers** - restrict the search to selected maps and layers. This also narrows schema-aware completion and style-field pickers.
-- **Scope** - choose `Auto`, `Feature`, or `Attribute`. Feature scope evaluates once per feature. Attribute scope evaluates once per attribute/validity context and exposes `$name`, `$layer`, `$feature`, `$validityIndex`, and `$validityCount`. Auto chooses attribute scope when schema metadata proves that the query targets attribute-layer fields.
+- **Scope** - choose `Auto`, `Feature`, or `Attribute`. Feature scope evaluates once per feature. Attribute scope evaluates once per attribute/validity context and exposes `$name`, `$layer`, `$feature`, `$attributeIndex`, `$hasValidity`, `$validityIndex`, and `$validityCount`. Auto chooses attribute scope when schema metadata proves that the query targets attribute-layer fields.
 - **View** - in split view, choose where the result layer is visualized: left view, right view, or both. Auto-update follows the visible tiles of the selected view set.
 - **Auto update area** - when enabled, panning, zooming, layer changes, and split-view changes refresh the search area automatically. When disabled, use **Update area** to replace the search area with the current visible tiles without changing the query.
 - **Refresh / rerun** - refresh repeats the active search over its current area. When the query text is dirty, the same action becomes **Rerun search** and commits the edited query before searching.

@@ -15,7 +15,6 @@ import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapInfoService} from "../../mapdata/map-info.service";
 import {MapViewStateService} from "../map-view-state.service";
 import {MapTileStreamService} from "../../mapdata/map-tile-stream.service";
-import {MapRenderService, TileVisualizationRenderTask} from "../../mapdata/map-render.service";
 import {InspectionSelectionService} from "../../inspection/inspection-selection.service";
 import {
     FeatureSearchService,
@@ -38,11 +37,10 @@ import {
     type WmsBackgroundLayerConfig,
     type XyzBackgroundLayerConfig
 } from "../../shared/app-config.service";
-import {IRenderSceneHandle, IRenderView, ITileVisualization, RenderViewDestroyOptions} from "../render-view.model";
+import {IRenderSceneHandle, IRenderView, RenderViewDestroyOptions} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import {environment} from "../../environments/environment";
-import {MergedPointsTile} from "../pointmerge.service";
 import {coreLib} from "../../integrations/wasm";
 import {
     TileGridOverlayDatum,
@@ -72,6 +70,7 @@ import {
     wrapColumnIntoExtent,
     type TileGridLevelExtent
 } from "../tile-grid-visibility";
+import {ViewLayerController} from "../view-layer.controller";
 
 /** Internal camera state deck uses while the rest of the app still speaks Cesium-like camera values. */
 interface DeckCameraState {
@@ -160,6 +159,7 @@ interface DeckPickLayerProps {
     searchResultFeatureIds?: string[];
     featureAddresses?: ArrayLike<number | null>;
     featureAddressesByPath?: ArrayLike<number | null>;
+    subsetPickResolver?: (pickIndex: number) => TileFeatureId[];
 }
 
 /** Minimal event shape used by deck click callbacks. */
@@ -321,13 +321,13 @@ export abstract class DeckMapView implements IRenderView {
                 protected mapInfo: MapInfoService,
                 protected mapViewState: MapViewStateService,
                 protected tileStream: MapTileStreamService,
-                protected mapRender: MapRenderService,
                 protected inspectionSelection: InspectionSelectionService,
                 protected featureSearchService: FeatureSearchService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
                 protected stateService: AppStateService,
-                protected configService: AppConfigService) {
+                protected configService: AppConfigService,
+                protected layerController: ViewLayerController) {
         this._viewIndex = id;
         this.canvasId = canvasId;
     }
@@ -383,7 +383,6 @@ export abstract class DeckMapView implements IRenderView {
 
         this.setupSubscriptions();
         this.updateViewport();
-        this.mapRender.refreshHighlightVisualizationsForCurrentPolicies(true);
         this.requestRender();
     }
 
@@ -413,10 +412,6 @@ export abstract class DeckMapView implements IRenderView {
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
         this.layerRegistry.destroy();
-        if (options.clearTileVisualizations !== false) {
-            this.mapRender.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
-        }
-
         if (this.deck) {
             this.deck.finalize();
             this.deck = null;
@@ -738,36 +733,8 @@ export abstract class DeckMapView implements IRenderView {
             return value;
         };
 
-        const resolveFeatureAddress = (
-            tileKey: string | undefined,
-            value: unknown
-        ): TileFeatureId | null => {
-            if (!Number.isInteger(value)) {
-                return null;
-            }
-            if (!tileKey) {
-                return null;
-            }
-            return this.tileStream.resolveTileFeatureIdByAddress(tileKey, value as number);
-        };
-        const resolveSearchResultAddress = (
-            tileKey: string | undefined,
-            resultFeatureIds: string[] | undefined,
-            value: unknown
-        ): TileFeatureId | null => {
-            if (!tileKey || !resultFeatureIds || !Number.isInteger(value)) {
-                return null;
-            }
-            const featureId = resultFeatureIds[value as number];
-            return featureId ? {mapTileKey: tileKey, featureId} : null;
-        };
-
         const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
-        const objectTileKey = layerProps?.tileKey;
         const pickedObject = picked.object;
-        const objectFeatureTileKeys = Array.isArray(pickedObject?.featureTileKeys)
-            ? pickedObject.featureTileKeys as unknown[]
-            : undefined;
         const objectFeatureAddresses = pickedObject?.featureAddresses ?? pickedObject?.featureAddress;
         const objectFeatureAddressesAreBinaryBuffer = typeof objectFeatureAddresses === "object"
             && objectFeatureAddresses !== null
@@ -775,53 +742,39 @@ export abstract class DeckMapView implements IRenderView {
         if (objectFeatureAddresses !== undefined && objectFeatureAddresses !== null && !objectFeatureAddressesAreBinaryBuffer) {
             if (Array.isArray(objectFeatureAddresses)) {
                 return objectFeatureAddresses
-                    .map((value, index) => {
-                        const featureTileKey = typeof objectFeatureTileKeys?.[index] === "string"
-                            ? objectFeatureTileKeys[index] as string
-                            : objectTileKey;
-                        return resolveFeatureAddress(featureTileKey, value);
-                    })
-                    .filter((value): value is TileFeatureId => value !== null);
+                    .map(value => Number.isInteger(value)
+                        ? layerProps?.subsetPickResolver?.(Number(value)) ?? []
+                        : [])
+                    .flat();
             }
-            const searchResult = resolveSearchResultAddress(
-                objectTileKey,
-                layerProps?.searchResultFeatureIds,
-                objectFeatureAddresses
-            );
-            if (searchResult) {
-                return [searchResult];
+            if (Number.isInteger(objectFeatureAddresses)) {
+                const subsetResult = layerProps?.subsetPickResolver?.(
+                    objectFeatureAddresses as number
+                );
+                if (subsetResult?.length) {
+                    return subsetResult;
+                }
             }
-            const resolved = resolveFeatureAddress(objectTileKey, objectFeatureAddresses);
-            return resolved ? [resolved] : [];
+            return [];
         }
 
         const pickedIndex = Number(picked.index);
         if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
             const featureAddress = readFeatureAddress(layerProps?.featureAddresses, pickedIndex);
             if (featureAddress !== null) {
-                const searchResult = resolveSearchResultAddress(
-                    layerProps?.tileKey,
-                    layerProps?.searchResultFeatureIds,
-                    featureAddress
-                );
-                if (searchResult) {
-                    return [searchResult];
+                const subsetResult = layerProps?.subsetPickResolver?.(featureAddress);
+                if (subsetResult?.length) {
+                    return subsetResult;
                 }
-                const resolved = resolveFeatureAddress(layerProps?.tileKey, featureAddress);
-                return resolved ? [resolved] : [];
+                return [];
             }
             const featureAddressByPath = readFeatureAddress(layerProps?.featureAddressesByPath, pickedIndex);
             if (featureAddressByPath !== null) {
-                const searchResult = resolveSearchResultAddress(
-                    layerProps?.tileKey,
-                    layerProps?.searchResultFeatureIds,
-                    featureAddressByPath
-                );
-                if (searchResult) {
-                    return [searchResult];
+                const subsetResult = layerProps?.subsetPickResolver?.(featureAddressByPath);
+                if (subsetResult?.length) {
+                    return subsetResult;
                 }
-                const resolved = resolveFeatureAddress(layerProps?.tileKey, featureAddressByPath);
-                return resolved ? [resolved] : [];
+                return [];
             }
         }
         return [];
@@ -1101,7 +1054,9 @@ export abstract class DeckMapView implements IRenderView {
             this.mapInfo.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.tileStream.tileDataChanged.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
+            this.layerController.occupancyChanged.subscribe(() =>
+                this.scheduleTileGridOverlayDataRefresh()
+            )
         );
         this.subscriptions.push(
             this.featureSearchService.progress.subscribe(() => this.scheduleSearchResultsOverlayDataRefresh())
@@ -1149,42 +1104,6 @@ export abstract class DeckMapView implements IRenderView {
                     zoom
                 }, true, true);
                 this.startJumpAreaHighlight(value.rectangle);
-            })
-        );
-
-        this.subscriptions.push(
-            this.mapRender.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
-                const tileVis = task.visualization;
-                // The render task topic is shared across all views. Only the
-                // owning view may consume and complete the task.
-                if (tileVis.viewIndex !== this._viewIndex) {
-                    return;
-                }
-                tileVis.render(this.getSceneHandle())
-                    .catch(error => {
-                        console.error("Tile visualization render failed.", error);
-                    })
-                    .finally(() => {
-                        task.onDone?.();
-                    });
-            })
-        );
-
-        this.subscriptions.push(
-            this.mapRender.tileVisualizationDestructionTopic.subscribe((tileVis: ITileVisualization) => {
-                if (tileVis.viewIndex !== this._viewIndex) {
-                    return;
-                }
-                tileVis.destroy(this.getSceneHandle());
-            })
-        );
-
-        this.subscriptions.push(
-            this.mapRender.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
-                if (tileVis.viewIndex !== this._viewIndex) {
-                    return;
-                }
-                tileVis.removeScene(this.getSceneHandle());
             })
         );
 
@@ -2312,39 +2231,14 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Classifies one tile cell as error, empty, or uncolored across every visible layer at that level. */
     private tileStateKindForTile(tileId: number, visibleLayers: VisibleLayerRef[]): number {
-        let hasParticipant = false;
-        let hasPendingParticipant = false;
-        let hasEmptyParticipant = false;
-        let hasNonEmptyData = false;
-        for (const layer of visibleLayers) {
-            const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.layerId, tileId);
-            const tile = this.tileStream.loadedTileLayers.get(tileKey);
-            if (!tile) {
-                continue;
-            }
-            hasParticipant = true;
-            if (tile.error) {
+        switch (this.layerController.occupancyForTile(tileId, visibleLayers)) {
+            case "error":
                 return TILE_STATE_KIND_ERROR;
-            }
-            if (!tile.hasData()) {
-                hasPendingParticipant = true;
-                continue;
-            }
-            if (tile.numFeatures > 0) {
-                hasNonEmptyData = true;
-                continue;
-            }
-            hasEmptyParticipant = true;
+            case "empty":
+                return TILE_STATE_KIND_EMPTY;
+            default:
+                return 0;
         }
-        // Aggregation rule per tile across participating layers:
-        // error > non-empty > empty > unknown/loading.
-        if (hasNonEmptyData) {
-            return 0;
-        }
-        if (hasParticipant && hasEmptyParticipant && !hasPendingParticipant) {
-            return TILE_STATE_KIND_EMPTY;
-        }
-        return 0;
     }
 
     /** Converts a tile id to its raster-cell coordinates inside the current tile-grid extent. */

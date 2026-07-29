@@ -243,8 +243,8 @@ export class FeatureFilterOptions {
                                             }
                                         </span>
                                     }
-                                    @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
-                                        <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    @if (rowData.hasOwnProperty("geometryNameBubble") && $index === 0) {
+                                        <span class="inspection-geometry-name-badge">{{rowData["geometryNameBubble"]}}</span>
                                     }
                                     @if (rowData.hasOwnProperty("valueCount") && $index === 0) {
                                         <p-tag class="inspection-node-count-tag"
@@ -1374,7 +1374,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return Array.isArray(node?.children) && node.children.length > 0;
     }
 
-    /** Builds the CSS class map for stage badges, hover groups, and special inspection rows. */
+    /** Builds the CSS class map for geometry badges, hover groups, and special inspection rows. */
     getRowClasses(rowData: any): Record<string, boolean> {
         const strongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
             ? rowData["strongHoverGroupId"]

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mapget/model/featurelayer.h"
+#include "mapget/model/geometry.h"
 #include "simfil/model/nodes.h"
 #include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"
@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <regex>
+#include <variant>
 
 namespace erdblick
 {
@@ -18,7 +19,6 @@ namespace erdblick
  */
 struct BoundEvalFun
 {
-    simfil::model_ptr<simfil::OverlayNode> context_;
     std::function<simfil::Value(std::string const& expr)> eval_;
     std::function<void(
         std::string const& property,
@@ -43,7 +43,7 @@ public:
     FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
     /** Selects whether the rule runs against whole features, relations, or attributes. */
-    enum Aspect {
+    enum Scope {
         Feature,
         Relation,
         Attribute
@@ -78,16 +78,21 @@ public:
         AllOf
     };
 
-    /** Return this rule when it matches the feature and current evaluation context. */
-    FeatureStyleRule const* match(mapget::Feature& feature, BoundEvalFun const& evalFun) const;
-    /** Visit every concrete matching leaf rule. Returns true if at least one leaf matched. */
+    /** Static result metadata used for client-owned rule traversal. */
+    struct MatchContext {
+        std::string_view featureType;
+        std::optional<std::string_view> relationName;
+        std::optional<std::string_view> attributeName;
+        std::optional<std::string_view> attributeLayer;
+        std::optional<bool> hasValidity;
+    };
+
+    /** Visit every matching concrete leaf using only metadata and projected scalars. */
     bool forEachMatchingRule(
-        mapget::Feature& feature,
-        BoundEvalFun const& evalFun,
+        MatchContext const& context,
+        BoundEvalFun const& entryEvalFun,
         std::function<void(FeatureStyleRule const&)> const& callback,
-        std::string_view const* relationName = nullptr) const;
-    /** Check only source-feature gates that do not require the final evaluation context. */
-    [[nodiscard]] bool matchesFeatureGates(mapget::Feature& feature) const;
+        BoundEvalFun const* featureEvalFun = nullptr) const;
     /** Visit all concrete renderable leaf rules without evaluating feature gates. */
     void forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const;
     /** Assign stable render identities to concrete leaf rules in source order. */
@@ -98,35 +103,40 @@ public:
     [[nodiscard]] BranchMode branchMode() const;
     /** Return nested branch rules. */
     [[nodiscard]] std::vector<FeatureStyleRule> const& subRules() const;
-    /** Return the rule's target aspect. */
-    [[nodiscard]] Aspect aspect() const;
+    /** Return the rule's target scope. */
+    [[nodiscard]] Scope scope() const;
     /** Return the highlight pass this rule belongs to. */
     [[nodiscard]] HighlightMode mode() const;
     /** Return the fidelity mode requested by the rule. */
     [[nodiscard]] Fidelity fidelity() const;
-    /** Return the required geometry/data stage override, if the rule pins one. */
-    [[nodiscard]] std::optional<uint32_t> stage() const;
-    /** Return the low-fi LOD bucket restriction, if one was configured. */
-    [[nodiscard]] std::optional<uint8_t> lod() const;
     /** Report whether geometry emitted by this rule may be selected in the UI. */
     [[nodiscard]] bool selectable() const;
-    /** Check whether this rule can emit the given geometry type and stage. */
-    [[nodiscard]] bool supports(
-        mapget::GeomType const& g,
-        std::optional<uint32_t> geometryStage={}) const;
+    /** Check whether this rule can emit the given named geometry. */
+    [[nodiscard]] bool supports(mapget::GeomType g, std::optional<std::string_view> geometryName = {}) const;
     /** Return the raw geometry-type bit mask used by `supports()`. */
     [[nodiscard]] uint32_t geometryTypesMask() const;
     /** Return this node's own mask or the union of descendant concrete masks. */
     [[nodiscard]] uint32_t effectiveGeometryTypesMask() const;
+    /** Return the concrete semantic geometry name, or wildcard when absent. */
+    [[nodiscard]] std::optional<std::string> const& geometryName() const;
+    /** Return one common descendant geometry name, or wildcard on disagreement. */
+    [[nodiscard]] std::optional<std::string> effectiveGeometryName() const;
 
-    /** Resolve the effective RGBA color, including optional color expressions. */
-    [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
+    /** Return this node's host-feature filter expression. */
+    [[nodiscard]] std::string const& filter() const;
+    /** Return presentation expressions evaluated in this node's active context. */
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> expressionUses() const;
+
+    /** Resolve the effective RGBA color, including expression and color-scale modes. */
+    [[nodiscard]] std::optional<glm::fvec4> color(BoundEvalFun const& evalFun) const;
     /** Report whether the rule explicitly overrides the base RGB tint. */
     [[nodiscard]] bool hasExplicitColor() const;
     /** Report whether the rule explicitly overrides opacity. */
     [[nodiscard]] bool hasExplicitOpacity() const;
     /** Return the configured line width or point radius basis value. */
     [[nodiscard]] float width() const;
+    /** Resolve a width-scale override against projected entry values. */
+    [[nodiscard]] float width(BoundEvalFun const& evalFun) const;
     /** Report whether emitted geometry should participate in depth testing. */
     [[nodiscard]] bool depthTest() const;
     /** Return the billboard override, or `std::nullopt` to use renderer defaults. */
@@ -161,6 +171,8 @@ public:
 
     /** Return the regex used to filter relation types, if any. */
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
+    /** Return the original relation-name regex transported to mapget. */
+    [[nodiscard]] std::optional<std::string> const& relationTypePattern() const;
     /** Return the vertical offset used when drawing relation helper lines. */
     [[nodiscard]] float relationLineHeightOffset() const;
     /** Return the optional style used for relation end markers. */
@@ -231,20 +243,47 @@ private:
         return 1 << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
     }
 
-    Aspect aspect_ = Feature;
+public:
+    /** Typed literal stop used by the Erdblick-only color-scale presentation. */
+    struct ColorScaleStop {
+        using Key = std::variant<bool, int64_t, double, std::string>;
+        Key key;
+        glm::fvec4 color;
+    };
+    struct ColorScale {
+        enum class Mode { Linear, Categorical };
+        Mode mode = Mode::Linear;
+        std::string expression;
+        std::vector<ColorScaleStop> stops;
+        std::optional<glm::fvec4> fallback;
+    };
+    struct WidthScaleStop {
+        ColorScaleStop::Key key;
+        float width = 0.0f;
+    };
+    struct WidthScale {
+        ColorScale::Mode mode = ColorScale::Mode::Linear;
+        std::string expression;
+        std::vector<WidthScaleStop> stops;
+        std::optional<float> fallback;
+    };
+
+private:
+    Scope scope_ = Feature;
     HighlightMode mode_ = NoHighlight;
     Fidelity fidelity_ = AnyFidelity;
-    std::optional<uint32_t> stage_;
-    std::optional<uint8_t> lod_;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
+    std::optional<std::string> geometryName_;
     std::optional<std::regex> type_;
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};
     std::string colorExpression_;
+    std::optional<ColorScale> colorScale_;
     bool hasExplicitColor_ = false;
     bool hasExplicitOpacity_ = false;
     float width_ = 1.;
+    std::optional<WidthScale> widthScale_;
     bool depthTest_ = true;
     std::optional<bool> billboard_;
     bool flat_ = false;
@@ -282,6 +321,7 @@ private:
     std::string iconUrlExpression_;
 
     std::optional<std::regex> relationType_;
+    std::optional<std::string> relationTypePattern_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
     std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
     std::shared_ptr<FeatureStyleRule> relationSourceStyle_;

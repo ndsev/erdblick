@@ -119,11 +119,11 @@ diagnostics-indicator {
     align-items: center;
   }
 
-  .diagnostics-stage-label {
+  .diagnostics-progress-label {
     font-size: 0.85em;
   }
 
-  .diagnostics-stage-bar {
+  .diagnostics-progress-bar {
     position: relative;
     display: flex;
     align-items: center;
@@ -143,7 +143,7 @@ diagnostics-indicator {
     }
   }
 
-  .diagnostics-stage-bar-value {
+  .diagnostics-progress-bar-value {
     position: absolute;
     inset: 0;
     display: flex;
@@ -156,7 +156,7 @@ diagnostics-indicator {
   }
 
   @supports ((-webkit-background-clip: text) or (background-clip: text)) {
-    .diagnostics-stage-bar-value {
+    .diagnostics-progress-bar-value {
       background-image: linear-gradient(
                       90deg,
                       #fff 0%,
@@ -418,4 +418,3 @@ diagnostics-indicator {
   display: flex;
   justify-content: flex-end;
 }
-

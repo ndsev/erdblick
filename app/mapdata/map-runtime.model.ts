@@ -1,79 +1,16 @@
-import type {
-    MapTileStreamSearchStatusPayload,
-    MapTileStreamTransportCompressionStats
-} from "./tilestream";
-import type {FeatureTile} from "./features.model";
-
-/** Promise-backed request used when selection/inspection pins a tile outside the viewport. */
-export interface SelectionTileRequest {
-    remoteRequest: {
-        mapId: string,
-        layerId: string,
-        tileIds: Array<number>
-    };
-    tileKey: string;
-    /** Keep the request pending until the selected tile has enough stages for inspection. */
-    resolveWhenInspectionComplete?: boolean;
-    resolve: null | ((tile: FeatureTile) => void);
-    reject: null | ((why: unknown) => void);
-}
-
-/** Aggregate backend request progress reported by the interactive websocket. */
-export interface BackendRequestProgress {
-    done: number;
-    total: number;
-    allDone: boolean;
-    requestId?: number;
-}
-
-/** Single diagnostics snapshot consumed by the tile-loading HUD. */
-export interface TileLoadingHudStats {
-    backend: BackendRequestProgress;
-    downstreamBytesPerSecond: number;
-    pullResponses: number;
-    pullGzipResponses: number;
-    pullUncompressedBytes: number;
-    pullCompressedBytesKnown: number;
-    pullCompressionRatioPct: number | null;
-    pullCompressionCoveragePct: number;
-    features: number;
-    vertices: number;
-    parseQueueSize: number;
-    renderQueueSize: number;
-    frameTimeMs: number;
-    viewportRenderSeconds: number;
-}
-
-/** Serialized mapget tile key produced by native TileLayerParser/core helpers. */
-export type MapTileKey = string;
-
-/** Fine-grained tile-data lifecycle event for consumers that need the concrete tile instance. */
-export type TileDataChangeReason = "placeholder" | "loaded" | "evicted";
-
-/** Payload for feature-tile data updates and evictions. */
-export interface TileDataChange {
-    tileKey: MapTileKey;
-    tile: FeatureTile;
-    reason: TileDataChangeReason;
-}
-
-/** Per-layer stage request bookkeeping used by progress UI and high-fidelity inspection checks. */
-export interface RequestedLayerProgressState {
-    mapId: string;
-    layerId: string;
-    tileMaxRequestedStageByKey: Map<string, number>;
-    stageCount: number;
-}
-
-/** UI-facing point/result entry extracted from a streamed TileSearchResultLayer. */
+/** UI-facing result entry projected from one TileSubsetLayer channel. */
 export interface SearchResultTileEntry {
     mapTileKey: string;
     featureId: string;
     resultIndex: number;
     position?: {
-        cartesian: {x: number, y: number, z: number};
-        cartographic: {x: number, y: number, z: number} | null;
-        cartographicRad?: {longitude: number, latitude: number, height: number} | null;
+        cartesian: {x: number; y: number; z: number};
+        cartographic: {x: number; y: number; z: number} | null;
+        cartographicRad?: {
+            longitude: number;
+            latitude: number;
+            height: number;
+        } | null;
     };
     values?: unknown[];
     attributeIndex?: number;
@@ -81,7 +18,7 @@ export interface SearchResultTileEntry {
     validityCount?: number;
 }
 
-/** Compact frontend payload emitted when a search result tile arrives. */
+/** Compact list-ingestion payload derived from an immutable search subset. */
 export interface SearchResultTilePayload {
     searchId: string;
     refresh: number;
@@ -102,55 +39,6 @@ export interface SearchResultTilePayload {
     entries: SearchResultTileEntry[];
     entryOffset?: number;
     entriesComplete?: boolean;
-}
-
-/** Payload emitted when a search result tile leaves the runtime cache. */
-export interface SearchResultTileEvictedPayload {
-    searchId: string;
-    sourceTileKey: MapTileKey;
-}
-
-/** Search source-tile coverage changed before backend statuses for the new request generation arrive. */
-export interface SearchCoverageChangedPayload {
-    searchId: string;
-    refresh: number;
-    tilesConsidered: number;
-    tilesCompleted: number;
-}
-
-/** Internal render-invalidation payload for a removed high-fidelity search-result tile. */
-export interface SearchResultTileRemovedPayload {
-    searchId: string;
-    sourceTileKey: MapTileKey;
-}
-
-/** One visible source tile in the order produced by the viewport tile planner. */
-export interface SearchLayerTileEntry {
-    tileId: number;
-    requestOrder: number;
-    priority: boolean;
-}
-
-/** Visible source-tile coverage for one map/layer pair. */
-export interface SearchLayerTileSet {
-    mapId: string;
-    layerId: string;
-    featureTypes: string[];
-    tiles: Map<number, SearchLayerTileEntry>;
-}
-
-/** Concrete server-side search request embedded in the next interactive update. */
-export interface FeatureSearchTileRequest {
-    mapId: string;
-    layerId: string;
-    tileIds: number[];
-    priorityTileIds?: number[];
-    searchId: string;
-    refresh: number;
-    searchQuery: string;
-    searchScope: "feature" | "attribute";
-    featureTypes: string[];
-    withFields?: string[];
 }
 
 /** Schema-backed candidate indicating that a query can run in attribute scope. */
@@ -184,9 +72,3 @@ export interface FeatureSearchStyleFieldCandidate {
     enumValues: string[];
     numericRange?: {min: number; max: number};
 }
-
-/** Re-export of the native search status payload type used by feature-search UI state. */
-export type SearchStatusPayload = MapTileStreamSearchStatusPayload;
-
-/** Re-export of transport compression statistics exposed by the websocket client. */
-export type TileStreamCompressionStats = MapTileStreamTransportCompressionStats;

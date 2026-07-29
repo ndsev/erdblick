@@ -10,20 +10,27 @@ import {
     MAX_MAP_ZOOM_STEP,
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
-    MAX_DECK_STYLE_WORKERS,
     DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
     MAX_LOCATION_SEARCH_RESULT_LIMIT,
     PREFERENCES_DIALOG_LAYOUT_ID,
     MIN_MAP_ZOOM_STEP,
     AppStateService,
-    DEFAULT_DECK_STYLE_WORKER_COUNT,
     DEFAULT_LOW_FI_TILE_THRESHOLD,
+    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
+    MAX_RENDER_BLOCK_VERTEX_LIMIT,
+    MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
     MAX_LOW_FI_TILE_THRESHOLD,
+    MIN_RENDER_BLOCK_VERTEX_LIMIT,
     MIN_LOW_FI_TILE_THRESHOLD,
+    AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
+    clampRenderBlockVertexLimit,
+    clampTileSubsetRenderWorkerCount,
     clampLowFiTileThreshold
 } from "../shared/appstate.service";
+import {
+    getTileSubsetLayerRenderAutoWorkerCount
+} from "../mapview/deck/tile-subset-layer-render.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
-import {getDeckRenderAutoWorkerCount} from "../mapview/deck/deck-render.worker.pool";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {environment} from "../environments/environment";
 
@@ -169,14 +176,6 @@ import {environment} from "../environments/environment";
                                 (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Threaded tile rendering</label>
-                <p-selectButton [options]="toggleOptions"
-                                [(ngModel)]="deckThreadedRenderingEnabledSetting"
-                                optionLabel="label"
-                                optionValue="value"
-                                (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
-            </div>
-            <div class="button-container">
                 <label>WebGL antialiasing
                     <i class="pi pi-info-circle"
                        pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
@@ -187,14 +186,6 @@ import {environment} from "../environments/environment";
                                 optionLabel="label"
                                 optionValue="value"
                                 (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
-            </div>
-            <div class="button-container">
-                <label>Pin low-fi rendering to max LOD</label>
-                <p-selectButton [options]="toggleOptions"
-                                [(ngModel)]="pinLowFiToMaxLodSetting"
-                                optionLabel="label"
-                                optionValue="value"
-                                (ngModelChange)="setPinLowFiToMaxLod($event)"></p-selectButton>
             </div>
             <div class="slider-container">
                 <label for="low-fi-tile-threshold-input">High/Low-Fi Tile Threshold
@@ -223,39 +214,71 @@ import {environment} from "../environments/environment";
                               [disabled]="!lowFiTileThresholdChanged"></p-button>
                 </div>
             </div>
-            <div class="button-container">
-                <label>Render worker count override
-                    <i class="pi pi-info-circle" pTooltip="Use only when there are rendering issues"
+            <p-divider></p-divider>
+            <div class="slider-container">
+                <label for="render-worker-count-input">Render Workers
+                    <i class="pi pi-info-circle"
+                       pTooltip="Number of parallel TileSubsetLayer WASM workers. Zero selects half of the available logical CPUs automatically."
                        tooltipPosition="top"></i>
                 </label>
-                <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
-                                [disabled]="!deckThreadedRenderingEnabledSetting"
-                                (ngModelChange)="setDeckStyleWorkersOverride($event)"/>
-            </div>
-            <div class="slider-container">
-                <label [for]="deckStyleWorkersCountInput">Worker count</label>
                 <div class="slider-controls">
                     <div style="display: inline-block">
-                        <input class="tiles-input w-full"
+                        <input id="render-worker-count-input"
+                               class="tiles-input w-full"
                                type="text"
                                pInputText
-                               [(ngModel)]="deckStyleWorkersCountInput"
-                               (ngModelChange)="onDeckStyleWorkersCountInputChange($event)"
-                               [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
-                               (keydown.enter)="applyDeckStyleWorkersCount()"/>
-                        <p-slider [(ngModel)]="deckStyleWorkersCountInput"
-                                  (ngModelChange)="onDeckStyleWorkersCountSliderChange($event)"
+                               [(ngModel)]="renderWorkerCountInput"
+                               (ngModelChange)="onRenderWorkerCountInputChange($event)"
+                               (keydown.enter)="applyRenderWorkerCount()"/>
+                        <p-slider [(ngModel)]="renderWorkerCountInput"
+                                  (ngModelChange)="onRenderWorkerCountSliderChange($event)"
                                   class="w-full"
-                                  [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
-                                  [min]="1"
-                                  [max]="MAX_DECK_STYLE_WORKERS"></p-slider>
+                                  [min]="AUTO_TILE_SUBSET_RENDER_WORKER_COUNT"
+                                  [max]="MAX_TILE_SUBSET_RENDER_WORKER_COUNT"></p-slider>
+                        <small>{{ renderWorkerCountDescription }}</small>
                     </div>
-                    <p-button (click)="applyDeckStyleWorkersCount()"
+                    <p-button (click)="applyRenderWorkerCount()"
                               label=""
                               icon="pi pi-check"
-                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting || !deckStyleWorkersCountChanged">
-                    </p-button>
+                              [disabled]="!renderWorkerCountChanged"></p-button>
                 </div>
+            </div>
+            <div class="slider-container">
+                <label for="render-block-vertex-limit-input">Render Block Vertex Limit
+                    <i class="pi pi-info-circle"
+                       pTooltip="Soft maximum source-geometry vertex count for a multi-tile Morton render block. A single tile is always allowed."
+                       tooltipPosition="top"></i>
+                </label>
+                <div class="slider-controls">
+                    <div style="display: inline-block">
+                        <input id="render-block-vertex-limit-input"
+                               class="tiles-input w-full"
+                               type="text"
+                               pInputText
+                               [(ngModel)]="renderBlockVertexLimitInput"
+                               (ngModelChange)="onRenderBlockVertexLimitInputChange($event)"
+                               (keydown.enter)="applyRenderBlockVertexLimit()"/>
+                        <p-slider [(ngModel)]="renderBlockVertexLimitInput"
+                                  (ngModelChange)="onRenderBlockVertexLimitSliderChange($event)"
+                                  class="w-full"
+                                  [min]="MIN_RENDER_BLOCK_VERTEX_LIMIT"
+                                  [max]="MAX_RENDER_BLOCK_VERTEX_LIMIT"
+                                  [step]="256"></p-slider>
+                    </div>
+                    <p-button (click)="applyRenderBlockVertexLimit()"
+                              label=""
+                              icon="pi pi-check"
+                              [disabled]="!renderBlockVertexLimitChanged"></p-button>
+                </div>
+            </div>
+            <div class="button-container">
+                <label>Debug Render Blocks
+                    <i class="pi pi-info-circle"
+                       pTooltip="Draw the actual Morton block boundaries, tile count, and source-geometry vertex count."
+                       tooltipPosition="top"></i>
+                </label>
+                <p-toggleswitch
+                    [(ngModel)]="stateService.debugRenderBlocks"></p-toggleswitch>
             </div>
             <p-divider></p-divider>
             <div class="button-container">
@@ -302,18 +325,19 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     limitSimultaneousInspectionsInput: number | string = 0;
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
-    deckThreadedRenderingEnabledSetting: boolean = true;
     deckAntialiasingEnabledSetting: boolean = true;
-    pinLowFiToMaxLodSetting: boolean = false;
     lowFiTileThresholdInput: number | string = DEFAULT_LOW_FI_TILE_THRESHOLD;
-    deckStyleWorkersOverrideSetting: boolean = false;
-    deckStyleWorkersCountInput: number | string = DEFAULT_DECK_STYLE_WORKER_COUNT;
+    renderWorkerCountInput: number | string =
+        AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
+    renderBlockVertexLimitInput: number | string =
+        DEFAULT_RENDER_BLOCK_VERTEX_LIMIT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     locationSearchResultLimitChanged: boolean = false;
     lowFiTileThresholdChanged: boolean = false;
-    deckStyleWorkersCountChanged: boolean = false;
+    renderWorkerCountChanged: boolean = false;
+    renderBlockVertexLimitChanged: boolean = false;
     mapZoomStepChanged: boolean = false;
     toggleOptions = [
         {label: 'Off', value: false},
@@ -360,25 +384,27 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
-            this.deckThreadedRenderingEnabledSetting = enabled;
-        }));
         this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
             this.deckAntialiasingEnabledSetting = enabled;
-        }));
-        this.subscriptions.push(this.stateService.pinLowFiToMaxLodState.subscribe(enabled => {
-            this.pinLowFiToMaxLodSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.lowFiTileThresholdState.subscribe(threshold => {
             this.lowFiTileThresholdInput = threshold;
             this.updateLowFiTileThresholdChangeState();
         }));
-        this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
-            this.deckStyleWorkersOverrideSetting = enabled;
-        }));
-        this.subscriptions.push(this.stateService.deckStyleWorkersCountState.subscribe(count => {
-            this.deckStyleWorkersCountInput = count;
-        }));
+        this.subscriptions.push(
+            this.stateService.tileSubsetRenderWorkerCountState.subscribe(
+                workerCount => {
+                    this.renderWorkerCountInput = workerCount;
+                    this.updateRenderWorkerCountChangeState();
+                }
+            ),
+            this.stateService.renderBlockVertexLimitState.subscribe(
+                vertexLimit => {
+                    this.renderBlockVertexLimitInput = vertexLimit;
+                    this.updateRenderBlockVertexLimitChangeState();
+                }
+            )
+        );
         this.subscriptions.push(this.stateService.mapZoomStepState.subscribe(step => {
             this.mapZoomStepInput = step;
         }));
@@ -392,7 +418,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.syncInspectionValuePresentationSelection();
         }));
         this.syncInspectionValuePresentationSelection();
-        this.syncDeckStyleWorkersCountToAutoIfNeeded();
     }
 
     get dialogVisible(): boolean {
@@ -401,6 +426,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     set dialogVisible(visible: boolean) {
         this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+    }
+
+    get renderWorkerCountDescription(): string {
+        const configured = clampTileSubsetRenderWorkerCount(
+            this.renderWorkerCountInput
+        );
+        return configured === AUTO_TILE_SUBSET_RENDER_WORKER_COUNT
+            ? `Auto (${getTileSubsetLayerRenderAutoWorkerCount()})`
+            : `${configured} active worker${configured === 1 ? "" : "s"}`;
     }
 
     /** Keeps the multiselect value stable between change-detection passes. */
@@ -448,18 +482,21 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Refreshes dialog fields from current state whenever the preferences dialog opens. */
     onDialogShow() {
-        this.syncDeckStyleWorkersCountToAutoIfNeeded();
         this.tilesToLoadInput = this.stateService.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
         this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
-        this.deckStyleWorkersCountInput = this.stateService.deckStyleWorkersCount;
         this.mapZoomStepInput = this.stateService.mapZoomStep;
         this.lowFiTileThresholdInput = this.stateService.lowFiTileThreshold;
+        this.renderWorkerCountInput =
+            this.stateService.tileSubsetRenderWorkerCount;
+        this.renderBlockVertexLimitInput =
+            this.stateService.renderBlockVertexLimit;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.locationSearchResultLimitChanged = false;
         this.lowFiTileThresholdChanged = false;
-        this.deckStyleWorkersCountChanged = false;
+        this.renderWorkerCountChanged = false;
+        this.renderBlockVertexLimitChanged = false;
         this.mapZoomStepChanged = false;
         this.dialogStack.bringToFront(this.preferencesDialog);
     }
@@ -521,23 +558,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.tilePullCompressionEnabled = enabled;
     }
 
-    /** Enables or disables threaded Deck rendering. */
-    setDeckThreadedRenderingEnabled(enabled: boolean) {
-        this.deckThreadedRenderingEnabledSetting = enabled;
-        this.stateService.deckThreadedRenderingEnabled = enabled;
-        this.syncDeckStyleWorkersCountToAutoIfNeeded();
-    }
-
     /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
         this.stateService.deckAntialiasingEnabled = enabled;
-    }
-
-    /** Controls whether low-fidelity rendering stays pinned to the highest requested LOD. */
-    setPinLowFiToMaxLod(enabled: boolean) {
-        this.pinLowFiToMaxLodSetting = enabled;
-        this.stateService.pinLowFiToMaxLod = enabled;
     }
 
     /** Applies the pending low-fi tile threshold after validating the input. */
@@ -558,26 +582,48 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lowFiTileThresholdChanged = false;
     }
 
-    /** Enables or disables the explicit Deck render-worker count override. */
-    setDeckStyleWorkersOverride(enabled: boolean) {
-        this.deckStyleWorkersOverrideSetting = enabled;
-        this.stateService.deckStyleWorkersOverride = enabled;
-        this.syncDeckStyleWorkersCountToAutoIfNeeded();
+    /** Applies zero-for-auto or one explicit subset-render worker count. */
+    applyRenderWorkerCount() {
+        if (!this.renderWorkerCountChanged) {
+            return;
+        }
+        const workerCount = Number(this.renderWorkerCountInput);
+        if (!Number.isInteger(workerCount) ||
+            workerCount < AUTO_TILE_SUBSET_RENDER_WORKER_COUNT ||
+            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT) {
+            this.messageService.showError(
+                `Please enter a render worker count between ` +
+                `${AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} (Auto) and ` +
+                `${MAX_TILE_SUBSET_RENDER_WORKER_COUNT}.`
+            );
+            return;
+        }
+        const normalized = clampTileSubsetRenderWorkerCount(workerCount);
+        this.renderWorkerCountInput = normalized;
+        this.stateService.tileSubsetRenderWorkerCount = normalized;
+        this.renderWorkerCountChanged = false;
     }
 
-    /** Applies a manually chosen Deck render-worker count when overrides are enabled. */
-    applyDeckStyleWorkersCount() {
-        if (!this.deckThreadedRenderingEnabledSetting || !this.deckStyleWorkersOverrideSetting || !this.deckStyleWorkersCountChanged) {
+    /** Applies the soft source-geometry vertex limit for aggregate blocks. */
+    applyRenderBlockVertexLimit() {
+        if (!this.renderBlockVertexLimitChanged) {
             return;
         }
-        const count = Number(this.deckStyleWorkersCountInput);
-        if (!Number.isInteger(count) || count < 1 || count > MAX_DECK_STYLE_WORKERS) {
-            this.messageService.showError(`Please enter a worker count between 1 and ${MAX_DECK_STYLE_WORKERS}.`);
+        const vertexLimit = Number(this.renderBlockVertexLimitInput);
+        if (!Number.isInteger(vertexLimit) ||
+            vertexLimit < MIN_RENDER_BLOCK_VERTEX_LIMIT ||
+            vertexLimit > MAX_RENDER_BLOCK_VERTEX_LIMIT) {
+            this.messageService.showError(
+                `Please enter a render block vertex limit between ` +
+                `${MIN_RENDER_BLOCK_VERTEX_LIMIT} and ` +
+                `${MAX_RENDER_BLOCK_VERTEX_LIMIT}.`
+            );
             return;
         }
-        this.deckStyleWorkersCountInput = count;
-        this.stateService.deckStyleWorkersCount = count;
-        this.deckStyleWorkersCountChanged = false;
+        const normalized = clampRenderBlockVertexLimit(vertexLimit);
+        this.renderBlockVertexLimitInput = normalized;
+        this.stateService.renderBlockVertexLimit = normalized;
+        this.renderBlockVertexLimitChanged = false;
     }
 
     /** Applies a manually chosen map zoom step for wheel and keyboard deck interactions. */
@@ -689,12 +735,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.stateService.locationSearchResultLimit);
     }
 
-    /** Tracks slider edits for the Deck render-worker count override. */
-    protected onDeckStyleWorkersCountSliderChange(value: number) {
-        this.deckStyleWorkersCountInput = value;
-        this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
-    }
-
     /** Tracks slider edits for the map zoom-step preference. */
     protected onMapZoomStepSliderChange(value: number) {
         this.mapZoomStepInput = value;
@@ -705,6 +745,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onLowFiTileThresholdSliderChange(value: number) {
         this.lowFiTileThresholdInput = value;
         this.updateLowFiTileThresholdChangeState();
+    }
+
+    /** Tracks slider edits for the active render-worker count. */
+    protected onRenderWorkerCountSliderChange(value: number) {
+        this.renderWorkerCountInput = value;
+        this.updateRenderWorkerCountChangeState();
+    }
+
+    /** Tracks slider edits for the aggregate render-block vertex limit. */
+    protected onRenderBlockVertexLimitSliderChange(value: number) {
+        this.renderBlockVertexLimitInput = value;
+        this.updateRenderBlockVertexLimitChangeState();
     }
 
     /** Tracks free-form edits for the tile-load input. */
@@ -725,12 +777,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.stateService.locationSearchResultLimit);
     }
 
-    /** Tracks free-form edits for the Deck render-worker count input. */
-    protected onDeckStyleWorkersCountInputChange(value: number | string) {
-        this.deckStyleWorkersCountInput = value;
-        this.deckStyleWorkersCountChanged = this.hasPendingNumericChange(value, this.stateService.deckStyleWorkersCount);
-    }
-
     /** Tracks free-form edits for the map zoom-step input. */
     protected onMapZoomStepInputChange(value: number | string) {
         this.mapZoomStepInput = value;
@@ -741,6 +787,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onLowFiTileThresholdInputChange(value: number | string) {
         this.lowFiTileThresholdInput = value;
         this.updateLowFiTileThresholdChangeState();
+    }
+
+    /** Tracks free-form edits for the active render-worker count. */
+    protected onRenderWorkerCountInputChange(value: number | string) {
+        this.renderWorkerCountInput = value;
+        this.updateRenderWorkerCountChangeState();
+    }
+
+    /** Tracks free-form edits for the render-block vertex limit. */
+    protected onRenderBlockVertexLimitInputChange(value: number | string) {
+        this.renderBlockVertexLimitInput = value;
+        this.updateRenderBlockVertexLimitChangeState();
     }
 
     /** Updates the dirty flag for the low-fi threshold control. */
@@ -755,6 +813,34 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             clampLowFiTileThreshold(threshold) !== this.stateService.lowFiTileThreshold;
     }
 
+    /** Updates the dirty flag for the subset-render worker control. */
+    private updateRenderWorkerCountChangeState(): void {
+        const workerCount = Number(this.renderWorkerCountInput);
+        if (!Number.isInteger(workerCount) ||
+            workerCount < AUTO_TILE_SUBSET_RENDER_WORKER_COUNT ||
+            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT) {
+            this.renderWorkerCountChanged = true;
+            return;
+        }
+        this.renderWorkerCountChanged =
+            clampTileSubsetRenderWorkerCount(workerCount) !==
+            this.stateService.tileSubsetRenderWorkerCount;
+    }
+
+    /** Updates the dirty flag for the render-block vertex limit control. */
+    private updateRenderBlockVertexLimitChangeState(): void {
+        const vertexLimit = Number(this.renderBlockVertexLimitInput);
+        if (!Number.isInteger(vertexLimit) ||
+            vertexLimit < MIN_RENDER_BLOCK_VERTEX_LIMIT ||
+            vertexLimit > MAX_RENDER_BLOCK_VERTEX_LIMIT) {
+            this.renderBlockVertexLimitChanged = true;
+            return;
+        }
+        this.renderBlockVertexLimitChanged =
+            clampRenderBlockVertexLimit(vertexLimit) !==
+            this.stateService.renderBlockVertexLimit;
+    }
+
     /** Determines whether a numeric preference control still has an unapplied change. */
     private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
         if (typeof value === "string" && value.trim().length === 0) {
@@ -764,25 +850,19 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         return !Number.isFinite(parsedValue) || parsedValue !== currentValue;
     }
 
-    /** Mirrors the automatically chosen worker count into the UI when override mode is disabled. */
-    private syncDeckStyleWorkersCountToAutoIfNeeded(): void {
-        if (this.stateService.deckStyleWorkersOverride) {
-            return;
-        }
-        const autoCount = getDeckRenderAutoWorkerCount();
-        this.deckStyleWorkersCountInput = autoCount;
-        this.deckStyleWorkersCountChanged = false;
-        if (this.stateService.deckStyleWorkersCount !== autoCount) {
-            this.stateService.deckStyleWorkersCount = autoCount;
-        }
-    }
-
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
     protected readonly MAX_LOCATION_SEARCH_RESULT_LIMIT = MAX_LOCATION_SEARCH_RESULT_LIMIT;
-    protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
     protected readonly MIN_LOW_FI_TILE_THRESHOLD = MIN_LOW_FI_TILE_THRESHOLD;
     protected readonly MAX_LOW_FI_TILE_THRESHOLD = MAX_LOW_FI_TILE_THRESHOLD;
+    protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT =
+        AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
+    protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT =
+        MAX_TILE_SUBSET_RENDER_WORKER_COUNT;
+    protected readonly MIN_RENDER_BLOCK_VERTEX_LIMIT =
+        MIN_RENDER_BLOCK_VERTEX_LIMIT;
+    protected readonly MAX_RENDER_BLOCK_VERTEX_LIMIT =
+        MAX_RENDER_BLOCK_VERTEX_LIMIT;
 }

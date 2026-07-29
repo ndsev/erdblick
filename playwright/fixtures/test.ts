@@ -28,12 +28,22 @@ declare global {
          * we only describe the surface we rely on.
          */
         ebDebug?: {
-            /** Renders a synthetic debug tile into the primary map view. */
-            showTestTile: () => void;
             /** Builds the canonical feature-layer tile key for a map/layer/tile tuple. */
             mapTileKey: (mapId: string, layerId: string, tileId: string | number | bigint) => string;
-            /** Loads a feature tile into the client-side tile registry for test setup. */
-            ensureTileLoaded: (mapTileKey: string) => Promise<unknown>;
+            /** Exposes the initialized native core for deterministic coordinate helpers. */
+            coreLib: () => any;
+            /** Loads one exact feature through the inspection-only restricted tile path. */
+            featureInspectionHoverSummary: (
+                mapTileKey: string,
+                featureId: string,
+                keyFilter?: string
+            ) => Promise<Record<string, unknown>>;
+            /** Application state used to drive the same selection path as picking and search. */
+            stateService: {
+                setSelection: (
+                    features: Array<{mapTileKey: string; featureId: string}>
+                ) => void;
+            };
             /**
              * Serialised camera setter used for synchronising camera positions
              * across views in tests.
@@ -140,7 +150,8 @@ export const test = base.extend<SnapshotFixtures>({
                     return;
                 }
 
-                // Expect shape { requests: [{ mapId, typeId, featureId: [...] }, ...] }.
+                // Expect the canonical locate shape
+                // { requests: [{ mapId, featureId: "Type.id" }, ...] }.
                 const requests = Array.isArray(body?.requests) ? body.requests : null;
                 if (!requests || requests.length === 0) {
                     // No locate requests to satisfy; fall back to default handling.
@@ -148,8 +159,7 @@ export const test = base.extend<SnapshotFixtures>({
                     return;
                 }
 
-                // Only handle "feature locate" requests that carry a flat featureId array.
-                if (!Array.isArray(requests[0]?.featureId)) {
+                if (typeof requests[0]?.featureId !== 'string') {
                     await route.continue();
                     return;
                 }
@@ -157,19 +167,19 @@ export const test = base.extend<SnapshotFixtures>({
                 const tileId = await packedTileIdForTestPosition();
                 const responses = requests.map((req: any) => {
                     const mapId = typeof req.mapId === 'string' ? req.mapId : TEST_MAP_NAMES[0];
-                    const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
-                    const featureId = Array.isArray(req.featureId) ? req.featureId : [];
+                    const canonicalFeatureId = typeof req.featureId === 'string'
+                        ? req.featureId
+                        : 'Way.0';
 
                     // Use a valid packed tile id for all located features. The
                     // Python datasource generates the same synthetic grid in
                     // every tile, but mapget now rejects non-packed legacy ids.
-                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAMES[0]}:${tileId}:0`;
+                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAMES[0]}:${tileId}`;
 
                     // Each locate request yields a single synthetic location result.
                     return [{
                         tileId: tileKey,
-                        typeId,
-                        featureId
+                        canonicalFeatureId
                     }];
                 });
 

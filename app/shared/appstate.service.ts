@@ -9,7 +9,7 @@ import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
-import type {FeatureWrapper} from "../mapdata/features.model";
+import type {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
 import {
     BackgroundLayerConfig,
@@ -40,6 +40,28 @@ import {
     sourceDataSelectionMapIds
 } from "./url-state-codec";
 import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
+import {
+    clampRenderBlockVertexLimit,
+    clampLowFiTileThreshold,
+    clampTileSubsetRenderWorkerCount,
+    DEFAULT_LOW_FI_TILE_THRESHOLD,
+    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
+} from "./tile-render-policy";
+
+export {
+    AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
+    clampRenderBlockVertexLimit,
+    clampLowFiTileThreshold,
+    clampTileSubsetRenderWorkerCount,
+    DEFAULT_LOW_FI_TILE_THRESHOLD,
+    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
+    MAX_RENDER_BLOCK_VERTEX_LIMIT,
+    MAX_LOW_FI_TILE_THRESHOLD,
+    MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
+    MIN_LOW_FI_TILE_THRESHOLD,
+    MIN_RENDER_BLOCK_VERTEX_LIMIT,
+    MIN_TILE_SUBSET_RENDER_WORKER_COUNT
+} from "./tile-render-policy";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -61,11 +83,6 @@ export const VIEW_SYNC_LAYERS = "lay";
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
-export const MAX_DECK_STYLE_WORKERS = 32;
-export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
-export const DEFAULT_LOW_FI_TILE_THRESHOLD = 128;
-export const MIN_LOW_FI_TILE_THRESHOLD = 1;
-export const MAX_LOW_FI_TILE_THRESHOLD = 4096;
 export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
 export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
 export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
@@ -94,19 +111,6 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
-
-/** Clamp one low-fi tile threshold to the supported integer preference range. */
-export function clampLowFiTileThreshold(
-    value: unknown,
-    fallback = DEFAULT_LOW_FI_TILE_THRESHOLD): number {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-        return fallback;
-    }
-    return Math.min(
-        MAX_LOW_FI_TILE_THRESHOLD,
-        Math.max(MIN_LOW_FI_TILE_THRESHOLD, Math.trunc(numeric)));
-}
 
 /** Normalizes feature search grouping values from persisted state. */
 function normalizeFeatureSearchGrouping(value: unknown): number[] {
@@ -591,27 +595,9 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly deckStyleWorkersOverrideState = this.createState<boolean>({
-        name: 'deckStyleWorkersOverride',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly deckThreadedRenderingEnabledState = this.createState<boolean>({
-        name: 'deckThreadedRenderingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
     readonly deckAntialiasingEnabledState = this.createState<boolean>({
         name: 'deckAntialiasingEnabled',
         defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly pinLowFiToMaxLodState = this.createState<boolean>({
-        name: 'pinLowFiToMaxLod',
-        defaultValue: false,
         schema: Boolish
     });
 
@@ -623,10 +609,32 @@ export class AppStateService implements OnDestroy {
         fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD)
     });
 
-    readonly deckStyleWorkersCountState = this.createState<number>({
-        name: 'deckStyleWorkersCount',
-        defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
-        schema: z.coerce.number().int().min(1).max(MAX_DECK_STYLE_WORKERS)
+    readonly tileSubsetRenderWorkerCountState = this.createState<number>({
+        name: 'tileSubsetRenderWorkerCount',
+        defaultValue: 0,
+        schema: z.coerce.number().int(),
+        toStorage: value => clampTileSubsetRenderWorkerCount(value),
+        fromStorage: value => clampTileSubsetRenderWorkerCount(value)
+    });
+
+    readonly debugRenderBlocksState = this.createState<boolean>({
+        name: 'debugRenderBlocks',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly renderBlockVertexLimitState = this.createState<number>({
+        name: 'renderBlockVertexLimit',
+        defaultValue: DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
+        schema: z.coerce.number().int(),
+        toStorage: value => clampRenderBlockVertexLimit(
+            value,
+            DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
+        ),
+        fromStorage: value => clampRenderBlockVertexLimit(
+            value,
+            DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
+        )
     });
 
     readonly tilePullCompressionEnabledState = this.createState<boolean>({
@@ -1498,16 +1506,13 @@ export class AppStateService implements OnDestroy {
         layerType,
         mapId,
         layerId,
-        tileId,
-        stage
+        tileId
     ) => {
-        const parsedStage = Number(stage || 0);
         return coreLib.createMapTileKey(
             layerType,
             mapId,
             layerId,
-            tileId,
-            Number.isFinite(parsedStage) ? parsedStage : 0);
+            tileId);
     };
 
     /** Restores v2 URL params through a coordinated layer-indexed decode path. */
@@ -2043,20 +2048,35 @@ export class AppStateService implements OnDestroy {
         this.seedAdditionalViews(previousViewCount, val);
         this.numViewsState.next(val);
     };
-    get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
-    set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
     get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
-    get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
-    set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
     get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
     set lowFiTileThreshold(val: number) {
         this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));
     }
-    get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
-    set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
-    get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
-    set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
+    get tileSubsetRenderWorkerCount() {
+        return this.tileSubsetRenderWorkerCountState.getValue();
+    }
+    set tileSubsetRenderWorkerCount(val: number) {
+        this.tileSubsetRenderWorkerCountState.next(
+            clampTileSubsetRenderWorkerCount(val)
+        );
+    }
+    get debugRenderBlocks() {return this.debugRenderBlocksState.getValue();}
+    set debugRenderBlocks(val: boolean) {
+        this.debugRenderBlocksState.next(!!val);
+    }
+    get renderBlockVertexLimit() {
+        return this.renderBlockVertexLimitState.getValue();
+    }
+    set renderBlockVertexLimit(val: number) {
+        this.renderBlockVertexLimitState.next(
+            clampRenderBlockVertexLimit(
+                val,
+                DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
+            )
+        );
+    }
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}

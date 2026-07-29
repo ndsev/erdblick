@@ -3,10 +3,10 @@ project(erdblick-core)
 # For WASM modules, add_executable is used instead of add_library.
 set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization.h
-  include/erdblick/visualization-base.h
-  include/erdblick/visualization-deck.h
+  include/erdblick/subset-renderer.h
   include/erdblick/style.h
   include/erdblick/style-validation.h
+  include/erdblick/style-filter-plan.h
   include/erdblick/rule.h
   include/erdblick/buffer.h
   include/erdblick/color.h
@@ -21,10 +21,10 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/interop/js-object.h
   include/erdblick/geo/point-conversion.h
 
-  src/visualization-base.cpp
-  src/visualization-deck.cpp
+  src/subset-renderer.cpp
   src/style.cpp
   src/style-validation.cpp
+  src/style-filter-plan.cpp
   src/rule.cpp
   src/color.cpp
   src/buffer.cpp
@@ -70,16 +70,18 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     "-s ALLOW_MEMORY_GROWTH=1"
     "-s FILESYSTEM=0"
     "-s EXPORTED_RUNTIME_METHODS=HEAPU8"
-    "-s ASSERTIONS=0"
     "-s SAFE_HEAP=0"
-    "-s NO_DISABLE_EXCEPTION_CATCHING=0"
+    # Keep C++ failures catchable at the embind boundary. Disabling catching
+    # turns an otherwise reportable malformed subset into a poisoned WASM
+    # runtime which can only surface the generic "Aborted()" message.
+    "-s DISABLE_EXCEPTION_CATCHING=0"
     "-s STACK_OVERFLOW_CHECK=0"
   )
   message(STATUS "Building ${CMAKE_BUILD_TYPE}")
   if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    list(APPEND erdblick_link_flags "--profiling")
+    list(APPEND erdblick_link_flags "--profiling" "-s ASSERTIONS=1")
   else ()
-    list(APPEND erdblick_link_flags "-O3" "-msimd128")
+    list(APPEND erdblick_link_flags "-O3" "-msimd128" "-s ASSERTIONS=0")
   endif()
   string(JOIN " " erdblick_link_flags_joined ${erdblick_link_flags})
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "${erdblick_link_flags_joined}")

@@ -1,7 +1,7 @@
 import {Component, OnDestroy} from "@angular/core";
 import {Subscription} from "rxjs";
 import {InspectionSelectionService} from "./inspection-selection.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
 
 @Component({

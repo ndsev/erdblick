@@ -10,6 +10,7 @@ import {
 
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
+const CONFIGURED_STYLE_TEST_ID = 'nds-live-display';
 test.use({ stateSnapshot: 'style_editor_state' });
 
 test.describe('Snapshot – style component', () => {
@@ -19,7 +20,12 @@ test.describe('Snapshot – style component', () => {
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
         const stylesDialog = await openStylesDialog(page);
-        const editButton = stylesDialog.locator('[data-testid^="style-edit-button-"]').first();
+        // Wait for the configured style bundle to replace the transient empty
+        // startup tree, then edit a deterministic style. Choosing the first
+        // live locator made this test race style initialization.
+        const editButton = stylesDialog.getByTestId(
+            `style-edit-button-${CONFIGURED_STYLE_TEST_ID}`
+        );
         await expect(editButton).toBeVisible();
         const editButtonTestId = await editButton.getAttribute('data-testid');
         if (!editButtonTestId?.startsWith('style-edit-button-')) {

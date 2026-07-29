@@ -13,7 +13,7 @@ import {
     InspectionComparisonOption,
     InspectionPanelModel
 } from '../shared/appstate.service';
-import {FeatureWrapper} from '../mapdata/features.model';
+import {FeatureWrapper} from '../mapdata/feature-inspection.model';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {FeaturePanelComponent} from './feature.panel.component';
 import {AppDialogComponent} from '../shared/app-dialog.component';

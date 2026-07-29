@@ -16,7 +16,6 @@ import {
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapViewStateService, ViewRecalculationReason} from "./map-view-state.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {MapRenderService} from "../mapdata/map-render.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
@@ -38,6 +37,17 @@ import {environment} from "../environments/environment";
 import {Popover} from "primeng/popover";
 import {coreLib} from "../integrations/wasm";
 import {AppConfigService} from "../shared/app-config.service";
+import {StyleService} from "../styledata/style.service";
+import {ViewLayerController} from "./view-layer.controller";
+import {
+    TileSubsetLayerRenderService
+} from "./deck/tile-subset-layer-render.service";
+import {
+    ViewLayerDiagnosticsService
+} from "./view-layer-diagnostics.service";
+import {
+    StyleValidationReportService
+} from "../styledata/style-validation-report.service";
 
 
 
@@ -136,6 +146,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private viewerContextMenuCapture?: (event: MouseEvent) => void;
     private layoutResizePrepareListener?: (event: Event) => void;
     private viewerSetupGeneration = 0;
+    private layerController?: ViewLayerController;
 
     @ViewChild('popover') featureIdsPopover!: Popover;
     @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
@@ -149,7 +160,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     constructor(public mapService: MapInfoService,
                 public mapViewState: MapViewStateService,
                 public tileStream: MapTileStreamService,
-                public mapRender: MapRenderService,
                 public inspectionSelection: InspectionSelectionService,
                 public featureSearchService: FeatureSearchService,
                 public stateService: AppStateService,
@@ -159,6 +169,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService,
                 public configService: AppConfigService,
+                private styleService: StyleService,
+                private subsetRenderService: TileSubsetLayerRenderService,
+                private viewLayerDiagnostics: ViewLayerDiagnosticsService,
+                private styleValidationReports: StyleValidationReportService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone
     ) {
@@ -179,6 +193,18 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
     ngOnInit() {
+        this.layerController = new ViewLayerController(
+            this.viewIndex(),
+            this.mapService,
+            this.mapViewState,
+            this.tileStream,
+            this.styleService,
+            this.subsetRenderService,
+            this.featureSearchService,
+            this.inspectionSelection,
+            this.viewLayerDiagnostics,
+            this.styleValidationReports
+        );
         this.subscriptions.push(
             this.menuService.menuItems.subscribe(items => {
                 this.menuItems = [...items];
@@ -283,19 +309,22 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
         if (this.mapView) {
+            this.layerController?.detachScene();
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
             this.mapView = undefined;
         }
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
-                this.mapRender, this.inspectionSelection, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService, this.configService
+                this.inspectionSelection, this.featureSearchService,
+                this.menuService, this.coordinatesService, this.stateService, this.configService,
+                this.layerController!
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
-                this.mapRender, this.inspectionSelection, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService, this.configService
+                this.inspectionSelection, this.featureSearchService,
+                this.menuService, this.coordinatesService, this.stateService, this.configService,
+                this.layerController!
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
@@ -304,7 +333,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             return undefined;
         }
         this.mapView = mapView;
-        this.mapRender.rebuildTileVisualizationsForScene(this.viewIndex(), mapView.getSceneHandle());
+        this.layerController?.attachScene(mapView.getSceneHandle());
         this.viewerInitError = "";
         return mapView;
     }
@@ -330,6 +359,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }
+        this.layerController?.dispose();
+        this.layerController = undefined;
     }
 
     /**
@@ -642,9 +673,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 continue;
             }
 
-            const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.id, tileId);
-            const loadedTile = this.tileStream.loadedTileLayers.get(tileKey);
-            if (!loadedTile?.hasData() || loadedTile.numFeatures <= 0) {
+            if (this.layerController?.occupancyForTile(
+                tileId,
+                [{mapId: layer.mapId, layerId: layer.id}]
+            ) !== "non-empty") {
                 continue;
             }
 

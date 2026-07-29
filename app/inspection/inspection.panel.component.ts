@@ -7,7 +7,7 @@ import {
 } from "../shared/appstate.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib} from "../integrations/wasm";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";

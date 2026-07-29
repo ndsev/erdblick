@@ -133,7 +133,7 @@ describe('AppStateService', () => {
             id: 0,
             features: [feature(
                 "Intersection.545554858.3348",
-                "Features:Very-Large-Map:Road:22100770000d:0"
+                "Features:Very-Large-Map:Road:22100770000d"
             )],
             locked: true,
             size: [30, 20],
@@ -144,7 +144,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
-                nodeId: "Very-Large-Map",
+                sourceId: "Very-Large-Map",
+                stringPoolId: "Very-Large-Map",
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
@@ -153,7 +154,7 @@ describe('AppStateService', () => {
         ]), new Map());
 
         expect(service.selection).toHaveLength(1);
-        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d:0");
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
     });
 
 
@@ -164,7 +165,7 @@ describe('AppStateService', () => {
             id: 0,
             features: [feature(
                 "Intersection.545554858.3348",
-                "Features:Very-Large-Map:Road:545554858:0"
+                "Features:Very-Large-Map:Road:545554858"
             )],
             locked: true,
             size: [30, 20],
@@ -175,7 +176,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
-                nodeId: "Very-Large-Map",
+                sourceId: "Very-Large-Map",
+                stringPoolId: "Very-Large-Map",
                 maxParallelJobs: 0,
                 addOn: false,
                 status: "initializing",
@@ -185,7 +187,7 @@ describe('AppStateService', () => {
         ]), new Map());
 
         expect(service.selection).toHaveLength(1);
-        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858:0");
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
     });
 
     it('preserves focused selection metadata while pruning unavailable selections', () => {
@@ -194,8 +196,8 @@ describe('AppStateService', () => {
         service.selection = [{
             id: 0,
             features: [
-                feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
-                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858:0"),
+                feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
+                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858"),
             ],
             locked: true,
             focused: true,
@@ -207,7 +209,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
-                nodeId: "Very-Large-Map",
+                sourceId: "Very-Large-Map",
+                stringPoolId: "Very-Large-Map",
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
@@ -218,7 +221,7 @@ describe('AppStateService', () => {
         expect(service.selection).toHaveLength(1);
         expect(service.selection[0].focused).toBe(true);
         expect(service.selection[0].features).toEqual([
-            feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
+            feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
         ]);
     });
 
@@ -229,7 +232,7 @@ describe('AppStateService', () => {
             id: 0,
             features: [feature(
                 "Landmark.545666604.12",
-                "Features:Provider%2FSample Munich:Landmark:545666604:0"
+                "Features:Provider%2FSample Munich:Landmark:545666604"
             )],
             locked: true,
             focused: true,
@@ -241,7 +244,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Provider/Sample Munich", new MapTreeNode({
                 mapId: "Provider/Sample Munich",
-                nodeId: "Provider/Sample Munich",
+                sourceId: "Provider/Sample Munich",
+                stringPoolId: "Provider/Sample Munich",
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
@@ -253,7 +257,7 @@ describe('AppStateService', () => {
         expect(service.selection[0].focused).toBe(true);
         expect(service.selection[0].features[0]).toEqual(feature(
             "Landmark.545666604.12",
-            "Features:Provider%2FSample Munich:Landmark:545666604:0"
+            "Features:Provider%2FSample Munich:Landmark:545666604"
         ));
     });
 
@@ -275,6 +279,29 @@ describe('AppStateService', () => {
 
         service.lowFiTileThreshold = 9999;
         expect(service.lowFiTileThreshold).toBe(4096);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('normalizes persisted subset-render tuning preferences', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(
+            routerStub as unknown as Router,
+            infoServiceStub()
+        );
+
+        expect(service.tileSubsetRenderWorkerCount).toBe(0);
+        expect(service.renderBlockVertexLimit).toBe(16_384);
+        expect(service.debugRenderBlocks).toBe(false);
+
+        service.tileSubsetRenderWorkerCount = 999;
+        service.renderBlockVertexLimit = 1;
+        service.debugRenderBlocks = true;
+
+        expect(service.tileSubsetRenderWorkerCount).toBe(32);
+        expect(service.renderBlockVertexLimit).toBe(256);
+        expect(service.debugRenderBlocks).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -387,7 +414,7 @@ describe('AppStateService', () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: 'Features:MapA:Lane:606830446:0',
+                    mapTileKey: 'Features:MapA:Lane:545379780',
                     featureId: 'Lane.1:attribute#1'
                 }],
                 locked: true,
@@ -399,7 +426,7 @@ describe('AppStateService', () => {
                 id: 1,
                 features: [],
                 sourceData: {
-                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1143701358:0',
+                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1451349444',
                     address: 783783249845n
                 },
                 locked: true,
@@ -474,7 +501,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.selection[0].features[0]).toEqual({
-            mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209:0',
+            mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209',
             featureId: 'Road.545555209.387',
         });
 
@@ -603,7 +630,7 @@ describe('AppStateService', () => {
         service.selection = [{
             id: 0,
             features: [{
-                mapTileKey: 'Features:MapB:Road:21:0',
+                mapTileKey: 'Features:MapB:Road:21',
                 featureId: 'Road.1',
             }],
             locked: true,

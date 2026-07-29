@@ -287,7 +287,10 @@ export async function clickSearchResultLeaf(page: Page, index: number): Promise<
 }
 
 /** Derives the packed tile id used by the deterministic test viewport. */
-async function packedTileIdForTestPosition(page: Page, locationIndex: number = 0): Promise<number> {
+export async function packedTileIdForTestPosition(
+    page: Page,
+    locationIndex: number = 0
+): Promise<number> {
     const [lon, lat, level] = TEST_VIEW_POSITIONS[locationIndex];
     return page.evaluate(({lon, lat, level}) => {
         const debugApi = window.ebDebug as any;
@@ -300,8 +303,9 @@ async function packedTileIdForTestPosition(page: Page, locationIndex: number = 0
 }
 
 /**
- * Loads a deterministic test tile and selects one of its features through the
- * same AppState selection path used by result clicks and map picking.
+ * Selects one deterministic feature through the same AppState path used by
+ * result clicks and map picking. The inspection service performs the exact
+ * restricted feature fetch; no client-side complete-tile registry is involved.
  */
 export async function selectFeatureForInspection(
     page: Page,
@@ -314,7 +318,13 @@ export async function selectFeatureForInspection(
     await page.evaluate(async ({ mapId, layerId, tileId, featureId }) => {
         const debugApi = window.ebDebug as any;
         const mapTileKey = debugApi.mapTileKey(mapId, layerId, tileId);
-        await debugApi.ensureTileLoaded(mapTileKey);
+        const summary = await debugApi.featureInspectionHoverSummary(
+            mapTileKey,
+            featureId
+        );
+        if (summary?.error) {
+            throw new Error(String(summary.error));
+        }
         debugApi.stateService.setSelection([{ mapTileKey, featureId }]);
     }, { mapId, layerId, tileId: resolvedTileId, featureId });
 }

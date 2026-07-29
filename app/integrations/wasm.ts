@@ -64,17 +64,39 @@ export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T, inputData: 
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null;
 /** Copies a JS byte array into WASM memory, runs a callback, and cleans up the shared buffer. */
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null {
+    try {
+        return uint8ArrayToWasmOrThrow(fun, inputData) as T | null;
+    } catch (e) {
+        console.error(`Error while parsing UINT8 encoded data: ${e}`)
+        return null;
+    }
+}
+
+export function uint8ArrayToWasmOrThrow<T>(
+    fun: (d: SharedUint8Array) => T,
+    inputData: Uint8Array
+): T;
+export function uint8ArrayToWasmOrThrow<T>(
+    fun: (d: SharedUint8Array) => T | false,
+    inputData: Uint8Array
+): T | null;
+/**
+ * Strict byte-to-WASM boundary for callers which own an error channel.
+ * Native exceptions retain their concrete message instead of becoming a
+ * generic null parse result.
+ */
+export function uint8ArrayToWasmOrThrow<T>(
+    fun: (d: SharedUint8Array) => T | false,
+    inputData: Uint8Array
+): T | null {
     let sharedGlbArray: SharedUint8Array | null = null;
     try {
         const shared = new coreLib.SharedUint8Array(inputData.length);
         sharedGlbArray = shared;
-        let bufferPtr = Number(shared.getPointer());
+        const bufferPtr = Number(shared.getPointer());
         coreLib.HEAPU8.set(inputData, bufferPtr);
-        let result = fun(shared);
-        return (result === false) ? null : result;
-    } catch (e) {
-        console.error(`Error while parsing UINT8 encoded data: ${e}`)
-        return null;
+        const result = fun(shared);
+        return result === false ? null : result;
     } finally {
         sharedGlbArray?.delete();
     }

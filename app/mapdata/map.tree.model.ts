@@ -32,9 +32,6 @@ export interface LayerInfoItem extends Record<string, any> {
     coverage: Array<number | CoverageRectItem>;
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
-    stages?: number;
-    stageLabels?: string[];
-    highFidelityStage?: number;
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
@@ -46,7 +43,8 @@ export interface MapInfoItem extends Record<string, any> {
     layers: Record<string, LayerInfoItem>;
     mapId: string;
     maxParallelJobs: number;
-    nodeId: string;
+    sourceId: string;
+    stringPoolId: string;
     protocolVersion?: { major: number, minor: number, patch: number };
     addOn: boolean;
     status?: DataSourceCatalogStatus | string;

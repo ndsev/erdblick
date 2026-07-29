@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <ranges>
 #include <regex>
 #include <set>
@@ -17,6 +19,21 @@ namespace erdblick
 {
 
 namespace {
+
+enum class RuleValidationContext {
+    TopLevel,
+    Branch,
+    RelationFeatureStyle,
+    RelationFeatureBranch
+};
+
+bool validateStyleRuleYamlImpl(
+    YAML::Node const& ruleYaml,
+    uint32_t sourceRuleIndex,
+    std::string const& rulePath,
+    std::string const& source,
+    StyleValidationReport& report,
+    RuleValidationContext context);
 
 uint64_t nowMillis()
 {
@@ -374,19 +391,328 @@ bool validateGeometry(YAML::Node const& ruleYaml, std::string const& rulePath, S
     return validateOne(node);
 }
 
+bool validateColorScale(
+    YAML::Node const& ruleYaml,
+    std::string const& rulePath,
+    std::string const& source,
+    StyleValidationReport& report,
+    uint32_t ruleIndex)
+{
+    auto scale = ruleYaml["color-scale"];
+    if (!scale.IsDefined()) {
+        return true;
+    }
+    auto fail = [&](std::string message, YAML::Node const& node) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            std::move(message),
+            locationForNode(node));
+        issue.ruleIndex = ruleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "color-scale";
+        return false;
+    };
+    if (!scale.IsMap()) {
+        return fail("color-scale must be a map.", scale);
+    }
+    if (!validateEnumValue(
+            scale,
+            "mode",
+            {"linear", "categorical"},
+            rulePath,
+            report,
+            ruleIndex) ||
+        !scale["mode"].IsDefined())
+    {
+        return false;
+    }
+    if (!validateExpression(
+            scale,
+            "expression",
+            false,
+            rulePath,
+            source,
+            report,
+            ruleIndex) ||
+        !scale["expression"].IsDefined() ||
+        scale["expression"].Scalar().empty())
+    {
+        return false;
+    }
+    auto stops = scale["stops"];
+    if (!stops.IsSequence() || stops.size() == 0) {
+        return fail("color-scale.stops must be a non-empty list of [value, color] pairs.", stops);
+    }
+
+    auto const mode = scale["mode"].Scalar();
+    std::optional<double> previousLinear;
+    std::set<std::string> categoricalKeys;
+    for (auto const& stop : stops) {
+        if (!stop.IsSequence() || stop.size() != 2 ||
+            !stop[0].IsScalar() || !stop[1].IsScalar())
+        {
+            return fail("Every color-scale stop must be a two-scalar [value, color] pair.", stop);
+        }
+        if (!Color(stop[1].Scalar()).isValid()) {
+            return fail("color-scale stop contains an invalid literal color.", stop[1]);
+        }
+        auto const key = stop[0].Scalar();
+        if (key == "null" || key == "~") {
+            return fail("Null is not a valid color-scale stop key; use fallback.", stop[0]);
+        }
+        if (mode == "linear") {
+            double value = 0.0;
+            try {
+                value = stop[0].as<double>();
+            }
+            catch (YAML::Exception const&) {
+                return fail("Linear color-scale stop values must be finite numbers.", stop[0]);
+            }
+            if (!std::isfinite(value) || (previousLinear && value <= *previousLinear)) {
+                return fail(
+                    "Linear color-scale stops must be finite and strictly increasing.",
+                    stop[0]);
+            }
+            previousLinear = value;
+        }
+        else {
+            std::string normalized;
+            auto const tag = stop[0].Tag();
+            auto const explicitlyString =
+                tag == "!" ||
+                tag.ends_with(":str");
+            if (explicitlyString) {
+                normalized = "s:" + key;
+            }
+            else if (key == "true" || key == "false") {
+                normalized = "b:" + key;
+            }
+            else {
+                char* end = nullptr;
+                auto number = std::strtod(key.c_str(), &end);
+                if (end == key.c_str() + key.size() && std::isfinite(number)) {
+                    std::ostringstream stream;
+                    stream.precision(17);
+                    stream << number;
+                    normalized = "n:" + stream.str();
+                }
+                else {
+                    normalized = "s:" + key;
+                }
+            }
+            if (!categoricalKeys.insert(std::move(normalized)).second) {
+                return fail("Categorical color-scale contains a duplicate typed stop key.", stop[0]);
+            }
+        }
+    }
+    if (scale["fallback"].IsDefined() &&
+        (!scale["fallback"].IsScalar() ||
+         !Color(scale["fallback"].Scalar()).isValid()))
+    {
+        return fail("color-scale.fallback must be a valid literal color.", scale["fallback"]);
+    }
+    return true;
+}
+
+bool validateWidthScale(
+    YAML::Node const& ruleYaml,
+    std::string const& rulePath,
+    std::string const& source,
+    StyleValidationReport& report,
+    uint32_t ruleIndex)
+{
+    auto scale = ruleYaml["width-scale"];
+    if (!scale.IsDefined()) {
+        return true;
+    }
+    auto fail = [&](std::string message, YAML::Node const& node) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            std::move(message),
+            locationForNode(node));
+        issue.ruleIndex = ruleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "width-scale";
+        return false;
+    };
+    if (!scale.IsMap()) {
+        return fail("width-scale must be a map.", scale);
+    }
+    if (!validateEnumValue(
+            scale,
+            "mode",
+            {"linear", "categorical"},
+            rulePath,
+            report,
+            ruleIndex) ||
+        !scale["mode"].IsDefined())
+    {
+        return false;
+    }
+    if (!validateExpression(
+            scale,
+            "expression",
+            false,
+            rulePath,
+            source,
+            report,
+            ruleIndex) ||
+        !scale["expression"].IsDefined() ||
+        scale["expression"].Scalar().empty())
+    {
+        return false;
+    }
+
+    auto stops = scale["stops"];
+    if (!stops.IsSequence() || stops.size() == 0) {
+        return fail(
+            "width-scale.stops must be a non-empty list of [value, width] pairs.",
+            stops);
+    }
+
+    auto const mode = scale["mode"].Scalar();
+    std::optional<double> previousLinear;
+    std::set<std::string> categoricalKeys;
+    for (auto const& stop : stops) {
+        if (!stop.IsSequence() || stop.size() != 2 ||
+            !stop[0].IsScalar() || !stop[1].IsScalar())
+        {
+            return fail(
+                "Every width-scale stop must be a two-scalar [value, width] pair.",
+                stop);
+        }
+
+        double width = 0.0;
+        try {
+            width = stop[1].as<double>();
+        }
+        catch (YAML::Exception const&) {
+            return fail(
+                "width-scale stop width must be a finite non-negative number.",
+                stop[1]);
+        }
+        if (!std::isfinite(width) || width < 0.0) {
+            return fail(
+                "width-scale stop width must be a finite non-negative number.",
+                stop[1]);
+        }
+
+        auto const key = stop[0].Scalar();
+        if (key == "null" || key == "~") {
+            return fail(
+                "Null is not a valid width-scale stop key; use fallback.",
+                stop[0]);
+        }
+        if (mode == "linear") {
+            double value = 0.0;
+            try {
+                value = stop[0].as<double>();
+            }
+            catch (YAML::Exception const&) {
+                return fail(
+                    "Linear width-scale stop values must be finite numbers.",
+                    stop[0]);
+            }
+            if (!std::isfinite(value) ||
+                (previousLinear && value <= *previousLinear))
+            {
+                return fail(
+                    "Linear width-scale stops must be finite and strictly increasing.",
+                    stop[0]);
+            }
+            previousLinear = value;
+        }
+        else {
+            std::string normalized;
+            auto const tag = stop[0].Tag();
+            auto const explicitlyString =
+                tag == "!" ||
+                tag.ends_with(":str");
+            if (explicitlyString) {
+                normalized = "s:" + key;
+            }
+            else if (key == "true" || key == "false") {
+                normalized = "b:" + key;
+            }
+            else {
+                char* end = nullptr;
+                auto number =
+                    std::strtod(key.c_str(), &end);
+                if (end == key.c_str() + key.size() &&
+                    std::isfinite(number))
+                {
+                    std::ostringstream stream;
+                    stream.precision(17);
+                    stream << number;
+                    normalized =
+                        "n:" + stream.str();
+                }
+                else {
+                    normalized = "s:" + key;
+                }
+            }
+            if (!categoricalKeys
+                    .insert(std::move(normalized))
+                    .second)
+            {
+                return fail(
+                    "Categorical width-scale contains a duplicate typed stop key.",
+                    stop[0]);
+            }
+        }
+    }
+
+    if (scale["fallback"].IsDefined()) {
+        if (!scale["fallback"].IsScalar()) {
+            return fail(
+                "width-scale.fallback must be a finite non-negative number.",
+                scale["fallback"]);
+        }
+        double fallback = 0.0;
+        try {
+            fallback =
+                scale["fallback"].as<double>();
+        }
+        catch (YAML::Exception const&) {
+            return fail(
+                "width-scale.fallback must be a finite non-negative number.",
+                scale["fallback"]);
+        }
+        if (!std::isfinite(fallback) ||
+            fallback < 0.0)
+        {
+            return fail(
+                "width-scale.fallback must be a finite non-negative number.",
+                scale["fallback"]);
+        }
+    }
+    return true;
+}
+
 bool validateNestedRule(
     YAML::Node const& parent,
     std::string const& property,
     uint32_t sourceRuleIndex,
     std::string const& rulePath,
     std::string const& source,
-    StyleValidationReport& report)
+    StyleValidationReport& report,
+    RuleValidationContext context)
 {
     auto node = parent[property];
     if (!node.IsDefined()) {
         return true;
     }
-    return validateStyleRuleYaml(node, sourceRuleIndex, rulePath + "." + property, source, report);
+    return validateStyleRuleYamlImpl(
+        node,
+        sourceRuleIndex,
+        rulePath + "." + property,
+        source,
+        report,
+        context);
 }
 
 bool validateBranchRules(
@@ -395,7 +721,8 @@ bool validateBranchRules(
     uint32_t sourceRuleIndex,
     std::string const& rulePath,
     std::string const& source,
-    StyleValidationReport& report)
+    StyleValidationReport& report,
+    RuleValidationContext childContext)
 {
     auto branch = parent[property];
     if (!branch.IsDefined()) {
@@ -418,7 +745,14 @@ bool validateBranchRules(
     uint32_t nestedIndex = 0;
     for (auto const& nested : branch) {
         auto nestedPath = rulePath + "." + property + "[" + std::to_string(nestedIndex++) + "]";
-        if (!validateStyleRuleYaml(nested, sourceRuleIndex, nestedPath, source, report)) {
+        if (!validateStyleRuleYamlImpl(
+                nested,
+                sourceRuleIndex,
+                nestedPath,
+                source,
+                report,
+                childContext))
+        {
             ok = false;
         }
     }
@@ -564,6 +898,50 @@ bool validateTopLevelStyleYaml(YAML::Node const& styleYaml, StyleValidationRepor
         return false;
     }
 
+    auto version = styleYaml["version"];
+    if (!version || !version.IsScalar()) {
+        report.addIssue(
+            "error",
+            "schema",
+            "stylesheet-failed",
+            "Style sheet must declare breaking schema version 2.",
+            version ? std::optional<StyleSourceLocation>(locationForNode(version)) : std::nullopt);
+        report.markStylesheetFailed();
+        return false;
+    }
+    try {
+        if (version.as<uint32_t>() != 2U) {
+            report.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Unsupported style sheet version; this build requires version 2.",
+                locationForNode(version));
+            report.markStylesheetFailed();
+            return false;
+        }
+    }
+    catch (YAML::Exception const&) {
+        report.addIssue(
+            "error",
+            "schema",
+            "stylesheet-failed",
+            "Style sheet version must be the integer 2.",
+            locationForNode(version));
+        report.markStylesheetFailed();
+        return false;
+    }
+    if (styleYaml["stage"].IsDefined()) {
+        report.addIssue(
+            "error",
+            "schema",
+            "stylesheet-failed",
+            "Top-level stage was removed in style schema version 2; select semantic geometry names in rules.",
+            locationForNode(styleYaml["stage"]));
+        report.markStylesheetFailed();
+        return false;
+    }
+
     auto name = styleYaml["name"];
     if (!name || !name.IsScalar() || name.Scalar().empty()) {
         report.addIssue(
@@ -641,12 +1019,15 @@ bool validateStyleOptionYaml(
     return true;
 }
 
-bool validateStyleRuleYaml(
+namespace {
+
+bool validateStyleRuleYamlImpl(
     YAML::Node const& ruleYaml,
     uint32_t sourceRuleIndex,
     std::string const& rulePath,
     std::string const& source,
-    StyleValidationReport& report)
+    StyleValidationReport& report,
+    RuleValidationContext context)
 {
     if (!ruleYaml.IsMap()) {
         auto& issue = report.addIssue("error", "schema", "rule-skipped", "Style rule must be a YAML map.", locationForNode(ruleYaml));
@@ -657,37 +1038,78 @@ bool validateStyleRuleYaml(
 
     bool ok = true;
     auto markInvalid = [&ok](bool value) { ok = value && ok; };
+    auto rejectRemoved = [&](std::string const& property, std::string message) {
+        auto node = ruleYaml[property];
+        if (!node.IsDefined()) {
+            return;
+        }
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            std::move(message),
+            locationForNode(node));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = property;
+        ok = false;
+    };
 
     markInvalid(validateGeometry(ruleYaml, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "aspect", {"feature", "relation", "attribute"}, rulePath, report, sourceRuleIndex));
+    markInvalid(validateEnumValue(ruleYaml, "scope", {"feature", "relation", "attribute"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "attribute-validity-geom", {"any", "required", "none"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "offset-type", {"miter"}, rulePath, report, sourceRuleIndex));
 
-    if (ruleYaml["stage"].IsDefined()) {
-        int stage = 0;
-        if (readScalar(ruleYaml, "stage", rulePath, report, sourceRuleIndex, &stage) && stage < 0) {
-            auto& issue = report.addIssue("error", "schema", "rule-skipped", "stage must be non-negative.", locationForNode(ruleYaml["stage"]));
-            issue.ruleIndex = sourceRuleIndex;
-            issue.rulePath = rulePath;
-            issue.property = "stage";
-            ok = false;
-        } else if (!report.issues.empty() && report.issues.back().property == "stage" && report.issues.back().rulePath == rulePath) {
+    rejectRemoved(
+        "aspect",
+        "aspect was renamed to scope in style schema version 2.");
+    rejectRemoved(
+        "stage",
+        "stage was removed in style schema version 2; select semantic geometry names with geometry-name.");
+    rejectRemoved(
+        "lod",
+        "lod was removed in style schema version 2; use an explicit feature attribute filter such as FRC/PRC instead.");
+
+    if (context != RuleValidationContext::TopLevel &&
+        ruleYaml["scope"].IsDefined())
+    {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            "scope is owned by the top-level style rule and must not be changed in a nested style tree.",
+            locationForNode(ruleYaml["scope"]));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "scope";
+        ok = false;
+    }
+
+    if (ruleYaml["geometry-name"].IsDefined()) {
+        std::string geometryName;
+        if (!readScalar(
+                ruleYaml,
+                "geometry-name",
+                rulePath,
+                report,
+                sourceRuleIndex,
+                &geometryName))
+        {
             ok = false;
         }
-    }
-    if (ruleYaml["lod"].IsDefined()) {
-        int lod = 0;
-        auto const maxLod = static_cast<int>(mapget::Feature::MAX_LOD);
-        if (readScalar(ruleYaml, "lod", rulePath, report, sourceRuleIndex, &lod) && (lod < 0 || lod > maxLod)) {
-            auto& issue = report.addIssue("error", "schema", "rule-skipped", "lod must be between 0 and " + std::to_string(maxLod) + ".", locationForNode(ruleYaml["lod"]));
+        else if (geometryName.empty()) {
+            auto& issue = report.addIssue(
+                "error",
+                "schema",
+                "rule-skipped",
+                "geometry-name must be a non-empty semantic name or '*'.",
+                locationForNode(ruleYaml["geometry-name"]));
             issue.ruleIndex = sourceRuleIndex;
             issue.rulePath = rulePath;
-            issue.property = "lod";
-            ok = false;
-        } else if (!report.issues.empty() && report.issues.back().property == "lod" && report.issues.back().rulePath == rulePath) {
+            issue.property = "geometry-name";
             ok = false;
         }
     }
@@ -723,6 +1145,25 @@ bool validateStyleRuleYaml(
     markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "label-text-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateColorScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateWidthScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
+
+    uint32_t colorModeCount = 0;
+    colorModeCount += ruleYaml["color"].IsDefined() ? 1U : 0U;
+    colorModeCount += ruleYaml["color-expression"].IsDefined() ? 1U : 0U;
+    colorModeCount += ruleYaml["color-scale"].IsDefined() ? 1U : 0U;
+    if (colorModeCount > 1) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            "color, color-expression, and color-scale are mutually exclusive.",
+            locationForNode(ruleYaml));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "color-scale";
+        ok = false;
+    }
 
     if (ruleYaml["first-of"].IsDefined() && ruleYaml["all-of"].IsDefined()) {
         auto& issue = report.addIssue(
@@ -735,16 +1176,100 @@ bool validateStyleRuleYaml(
         issue.rulePath = rulePath;
         issue.property = "all-of";
         ok = false;
-    } else {
-        markInvalid(validateBranchRules(ruleYaml, "first-of", sourceRuleIndex, rulePath, source, report));
-        markInvalid(validateBranchRules(ruleYaml, "all-of", sourceRuleIndex, rulePath, source, report));
+    }
+    else {
+        auto const relationScope =
+            context == RuleValidationContext::TopLevel &&
+            ruleYaml["scope"].IsDefined() &&
+            ruleYaml["scope"].IsScalar() &&
+            ruleYaml["scope"].Scalar() == "relation";
+        if (relationScope &&
+            (ruleYaml["first-of"].IsDefined() ||
+             ruleYaml["all-of"].IsDefined()))
+        {
+            auto const property = ruleYaml["first-of"].IsDefined()
+                ? "first-of"
+                : "all-of";
+            auto& issue = report.addIssue(
+                "error",
+                "schema",
+                "rule-skipped",
+                "A top-level relation-scope rule cannot contain first-of or all-of; use branches inside relation-source-style or relation-target-style.",
+                locationForNode(ruleYaml[property]));
+            issue.ruleIndex = sourceRuleIndex;
+            issue.rulePath = rulePath;
+            issue.property = property;
+            ok = false;
+        }
+        else {
+            auto const childContext =
+                context == RuleValidationContext::RelationFeatureStyle ||
+                context == RuleValidationContext::RelationFeatureBranch
+                    ? RuleValidationContext::RelationFeatureBranch
+                    : RuleValidationContext::Branch;
+            markInvalid(validateBranchRules(
+                ruleYaml,
+                "first-of",
+                sourceRuleIndex,
+                rulePath,
+                source,
+                report,
+                childContext));
+            markInvalid(validateBranchRules(
+                ruleYaml,
+                "all-of",
+                sourceRuleIndex,
+                rulePath,
+                source,
+                report,
+                childContext));
+        }
     }
 
-    markInvalid(validateNestedRule(ruleYaml, "relation-line-end-markers", sourceRuleIndex, rulePath, source, report));
-    markInvalid(validateNestedRule(ruleYaml, "relation-source-style", sourceRuleIndex, rulePath, source, report));
-    markInvalid(validateNestedRule(ruleYaml, "relation-target-style", sourceRuleIndex, rulePath, source, report));
+    markInvalid(validateNestedRule(
+        ruleYaml,
+        "relation-line-end-markers",
+        sourceRuleIndex,
+        rulePath,
+        source,
+        report,
+        RuleValidationContext::RelationFeatureStyle));
+    markInvalid(validateNestedRule(
+        ruleYaml,
+        "relation-source-style",
+        sourceRuleIndex,
+        rulePath,
+        source,
+        report,
+        RuleValidationContext::RelationFeatureStyle));
+    markInvalid(validateNestedRule(
+        ruleYaml,
+        "relation-target-style",
+        sourceRuleIndex,
+        rulePath,
+        source,
+        report,
+        RuleValidationContext::RelationFeatureStyle));
 
     return ok;
+}
+
+}
+
+bool validateStyleRuleYaml(
+    YAML::Node const& ruleYaml,
+    uint32_t sourceRuleIndex,
+    std::string const& rulePath,
+    std::string const& source,
+    StyleValidationReport& report)
+{
+    return validateStyleRuleYamlImpl(
+        ruleYaml,
+        sourceRuleIndex,
+        rulePath,
+        source,
+        report,
+        RuleValidationContext::TopLevel);
 }
 
 }

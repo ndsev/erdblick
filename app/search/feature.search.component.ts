@@ -1289,7 +1289,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return Math.max(0, Math.min(share, (percent / 100) * share));
     }
 
-    /** Updates the compact multi-stage progress display from the current session and tree state. */
+    /** Updates the compact multi-phase progress display from the current session and tree state. */
     private refreshProgressDisplay(session: FeatureSearchSession): void {
         this.percentDone = this.progressPercent(session.progressDone, session.progressTotal);
         this.totalTiles = session.progressTotal;

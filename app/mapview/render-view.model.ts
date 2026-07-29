@@ -38,44 +38,6 @@ export interface IRenderSceneHandle {
     readonly scene: unknown;
 }
 
-/** Minimal tile/layer data surface required by the shared visualization scheduler. */
-export interface RenderableTileLayer {
-    mapTileKey: string;
-    nodeId: string;
-    mapName: string;
-    layerName: string;
-    tileId: number;
-    dataVersion: number;
-    disposed: boolean;
-    stats: Map<string, number[]>;
-
-    setRenderOrder(order: number): void;
-    renderOrder(): number;
-    setVertexCount(count: number): void;
-}
-
-/**
- * Contract implemented by tile visualizations regardless of renderer backend.
- * Instances are long-lived and can be marked dirty multiple times as tiles or style options change.
- */
-export interface ITileVisualization {
-    readonly viewIndex: number;
-    readonly styleId: string;
-    readonly tile: RenderableTileLayer;
-    styleOrder: number;
-    highFidelityStage: number;
-    prefersHighFidelity: boolean;
-    maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
-    showTileBorder: boolean;
-
-    render(sceneHandle: IRenderSceneHandle): Promise<boolean>;
-    destroy(sceneHandle: IRenderSceneHandle): void;
-    isDirty(): boolean;
-    renderRank(): number;
-    updateStatus(renderQueued?: boolean): void;
-    setStyleOption(optionId: string, value: string | number | boolean): boolean;
-}
-
 /**
  * Minimal renderer abstraction used by the rest of the frontend.
  * Views expose picking, camera sync, and movement without leaking deck-specific details upward.

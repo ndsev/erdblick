@@ -19,6 +19,9 @@ import {KeyboardService} from "./shared/keyboard.service";
 import {AppConfigService} from "./shared/app-config.service";
 import {StyleService} from "./styledata/style.service";
 import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+import {
+    TileSubsetLayerRenderService
+} from "./mapview/deck/tile-subset-layer-render.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -82,6 +85,7 @@ export class AppComponent implements OnDestroy {
                 private httpClient: HttpClient,
                 private mapInfo: MapInfoService,
                 private tileStream: MapTileStreamService,
+                private subsetRenderer: TileSubsetLayerRenderService,
                 private styleService: StyleService,
                 private keyboardService: KeyboardService,
                 private viewContainerRef: ViewContainerRef,
@@ -96,9 +100,8 @@ export class AppComponent implements OnDestroy {
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
         window.ebDebug = new ErdblickDebugApi(
-            this.mapInfo,
             this.tileStream,
-            this.styleService,
+            this.subsetRenderer,
             this.stateService
         );
 

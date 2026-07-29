@@ -5,7 +5,6 @@
 #include "erdblick/rule.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
-#include "mapget/model/searchresultlayer.h"
 #include "mapget/model/point.h"
 #include "mapget/model/sourceinfo.h"
 #include "mapget/model/sourcedatareference.h"
@@ -13,9 +12,7 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <functional>
-#include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -44,18 +41,6 @@ std::shared_ptr<mapget::LayerInfo> relationTestLayerInfo()
                     {"partId": "areaId", "datatype": "STR"},
                     {"partId": "pointId", "datatype": "U32"}
                 ]]
-            },
-            {
-                "name": "SecondaryPointOfInterest",
-                "uniqueIdCompositions": [
-                    [
-                        {"partId": "areaId", "datatype": "STR"},
-                        {"partId": "poiRef", "datatype": "U32"}
-                    ],
-                    [
-                        {"partId": "poiRef", "datatype": "U32"}
-                    ]
-                ]
             }
         ]
     })json"));
@@ -79,9 +64,9 @@ std::shared_ptr<mapget::LayerInfo> lineTestLayerInfo()
 }
 
 /** Serializes a minimal datasource string-pool update for parser cache tests. */
-SharedUint8Array serializedStringPool(std::string const& nodeId, std::string const& dynamicEntry)
+SharedUint8Array serializedStringPool(std::string const& stringPoolId, std::string const& dynamicEntry)
 {
-    mapget::StringPool pool(nodeId);
+    mapget::StringPool pool(stringPoolId);
     pool.emplace(dynamicEntry);
     std::ostringstream stream;
     auto writeResult = pool.write(stream, 0);
@@ -419,31 +404,6 @@ nlohmann::json warningSignLayerInfoJson()
     };
 }
 
-/** Build a schema-backed render tile with one warning-sign enum attribute. */
-std::shared_ptr<mapget::TileFeatureLayer> makeWarningSignRenderTile(mapget::TileId tileId)
-{
-    auto layer = std::make_shared<mapget::TileFeatureLayer>(
-        tileId,
-        "WarningSignRenderNode",
-        "WarningSignRenderMap",
-        mapget::LayerInfo::fromJson(warningSignLayerInfoJson()),
-        std::make_shared<simfil::StringPool>());
-
-    auto const center = mapget::Point(tileId.centerWgs84());
-    auto feature = layer->newFeature("Road", {{"id", 1}});
-    feature->addLine({
-        {center.x - 0.0005, center.y, 0.0},
-        {center.x + 0.0005, center.y, 0.0},
-    });
-
-    auto attr = feature->attributeLayers()->newLayer("RoadRulesLayer")->newAttribute("WARNING_SIGN");
-    auto attrValue = layer->newObject();
-    REQUIRE(attrValue->addField("warningSign", "SPEED_LIMIT_END").has_value());
-    REQUIRE(attr->addField("attributeValue", attrValue).has_value());
-
-    return layer;
-}
-
 std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId)
 {
     auto layer = std::make_shared<mapget::TileFeatureLayer>(
@@ -459,68 +419,6 @@ std::shared_ptr<mapget::TileFeatureLayer> makeLineTestTile(mapget::TileId tileId
         {center.x - 0.0005, center.y, 0.0},
         {center.x + 0.0005, center.y, 0.0},
     });
-    return layer;
-}
-
-std::shared_ptr<mapget::TileFeatureLayer> makeRelationTestTile(
-    mapget::TileId tileId,
-    bool includeSource,
-    bool includeTarget)
-{
-    auto layer = std::make_shared<mapget::TileFeatureLayer>(
-        tileId,
-        "RelationTestNode",
-        "RelationTestMap",
-        relationTestLayerInfo(),
-        std::make_shared<mapget::StringPool>("RelationTestNode"));
-    layer->setIdPrefix({{"areaId", "Area"}});
-
-    auto const center = mapget::Point(tileId.centerWgs84());
-    if (includeSource) {
-        auto source = layer->newFeature("Diamond", {{"diamondId", 1}});
-        source->addLine({
-            {center.x - 0.0005, center.y, 0.0},
-            {center.x + 0.0005, center.y, 0.0},
-        });
-        source->addRelation("hasPoi", "PointOfInterest", {{"areaId", "Area"}, {"pointId", 200}});
-    }
-    if (includeTarget) {
-        auto target = layer->newFeature("PointOfInterest", {{"pointId", 200}});
-        target->addPoint({center.x, center.y + 0.0005, 0.0});
-    }
-    return layer;
-}
-
-FeatureLayerStyle relationTestStyle()
-{
-    return FeatureLayerStyle(SharedUint8Array(R"yaml(
-name: "RelationTestStyle"
-rules:
-  - type: "Diamond"
-    aspect: relation
-    relation-type: "hasPoi"
-    color: "#ff5500"
-    width: 4
-)yaml"));
-}
-
-std::shared_ptr<mapget::TileFeatureLayer> makeSecondaryReferenceSourceTile(mapget::TileId tileId)
-{
-    auto layer = std::make_shared<mapget::TileFeatureLayer>(
-        tileId,
-        "RelationTestNode",
-        "RelationTestMap",
-        relationTestLayerInfo(),
-        std::make_shared<mapget::StringPool>("RelationTestNode"));
-    layer->setIdPrefix({{"areaId", "Area"}});
-
-    auto const center = mapget::Point(tileId.centerWgs84());
-    auto source = layer->newFeature("Diamond", {{"diamondId", 1}});
-    source->addLine({
-        {center.x - 0.0005, center.y, 0.0},
-        {center.x + 0.0005, center.y, 0.0},
-    });
-    source->addRelation("hasPoi", "SecondaryPointOfInterest", {{"poiRef", 77}});
     return layer;
 }
 
@@ -742,16 +640,6 @@ void collectInspectionGeoJsonPaths(nlohmann::json const& node, std::vector<std::
     }
 }
 
-bool hasRenderedPathGeometry(nlohmann::json const& renderResult)
-{
-    auto const& pathWorld = renderResult["pathWorld"]["positions"];
-    if (pathWorld.is_array() && !pathWorld.empty()) {
-        return true;
-    }
-    auto const& pathBillboard = renderResult["pathBillboard"]["positions"];
-    return pathBillboard.is_array() && !pathBillboard.empty();
-}
-
 bool reportHasProperty(nlohmann::json const& report, std::string const& property)
 {
     if (!report.contains("issues") || !report["issues"].is_array()) {
@@ -768,7 +656,6 @@ bool reportHasProperty(nlohmann::json const& report, std::string const& property
 BoundEvalFun booleanEvalFun(std::map<std::string, bool> values)
 {
     return BoundEvalFun{
-        simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::null()),
         [values = std::move(values)](std::string const& expression) {
             auto key = expression;
             if (key.starts_with("any(") && key.ends_with(")")) {
@@ -782,21 +669,12 @@ BoundEvalFun booleanEvalFun(std::map<std::string, bool> values)
 }
 }
 
-TEST_CASE("DeckFeatureLayerVisualization", "[erdblick.renderer]")
-{
-    auto style = TestDataProvider::style();
-    DeckFeatureLayerVisualization visualization(0, "Features:Test:Test:0", style, {}, {});
-    REQUIRE(visualization.abiVersion() == 1);
-}
-
 TEST_CASE("FeatureInspection", "[erdblick.inspection]")
 {
     TileLayerParser tlp;
     auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     for (auto const& f : *testLayer) {
         auto inspection = InspectionConverter().convert(f);
-        std::cout << inspection.value_.dump(4) << std::endl;
-
         REQUIRE(inspection.size() > 0);
         REQUIRE(inspection.at(0)["key"].as<std::string>() == "Identifiers");
 
@@ -1408,7 +1286,7 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
-        {"nodeId", "SearchScopeNode"},
+        {"stringPoolId", "SearchScopeNode"},
         {"mapId", "SearchScopeMap"},
         {"layers", {
             {"Lane", speedLimitLayerInfoJson("Lane", "Lane", "LaneRulesLayer")},
@@ -1462,7 +1340,7 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
 TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
-        {"nodeId", "ClassicScopeNode"},
+        {"stringPoolId", "ClassicScopeNode"},
         {"mapId", "ClassicScopeMap"},
         {"layers", {
             {"NDS.Classic-Routing", classicSpeedLimitLayerInfoJson()}
@@ -1508,7 +1386,7 @@ TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields",
 TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
-        {"nodeId", "WarningSignScopeNode"},
+        {"stringPoolId", "WarningSignScopeNode"},
         {"mapId", "WarningSignScopeMap"},
         {"layers", {
             {"Road", warningSignLayerInfoJson()}
@@ -1552,7 +1430,7 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
 TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
-        {"nodeId", "WarningSignCompletionNode"},
+        {"stringPoolId", "WarningSignCompletionNode"},
         {"mapId", "WarningSignCompletionMap"},
         {"layers", {
             {"Road", warningSignLayerInfoJson()}
@@ -1597,24 +1475,20 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
 }
 
-TEST_CASE("FeatureStyleRuleLodFilterParsing", "[erdblick.style]")
+TEST_CASE("FeatureLayerStyle rejects removed LOD fields", "[erdblick.style]")
 {
-    auto yamlWithLod = YAML::Load(R"(
-type: Road
-geometry: [line]
-lod: 3
-)");
-    FeatureStyleRule ruleWithLod(yamlWithLod, 0);
-    REQUIRE(ruleWithLod.lod().has_value());
-    REQUIRE(*ruleWithLod.lod() == 3);
-
-    auto yamlWithInvalidLod = YAML::Load(R"(
-type: Road
-geometry: [line]
-lod: 42
-)");
-    FeatureStyleRule ruleWithInvalidLod(yamlWithInvalidLod, 0);
-    REQUIRE_FALSE(ruleWithInvalidLod.lod().has_value());
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: RemovedLod
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    lod: 3
+)yaml"));
+    REQUIRE_FALSE(style.isValid());
+    REQUIRE(reportHasProperty(
+        nlohmann::json(style.validationReport()),
+        "lod"));
 }
 
 TEST_CASE("FeatureStyleRuleOffsetIncrementParsing", "[erdblick.style]")
@@ -1687,10 +1561,13 @@ all-of:
     dashed: true
 )");
     FeatureStyleRule rule(yaml, 0);
+    FeatureStyleRule::MatchContext context{
+        .featureType = feature->typeId(),
+    };
 
     std::vector<FeatureStyleRule const*> matches;
     auto evalFun = booleanEvalFun({{"A", true}, {"B", false}});
-    REQUIRE(rule.forEachMatchingRule(*feature, evalFun, [&](auto const& matchingRule) {
+    REQUIRE(rule.forEachMatchingRule(context, evalFun, [&](auto const& matchingRule) {
         matches.push_back(&matchingRule);
     }));
     REQUIRE(matches.size() == 1);
@@ -1698,7 +1575,7 @@ all-of:
 
     matches.clear();
     evalFun = booleanEvalFun({{"A", true}, {"B", true}});
-    REQUIRE(rule.forEachMatchingRule(*feature, evalFun, [&](auto const& matchingRule) {
+    REQUIRE(rule.forEachMatchingRule(context, evalFun, [&](auto const& matchingRule) {
         matches.push_back(&matchingRule);
     }));
     REQUIRE(matches.size() == 2);
@@ -1723,9 +1600,12 @@ first-of:
     width: 3
 )");
     FeatureStyleRule rule(yaml, 0);
+    FeatureStyleRule::MatchContext context{
+        .featureType = feature->typeId(),
+    };
     std::vector<float> widths;
     auto evalFun = booleanEvalFun({{"A", true}, {"B", true}});
-    REQUIRE(rule.forEachMatchingRule(*feature, evalFun, [&](auto const& matchingRule) {
+    REQUIRE(rule.forEachMatchingRule(context, evalFun, [&](auto const& matchingRule) {
         widths.push_back(matchingRule.width());
     }));
     auto const expectedWidths = std::vector<float>{1.0f, 2.0f};
@@ -1745,6 +1625,7 @@ TEST_CASE("FeatureLayerStyleValidatesAllOfAndOffsetAliases", "[erdblick.style]")
 {
     auto valid = FeatureLayerStyle(SharedUint8Array(R"yaml(
 name: "AllOfValidation"
+version: 2
 rules:
   - type: Way
     geometry: [line]
@@ -1757,6 +1638,7 @@ rules:
 
     auto badAllOf = FeatureLayerStyle(SharedUint8Array(R"yaml(
 name: "BadAllOf"
+version: 2
 rules:
   - type: Way
     all-of: {}
@@ -1766,6 +1648,7 @@ rules:
 
     auto mixedBranches = FeatureLayerStyle(SharedUint8Array(R"yaml(
 name: "MixedBranches"
+version: 2
 rules:
   - type: Way
     first-of:
@@ -1778,6 +1661,7 @@ rules:
 
     auto badOffsetType = FeatureLayerStyle(SharedUint8Array(R"yaml(
 name: "BadOffsetType"
+version: 2
 rules:
   - type: Way
     geometry: [line]
@@ -1788,6 +1672,7 @@ rules:
 
     auto badLateralOffset = FeatureLayerStyle(SharedUint8Array(R"yaml(
 name: "BadLateralOffset"
+version: 2
 rules:
   - type: Way
     geometry: [line]
@@ -1801,6 +1686,7 @@ TEST_CASE("FeatureLayerStyleSkipsUnsafeOptionIdentifiers", "[erdblick.style]")
 {
     auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
 name: "OptionIdentifierValidation"
+version: 2
 options:
   - label: Valid
     id: showValid
@@ -1825,304 +1711,4 @@ rules:
     auto report = nlohmann::json(style.validationReport());
     REQUIRE(reportHasProperty(report, "id"));
     REQUIRE(report["issues"].size() == 2);
-}
-
-TEST_CASE("DeckFeatureLayerVisualization renders all-of line leaves", "[erdblick.renderer]")
-{
-    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
-name: "AllOfRender"
-rules:
-  - type: Way
-    geometry: [line]
-    all-of:
-      - color: red
-        lateral-offset: 1
-      - color: blue
-        dashed: true
-        dash-length: 7
-        lateral-offset: -1
-        selectable: false
-)yaml"));
-    REQUIRE(style.isValid());
-
-    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
-    DeckFeatureLayerVisualization visualization(0, "LineTestMap/LineLayer/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
-    visualization.run();
-
-    auto result = nlohmann::json(visualization.renderResult());
-    auto const& pathWorld = result["pathWorld"];
-    REQUIRE(pathWorld["startIndices"].size() == 3);
-    REQUIRE(pathWorld["featureAddresses"].size() == 2);
-    REQUIRE(pathWorld["dashArrays"].size() == 8);
-    REQUIRE(pathWorld["dashArrays"][0].get<float>() == 1.0f);
-    REQUIRE(pathWorld["dashArrays"][4].get<float>() == 7.0f);
-}
-
-TEST_CASE("DeckTileSearchResultLayerVisualization does not connect point-cloud validity hits", "[erdblick.renderer]")
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchResultNode");
-    auto layer = std::make_shared<mapget::TileSearchResultLayer>(
-        mapget::TileId::fromWgs84(42.0, 11.0, 13),
-        strings->nodeId_,
-        "LineTestMap",
-        lineTestLayerInfo(),
-        strings);
-
-    auto const center = mapget::Point(layer->tileId().centerWgs84());
-    auto geometry = layer->newGeometryCollection();
-    auto line = geometry->newGeometry(mapget::GeomType::Line);
-    for (auto pointIndex = 0; pointIndex < 10; ++pointIndex) {
-        line->append({
-            center.x + (pointIndex % 2 == 0 ? -0.04 : 0.04),
-            center.y + static_cast<double>(pointIndex) * 0.0004,
-            0.0});
-    }
-
-    auto featureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
-    std::vector<simfil::ModelNode::Ptr> values;
-    layer->newSearchResult(featureId, geometry, values, 0U, 0U, 10U);
-
-    DeckTileSearchResultLayerVisualization visualization(0, "LineTestMap/LineLayer/0", R"json({
-        "rules": [{
-            "geometry": "any",
-            "color": {"mode": "solid", "color": "#ea4336"}
-        }]
-    })json");
-    visualization.addTileSearchResultLayer(TileSearchResultLayer(layer));
-    visualization.run();
-
-    auto result = nlohmann::json(visualization.renderResult());
-    REQUIRE(result["pathWorld"]["positions"].empty());
-    REQUIRE(result["pointWorld"]["positions"].size() == 30);
-}
-
-TEST_CASE("DeckTileSearchResultLayerVisualization renders every matching style rule", "[erdblick.renderer]")
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchResultMultiRuleNode");
-    auto layer = std::make_shared<mapget::TileSearchResultLayer>(
-        mapget::TileId::fromWgs84(42.0, 11.0, 13),
-        strings->nodeId_,
-        "LineTestMap",
-        lineTestLayerInfo(),
-        strings);
-    layer->setResultFields({"name"});
-
-    auto const center = mapget::Point(layer->tileId().centerWgs84());
-    auto geometry = layer->newGeometryCollection();
-    auto line = geometry->newGeometry(mapget::GeomType::Line);
-    line->append({center.x, center.y, 0.0});
-    line->append({center.x + 0.01, center.y + 0.01, 0.0});
-
-    auto featureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
-    layer->newSearchResult(
-        featureId,
-        geometry,
-        std::vector<simfil::ModelNode::Ptr>{layer->newValue("Main Street")});
-
-    DeckTileSearchResultLayerVisualization visualization(0, "LineTestMap/LineLayer/0", R"json({
-        "rules": [
-            {
-                "geometry": "line",
-                "width": 3,
-                "color": {"mode": "solid", "color": "#ff0000"}
-            },
-            {
-                "geometry": "line",
-                "width": 5,
-                "color": {"mode": "solid", "color": "#0000ff"}
-            },
-            {
-                "geometry": "label",
-                "width": 14,
-                "labelExpression": "name",
-                "color": {"mode": "solid", "color": "#ffffff"}
-            }
-        ]
-    })json");
-    visualization.addTileSearchResultLayer(TileSearchResultLayer(layer));
-    visualization.run();
-
-    auto result = nlohmann::json(visualization.renderResult());
-    REQUIRE(result["pathWorld"]["startIndices"].size() == 3);
-    REQUIRE(result["pathWorld"]["featureAddresses"].size() == 2);
-    REQUIRE(result["pathWorld"]["positions"].size() == 12);
-    REQUIRE(result["labelBillboard"].size() == 1);
-    REQUIRE(result["labelBillboard"][0]["text"] == "Main Street");
-}
-
-TEST_CASE("TileSearchResultLayer value summaries aggregate fields and typed traces", "[erdblick.search]")
-{
-    auto strings = std::make_shared<mapget::StringPool>("SearchSummaryNode");
-    auto layer = std::make_shared<mapget::TileSearchResultLayer>(
-        mapget::TileId::fromWgs84(42.0, 11.0, 13),
-        strings->nodeId_,
-        "LineTestMap",
-        lineTestLayerInfo(),
-        strings);
-    layer->setResultFields({"speed", "category", "shape"});
-
-    auto geometry = layer->newGeometryCollection();
-    geometry->newGeometry(mapget::GeomType::Points)->append(mapget::Point(layer->tileId().centerWgs84()));
-    auto firstFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(1)}});
-    auto secondFeatureId = layer->newFeatureId("Way", {{"wayId", int64_t(2)}});
-    auto listValue = layer->newArray(1, true);
-    listValue->append(layer->newValue(int64_t(1)));
-    layer->newSearchResult(
-        firstFeatureId,
-        geometry,
-        std::vector<simfil::ModelNode::Ptr>{
-            layer->newValue(int64_t(50)),
-            layer->newValue("primary"),
-            layer->materializeValue(simfil::Value{
-                simfil::ValueType::Object,
-                simfil::model_ptr<simfil::ModelNode>(firstFeatureId)}),
-        });
-    layer->newSearchResult(
-        secondFeatureId,
-        geometry,
-        std::vector<simfil::ModelNode::Ptr>{
-            layer->newValue(int64_t(80)),
-            layer->newValue("secondary"),
-            layer->materializeValue(simfil::Value{
-                simfil::ValueType::Array,
-                simfil::model_ptr<simfil::ModelNode>(listValue)}),
-        });
-
-    simfil::Trace trace;
-    trace.calls = 3;
-    trace.totalus = std::chrono::microseconds{12};
-    trace.values.push_back(simfil::Value::make(int64_t(80)));
-    trace.values.push_back(simfil::Value::make(std::string("secondary")));
-    trace.values.push_back(simfil::Value::make(simfil::ByteArray{"AB"}));
-    layer->setTraces({{"debug", std::move(trace)}});
-
-    auto summary = nlohmann::json(TileSearchResultLayer(layer).valueSummaries(4, 16));
-    REQUIRE(summary["resultFields"].size() == 3);
-    REQUIRE(summary["resultFields"][0]["summary"]["numeric"]["min"].get<double>() == 50.0);
-    REQUIRE(summary["resultFields"][0]["summary"]["numeric"]["max"].get<double>() == 80.0);
-    REQUIRE(summary["resultFields"][0]["summary"]["numeric"]["average"].get<double>() == 65.0);
-    REQUIRE(summary["resultFields"][1]["summary"]["histogram"].size() == 2);
-    REQUIRE(summary["resultFields"][2]["summary"]["kinds"]["object"].get<double>() == 1.0);
-    REQUIRE(summary["resultFields"][2]["summary"]["kinds"]["list"].get<double>() == 1.0);
-    REQUIRE(summary["traces"][0]["name"] == "debug");
-    REQUIRE(summary["traces"][0]["calls"].get<double>() == 3.0);
-    REQUIRE(summary["traces"][0]["summary"]["kinds"]["blob"].get<double>() == 1.0);
-}
-
-TEST_CASE("DeckFeatureLayerVisualization renders intra-tile relations", "[erdblick.renderer]")
-{
-    auto style = relationTestStyle();
-    auto tile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13), true, true);
-
-    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
-    visualization.run();
-
-    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
-}
-
-TEST_CASE("DeckFeatureLayerVisualization rewrites style enum symbols through layer schema", "[erdblick.renderer]")
-{
-    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
-name: "WarningSignEnumStyle"
-rules:
-  - type: Road
-    geometry: [line]
-    filter: properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END
-    color-expression: "(properties.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign == SPEED_LIMIT_END) and '#ff0000' or '#0000ff'"
-    width: 4
-)yaml"));
-    REQUIRE(style.isValid());
-
-    auto tile = makeWarningSignRenderTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
-    DeckFeatureLayerVisualization visualization(0, "WarningSignRenderMap/Road/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
-    visualization.run();
-
-    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
-    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
-}
-
-TEST_CASE("DeckFeatureLayerVisualization evaluates relation branches in relation context", "[erdblick.renderer]")
-{
-    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
-name: "RelationContextStyle"
-rules:
-  - type: "Diamond"
-    aspect: relation
-    first-of:
-      - relation-type: "doesNotMatch"
-        color: "#ff0000"
-        width: 4
-      - relation-type: "hasPoi"
-        filter: $target.typeId == "PointOfInterest"
-        color-expression: "($target.typeId == 'PointOfInterest') and '#00ff00' or '#ff0000'"
-        width: 4
-)yaml"));
-    REQUIRE(style.isValid());
-
-    auto tile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13), true, true);
-    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(tile));
-    visualization.run();
-
-    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
-    REQUIRE(nlohmann::json(visualization.runtimeStyleIssues()).empty());
-}
-
-TEST_CASE("DeckFeatureLayerVisualization resolves relation targets from added auxiliary tiles", "[erdblick.renderer]")
-{
-    auto style = relationTestStyle();
-    auto sourceTileId = mapget::TileId::fromWgs84(42.0, 11.0, 13);
-    auto sourceTile = makeRelationTestTile(sourceTileId, true, false);
-    auto auxiliaryTile = makeRelationTestTile(sourceTileId.neighbour(1, 0), false, true);
-
-    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(sourceTile));
-    visualization.addTileFeatureLayer(TileFeatureLayer(auxiliaryTile));
-    visualization.run();
-
-    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
-}
-
-TEST_CASE("DeckFeatureLayerVisualization exposes unresolved external relation references", "[erdblick.renderer]")
-{
-    auto style = relationTestStyle();
-    auto sourceTile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13), true, false);
-
-    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(sourceTile));
-    visualization.run();
-
-    auto unresolvedReferences =
-        nlohmann::json(visualization.externalRelationReferences());
-    REQUIRE(unresolvedReferences.is_array());
-    REQUIRE(unresolvedReferences.size() == 1);
-    REQUIRE(unresolvedReferences[0]["mapId"].get<std::string>() == "RelationTestMap");
-    REQUIRE(unresolvedReferences[0]["typeId"].get<std::string>() == "PointOfInterest");
-}
-
-TEST_CASE("DeckFeatureLayerVisualization resolves external relations with canonical locate ids", "[erdblick.renderer]")
-{
-    auto style = relationTestStyle();
-    auto sourceTile = makeSecondaryReferenceSourceTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));
-    auto targetTile = makeRelationTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13).neighbour(1, 0), false, true);
-
-    DeckFeatureLayerVisualization visualization(0, "RelationTestMap/RelationLayer/0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(sourceTile));
-    visualization.run();
-
-    visualization.addTileFeatureLayer(TileFeatureLayer(targetTile));
-    visualization.processResolvedExternalReferences(nlohmann::json::array({
-        nlohmann::json::array({
-            {
-                {"tileId", "RelationTestMap/RelationLayer/1"},
-                {"typeId", "PointOfInterest"},
-                {"featureId", nlohmann::json::array({"areaId", "Area", "pointId", 200})}
-            }
-        })
-    }));
-
-    REQUIRE(hasRenderedPathGeometry(nlohmann::json(visualization.renderResult())));
 }

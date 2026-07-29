@@ -1,440 +1,386 @@
-# Style System Guide
+# Erdblick Style System
 
-Erdblick visualizes every feature through YAML-defined style sheets. This guide explains how to manage styles in the UI, how the YAML schema works, and which rule fields are available for advanced styling.
+Erdblick stylesheets are YAML presentation programs. Schema version 2 is
+planned into mapget `/filter` channels and rendered from immutable
+`TileSubsetLayer` values.
 
-![erdblick UI](screenshots/style-controls.png)
-
-## Managing Styles in the UI
-
-Most day-to-day style work happens directly inside the Styles dialog, where you can toggle, edit, and reset style sheets without touching files on disk:
-
-1. **Open the Styles dialog** via **Edit -> Styles Configurator** in the main bar.
-2. **Activate/deactivate style sheets** to control which rules run.
-3. **Use the style editor** (pencil icon) for live editing:
-   - Syntax-highlighting with validation messages for YAML errors.
-   - Auto-complete based on the current schema.
-   - Import/Export buttons to move styles in and out of the browser’s `localStorage`.
-4. **Reset browser-stored versions** via the Preferences dialog: use the “Clear” buttons for imported styles and modified built-in styles if the UI behaves unexpectedly.
-
-Built-in styles that were edited locally show a **Modified** tag. Click it to open the **compare dialog** against the shipped version. Styles supplied through `additionalStyles` show an **Additional** tag. If an additional style overrides a base style with the same YAML `name:`, clicking **Additional** opens a read-only comparison against the base style.
-
-In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options.
-That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
-
-## YAML Styles and Search Result Styles
-
-YAML style sheets are persistent project-wide styling rules. They are loaded from the erdblick bundle, deployment configuration, additional style locations, or browser-imported YAML.
-
-Search result styles are configured inside a feature-search panel. They apply only to that search session's result layer and are stored with the search state. Use them when you want to quickly color, label, or filter the current result set without changing the shared project style sheets. The MapViewer [Search and Jump](../../../docs/mv-search.md#visualization) guide describes the Search panel controls.
-
-Both systems use the same rendering primitives and Simfil expression model. Datasource schemas improve both workflows by providing field completion, enum values, numeric ranges, and better picker defaults, but styles must still tolerate layers that do not publish schema metadata.
-
-## Style Sheet Anatomy
-
-At the top level, a style sheet is usually split into two sections: a list of rendering `rules` and an optional set of `options` that expose toggles in the UI for each layer the style sheet applies to:
+## Document shape
 
 ```yaml
-name: Subgroup/DefaultStyle
-layer: Road|Lane
-default: true
-rules:
-  - type: LaneGroup
-    geometry: [line]
-    color: "#00B5FF"
-    width: 6
+name: Roads
+version: 2
+
 options:
-  - id: show_lane_labels
-    label: "Show lane labels"
-    type: bool
+  - id: showRoads
+    label: Show roads
+    type: boolean
     default: true
-```
 
-- `name` – Mandatory. Free to set. May contain slash-separated grouping.
-- `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
-- `default` – Optional boolean that controls whether the style sheet starts enabled.
-- `stage` – Optional minimum loaded tile stage required before the style sheet can render.
-- `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
-- `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
-
-## Stages, Fidelity, and LOD
-
-Tile stages, render fidelity, and feature LOD are related, but they answer different questions:
-
-- **Tile stage** describes which payload slice of a tile has arrived from the backend. A layer can publish one or more numbered stages (`0`, `1`, `2`, ...). Stage labels are display text; rendering decisions use the numeric stage and the layer metadata.
-- **Render fidelity** is erdblick's current rendering mode for a tile in a view. The frontend chooses `low` or `high` from the visible tile count at the current camera distance, using the tile-count threshold configurable in Preferences. Style sheets can react to that choice with rule-level `fidelity`.
-- **Feature LOD** is a per-feature value supplied by the backend (`0..7`). In low-fidelity rendering erdblick can cull features above the active LOD cap. Rules can also match an exact feature LOD with `lod`.
-
-Layer metadata defines the high-fidelity threshold:
-
-- `LayerInfo.stages` gives the number of staged payloads the layer can provide.
-- `LayerInfo.stageLabels` provides UI labels for those stages.
-- `LayerInfo.highFidelityStage` defines the first stage that belongs to high-fidelity rendering.
-
-For geometry selection, erdblick uses this threshold as follows:
-
-- `fidelity: high` rules can render geometry from `highFidelityStage` and later stages.
-- `fidelity: low` rules can render geometry before `highFidelityStage`; if `highFidelityStage` is `0`, stage `0` is also available as the low-fidelity fallback stage.
-- `fidelity: any` rules are eligible in both render modes.
-
-The two YAML fields named `stage` have different scopes:
-
-- Top-level `stage` is a style-sheet readiness gate. A style with `stage: 1` waits until the tile has loaded at least stage `1` before rendering any of its rules. If a dataset exposes fewer stages than the style requests, erdblick treats the style as ready once the tile is complete for that layer.
-- Rule-level `stage` is an exact geometry-stage filter. A rule with `stage: 1` only applies to geometry whose own stage is `1`.
-
-`stage` and `lod` are independent. Stage controls which backend payload slice provides the geometry. LOD controls which features are kept or matched inside that payload. A common pattern is to use `first-of` with exact `lod` matches to draw coarse features differently from fine ones:
-
-```yaml
 rules:
   - type: Road
-    geometry: [line]
-    first-of:
-      - lod: 0
-        width: 2
-      - lod: 4
-        width: 5
-      - width: 8
+    filter: "showRoads and properties.frc <= 4"
+    geometry: line
+    geometry-name: centerline
+    color: "#4f81bd"
+    width: 2
 ```
 
-## Rule Field Reference
+`version: 2` is required. The removed `aspect`, `stage`, and `lod` fields are
+validation errors. Use `scope`, semantic `geometry-name`, and explicit
+attribute filters.
 
-### Matching and Interaction
+Options become typed SIMFIL bindings. They can participate in filters and
+presentation expressions without rewriting the stylesheet.
 
-| Field | Description |
-| --- | --- |
-| `type` | Regex that matches the feature type ID (e.g., `LaneGroup`). |
-| `filter` | Simfil expression that runs against the current feature/relation/attribute. |
-| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, `mesh`, `aabb`, or `gltf` primitives. |
-| `aspect` | `feature` (default), `relation`, or `attribute`. Controls how the rule interprets the current entity. |
-| `mode` | `none`, `hover`, or `selection`. Use separate rules for hover/selection-specific rendering. |
-| `fidelity` | `low`, `high`, or `any` (default). Controls whether the rule participates in low-fidelity rendering, high-fidelity rendering, or both. |
-| `stage` | Optional exact geometry-stage match. This is separate from the top-level style-sheet `stage` readiness gate. |
-| `lod` | Optional exact feature LOD match (`0..7`). Useful inside `first-of` chains to style coarse and fine features differently. |
-| `selectable` | `true`/`false` flag that decides whether the feature can be selected or will be skipped when the user clicks it. |
-| `first-of` | Array of child rules; erdblick evaluates them top-to-bottom and applies only the first match. Remaining child rules are skipped. |
-| `all-of` | Array of child rules; erdblick evaluates every matching child and renders all matching leaves. `first-of` and `all-of` can be nested, but not used on the same rule node. |
+## One top-level rule, one channel
 
-### Core Visual Properties
+Each applicable top-level rule becomes exactly one ordered `/filter` channel.
+Channels are not combined for compression. The channel transports only the
+geometry and projected scalar expressions needed to evaluate that rule tree.
 
-| Field | Description |
-| --- | --- |
-| `color` / `color-expression` | Solid color or Simfil expression for meshes/lines/polygons. Accepts CSS colors or RGBA arrays. |
-| `opacity` | Convenience alpha override for `color`. |
-| `width` | Width in pixels (lines/points) or meters (meshes). |
-| `billboard` | Optional `true`/`false` override for camera-facing rendering. When omitted, erdblick keeps the primitive-specific default (for example paths stay world-oriented, while labels/icons stay billboarded). |
-| `flat` | Clamp geometry to ground, ignoring heights. |
-| `outline-color`, `outline-width` | Outline rendering for meshes and lines. |
-| `depth-test` | Whether the rendered geometry participates in depth testing. Set `false` for overlay-style highlights that should render on top. |
-| `offset` / `vertical-offset` / `lateral-offset` | Base local `[x, y, z]` offset in meters, or scalar aliases for `z` and local `x`. For line geometry, local `x` is the lateral side-of-line offset. |
-| `offset-type` | Optional offset algorithm name. Only `miter` is supported, and it is the default line-offset behavior. |
-| `offset-increment` | Additional local `[x, y, z]` offset step used for stacked rendering. Effective offset is `offset + offset-increment * slot`, where the slot increments per emitted feature for `aspect: feature` rules and per rendered attribute/transition slot for `aspect: attribute` rules. |
-| `icon-url` / `icon-url-expression` | Static path or Simfil expression for billboard icons. |
-| `dashed`, `dash-length`, `gap-color`, `dash-pattern` | Controls for dashed lines. Set `dashed: true` and specify the remaining fields as needed. |
-| `arrow` / `arrow-expression` | `none`, `forward`, `backward`, or `double` arrowheads. Expressions can switch per feature. |
-| `point-merge-grid-cell` | `[x, y, z]` cell size for merging coincident POIs. When set, `$mergeCount` appears in the expression context. |
+The planner separates:
 
-## Rule Composition Examples
+- `featureFilter`: root-feature admission;
+- `entryFilter`: attribute/relation terminal admission;
+- `featureFields`: expressions evaluated on the feature;
+- `entryFields`: expressions evaluated on the terminal context.
 
-Use `all-of` when one matched feature should emit several visual leaves. This example draws a casing line and a narrower center line from the same rule:
+Mapget schema-compiles all four lists in their real contexts. Styles do not use
+search-query normalization.
+
+## Scopes
+
+`scope` belongs to the top-level rule:
+
+- `feature` (default);
+- `attribute`;
+- `relation`.
+
+Nested `first-of`/`all-of` rules may not change scope. A single channel never
+mixes feature and attribute terminal rows.
+
+A top-level relation rule may not contain `first-of` or `all-of`; its
+`relation-source-style` and `relation-target-style` are feature-style trees and
+may use branches.
+
+## Matching fields
+
+Common admission fields:
+
+| Field | Meaning |
+|---|---|
+| `type` | Feature type name or accepted type pattern. |
+| `filter` | SIMFIL feature-root filter. |
+| `mode` | Regular, `hover`, or `selection` pass. |
+| `fidelity` | `low`, `high`, or any presentation fidelity. |
+| `geometry` | One type or list: point, line, polygon, mesh, etc. |
+| `geometry-name` | Exact semantic name, or `*`/omission for wildcard. |
+| `selectable` | Whether generated primitives participate in selection. |
+
+Geometry type and name are independent selectors.
 
 ```yaml
-rules:
-  - type: Road
-    geometry: [line]
-    all-of:
-      - width: 10
-        color: "#202020"
-      - width: 6
-        color: "#f6c344"
+- type: Road
+  geometry: line
+  geometry-name: topology
+  fidelity: low
+  filter: "any(properties.layer.**.FUNCTIONAL_ROAD_CLASS.** <= 4)"
 ```
 
-Use lateral offsets to draw parallel lines for the same feature or attribute family:
+Mapget does not interpret `topology` as low fidelity. Erdblick chose the
+low-fidelity rule; the channel simply asks for a semantic geometry and an
+ordinary feature predicate.
+
+## Branches
+
+`first-of` selects the first matching child for rendering:
 
 ```yaml
-rules:
-  - type: Road
-    geometry: [line]
-    all-of:
-      - width: 3
-        color: "#2f80ed"
-        lateral-offset: -1.5
-        offset-type: miter
-      - width: 3
-        color: "#eb5757"
-        lateral-offset: 1.5
-        offset-type: miter
+- type: Road
+  geometry: line
+  first-of:
+    - filter: "properties.frc <= 2"
+      width: 4
+    - filter: "properties.frc <= 5"
+      width: 2
 ```
 
-Use `offset-increment` when repeated attribute or relation renderings need to stack apart from each other:
+`all-of` emits every matching child:
 
 ```yaml
-rules:
-  - type: Road
-    aspect: attribute
-    attribute-layer-type: speedProfile
-    geometry: [line]
-    color: "#00a86b"
-    width: 4
-    offset-increment: [0.8, 0, 0]
+- type: Boundary
+  geometry: line
+  all-of:
+    - color: white
+      width: 5
+    - color: black
+      width: 2
+      dashed: true
 ```
 
-Attribute-aware highlights can combine attribute filtering, validity geometry, arrows and stacked offsets. This is useful when several matched attributes share the same road geometry:
+For server admission, both trees need the union of possible leaves. The
+planner recursively builds:
+
+```text
+own-filter AND (child-1-eligibility OR child-2-eligibility OR ...)
+```
+
+The renderer retains the different first/all semantics using projected fields.
+This avoids one channel per flattened leaf while still excluding features
+which no descendant could render.
+
+One rule cannot define both branch kinds.
+
+## Presentation fields
+
+Common primitive fields include:
+
+- `color`, `color-expression`, or `color-scale`;
+- `opacity`;
+- `width` and optional `width-scale`;
+- `offset` and `offset-increment`;
+- `flat`, `billboard`, and `depth-test`;
+- `dashed`, `dash-length`, `dash-pattern`, and `gap-color`;
+- `arrow` / `arrow-expression`;
+- outline color/width;
+- icon URL/expression;
+- label text/expression, font, color, outline, background, padding, origin,
+  pixel offset, and height reference.
+
+Literal values are resolved without projection. Every expression-backed field
+is collected by the planner and transported in the appropriate field list.
+
+## Color modes
+
+Exactly one of these may be present:
+
+### Literal color
 
 ```yaml
-rules:
-  - type: Road
-    aspect: attribute
-    attribute-layer-type: speedProfile
-    attribute-type: SPEED_LIMIT
-    attribute-validity-geom: any
-    geometry: [line]
-    color-expression: valueKph > 80 and "#d6452f" or "#2f80ed"
-    width: 5
-    arrow: forward
-    offset-increment: [0.8, 0, 0]
+color: orange
 ```
 
-Labels are additional output from regular geometry rules. Use `label-text-expression` to keep text data-driven:
+### Expression color
 
 ```yaml
-rules:
-  - type: Road
-    geometry: [line]
-    label-text-expression: "**.speedLimitKmh as string"
-    label-scale: 0.8
-    label-color: "#ffffff"
-    label-pixel-offset: [0, -12]
+color-expression: "selected and '#ff0000' or '#808080'"
 ```
 
-For dense point layers, `point-merge-grid-cell` merges coincident points and exposes `$mergeCount` to the same rule, including its label expression:
+Use this for genuinely dynamic color strings, such as the internal selection
+color binding.
+
+### Typed color scale
 
 ```yaml
-rules:
-  - type: ValidationIssue
-    geometry: [point]
-    color: "#f2994a"
-    width: 10
-    point-merge-grid-cell: [2, 2, 0]
-    label-text-expression: "$mergeCount > 1 and $mergeCount as string or ruleId"
-    label-scale: 0.8
-    label-pixel-offset: [0, -16]
+color-scale:
+  mode: categorical
+  expression: "properties.category"
+  stops:
+    - ["motorway", "#e41a1c"]
+    - ["primary", "#377eb8"]
+    - ["secondary", "#4daf4a"]
+  fallback: gray
 ```
 
-### GLTF and AABB Geometry
+Stops are `[value, color]` pairs, not a YAML map. This preserves boolean,
+numeric, and string key types.
 
-`geometry: ["gltf"]` and `geometry: ["aabb"]` are the two 3D-oriented geometry families exposed by erdblick:
-
-- `gltf` renders feature-owned node subsets from a tile-level GLB attachment.
-- `aabb` renders explicit feature bounding boxes. This is mainly useful for low-fidelity 3D fallbacks, debug views, and coarse interaction proxies.
-  For GLTF-backed features, `aabb` rules can also render the exported node bounding box instead of the real model geometry.
-
-For `gltf` rules, the style system treats the attached model as fixed geometry and uses the rule mostly as a visibility/highlight/tint contract:
-
-- Supported and meaningful fields:
-  - `type`, `filter`, `mode`, `fidelity`, `stage`, `lod`, `selectable`
-  - `color` / `color-expression`
-  - `opacity`
-  - `depth-test`
-- Fields that do **not** reshape visible GLTF node rendering:
-  - `width`
-  - `outline-color`, `outline-width`
-  - `offset`, `vertical-offset`, `offset-increment`
-  - `billboard`
-
-Important behavior for GLTF highlights:
-
-- `mode: hover` and `mode: selection` rules do not instantiate separate model copies. They act as temporary style overrides on the same shared GLTF node set.
-- In practice this means GLTF highlight rules are best used for `color` / `opacity` overlays, not for geometric displacement tricks.
-- If a GLTF highlight should always stay visible on top of the base model, set `depth-test: false`.
-
-For `aabb` rules, the regular mesh/polygon-style properties apply normally because erdblick renders the box geometry itself. That also applies when the source feature is GLTF-backed and the box comes from the node's exported bounds instead of an explicit backend AABB feature.
-
-Example:
+Categorical scales use exact typed equality. Duplicate typed keys are invalid.
 
 ```yaml
-rules:
-  - type: Display3D
-    fidelity: high
-    filter: show3d == true
-    geometry: ["gltf"]
-
-  - type: Display3D
-    fidelity: low
-    filter: show3d == true
-    geometry: ["aabb"]
-    color: pink
-    opacity: 0.2
-
-  - type: Display3D
-    geometry: ["gltf"]
-    mode: hover
-    color: yellow
-    opacity: 0.5
-    depth-test: false
+color-scale:
+  mode: linear
+  expression: "properties.score"
+  stops:
+    - [0, blue]
+    - [50, yellow]
+    - [100, red]
+  fallback: gray
 ```
 
-If you rely on the built-in `Highlights` style for hover/selection, make sure its feature highlight rules include `gltf` (and optionally `aabb`) in their `geometry` lists.
+Linear keys must be finite, numeric, and strictly increasing. Colors are
+interpolated between adjacent stops. `fallback` handles null, unsupported
+types, and values which cannot be mapped.
 
-### Labeling
+Use one scale instead of a palette-only `first-of` chain. Structural
+`first-of`/`all-of` trees remain appropriate for geometry, dash composition,
+or other compound presentation changes.
 
-Erdblick emits a label when a matched rule defines `label-text` or a non-empty `label-text-expression`. The label is placed at a representative point of the matched geometry or relation helper geometry.
+## Width scales
 
-| Field | Description |
-| --- | --- |
-| `label-text` | Static string used as the label. |
-| `label-text-expression` | Simfil expression returning the label text (e.g., `**.name`). |
-| `label-color`, `label-outline-color`, `label-scale` | Text color, outline color, and size scale used by the deck.gl text layer. |
-| `label-pixel-offset` | Optional `[x, y]` screen-space offset in pixels. |
-| `billboard`, `depth-test` | The regular rule fields also apply to emitted labels. Labels are billboarded by default unless `billboard: false` is set. |
-
-### Relation-Specific Fields (`aspect: relation`)
-
-| Field | Description |
-| --- | --- |
-| `relation-type` | Regex that filters relation names (e.g., `nextLaneGroup|prevLaneGroup`). |
-| `relation-recursive` | Continue following relations until the tile boundary is reached. |
-| `relation-merge-twoway` | Treat bidirectional relations as one. |
-| `relation-line-height-offset` | Vertical offset in meters. |
-| `relation-line-end-markers` | Nested style that defines markers at relation endpoints. |
-| `relation-source-style`, `relation-target-style` | Optional nested styles for source/target highlights. |
-
-### Attribute-Specific Fields (`aspect: attribute`)
-
-| Field | Description |
-| --- | --- |
-| `attribute-layer-type` / `attribute-type` | Regex filters that pick which attributes to visualize. |
-| `attribute-filter` | Simfil expression evaluated against each attribute payload. |
-| `attribute-validity-geom` | `required`, `none`, or `any` (default) to control whether attributes must provide validity geometries. |
-
-### Expression Contexts
-
-Simfil expressions evaluate inside context objects:
-
-- **Feature aspect**: `$mergeCount`, `geometry`, `properties`, etc.
-- **Relation aspect**: `$source`, `$target`, `$twoway`, `sourceValidity`, `targetValidity`.
-- **Attribute aspect**: `$name`, `$layer`, `$feature`, `validity`, `$validityIndex`, `$validityCount`, and nested attribute fields.
-
-Because expressions run for every candidate feature, keep them as specific as possible—prefer direct field access over broad `**` wildcards unless necessary.
-
-Note: The context also contains values for all declared style option IDs.
-
-## Style Options and Per-Layer Overrides
-
-Each entry under `options` exposes a UI control:
+`width-scale` maps one projected scalar to a line width or point-radius basis
+without creating a `first-of` branch for every category. It uses the same
+typed keys and categorical/linear modes as `color-scale`; stop values and the
+fallback are finite non-negative numbers. A literal `width` remains the
+fallback when `width-scale.fallback` is omitted.
 
 ```yaml
-options:
-  - id: show_lane_id_labels
-    label: "Show Lane ID labels"
-    type: bool
-    default: false
-    internal: false
-    description: "Adds lane IDs next to the geometry"
+width: 1
+width-scale:
+  mode: categorical
+  expression: "properties.roadClass"
+  stops:
+    - [0, 5]
+    - [1, 3]
+    - [2, 2]
+  fallback: 1
 ```
 
-- `id` becomes the Simfil variable name, accessible as `$options.<id>`.
-- `label` is rendered as option text in the Styles dialog and under individual layers.
-- `type` supports `bool`, `color`, and `string`.
-- `default` defines the initial typed value until the user changes it.
-- `internal` hides the option from the UI when set to `true`.
-- `description` (optional) adds hover text in the Styles dialog.
+When color and width depend on the same expression, use identical expression
+text. The style planner then projects one value for both scales.
 
-Per-layer overrides in the Maps & Layers panel map directly to these options. Behind the scenes, erdblick stores the values per `mapId/layerId/styleId` combination, which lets you run different variants across split views or specific layers without cloning the entire style file.
+## Point grouping and `$mergeCount`
 
-## Attribute Validity Visualization
-
-Attribute validities (for example positional or range validities) are best visualized through Search result styles or focused inspection highlights:
-
-- Use Search result styles for broad, query-specific validity overlays.
-- Use inspection row actions to highlight a single attribute or validity while keeping the rest of the scene readable.
-- Use `aspect: attribute` rules when a persistent project style really needs to render validity geometry directly.
-
-!!! warning "Use global validity overlays sparingly"
-    Enabling validity visualization for all features in a large viewport can be expensive. Start with selection-based overlays and narrow attribute filters, then only widen the scope when you are sure that performance remains acceptable.
-
-SourceData panels and the inspection tree mirror the same validity information; the overlays are intended as a visual aid, not as the sole source of truth.
-
-## Relations, Labels, and Source Data References
-
-When you move beyond basic coloring and start visualizing relations or labels, a few patterns make styles easier to reason about:
-
-- **Relations**: use `aspect: relation` plus `relation-recursive: true` when you want the UI to traverse relation chains (for example lane groups). Recursion stops at tile boundaries and only follows relations within the same layer. Combine this with separate rules for `mode: hover` or `mode: selection` if relation highlighting should only appear on hover or selection.
-- **Labels**: use `label-text-expression` to keep labels concise and data-driven. Use `label-pixel-offset` and `label-scale` when labels need to be separated from dense geometry.
-- **Source references**: rules inherit the same hover/selection colors used in the inspector. If you need a dedicated highlight color, create a `mode: selection` rule with the desired `color`/`opacity`.
-
-## Performance Considerations
-
-Style filters can significantly affect rendering cost. Wildcards (`*` and `**`) are convenient while exploring data, but they require erdblick to check multiple paths for each feature. On large tiles, broad wildcard filters, long `first-of` chains, and broad `all-of` branches can become expensive. `all-of` intentionally emits multiple concrete renderings for one matched feature.
-
-The road speed heatmap below shows two common pitfalls:
-
-1. `first-of` evaluates sub-rules in order until one matches, so rule order matters.
-2. `**` expands through multiple paths in the feature structure, and that expansion happens for every filter that uses it.
-
-![Average speed heatmap visualization](average_speed_heatmap.png)
-
-An inefficient style config might look like this:
+Feature-scope point rules can request server grouping:
 
 ```yaml
-  - type: Road
-    geometry: [line]
-    filter: "showHeatMap == true"
-    width: 10
-    offset: [0,1,0]
-    first-of:
-      - filter: "**.averageSpeed <= 20"
-        color: "#0045f1"
-
-      - filter: "**.averageSpeed <= 40"
-        color: "#8cf6f4"
-
-      - filter: "**.averageSpeed > 40"
-        color: "#c01f1f"
+- type: Sign
+  geometry: point
+  geometry-name: position
+  point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
+  color-scale:
+    mode: categorical
+    expression: "$mergeCount > 1"
+    stops:
+      - [false, moccasin]
+      - [true, red]
+    fallback: moccasin
+  label-text-expression: "$mergeCount > 1 and ($mergeCount as string) or ''"
 ```
 
-This can be optimized in two ways:
+The planner rewrites `$mergeCount` in projected fields to
+`count($features.*)`. Group membership includes feature type, point geometry
+type/name, existence of a qualifying point, and the recursively assembled
+feature filter.
 
-1. Use full paths instead of wildcards where the schema is known.
-2. Put the most likely `first-of` matches first. In this example, speeds above 40 are assumed to be the common case.
+Initial restrictions:
 
-The optimized style config is more explicit:
+- feature scope only;
+- every concrete leaf must be grouped;
+- every leaf must be point-only;
+- one identical cell size and compatible geometry-name selector;
+- `$mergeCount` cannot influence membership;
+- no attribute-validity or multi-input grouping.
+
+A mismatch rejects the plan rather than returning a wrong merge count.
+
+## Attribute rules
 
 ```yaml
-  - type: Road
-    geometry: [line]
-    filter: "showHeatMap == true"
-    width: 10
-    offset: [0,1,0]
-    # Use full path and order by likelihood (if applicable)
-    first-of:
-      - filter: "properties.layer.RoadCharacteristicsLayer.AVERAGE_SPEED.attributeValue.averageSpeed > 40"
-        color: "#c01f1f"
-
-      - filter: "properties.layer.RoadCharacteristicsLayer.AVERAGE_SPEED.attributeValue.averageSpeed <= 20"
-        color: "#0045f1"
-
-      - filter: "properties.layer.RoadCharacteristicsLayer.AVERAGE_SPEED.attributeValue.averageSpeed <= 40"
-        color: "#8cf6f4"
+- type: Road
+  scope: attribute
+  attribute-type: "SPEED_LIMIT"
+  attribute-layer-type: "speedProfile"
+  attribute-filter: "valueKph > 50"
+  attribute-validity-geom: required
+  geometry: line
+  geometry-name: centerline
+  color: red
+  width: 4
 ```
 
-Use the feature inspector's **Copy Path** action to obtain explicit paths for attributes you want to style. Wildcards are still useful for exploration and quick prototypes, but production styles should prefer explicit paths when the data structure is known.
+`filter` still applies to the host feature.
+`attribute-filter` applies to the expanded attribute context.
 
-## Configuring Styles on Disk
+Attribute fields:
 
-To control which style sheets are available in a given deployment, configure them on disk before starting erdblick:
+| Field | Meaning |
+|---|---|
+| `attribute-type` | Attribute-name/type pattern. |
+| `attribute-layer-type` | Attribute-layer pattern. |
+| `attribute-filter` | Entry-context SIMFIL predicate. |
+| `attribute-validity-geom` | `any`, `required`, or `none`. |
 
-- Place `.yaml` files under `config/styles` before building erdblick or before launching the bundle.
-- List each file in `config/config.json`:
-  ```json
-  {
-    "styles": [
-      { "url": "default.yaml" },
-      { "url": "debug.yaml" }
-    ]
-  }
-  ```
-- Containerized deployments can mount their own directories over the style bundle path used by the image (for example `config/styles` in a source-tree style deployment, or the image-specific path that is published as `bundle/styles`). Plain style names are requested from `bundle/styles/<name>`.
-- If your backend supplies `/config.erdblick`, it can provide the same `styles` list at runtime. The referenced YAML files must still be reachable through the normal style bundle routes.
-- Backends can also provide `additionalStyles` to append deployment-specific style sheets without replacing the base style list. Entries use the same string or `{ "url": "..." }` shape as `styles`, and their URLs must already be browser-reachable.
-- Additional style entries are loaded after base styles. An additional style with the same `name:` as a base style overrides the active base style. If the user modifies that additional style locally, the local modification takes precedence over the original additional style, which takes precedence over the base style.
-- Erdblick does not scan style directories or expand wildcards. If a hosting application offers wildcard or directory syntax, it must publish concrete style URLs in `config.json` or `/config.erdblick` before erdblick loads them.
-- Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.
+Expression context adds `$feature`, `$layer`, `$name`, `$attributeIndex`,
+`$hasValidity`, `$validityIndex`, and `$validityCount`.
+
+The renderer consumes explicit `GeometryCollection` values. Validity-required
+rules receive effective validity geometry; a one-element collection is still
+a collection.
+
+## Relation rules
+
+```yaml
+- type: LaneGroup
+  scope: relation
+  mode: selection
+  filter: "showTopology"
+  relation-type: "nextLaneGroup|prevLaneGroup"
+  relation-recursive: true
+  relation-merge-twoway: true
+  geometry: line
+  color-scale:
+    mode: categorical
+    expression: "(($source.tileId != $target.tileId) as int) * 2 + ($twoway as int)"
+    stops:
+      - [0, red]
+      - [1, green]
+      - [2, blue]
+      - [3, orange]
+    fallback: red
+  relation-source-style:
+    geometry: line
+    opacity: 0
+    label-text-expression: "$source.laneGroupId"
+  relation-target-style:
+    geometry: line
+    opacity: 0
+    label-text-expression: "$target.laneGroupId"
+```
+
+Relation fields:
+
+- `relation-type`: stored relation-name regex;
+- `relation-recursive`: local recursion plus at most one hop across a tile;
+- `relation-merge-twoway`: pair reverse descriptors;
+- `relation-line-height-offset`;
+- `relation-line-end-markers`;
+- `relation-source-style`;
+- `relation-target-style`.
+
+Relation expressions can use the relation root plus `$source`, `$target`, and
+`$twoway`. Endpoint styles may independently select semantic geometry.
+`RelationEntry` carries source/target feature entries and explicit source and
+target geometry collections.
+
+Generic bidirectional display uses permanent south-west ownership. If that
+owner is outside current coverage, the pair is not rendered. Selection
+traversal is root-owned.
+
+## Fidelity
+
+`fidelity: low|high` remains a presentation-only rule gate. The current view
+density chooses which set applies. Both use the same complete backend source
+tile and `/filter` evaluator.
+
+Do not encode fidelity into mapget geometry names. Choose the semantic
+geometry each rule needs, and use explicit source attributes when a
+presentation should include fewer features.
+
+## Validation and planner failures
+
+Style validation reports source rule index, property, message, and YAML
+location. Important hard failures include:
+
+- schema version other than 2;
+- removed `aspect`, `stage`, or `lod`;
+- descendant scope changes;
+- branches on a top-level relation rule;
+- invalid/mixed color modes;
+- malformed color-scale stops;
+- incompatible point-group leaves;
+- invalid relation/attribute regexes.
+
+Planner issues are also rule-indexed. A syntactically valid style can still be
+unplannable against a concrete layer—for example when a point-group rule has
+no compatible feature types.
+
+## Picking identity
+
+Presentation choices such as highlight mode, fidelity, options, style
+identity/order, and rule tree participate in the render signature. Backend
+transport identity is only `filterId + generation + output tile`.
+
+Deck picks store `(channel ordinal, typed-entry ordinal)` against the exact
+subset retained by the visualization. Nested render-rule and primitive details
+stay renderer-local.

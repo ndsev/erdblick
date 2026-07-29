@@ -33,8 +33,7 @@ export type UrlV2MapTileKeyFactory = (
     layerType: string,
     mapId: string,
     layerId: string,
-    tileId: string,
-    stage: string
+    tileId: string
 ) => string;
 
 interface ParsedLayerName {
@@ -47,7 +46,6 @@ interface ParsedMapTileKey {
     mapId: string;
     layerId: string;
     tileId: string;
-    stage: string;
 }
 
 const STYLE_PRIMITIVE_TOKEN_RE = /^(?:true|false|0|1|-?\d+(?:\.\d+)?)$/i;
@@ -356,30 +354,20 @@ function parseMapTileKey(mapTileKey: string): ParsedMapTileKey | null {
         layerType: parts[0],
         mapId: parts[1],
         layerId: parts[2],
-        tileId: parts[3],
-        stage: parts[4] ?? "0",
+        tileId: parts[3]
     };
 }
 
-/** Encodes stage zero compactly while preserving non-zero stages. */
-function encodeTileAndStage(tileId: string, stage: string): string {
-    return stage && stage !== "0" ? `${tileId}.${stage}` : tileId;
-}
-
-/** Decodes the compact tile/stage form used by v2 selections. */
-function decodeTileAndStage(token: string): {tileId: string, stage: string} {
+/** Reads a tile id and discards the suffix used by pre-S4E2 staged URLs. */
+function decodeLegacyTileId(token: string): string {
     const dotIndex = token.lastIndexOf(".");
     if (dotIndex <= 0 || dotIndex >= token.length - 1) {
-        return {tileId: token, stage: "0"};
+        return token;
     }
-    const stage = token.slice(dotIndex + 1);
-    if (!/^\d+$/.test(stage)) {
-        return {tileId: token, stage: "0"};
+    if (!/^\d+$/.test(token.slice(dotIndex + 1))) {
+        return token;
     }
-    return {
-        tileId: token.slice(0, dotIndex),
-        stage,
-    };
+    return token.slice(0, dotIndex);
 }
 
 /** Normalizes highlight colors to the compact v2 color token. */
@@ -481,7 +469,7 @@ export function encodeSelectionsV2(
             const suffix = parsed.layerId.startsWith("SourceData-")
                 ? parsed.layerId.slice("SourceData-".length)
                 : parsed.layerId;
-            fields.push(`SD:${mapIndex}:${encodeToken(suffix)}:${encodeTileAndStage(parsed.tileId, parsed.stage)}`);
+            fields.push(`SD:${mapIndex}:${encodeToken(suffix)}:${parsed.tileId}`);
             fields.push(panel.sourceData.address === undefined ? "" : String(panel.sourceData.address));
             fields.push(encodeLayout(panel.size));
             fields.push(encodeColor(panel.color, defaultColors));
@@ -500,7 +488,7 @@ export function encodeSelectionsV2(
             if (layerIndex < 0) {
                 continue;
             }
-            fields.push(`F:${layerIndex}:${encodeTileAndStage(parsed.tileId, parsed.stage)}`);
+            fields.push(`F:${layerIndex}:${parsed.tileId}`);
             fields.push(encodeToken(feature.featureId));
         }
         if (fields.length <= 2) {
@@ -582,9 +570,14 @@ function decodeFeaturePanel(
             index += 2;
             continue;
         }
-        const tile = decodeTileAndStage(payloadParts[2] ?? "");
+        const tileId = decodeLegacyTileId(payloadParts[2] ?? "");
         features.push({
-            mapTileKey: mapTileKeyFactory("Features", parsedLayer.mapId, parsedLayer.layerId, tile.tileId, tile.stage),
+            mapTileKey: mapTileKeyFactory(
+                "Features",
+                parsedLayer.mapId,
+                parsedLayer.layerId,
+                tileId
+            ),
             featureId: decodeToken(parts[index + 1] ?? ""),
         });
         index += 2;
@@ -621,7 +614,7 @@ function decodeSourceDataPanel(
     }
     const suffix = decodeToken(payloadParts[2]);
     const layerId = suffix.startsWith("SourceData-") ? suffix : `SourceData-${suffix}`;
-    const tile = decodeTileAndStage(payloadParts[3]);
+    const tileId = decodeLegacyTileId(payloadParts[3]);
     const addressToken = parts[3] ?? "";
     const layoutToken = parts[4];
     const colorToken = parts[5];
@@ -629,7 +622,12 @@ function decodeSourceDataPanel(
         id,
         features: [],
         sourceData: {
-            mapTileKey: mapTileKeyFactory("SourceData", mapNames[mapIndex], layerId, tile.tileId, tile.stage),
+            mapTileKey: mapTileKeyFactory(
+                "SourceData",
+                mapNames[mapIndex],
+                layerId,
+                tileId
+            ),
             address: addressToken.length ? BigInt(addressToken) : undefined,
         },
         locked: true,

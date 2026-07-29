@@ -3,8 +3,10 @@ import {Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {TreeTableNode} from 'primeng/api';
-import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
-import {FeatureTile} from '../mapdata/features.model';
+import {
+    SubsetDiagnosticsTile,
+    ViewLayerDiagnosticsService
+} from '../mapview/view-layer-diagnostics.service';
 import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {PerformanceDiagnosticsScope, PerfStat} from './diagnostics.model';
 import {buildAggregatedPerfStats} from './diagnostics.datasource';
@@ -221,7 +223,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
                 public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService,
-                private readonly mapService: MapTileStreamService) {
+                private readonly viewDiagnostics: ViewLayerDiagnosticsService) {
         this.subscriptions.push(
             this.diagnostics.perfStats$.subscribe(() => {
                 this.refreshAvailableMapLayers();
@@ -356,7 +358,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     /** Rebuilds the list of selectable map layers from currently loaded tiles. */
     private refreshAvailableMapLayers() {
         const mapLayersByKey = new Map<string, LayerOption>();
-        for (const tile of this.mapService.loadedTileLayers.values()) {
+        for (const tile of this.viewDiagnostics.currentTiles()) {
             const key = JSON.stringify([tile.mapName, tile.layerName]);
             if (mapLayersByKey.has(key)) {
                 continue;
@@ -396,11 +398,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const tileIdSet = new Set<string>();
-        for (const tile of this.mapService.loadedTileLayers.values()) {
+        for (const tile of this.viewDiagnostics.currentTiles()) {
             if (!selectedLayerKeys.has(JSON.stringify([tile.mapName, tile.layerName]))) {
                 continue;
             }
-            if (!tile.hasData()) {
+            if (!tile.ready) {
                 continue;
             }
             tileIdSet.add(tile.tileId.toString());
@@ -508,13 +510,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const selectedTileIdSet = new Set(this.selectedTileIds.map(selection => selection.tileId));
         const hasTileIdSelection = selectedTileIdSet.size > 0;
 
-        const layerScopedTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
+        const layerScopedTiles = this.viewDiagnostics.currentTiles().filter(tile => {
             if (!selectedLayerKeys.has(JSON.stringify([tile.mapName, tile.layerName]))) {
                 return false;
             }
             return true;
         });
-        const layerScopedNonEmptyTiles = layerScopedTiles.filter(tile => tile.hasData());
+        const layerScopedNonEmptyTiles = layerScopedTiles.filter(tile => tile.ready);
 
         const tileScopedNonEmptyTiles = layerScopedNonEmptyTiles.filter(tile => {
             if (!hasTileIdSelection) {
@@ -532,9 +534,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     /** Computes tile-scope counts used by the root badges and their tooltips. */
-    private computeTileScopeCounts(scopedTiles: FeatureTile[],
-                                   nonEmptyTiles: FeatureTile[],
-                                   consideredSourceTiles: FeatureTile[]): PerfTileScopeCounts {
+    private computeTileScopeCounts(scopedTiles: SubsetDiagnosticsTile[],
+                                   nonEmptyTiles: SubsetDiagnosticsTile[],
+                                   consideredSourceTiles: SubsetDiagnosticsTile[]): PerfTileScopeCounts {
         const consideredTilesByRoot = new Map<string, number>();
         let consideredTiles = 0;
 
@@ -657,7 +659,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const nodeLookup = new Map<string, TreeTableNode>();
         const activePathKeys = new Set<string>();
 
-        /** Returns an existing stage node or creates it under the current parent. */
+        /** Returns an existing path node or creates it under the current parent. */
         const ensureNode = (pathKey: string, label: string, parent?: TreeTableNode): TreeTableNode => {
             activePathKeys.add(pathKey);
             const existing = nodeLookup.get(pathKey);
@@ -725,7 +727,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             });
         });
 
-        /** Sorts stage nodes by activity before rendering the tree. */
+        /** Sorts path nodes before rendering the tree. */
         const sortNodes = (nodes: TreeTableNode[]) => {
             nodes.sort((a, b) => String(a.data?.key ?? '').localeCompare(String(b.data?.key ?? '')));
             nodes.forEach(node => {

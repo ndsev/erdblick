@@ -20,7 +20,12 @@ test.describe('Snapshot – search component', () => {
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
-        await openSearchPalette(page, SEARCH_QUERY);
+        const searchPalette = await openSearchPalette(page, SEARCH_QUERY);
+        // Schema-backed jump providers are initialized asynchronously. Wait
+        // for one datasource-derived option so the snapshot never captures
+        // the transient built-in-only palette.
+        await expect(searchPalette.getByText('Jump to Way', { exact: true }))
+            .toBeVisible();
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('search-component-palette.png', {
             maxDiffPixelRatio: 0.01
@@ -40,6 +45,12 @@ test.describe('Snapshot – search component', () => {
         const featureSearchDialog = page.getByTestId('feature-search-dialog').locator('.p-dialog').first();
         await expect(featureSearchDialog).toBeVisible();
         await expect(featureSearchDialog.getByTestId('feature-search-tree')).toBeVisible();
+        await expect(featureSearchDialog.getByText('Complete, 1/1 tiles', {
+            exact: true
+        })).toBeVisible();
+        await expect(featureSearchDialog.getByText('No matches found.', {
+            exact: true
+        })).toBeVisible();
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('search-component-results.png', {
