@@ -36,6 +36,12 @@ interface BackgroundLayerOption {
     experimental: boolean;
 }
 
+/** Searchable metadata-layer choice shown by a map node. */
+interface MetadataLayerOption {
+    label: string;
+    mapTileKey: string;
+}
+
 
 @Component({
     selector: 'map-panel',
@@ -254,9 +260,27 @@ interface BackgroundLayerOption {
                                     </ng-template>
                                     <!-- Template for Map nodes -->
                                     <ng-template let-node pTemplate="Map">
-                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
-                                                [popup]="true"
-                                                appendTo="body"/>
+                                        <p-popover #metadataPopover
+                                                   styleClass="metadata-layer-popover"
+                                                   [baseZIndex]="30000"
+                                                   appendTo="body">
+                                            <p-listbox class="metadata-layer-listbox"
+                                                       [options]="metadataLayerOptions.get(node.id) ?? []"
+                                                       optionLabel="label"
+                                                       [filter]="true"
+                                                       filterBy="label"
+                                                       filterPlaceHolder="Search metadata"
+                                                       ariaFilterLabel="Search metadata"
+                                                       emptyFilterMessage="No matching metadata"
+                                                       scrollHeight="min(24rem, calc(100vh - 10rem))"
+                                                       [ngModel]="null"
+                                                       (onChange)="inspectMetadataLayer($event.value, metadataPopover)">
+                                                <ng-template let-option pTemplate="item">
+                                                    <span class="metadata-layer-option"
+                                                          [title]="option.label">{{ option.label }}</span>
+                                                </ng-template>
+                                            </p-listbox>
+                                        </p-popover>
                                         <div class="flex-container map-tree-row"
                                              [ngClass]="{'has-datasource-status': dataSourceStatus(node.info) !== 'ready'}">
                                             <span class="checkbox-entry map-tree-title">
@@ -293,12 +317,12 @@ interface BackgroundLayerOption {
                                                     <span class="material-symbols-outlined"
                                                           style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                                         </p-button>
-                                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                                  pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
+                                                        <p-button onEnterClick (click)="metadataPopover.toggle($event)" label=""
+                                                                  pTooltip="{{!metadataLayerOptions.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
                                                                   tooltipPosition="bottom"
                                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                                   tabindex="0"
-                                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                                                  [disabled]="!metadataLayerOptions.get(node.id)?.length">
                                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                                         data_object
                                                     </span>
@@ -427,7 +451,7 @@ export class MapPanelComponent {
 
     @ViewChild('mapLayerDialog') mapLayerDialog: AppDialogComponent | undefined;
 
-    metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
+    metadataLayerOptions = new Map<string, MetadataLayerOption[]>();
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
     constructor(public mapService: MapInfoService,
@@ -444,18 +468,14 @@ export class MapPanelComponent {
         this.subscriptions.push(
             // Rebuild metadata menus recursively and prune when needed.
             this.mapService.maps$.subscribe(mapTree => {
-                this.metadataMenusEntries.clear();
+                this.metadataLayerOptions.clear();
                 for (const [_, mapItem] of mapTree.maps) {
-                    this.metadataMenusEntries.set(
+                    this.metadataLayerOptions.set(
                         mapItem.id,
                         this.mapService.findLayersForMapId(mapItem.id, true)
                             .map(layer => ({
                                 label: layer.name,
-                                command: () => {
-                                    this.stateService.setSelection({
-                                        mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0)
-                                    } as SelectedSourceData);
-                                }
+                                mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0)
                             }))
                     );
                 }
@@ -782,6 +802,17 @@ export class MapPanelComponent {
     toggleBackgroundPopover(event: MouseEvent, popover: Popover) {
         event.stopPropagation();
         popover.toggle(event);
+    }
+
+    /** Opens the selected tile-zero metadata layer and closes its picker. */
+    inspectMetadataLayer(option: MetadataLayerOption | null, popover: Popover): void {
+        if (!option) {
+            return;
+        }
+        this.stateService.setSelection({
+            mapTileKey: option.mapTileKey
+        } as SelectedSourceData);
+        popover.hide();
     }
 
     /** Sets the visibility of one map or layer entry for a specific view. */

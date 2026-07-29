@@ -13,7 +13,8 @@ include(Catch)
 include(CTest)
 
 add_executable(test.erdblick
-  test-visualization.cpp)
+  test-visualization.cpp
+  test-source-data-inspection.cpp)
 
 target_link_libraries(test.erdblick
   PUBLIC

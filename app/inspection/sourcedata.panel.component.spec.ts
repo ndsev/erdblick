@@ -4,20 +4,23 @@ import {sourceDataTreePresentation} from "./sourcedata-tree.presentation";
 describe("sourceDataTreePresentation", () => {
     it("extracts an SQL query and flattens result rows into named sections", () => {
         const firstRow = {
-            data: {key: 0, type: "routingTileTable.row"},
-            children: [{data: {key: "id", value: 1}}]
+            key: 0,
+            schemaType: "routingTileTable.row",
+            children: [{key: "id", value: 1}]
         };
         const result = sourceDataTreePresentation({
-            data: {key: "root", type: "routingTileTable"},
+            key: "root",
+            schemaType: "routingTileTable",
             children: [
-                {data: {key: "query", value: "SELECT * FROM routingTileTable;"}},
+                {key: "query", value: "SELECT * FROM routingTileTable;"},
                 {
-                    data: {key: "rows"},
+                    key: "rows",
                     children: [
                         firstRow,
                         {
-                            data: {key: 1, type: "routingTileTable.row"},
-                            children: [{data: {key: "id", value: 2}}]
+                            key: 1,
+                            schemaType: "routingTileTable.row",
+                            children: [{key: "id", value: 2}]
                         }
                     ]
                 }
@@ -30,44 +33,34 @@ describe("sourceDataTreePresentation", () => {
             "Result row 2"
         ]);
         expect(result.treeData[0].data?.styleClass).toBe("source-data-sql-result-row");
-        expect(firstRow.data.key).toBe(0);
+        expect(firstRow.key).toBe(0);
     });
 
     it("shows decoded blob addresses relative to their SQL cell", () => {
         const result = sourceDataTreePresentation({
-            data: {
-                key: "root",
-                type: "routingTileTable",
-                address: {offset: 0, size: 200}
-            },
+            key: "root",
+            schemaType: "routingTileTable",
+            address: {offset: 0, size: 200},
             children: [
-                {data: {key: "query", value: "SELECT * FROM routingTileTable;"}},
+                {key: "query", value: "SELECT * FROM routingTileTable;"},
                 {
-                    data: {key: "rows"},
+                    key: "rows",
                     children: [{
-                        data: {
-                            key: 0,
-                            type: "routingTileTable.row",
-                            address: {offset: 40, size: 100}
-                        },
+                        key: 0,
+                        schemaType: "routingTileTable.row",
+                        address: {offset: 40, size: 100},
                         children: [
                             {
-                                data: {
-                                    key: "id",
-                                    address: {offset: 40, size: 1}
-                                }
+                                key: "id",
+                                address: {offset: 40, size: 1}
                             },
                             {
-                                data: {
-                                    key: "ndsData",
-                                    address: {offset: 80, size: 64},
-                                    addressScope: true
-                                },
+                                key: "ndsData",
+                                address: {offset: 80, size: 64},
+                                addressScope: true,
                                 children: [{
-                                    data: {
-                                        key: "header",
-                                        address: {offset: 88, size: 16}
-                                    }
+                                    key: "header",
+                                    address: {offset: 88, size: 16}
                                 }]
                             }
                         ]
@@ -88,15 +81,18 @@ describe("sourceDataTreePresentation", () => {
 
     it("hides structural SQL addresses even when the result has no blobs", () => {
         const result = sourceDataTreePresentation({
-            data: {key: "root", address: {offset: 0, size: 3}},
+            key: "root",
+            address: {offset: 0, size: 3},
             children: [
-                {data: {key: "query", value: "SELECT id FROM table;"}},
+                {key: "query", value: "SELECT id FROM table;"},
                 {
-                    data: {key: "rows"},
+                    key: "rows",
                     children: [{
-                        data: {key: 0, address: {offset: 0, size: 1}},
+                        key: 0,
+                        address: {offset: 0, size: 1},
                         children: [{
-                            data: {key: "id", address: {offset: 0, size: 1}}
+                            key: "id",
+                            address: {offset: 0, size: 1}
                         }]
                     }]
                 }
@@ -109,20 +105,51 @@ describe("sourceDataTreePresentation", () => {
 
     it("preserves ordinary SourceData roots without the SQL-result convention", () => {
         const child = {
-            data: {
-                key: "field",
-                value: 7,
-                address: {offset: 12, size: 4}
-            }
+            key: "field",
+            value: 7,
+            address: {offset: 12, size: 4}
         };
         const result = sourceDataTreePresentation({
-            data: {key: "root", type: "Example"},
+            key: "root",
+            schemaType: "Example",
             children: [child]
         });
 
         expect(result.sqlQuery).toBeUndefined();
         expect(result.treeData[0].data?.displayAddress).toEqual({offset: 12, size: 4});
         expect(result.treeData[0].data?.address).toEqual({offset: 12, size: 4});
-        expect(child.data).not.toHaveProperty("displayAddress");
+        expect(child).not.toHaveProperty("displayAddress");
+    });
+
+    it("adapts the shared flat inspection model without losing value summaries", () => {
+        const result = sourceDataTreePresentation({
+            key: "root",
+            type: 0,
+            schemaType: "Example.Root",
+            children: [{
+                key: "details",
+                type: 0,
+                schemaType: "Example.Details",
+                valueBubbles: [{
+                    label: "50",
+                    targetNodeId: "0:details/0:speed",
+                    kind: "scalar"
+                }],
+                children: [{
+                    key: "speed",
+                    value: 50,
+                    type: 1,
+                    nodeId: "0:details/0:speed"
+                }]
+            }]
+        });
+
+        expect(result.treeData[0].data?.schemaType).toBe("Example.Details");
+        expect(result.treeData[0].data?.valueBubbles).toEqual([{
+            label: "50",
+            targetNodeId: "0:details/0:speed",
+            kind: "scalar"
+        }]);
+        expect(result.treeData[0].children?.[0].data?.value).toBe(50);
     });
 });

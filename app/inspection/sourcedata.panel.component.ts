@@ -57,9 +57,23 @@ export class SourceDataPanelComponent {
     columns: Column[] = [
         { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
         { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
-        { key: "displayAddress", header: "Address", width: '100px', transform: this.addressFormatter.bind(this) },
-        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter.bind(this) }
-    ]
+        {
+            key: "displayAddress",
+            header: "Address",
+            width: '100px',
+            transform: this.addressFormatter.bind(this),
+            toggleable: true,
+            toggleIcon: "numbers"
+        },
+        {
+            key: "schemaType",
+            header: "Type",
+            width: 'auto',
+            transform: this.schemaTypeURLFormatter.bind(this),
+            toggleable: true,
+            toggleIcon: "data_object"
+        }
+    ];
 
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     firstHighlightedItemIndex: number = 0;

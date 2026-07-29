@@ -12,10 +12,31 @@ interface BitRangeAddress {
     size: number;
 }
 
+/** Flat C++ inspection node emitted by `TileSourceDataLayer.toObject()`. */
+interface SourceDataInspectionNode {
+    key?: unknown;
+    value?: unknown;
+    type?: number;
+    schemaType?: string;
+    address?: unknown;
+    addressScope?: boolean;
+    children?: SourceDataInspectionNode[];
+    [key: string]: unknown;
+}
+
 /** Visible tree nodes plus optional SQL context extracted from one SourceData root. */
 export interface SourceDataTreePresentation {
     sqlQuery?: string;
     treeData: TreeTableNode[];
+}
+
+/** Adapts the shared flat C++ inspection model to PrimeNG's `data/children` tree shape. */
+function asTreeTableNode(node: SourceDataInspectionNode): TreeTableNode {
+    const {children, ...data} = node;
+    return {
+        data,
+        children: children?.map(child => asTreeTableNode(child))
+    };
 }
 
 /** Returns whether one parsed SourceData node contributes visible tree content. */
@@ -87,14 +108,15 @@ function withDisplayAddresses(
  * redundant `rows > index` hierarchy into named result-row sections.
  */
 export function sourceDataTreePresentation(
-    root: TreeTableNode | undefined
+    root: SourceDataInspectionNode | undefined
 ): SourceDataTreePresentation {
     if (!root) {
         return {treeData: []};
     }
+    const treeRoot = asTreeTableNode(root);
 
-    const rawChildren = Array.isArray(root.children)
-        ? root.children.filter(hasSourceDataTreeNodeContent)
+    const rawChildren = Array.isArray(treeRoot.children)
+        ? treeRoot.children.filter(hasSourceDataTreeNodeContent)
         : [];
     const rawQueryNode = rawChildren.find(node => node.data?.["key"] === SQL_QUERY_KEY);
     const rawRowsNode = rawChildren.find(node => node.data?.["key"] === SQL_ROWS_KEY);
@@ -102,9 +124,9 @@ export function sourceDataTreePresentation(
     const isSqlResult = typeof rawSqlQuery === "string"
         && Array.isArray(rawRowsNode?.children);
     const presentedRoot = withDisplayAddresses(
-        root,
+        treeRoot,
         undefined,
-        isSqlResult || hasBitRangeAddressScope(root));
+        isSqlResult || hasBitRangeAddressScope(treeRoot));
     const children = Array.isArray(presentedRoot.children)
         ? presentedRoot.children.filter(hasSourceDataTreeNodeContent)
         : [];

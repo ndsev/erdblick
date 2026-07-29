@@ -357,3 +357,24 @@
   }
 }
 
+.metadata-layer-popover {
+  width: min(30rem, calc(100vw - 1rem));
+
+  .p-popover-content {
+    padding: 0.35rem;
+  }
+
+  .metadata-layer-listbox,
+  .p-listbox {
+    width: 100%;
+    border: 0;
+  }
+
+  .metadata-layer-option {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

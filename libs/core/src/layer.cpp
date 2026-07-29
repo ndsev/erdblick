@@ -2,6 +2,7 @@
 
 #include "geo/point-conversion.h"
 #include "geometry.h"
+#include "inspection.h"
 #include "mapget/log.h"
 #include "mapget/model/feature.h"
 #include "mapget/model/point.h"
@@ -523,19 +524,10 @@ std::string TileSourceDataLayer::toJson() const
 }
 
 /**
- * Converts the `SourceDataLayer` hierarchy to a tree model compatible structure.
+ * Converts the `SourceDataLayer` hierarchy to the shared inspection-node model.
  *
- * **Layout:**
- * ```json
- * [
- *   {
- *     "data": {"key": "...", "value": ...},
- *     "children": [{ ... }]
- *   },
- *   ...
- * ]
- * ```
- * @return A `NativeJsValue` representing the hierarchical data structure.
+ * Reusing `InspectionConverter::finalizeTree()` gives source data the same
+ * stable node identities and propagated scalar summaries as feature data.
  */
 NativeJsValue TileSourceDataLayer::toObject() const
 {
@@ -544,71 +536,11 @@ NativeJsValue TileSourceDataLayer::toObject() const
     using namespace simfil;
 
     const auto& strings = *model_->strings();
+    using InspectionNode = InspectionConverter::InspectionNode;
+    using InspectionValueType = InspectionConverter::ValueType;
+    std::function<InspectionNode(JsValue, simfil::ModelNode const&)> visit;
 
-    std::function<JsValue(JsValue&&, const simfil::ModelNode&)> visit;
-
-    // Function to handle atomic (non-complex) nodes
-    auto visitAtomic = [&](JsValue&& key, const simfil::ModelNode& node) {
-        auto value = [&node]() -> JsValue {
-            switch (node.type()) {
-            case simfil::ValueType::Null:
-                return JsValue();
-            case simfil::ValueType::Bool:
-                return JsValue(std::get<bool>(node.value()));
-            case simfil::ValueType::Int:
-                return JsValue(std::get<int64_t>(node.value()));
-            case simfil::ValueType::Float:
-                return JsValue(std::get<double>(node.value()));
-            case simfil::ValueType::String: {
-                auto v = node.value();
-                if (auto vv = std::get_if<std::string>(&v))
-                    return JsValue(*vv);
-                if (auto vv = std::get_if<std::string_view>(&v))
-                    return JsValue(std::string(*vv));
-                return JsValue();
-            }
-            case simfil::ValueType::Bytes: {
-                auto v = node.value();
-                if (auto vv = std::get_if<simfil::ByteArray>(&v))
-                    return JsValue(byteArrayToDisplayString(*vv));
-                return JsValue();
-            }
-            default:
-                return JsValue();
-            }
-        }();
-
-        auto res = JsValue::Dict();
-        auto data = JsValue::Dict();
-        data.set("key", std::move(key));
-        data.set("value", std::move(value));
-        res.set("data", std::move(data));
-
-        return res;
-    };
-
-    // Function to handle array nodes
-    auto visitArray = [&](JsValue&& key, const simfil::ModelNode& node) -> JsValue {
-        auto res = JsValue::Dict();
-
-        auto data = JsValue::Dict();
-        data.set("key", std::move(key));
-        res.set("data", std::move(data));
-
-        auto children = JsValue::List();
-        int i = 0;
-        for (const auto& item : node) {
-            children.call<void>("push", visit(JsValue(i++), *item));
-        }
-
-        if (i > 0)
-            res.set("children", std::move(children));
-
-        return res;
-    };
-
-    // Function to handle source data addresses
-    auto visitAddress = [&](const SourceDataAddress& addr) {
+    auto visitAddress = [&](SourceDataAddress const& addr) {
         if (model_->sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
             auto res = JsValue::Dict();
             res.set("offset", JsValue(addr.bitOffset()));
@@ -619,47 +551,75 @@ NativeJsValue TileSourceDataLayer::toObject() const
         }
     };
 
-    // Function to handle object nodes
-    auto visitObject = [&](JsValue&& key, const simfil::ModelNode& node) -> JsValue {
-        auto res = JsValue::Dict();
-
-        auto data = JsValue::Dict();
-        data.set("key", std::move(key));
-
+    auto visitObject = [&](JsValue key, simfil::ModelNode const& node) {
+        InspectionNode result;
+        result.key_ = std::move(key);
         if (node.addr().column() == mapget::TileSourceDataLayer::Compound) {
             auto compound = model_->resolve<SourceDataCompoundNode>(node);
-            data.set("address", visitAddress(compound->sourceDataAddress()));
-            if (compound->isSourceDataAddressScope()) {
-                data.set("addressScope", JsValue(true));
-            }
-            data.set("type", JsValue(std::string(compound->schemaName())));
+            result.address_ = visitAddress(compound->sourceDataAddress());
+            result.addressScope_ = compound->isSourceDataAddressScope();
+            result.schemaType_ = compound->schemaName();
         }
-
-        res.set("data", std::move(data));
-
-        auto children = JsValue::List();
         for (const auto& [field, v] : node.fields()) {
             if (auto k = strings.resolve(field); k && v) {
-                children.call<void>("push", visit(JsValue(k->data()), *v));
+                result.children_.push_back(visit(JsValue(k->data()), *v));
             }
         }
-
-        if (node.size() > 0)
-            res.set("children", std::move(children));
-
-        return res;
+        return result;
     };
 
-    // Main recursive visit function
-    visit = [&](JsValue&& key, const simfil::ModelNode& node) -> JsValue {
+    visit = [&](JsValue key, simfil::ModelNode const& node) {
+        InspectionNode result;
+        result.key_ = std::move(key);
         switch (node.type()) {
-        case simfil::ValueType::Array:
-            return visitArray(std::move(key), node);
         case simfil::ValueType::Object:
-            return visitObject(std::move(key), node);
-        default:
-            return visitAtomic(std::move(key), node);
+            return visitObject(std::move(result.key_), node);
+        case simfil::ValueType::Array: {
+            result.type_ = InspectionValueType::ArrayBit;
+            uint32_t index = 0;
+            for (auto const& item : node) {
+                result.children_.push_back(visit(JsValue(index++), *item));
+            }
+            break;
         }
+        case simfil::ValueType::Bool:
+            result.value_ = JsValue(std::get<bool>(node.value()));
+            result.type_ = InspectionValueType::Boolean;
+            break;
+        case simfil::ValueType::Int:
+            result.value_ = JsValue(std::get<int64_t>(node.value()));
+            result.type_ = InspectionValueType::Number;
+            break;
+        case simfil::ValueType::Float:
+            result.value_ = JsValue(std::get<double>(node.value()));
+            result.type_ = InspectionValueType::Number;
+            break;
+        case simfil::ValueType::String: {
+            auto value = node.value();
+            if (auto string = std::get_if<std::string>(&value)) {
+                result.value_ = JsValue(*string);
+            }
+            else if (auto view = std::get_if<std::string_view>(&value)) {
+                result.value_ = JsValue(std::string(*view));
+            }
+            result.type_ = InspectionValueType::String;
+            break;
+        }
+        case simfil::ValueType::Bytes: {
+            auto value = node.value();
+            if (auto bytes = std::get_if<simfil::ByteArray>(&value)) {
+                result.value_ = JsValue(byteArrayToDisplayString(*bytes));
+            }
+            result.type_ = InspectionValueType::String;
+            break;
+        }
+        case simfil::ValueType::Undef:
+        case simfil::ValueType::TransientObject:
+        case simfil::ValueType::Null:
+        case simfil::ValueType::LAST_:
+            break;
+        }
+        return result;
     };
 
     if (model_->numRoots() == 0)
@@ -669,7 +629,9 @@ NativeJsValue TileSourceDataLayer::toObject() const
     if (!root)
         raise(root.error().message);
 
-    return *visit(JsValue("root"), **root);
+    auto inspectionRoot = visit(JsValue("root"), **root);
+    InspectionConverter::finalizeTree(inspectionRoot);
+    return *inspectionRoot.toJsValue(std::string_view{});
 }
 
 std::string TileSourceDataLayer::getError() const

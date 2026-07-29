@@ -1066,9 +1066,14 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         });
     }
 
-    assignInspectionNodeIds(root_);
-    buildPropagatedValueBubbles(root_);
+    finalizeTree(root_);
     return root_.childrenToJsValue(tile_->mapId());
+}
+
+void InspectionConverter::finalizeTree(InspectionNode& root)
+{
+    assignInspectionNodeIds(root);
+    buildPropagatedValueBubbles(root);
 }
 
 InspectionConverter::InspectionNodeScope InspectionConverter::push(
@@ -1612,6 +1617,12 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("nodeId", JsValue(nodeId_));
     if (mapId_)
         newDict.set("mapId", *mapId_);
+    if (address_)
+        newDict.set("address", *address_);
+    if (addressScope_)
+        newDict.set("addressScope", JsValue(true));
+    if (!schemaType_.empty())
+        newDict.set("schemaType", JsValue(schemaType_));
     if (!keyBubbles_.empty()) {
         auto bubbles = JsValue::List();
         for (auto const& bubble : keyBubbles_) {

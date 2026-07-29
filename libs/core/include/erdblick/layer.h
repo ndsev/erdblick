@@ -118,21 +118,7 @@ struct TileSourceDataLayer
     /** Obtain the error string of the layer, if there is one. */
     std::string getError() const;
 
-    /**
-     * Converts the `SourceDataLayer` hierarchy to a tree model compatible structure.
-     *
-     * **Layout:**
-     * ```json
-     * [
-     *   {
-     *     "data": {"key": "...", "value": ...},
-     *     "children": [{ ... }]
-     *   },
-     *   ...
-     * ]
-     * ```
-     * @return A `NativeJsValue` representing the hierarchical data structure.
-     */
+    /** Convert the source hierarchy to the shared inspection-node representation. */
     NativeJsValue toObject() const;
 
     /** Shared pointer to the underlying `mapget::TileSourceDataLayer`. */

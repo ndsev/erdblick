@@ -60,6 +60,34 @@ sourcedata-panel {
 }
 
 inspection-tree {
+  .filter-container {
+    .input-container {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+  }
+
+  .inspection-column-visibility-buttons {
+    align-self: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
+  .inspection-column-visibility-button {
+    display: inline-flex;
+
+    .p-button {
+      height: 1.75em;
+      min-width: 1.75em;
+      padding: 0;
+      width: 1.75em;
+    }
+
+    .material-symbols-outlined {
+      font-size: 1rem;
+    }
+  }
+
   .section-style {
     background-color: var(--p-highlight-background);
     margin-top: 1em;

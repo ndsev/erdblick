@@ -55,6 +55,9 @@ public:
         JsValue direction_;
         std::string geoJsonPath_;
         std::string nodeId_;
+        std::optional<JsValue> address_;
+        bool addressScope_ = false;
+        std::string schemaType_;
 
         /** Source-data backlink attached to an inspection node. */
         struct SourceDataReference {
@@ -88,6 +91,14 @@ public:
         /** Convert only the child array when the parent object already exists. */
         [[nodiscard]] JsValue childrenToJsValue(std::string_view const& mapId) const;
     };
+
+    /**
+     * Assigns stable row identities and computes propagated value summaries.
+     *
+     * Feature and source-data inspection both call this after constructing
+     * their tree so summary semantics cannot drift between the two views.
+     */
+    static void finalizeTree(InspectionNode& root);
 
     /**
      * RAII helper that temporarily pushes a child node onto the converter stack.

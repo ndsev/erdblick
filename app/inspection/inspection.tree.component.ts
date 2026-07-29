@@ -31,7 +31,9 @@ export interface Column {
     key: string,
     header: string,
     width: string,
-    transform: (colKey: string, rowData: any) => any
+    transform: (colKey: string, rowData: any) => any,
+    toggleable?: boolean,
+    toggleIcon?: string
 }
 
 /** User-facing switches that control which inspection fields participate in tree filtering. */
@@ -57,28 +59,49 @@ export class FeatureFilterOptions {
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
-                @if (showFilter()) {
+                @if (showFilter() || toggleableColumns().length) {
                     <div class="filter-container">
-                        <p-iconfield class="input-container">
-                            @if (filterOptions()) {
-                                <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
-                                             style="cursor: pointer"/>
-                            }
-                            <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
-                                   [(ngModel)]="filterString"
-                                   (ngModelChange)="onFilterInput($event)"
-                                   (input)="onFilterInput($any($event.target).value)"/>
-                            @if (filterString) {
-                                <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                            }
-                        </p-iconfield>
+                        @if (showFilter()) {
+                            <p-iconfield class="input-container">
+                                @if (filterOptions()) {
+                                    <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
+                                                 style="cursor: pointer"/>
+                                }
+                                <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
+                                       [(ngModel)]="filterString"
+                                       (ngModelChange)="onFilterInput($event)"
+                                       (input)="onFilterInput($any($event.target).value)"/>
+                                @if (filterString) {
+                                    <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                                }
+                            </p-iconfield>
+                        }
+                        @if (toggleableColumns().length) {
+                            <p-buttonGroup class="inspection-column-visibility-buttons">
+                                @for (col of toggleableColumns(); track col.key) {
+                                    <p-button class="inspection-column-visibility-button"
+                                              [severity]="isColumnVisible(col) ? 'primary' : 'secondary'"
+                                              [outlined]="!isColumnVisible(col)"
+                                              (click)="toggleColumnVisibility($event, col)"
+                                              [pTooltip]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'"
+                                              [tooltipOptions]="{appendTo: 'body'}"
+                                              tooltipPosition="bottom"
+                                              [attr.aria-pressed]="isColumnVisible(col)"
+                                              [attr.aria-label]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'">
+                                        <span class="material-symbols-outlined">
+                                            {{ col.toggleIcon || 'view_column' }}
+                                        </span>
+                                    </p-button>
+                                }
+                            </p-buttonGroup>
+                        }
                     </div>
                 }
             </ng-template>
 
             <ng-template pTemplate="colgroup">
                 <colgroup>
-                    @for (col of columns(); track col.key) {
+                    @for (col of visibleColumns(); track col.key) {
                         <col [style.width]="col.width"/>
                     }
                 </colgroup>
@@ -86,7 +109,7 @@ export class FeatureFilterOptions {
 
             <ng-template pTemplate="header">
                 <tr>
-                    @for (col of columns(); track col.key) {
+                    @for (col of visibleColumns(); track col.key) {
                         <th ttResizableColumn>
                             <div class="inspection-header-content">
                                 <span class="inspection-header-label">{{ col.header }}</span>
@@ -133,7 +156,7 @@ export class FeatureFilterOptions {
                         (mouseenter)="onRowHover(rowData)"
                         (mouseleave)="onRowHoverExit(rowData)"
                         [ngClass]="getRowClasses(rowData)">
-                        @for (col of columns(); track $index) {
+                        @for (col of visibleColumns(); track $index) {
                             <td [class]="getStyleClassByType(rowData) + ' inspection-tree-cell'"
                                 [pTooltip]="valueCellUsesBubblePopover(rowNode, rowData, col.key) ? '' : cellTooltip(rowNode, rowData, col.key)"
                                 tooltipPosition="left"
@@ -284,7 +307,7 @@ export class FeatureFilterOptions {
 
             <ng-template pTemplate="emptymessage">
                 <tr>
-                    <td [attr.colspan]="columns().length">No entries found.</td>
+                    <td [attr.colspan]="visibleColumns().length">No entries found.</td>
                 </tr>
             </ng-template>
         </p-treeTable>
@@ -340,6 +363,33 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     enableSourceDataNavigation = input<boolean>(true);
     featureIds = input<string[]>([]);
 
+    /** Returns columns currently participating in the table layout. */
+    protected visibleColumns(): Column[] {
+        return this.columns().filter(column => this.isColumnVisible(column));
+    }
+
+    /** Returns columns for which the caller requested a visibility control. */
+    protected toggleableColumns(): Column[] {
+        return this.columns().filter(column => column.toggleable);
+    }
+
+    /** Returns whether one column is currently shown. */
+    protected isColumnVisible(column: Column): boolean {
+        return !this.hiddenColumnKeys.has(column.key);
+    }
+
+    /** Toggles one optional column without mutating the caller-owned column definitions. */
+    protected toggleColumnVisibility(event: MouseEvent, column: Column): void {
+        event.stopPropagation();
+        if (this.hiddenColumnKeys.has(column.key)) {
+            this.hiddenColumnKeys.delete(column.key);
+        } else {
+            this.hiddenColumnKeys.add(column.key);
+        }
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
+
     filterFields: string[] = [
         "key",
         "value"
@@ -351,6 +401,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     filterString = "";
     private suppressFilterEmit = false;
     private lastEmittedFilterText = "";
+    private readonly hiddenColumnKeys = new Set<string>();
     protected fullExpansionActive = false;
     private expansionSnapshotBeforeFullExpand?: Map<string, boolean | undefined>;
     protected fullCollapseActive = false;
