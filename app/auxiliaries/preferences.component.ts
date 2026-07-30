@@ -49,6 +49,7 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
                 <p-tablist>
                     <p-tab value="general" data-testid="preferences-tab-general">General</p-tab>
                     <p-tab value="inspection" data-testid="preferences-tab-inspection">Inspect & Search</p-tab>
+                    <p-tab value="hover-labels" data-testid="preferences-tab-hover-labels">Hover Labels</p-tab>
                     <p-tab value="rendering" data-testid="preferences-tab-rendering">Rendering</p-tab>
                     <p-tab value="storage" data-testid="preferences-tab-storage">Storage</p-tab>
                 </p-tablist>
@@ -217,6 +218,79 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
                                           icon="pi pi-check"
                                           [disabled]="!locationSearchResultLimitChanged"></p-button>
                             </div>
+                        </div>
+                    </p-tabpanel>
+
+                    <p-tabpanel value="hover-labels">
+                        <div class="hover-label-preferences" data-testid="hover-label-preferences">
+                            <section class="hover-label-options" aria-labelledby="hover-label-options-title">
+                                <h3 id="hover-label-options-title">Display options</h3>
+                                <div class="button-container">
+                                    <label for="hover-label-feature-id">Feature ID</label>
+                                    <p-toggleswitch inputId="hover-label-feature-id"
+                                                    data-testid="hover-label-feature-id"
+                                                    [(ngModel)]="stateService.hoverLabelFeatureId"/>
+                                </div>
+                                <div class="button-container">
+                                    <label for="hover-label-search-match">Search match</label>
+                                    <p-toggleswitch inputId="hover-label-search-match"
+                                                    data-testid="hover-label-search-match"
+                                                    [(ngModel)]="stateService.hoverLabelSearchMatch"/>
+                                </div>
+                                <div class="button-container">
+                                    <label for="hover-label-validity">Validity</label>
+                                    <p-toggleswitch inputId="hover-label-validity"
+                                                    data-testid="hover-label-validity"
+                                                    [(ngModel)]="stateService.hoverLabelValidity"/>
+                                </div>
+                                <div class="button-container">
+                                    <label for="hover-label-direction">Direction</label>
+                                    <p-toggleswitch inputId="hover-label-direction"
+                                                    data-testid="hover-label-direction"
+                                                    [(ngModel)]="stateService.hoverLabelDirection"/>
+                                </div>
+                                <div class="hover-label-preview-notice">
+                                    Preview only. These options are not yet applied to map hover labels.
+                                </div>
+                            </section>
+                            <section class="hover-label-preview-section" aria-labelledby="hover-label-preview-title">
+                                <h3 id="hover-label-preview-title">Preview</h3>
+                                <div class="hover-label-preview-frame">
+                                    <div class="hover-label-surface hover-label-preview-card"
+                                         data-testid="hover-label-preview">
+                                        @if (stateService.hoverLabelFeatureId) {
+                                            <div class="hover-label-preview-row">
+                                                <span>Feature ID</span>
+                                                <strong>feature-42</strong>
+                                            </div>
+                                        }
+                                        @if (stateService.hoverLabelSearchMatch) {
+                                            <div class="hover-label-preview-row">
+                                                <span>Search match</span>
+                                                <strong>category: example</strong>
+                                            </div>
+                                        }
+                                        @if (stateService.hoverLabelValidity) {
+                                            <div class="hover-label-preview-row">
+                                                <span>Validity</span>
+                                                <strong>2026-01-01 – 2026-12-31</strong>
+                                            </div>
+                                        }
+                                        @if (stateService.hoverLabelDirection) {
+                                            <div class="hover-label-preview-row">
+                                                <span>Direction</span>
+                                                <strong>Forward</strong>
+                                            </div>
+                                        }
+                                        @if (!stateService.hoverLabelFeatureId
+                                            && !stateService.hoverLabelSearchMatch
+                                            && !stateService.hoverLabelValidity
+                                            && !stateService.hoverLabelDirection) {
+                                            <div class="hover-label-preview-empty">No label content selected</div>
+                                        }
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </p-tabpanel>
 

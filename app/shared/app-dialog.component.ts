@@ -14,6 +14,24 @@ import {
 } from '@angular/core';
 import {Dialog, DialogModule} from 'primeng/dialog';
 import {AppDialogLayout, AppStateService} from './appstate.service';
+import {
+    AppDialogBounds,
+    AppDialogResizeCorner,
+    AppDialogResizeLimits,
+    resizeAppDialogBounds
+} from './app-dialog-resize';
+
+interface AppDialogResizeSession {
+    pointerId: number;
+    corner: AppDialogResizeCorner;
+    startPointerX: number;
+    startPointerY: number;
+    startBounds: AppDialogBounds;
+    limits: AppDialogResizeLimits;
+    handle: HTMLElement;
+    bodyCursor: string;
+    bodyUserSelect: string;
+}
 
 @Component({
     selector: 'app-dialog',
@@ -28,7 +46,7 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
                   [modal]="modal"
                   [closable]="closable"
                   [draggable]="draggable"
-                  [resizable]="resizable"
+                  [resizable]="false"
                   [style]="effectiveStyle"
                   [position]="position"
                   [showHeader]="showHeader"
@@ -45,9 +63,8 @@ import {AppDialogLayout, AppStateService} from './appstate.service';
                   [maskStyleClass]="maskStyleClass"
                   (onShow)="handleOnShow($event)"
                   (onHide)="handleOnHide($event)"
-                  (onResizeInit)="onResizeInit.emit($event)"
                   (onDragEnd)="handleOnDragEnd($event)"
-                  (onResizeEnd)="handleOnResizeEnd($event)">
+                  >
             @if (projectedHeaderTemplate) {
                 <ng-template #header>
                     <ng-container *ngTemplateOutlet="projectedHeaderTemplate"></ng-container>
@@ -119,6 +136,9 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     private detachDockCuePointerMove?: () => void;
     private detachDockCueUp?: () => void;
     private detachDockCuePointerUp?: () => void;
+    private resizeHandles: HTMLElement[] = [];
+    private detachResizeHandleListeners: Array<() => void> = [];
+    private resizeSession?: AppDialogResizeSession;
 
     constructor(private readonly stateService: AppStateService,
                 private readonly renderer: Renderer2) {
@@ -131,11 +151,15 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             const becameVisible = changes['visible']?.currentValue === true;
             this.refreshEffectiveStyle(becameVisible);
         }
+        if (changes['resizable'] && this.visible) {
+            this.syncResizeHandles();
+        }
     }
 
     /** Cancels pending layout reveal work when the wrapper is destroyed. */
     ngOnDestroy(): void {
         this.cancelRevealPersistedLayout();
+        this.removeResizeHandles();
         this.detachDockDropCueTracking();
         this.clearDockDropCue();
     }
@@ -178,6 +202,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     protected handleOnShow(event: any): void {
         this.syncPersistedOpenState(true);
         this.applyOrCapturePersistedLayout();
+        this.syncResizeHandles();
         this.bindDockDropCue();
         this.onShow.emit(event);
     }
@@ -185,6 +210,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     /** Stores closed state and forwards the hide event. */
     protected handleOnHide(event: any): void {
         this.cancelRevealPersistedLayout();
+        this.removeResizeHandles();
         this.syncPersistedOpenState(false);
         this.refreshEffectiveStyle(false);
         this.detachDockDropCueTracking();
@@ -204,6 +230,165 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     protected handleOnResizeEnd(event: any): void {
         this.persistCurrentLayout();
         this.onResizeEnd.emit(event);
+    }
+
+    /** Installs or removes the custom four-corner resize handles for the current dialog state. */
+    private syncResizeHandles(): void {
+        this.removeResizeHandles();
+        const container = this.container();
+        if (!this.resizable || !container) {
+            return;
+        }
+
+        for (const corner of ["nw", "ne", "sw", "se"] as const) {
+            const handle = this.renderer.createElement("div") as HTMLElement;
+            this.renderer.addClass(handle, "app-dialog-resize-handle");
+            this.renderer.addClass(handle, `app-dialog-resize-${corner}`);
+            this.renderer.setAttribute(handle, "data-resize-corner", corner);
+            this.renderer.setAttribute(handle, "aria-hidden", "true");
+            this.renderer.appendChild(container, handle);
+            this.resizeHandles.push(handle);
+            this.detachResizeHandleListeners.push(
+                this.renderer.listen(handle, "pointerdown", (event: PointerEvent) => {
+                    this.beginResize(event, corner, handle);
+                }),
+                this.renderer.listen(handle, "pointermove", (event: PointerEvent) => {
+                    this.continueResize(event);
+                }),
+                this.renderer.listen(handle, "pointerup", (event: PointerEvent) => {
+                    this.finishResize(event);
+                }),
+                this.renderer.listen(handle, "pointercancel", (event: PointerEvent) => {
+                    this.finishResize(event);
+                }),
+                this.renderer.listen(handle, "lostpointercapture", (event: PointerEvent) => {
+                    this.finishResize(event);
+                })
+            );
+        }
+    }
+
+    /** Starts one pointer-captured corner-resize gesture from the current rendered bounds. */
+    private beginResize(event: PointerEvent, corner: AppDialogResizeCorner, handle: HTMLElement): void {
+        if (event.button !== 0 || this.resizeSession) {
+            return;
+        }
+        const container = this.container();
+        if (!container) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = container.getBoundingClientRect();
+        const computedStyle = window.getComputedStyle(container);
+        const body = document.body;
+        this.resizeSession = {
+            pointerId: event.pointerId,
+            corner,
+            startPointerX: event.clientX,
+            startPointerY: event.clientY,
+            startBounds: {
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
+            },
+            limits: this.resizeLimits(computedStyle),
+            handle,
+            bodyCursor: body.style.cursor,
+            bodyUserSelect: body.style.userSelect
+        };
+
+        this.applyPosition(container, {left: rect.left, top: rect.top});
+        container.style.width = `${rect.width}px`;
+        container.style.height = `${rect.height}px`;
+        body.style.cursor = window.getComputedStyle(handle).cursor;
+        body.style.userSelect = "none";
+        handle.setPointerCapture(event.pointerId);
+        this.onResizeInit.emit(event);
+    }
+
+    /** Applies the latest pointer delta to the active resize session. */
+    private continueResize(event: PointerEvent): void {
+        const session = this.resizeSession;
+        if (!session || session.pointerId !== event.pointerId) {
+            return;
+        }
+        const container = this.container();
+        if (!container) {
+            return;
+        }
+
+        event.preventDefault();
+        const bounds = resizeAppDialogBounds(
+            session.startBounds,
+            event.clientX - session.startPointerX,
+            event.clientY - session.startPointerY,
+            session.corner,
+            {
+                ...session.limits,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight
+            }
+        );
+        container.style.left = `${bounds.left}px`;
+        container.style.top = `${bounds.top}px`;
+        container.style.width = `${bounds.width}px`;
+        container.style.height = `${bounds.height}px`;
+    }
+
+    /** Completes or cancels the active resize gesture and preserves the final valid rectangle. */
+    private finishResize(event: PointerEvent): void {
+        const session = this.resizeSession;
+        if (!session || session.pointerId !== event.pointerId) {
+            return;
+        }
+        this.resizeSession = undefined;
+        if (session.handle.hasPointerCapture(session.pointerId)) {
+            session.handle.releasePointerCapture(session.pointerId);
+        }
+        document.body.style.cursor = session.bodyCursor;
+        document.body.style.userSelect = session.bodyUserSelect;
+        this.handleOnResizeEnd(event);
+    }
+
+    /** Reads finite CSS resize constraints and clamps them to the current viewport. */
+    private resizeLimits(computedStyle: CSSStyleDeclaration): AppDialogResizeLimits {
+        const minWidth = this.cssPixelValue(computedStyle.minWidth, 1);
+        const minHeight = this.cssPixelValue(computedStyle.minHeight, 1);
+        const maxWidth = this.cssPixelValue(computedStyle.maxWidth, window.innerWidth);
+        const maxHeight = this.cssPixelValue(computedStyle.maxHeight, window.innerHeight);
+        return {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            minWidth,
+            minHeight,
+            maxWidth: Math.max(minWidth, Math.min(maxWidth, window.innerWidth)),
+            maxHeight: Math.max(minHeight, Math.min(maxHeight, window.innerHeight))
+        };
+    }
+
+    /** Converts one computed CSS pixel value to a finite number or returns its fallback. */
+    private cssPixelValue(value: string, fallback: number): number {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    /** Removes custom handles and restores body interaction styles if a resize was interrupted. */
+    private removeResizeHandles(): void {
+        const session = this.resizeSession;
+        if (session) {
+            this.resizeSession = undefined;
+            document.body.style.cursor = session.bodyCursor;
+            document.body.style.userSelect = session.bodyUserSelect;
+        }
+        this.detachResizeHandleListeners.forEach(detach => detach());
+        this.detachResizeHandleListeners = [];
+        for (const handle of this.resizeHandles) {
+            this.renderer.removeChild(handle.parentNode, handle);
+        }
+        this.resizeHandles = [];
     }
 
     /** Applies an existing layout or captures the first rendered layout. */

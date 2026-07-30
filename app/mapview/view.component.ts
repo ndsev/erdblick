@@ -127,7 +127,7 @@ interface PreparedContextMenuPosition {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }
         <div #popoverAnchor class="popover-anchor"></div>
-        <p-popover #popover styleClass="feature-hover-popover">
+        <p-popover #popover styleClass="feature-hover-popover hover-label-surface">
             <ng-template pTemplate="content">
                 @for (content of featureIdsContent; track $index) {
                     {{ content }}<br>

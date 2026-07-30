@@ -1,4 +1,15 @@
 @media only screen and (max-width: 56em) {
+  .pref-dialog,
+  .diagnostics-performance-dialog,
+  .diagnostics-log-dialog,
+  .map-layer-dialog,
+  .editor-dialog,
+  .style-compare-dialog {
+    .app-dialog-resize-handle {
+      display: none;
+    }
+  }
+
   .maps-close-button {
     position: absolute;
     top: 3em;

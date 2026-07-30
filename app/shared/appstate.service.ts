@@ -975,6 +975,30 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly hoverLabelFeatureIdState = this.createState<boolean>({
+        name: 'hoverLabelFeatureId',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly hoverLabelSearchMatchState = this.createState<boolean>({
+        name: 'hoverLabelSearchMatch',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly hoverLabelValidityState = this.createState<boolean>({
+        name: 'hoverLabelValidity',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly hoverLabelDirectionState = this.createState<boolean>({
+        name: 'hoverLabelDirection',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
         name: 'inspectionComparisonState',
         defaultValue: null,
@@ -2257,6 +2281,14 @@ export class AppStateService implements OnDestroy {
     set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
     get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
     set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
+    get hoverLabelFeatureId() {return this.hoverLabelFeatureIdState.getValue();}
+    set hoverLabelFeatureId(val: boolean) {this.hoverLabelFeatureIdState.next(!!val);}
+    get hoverLabelSearchMatch() {return this.hoverLabelSearchMatchState.getValue();}
+    set hoverLabelSearchMatch(val: boolean) {this.hoverLabelSearchMatchState.next(!!val);}
+    get hoverLabelValidity() {return this.hoverLabelValidityState.getValue();}
+    set hoverLabelValidity(val: boolean) {this.hoverLabelValidityState.next(!!val);}
+    get hoverLabelDirection() {return this.hoverLabelDirectionState.getValue();}
+    set hoverLabelDirection(val: boolean) {this.hoverLabelDirectionState.next(!!val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}

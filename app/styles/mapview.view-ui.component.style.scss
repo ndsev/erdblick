@@ -207,14 +207,16 @@
   }
 }
 
-.p-popover.feature-hover-popover {
-  pointer-events: none;
+.hover-label-surface {
   background: color-mix(in srgb, var(--p-content-background) 68%, transparent);
   border-color: color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
   backdrop-filter: blur(2px);
+}
+
+.p-popover.feature-hover-popover {
+  pointer-events: none;
 
   .p-popover-content {
     background: transparent;
   }
 }
-

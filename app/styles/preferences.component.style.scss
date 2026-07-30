@@ -2,8 +2,8 @@
   margin: 0;
 
   .p-dialog {
-    min-width: 32em;
-    width: 32em;
+    min-width: 44em;
+    width: 46em;
     max-width: calc(100vw - 1em);
   }
 
@@ -84,6 +84,97 @@
     display: flex;
     justify-content: flex-end;
     margin-top: 0.5em;
+  }
+
+  .hover-label-preferences {
+    display: grid;
+    grid-template-columns: minmax(15em, 0.9fr) minmax(20em, 1.1fr);
+    gap: 1.25em;
+    min-height: 18em;
+
+    h3 {
+      margin: 0 0 0.75em;
+      font-size: 1em;
+    }
+  }
+
+  .hover-label-options,
+  .hover-label-preview-section {
+    min-width: 0;
+  }
+
+  .hover-label-preview-notice {
+    margin-top: 1em;
+    color: var(--p-text-muted-color);
+    font-size: 0.85em;
+    line-height: 1.35;
+  }
+
+  .hover-label-preview-frame {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 14em;
+    padding: 1.25em;
+    overflow: hidden;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: var(--p-border-radius-md);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--p-primary-color) 12%, transparent), transparent 55%),
+      var(--p-surface-100);
+  }
+
+  .hover-label-preview-card {
+    position: relative;
+    width: min(100%, 22em);
+    padding: 0.75em;
+    border: 1px solid color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
+    border-radius: var(--p-border-radius-md);
+    box-shadow: var(--p-overlay-popover-shadow);
+
+    &::before {
+      position: absolute;
+      bottom: -0.45em;
+      left: 1.25em;
+      width: 0.8em;
+      height: 0.8em;
+      border-right: 1px solid color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
+      background: inherit;
+      content: "";
+      transform: rotate(45deg);
+    }
+  }
+
+  .hover-label-preview-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(6.5em, auto) minmax(0, 1fr);
+    gap: 0.75em;
+    padding: 0.2em 0;
+    z-index: 1;
+
+    span {
+      color: var(--p-text-muted-color);
+    }
+
+    strong {
+      overflow-wrap: anywhere;
+      font-weight: 600;
+    }
+  }
+
+  .hover-label-preview-empty {
+    position: relative;
+    color: var(--p-text-muted-color);
+    text-align: center;
+    z-index: 1;
+  }
+
+  @media only screen and (max-width: 42em) {
+    .hover-label-preferences {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 }
 

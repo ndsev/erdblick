@@ -969,6 +969,22 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('provides non-URL hover-label defaults for the preview preferences', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(service.hoverLabelFeatureId).toBe(true);
+        expect(service.hoverLabelSearchMatch).toBe(false);
+        expect(service.hoverLabelValidity).toBe(false);
+        expect(service.hoverLabelDirection).toBe(false);
+
+        const params = (service as any).serializeUrlV2();
+        expect(JSON.stringify(params)).not.toContain('hoverLabel');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('seeds each newly added view from the previous view when the view count keeps increasing', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;

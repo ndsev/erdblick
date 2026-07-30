@@ -1,3 +1,98 @@
+.p-dialog {
+  .app-dialog-resize-handle {
+    position: absolute;
+    display: block;
+    width: 3em;
+    height: 3em;
+    z-index: 90;
+    touch-action: none;
+
+    &::after {
+      position: absolute;
+      width: 3em;
+      height: 3em;
+      box-sizing: border-box;
+      content: "";
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+
+    &:hover::after {
+      opacity: 0.8;
+    }
+  }
+
+  .app-dialog-resize-nw {
+    top: 0;
+    right: auto;
+    bottom: auto;
+    left: 0;
+    cursor: nwse-resize;
+
+    &::after {
+      top: 0.1em;
+      left: 0.1em;
+      border-top: 0.2em solid currentColor;
+      border-left: 0.2em solid currentColor;
+      border-radius: 0.75em 0 0 0;
+    }
+  }
+
+  .app-dialog-resize-ne {
+    top: 0;
+    right: 0;
+    bottom: auto;
+    left: auto;
+    cursor: nesw-resize;
+
+    &::after {
+      top: 0.1em;
+      right: 0.1em;
+      border-top: 0.2em solid currentColor;
+      border-right: 0.2em solid currentColor;
+      border-radius: 0 0.75em 0 0;
+    }
+  }
+
+  .app-dialog-resize-sw {
+    top: auto;
+    right: auto;
+    bottom: 0;
+    left: 0;
+    cursor: nesw-resize;
+
+    &::after {
+      bottom: 0.1em;
+      left: 0.1em;
+      border-bottom: 0.2em solid currentColor;
+      border-left: 0.2em solid currentColor;
+      border-radius: 0 0 0 0.75em;
+    }
+  }
+
+  .app-dialog-resize-se {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    cursor: nwse-resize;
+
+    &::after {
+      right: 0.1em;
+      bottom: 0.1em;
+      border-right: 0.2em solid currentColor;
+      border-bottom: 0.2em solid currentColor;
+      border-radius: 0 0 .75em 0;
+    }
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .p-dialog .app-dialog-resize-handle::after {
+    opacity: 0.5;
+  }
+}
+
 .alert-dialog {
   .p-dialog-mask {
     z-index: 9001 !important;
@@ -216,4 +311,3 @@
 .app-confirm-popup-error .app-confirm-popup-icon {
   color: var(--p-red-500, var(--p-button-danger-background));
 }
-
