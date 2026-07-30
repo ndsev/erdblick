@@ -36,7 +36,8 @@ This separation keeps feature inspection and raw-payload inspection from competi
 Once the panel is open:
 
 - use the filter box to find field names or values
-- use the Address and Type buttons next to the filter to show or hide those columns
+- use the Address and Type buttons next to the filter to show or hide those columns;
+  both are hidden initially unless enabled under **Preferences → Source data columns**
 - expand nodes to inspect structure, offsets, and values
 - switch between raw layers with the dropdown when a tile exposes several SourceData entries
 - inspect metadata-only layers such as service definition or registry metadata without leaving the same overall workflow
@@ -44,6 +45,9 @@ Once the panel is open:
 Collapsed structures summarize descendant scalar values with the same value
 bubbles used by feature inspection. Selecting a bubble expands and highlights
 its source field, while expanding the parent hides the redundant summary.
+Aggregates show at most 100 values followed by an ellipsis, keeping very wide
+payloads responsive. Initial expansion opens each top-level node and continues
+only through branches that have exactly one child.
 
 SQL-backed SourceData additionally exposes the executed query in a collapsible
 **SQL query** section. Query rows appear directly as **Result row 1**, **Result

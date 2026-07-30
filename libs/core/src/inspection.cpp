@@ -786,10 +786,11 @@ bool isValidityNode(InspectionNode const& node)
     return node.hoverId_.find(":validity#") != std::string::npos;
 }
 
-/** Build the special one-bubble-per-validity representation. */
-std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
+/** Build the bounded one-bubble-per-validity representation. */
+BubblePropagation validityBubblesForNode(InspectionNode const& node)
 {
     std::deque<ValueBubble> bubbles;
+    auto truncated = false;
     for (auto const& child : node.children_) {
         auto const hasValidityHoverId = child.hoverId_.find(":validity#") != std::string::npos;
         auto const looksLikeIndexedValidity = child.key_.type() == JsValue::Type::Number
@@ -805,11 +806,18 @@ std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
         if (compact.label_ == "validity") {
             continue;
         }
+        if (bubbles.size() == kMaxAggregateValues) {
+            truncated = true;
+            break;
+        }
         auto kind = std::move(compact.kind_);
         bubbles.push_back(makeValueBubble(std::move(compact.label_), child.nodeId_, kind, "validity"));
     }
     if (!bubbles.empty()) {
-        return bubbles;
+        return {
+            .bubbles_ = std::move(bubbles),
+            .truncated_ = truncated
+        };
     }
     auto compact = compactValidityBubble(node);
     if (compact.label_ == "validity") {
@@ -817,7 +825,7 @@ std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
     }
     auto kind = std::move(compact.kind_);
     bubbles.push_back(makeValueBubble(std::move(compact.label_), node.nodeId_, kind, "validity"));
-    return bubbles;
+    return {.bubbles_ = std::move(bubbles)};
 }
 
 /** Convert a bubble tree into the JS shape consumed by the inspection table. */
@@ -988,8 +996,9 @@ BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_
     }
 
     if (isValidityNode(node)) {
-        node.valueBubbles_ = validityBubblesForNode(node);
-        return {.bubbles_ = node.valueBubbles_};
+        auto propagation = validityBubblesForNode(node);
+        setNodeValueBubbles(node, propagation.bubbles_, propagation.truncated_);
+        return propagation;
     }
 
     auto daysOfWeekBubbles = daysOfWeekBubblesForNode(node);
