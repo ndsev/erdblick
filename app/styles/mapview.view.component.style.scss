@@ -8,6 +8,19 @@ map-view {
   width: 100%;
   position: relative;
 
+  .first-person-exit-button {
+    position: absolute;
+    top: 2.75em;
+    left: 50%;
+    z-index: 110;
+    transform: translateX(-50%);
+
+    .p-button {
+      box-shadow: var(--p-dialog-shadow);
+      white-space: nowrap;
+    }
+  }
+
   .viewsync-select {
     position: absolute;
     right: 0.25em;
@@ -55,6 +68,12 @@ map-view {
       .material-symbols-outlined {
         color: var(--p-button-success-color) !important;
       }
+    }
+  }
+
+  @media only screen and (max-width: 56em) {
+    .first-person-exit-button {
+      top: 3.35em;
     }
   }
 

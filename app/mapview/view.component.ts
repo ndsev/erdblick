@@ -81,6 +81,18 @@ interface PreparedContextMenuPosition {
                 </div>
             </div>
         }
+        @if (mapView?.isFirstPersonViewActive()) {
+            <p-button class="first-person-exit-button"
+                      [attr.data-testid]="'exit-first-person-view-' + viewIndex()"
+                      label="Exit First Person View"
+                      severity="primary"
+                      size="small"
+                      (onClick)="exitFirstPersonView()">
+                <ng-template #icon let-iconClass="class">
+                    <span [class]="iconClass + ' material-symbols-outlined'">ar_on_you</span>
+                </ng-template>
+            </p-button>
+        }
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
                 @for (option of stateService.syncOptions; track option.code) {
@@ -698,6 +710,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
         });
         this.cdr.markForCheck();
+    }
+
+    /** Leaves this renderer's ephemeral first-person camera and restores its map camera. */
+    protected exitFirstPersonView(): void {
+        const mapView = this.mapView;
+        if (!mapView?.isFirstPersonViewActive()) {
+            return;
+        }
+        this.ngZone.runOutsideAngular(() => mapView.exitFirstPersonView());
     }
 
     /** Prepares enter only for an exact 3D feature target, while exit remains available over empty space. */
