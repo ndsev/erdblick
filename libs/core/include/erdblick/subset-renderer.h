@@ -281,13 +281,7 @@ private:
     std::unordered_map<std::string, size_t> runtimeIssueIndices_;
     std::unordered_set<std::string> renderedRelationEndpointParts_;
     std::unordered_map<uint32_t, uint32_t> featureOffsetSlotsByRule_;
-    struct AttributeOffsetState {
-        uint32_t attributeIndex =
-            mapget::AttributeValidityEntry::InvalidAttributeIndex;
-        uint32_t slot = 0;
-        bool initialized = false;
-    };
-    std::unordered_map<std::string, AttributeOffsetState>
+    std::unordered_map<std::string, uint32_t>
         attributeOffsetSlotsByFeature_;
 
     mutable bool hasCoordinateOriginWgs_ = false;

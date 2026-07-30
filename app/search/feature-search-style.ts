@@ -20,6 +20,7 @@ import type {
 import type {
     StyleFilterPlan
 } from "../mapdata/styled-mapget-layer.model";
+import {searchStyleColorProperties} from "./search-style-color.util";
 
 export interface CompiledFeatureSearchStyle {
     source: string;
@@ -173,16 +174,7 @@ function applyColor(
     target: Record<string, unknown>,
     color: FeatureSearchColorMode
 ): void {
-    if (color.mode === "solid") {
-        target["color"] = color.color;
-        return;
-    }
-    target["color-scale"] = {
-        mode: color.mode === "gradient" ? "linear" : "categorical",
-        expression: color.field,
-        stops: color.stops.map(stop => [stop.value, stop.color]),
-        ...(color.fallbackColor ? {fallback: color.fallbackColor} : {})
-    };
+    Object.assign(target, searchStyleColorProperties(color));
 }
 
 function labelColor(color: FeatureSearchColorMode): string {

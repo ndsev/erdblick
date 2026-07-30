@@ -147,7 +147,8 @@ export class TileSubsetLayerRenderService {
     private readonly latestSignatureByVisualization = new Map<string, string>();
     private initialization: Promise<void> = Promise.resolve();
     private nextTaskId = 0;
-    private latestFrameTimeMs = 0;
+    private latestNativeRenderMs = 0;
+    private readonly deckFrameTimeMsByView = new Map<number, number>();
     private completedTaskCount = 0;
     private completedTileCount = 0;
     private releasedTaskCount = 0;
@@ -223,7 +224,19 @@ export class TileSubsetLayerRenderService {
     }
 
     currentFrameTimeMs(): number {
-        return this.latestFrameTimeMs;
+        return Math.max(0, ...this.deckFrameTimeMsByView.values());
+    }
+
+    /** Records one complete Deck screen-pass duration for diagnostics. */
+    recordDeckFrameTime(viewIndex: number, milliseconds: number): void {
+        if (Number.isFinite(milliseconds) && milliseconds >= 0) {
+            this.deckFrameTimeMsByView.set(viewIndex, milliseconds);
+        }
+    }
+
+    /** Removes the last Deck timing when its logical view is destroyed. */
+    clearDeckFrameTime(viewIndex: number): void {
+        this.deckFrameTimeMsByView.delete(viewIndex);
     }
 
     debugSnapshot(): TileSubsetLayerRenderDebugSnapshot {
@@ -287,7 +300,7 @@ export class TileSubsetLayerRenderService {
                     .map(([size, count]) => [String(size), count])
             ),
             latestRoundTripMs: this.latestRoundTripMs,
-            latestNativeMs: this.latestFrameTimeMs,
+            latestNativeMs: this.latestNativeRenderMs,
             averageRoundTripMs: this.completedTaskCount
                 ? this.totalRoundTripMs / this.completedTaskCount
                 : 0,
@@ -555,7 +568,7 @@ export class TileSubsetLayerRenderService {
                     error: _error,
                     ...buffers
                 } = result;
-                this.latestFrameTimeMs = Number.isFinite(buffers.timings.totalMs)
+                this.latestNativeRenderMs = Number.isFinite(buffers.timings.totalMs)
                     ? buffers.timings.totalMs
                     : 0;
                 const blockTiles = Math.max(1, pending.task.tileIds.length);

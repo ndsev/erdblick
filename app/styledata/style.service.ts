@@ -9,7 +9,10 @@ import {
     catchError, Subject
 } from "rxjs";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {
+    coreLib,
+    uint8ArrayToWasmOrThrow
+} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {filter} from "rxjs/operators";
 import {shortId4, sipHash64Hex} from "./hash";
@@ -650,6 +653,12 @@ export class StyleService {
     ): StyleValidationReport {
         const parsed = this.parseWasmStyle(styleString, sourceRef);
         if (!parsed) {
+            const sourceHash =
+                sourceRef.sourceHash ?? sipHash64Hex(styleString);
+            if (this.lastValidationReport?.source.sourceHash ===
+                sourceHash) {
+                return this.lastValidationReport;
+            }
             this.styleValidationReportService.clearForSource(sourceRef);
             const report = this.createClientValidationFailureReport(styleString, sourceRef, 'Style source could not be parsed.');
             this.styleValidationReportService.recordReport(report, sourceRef);
@@ -676,38 +685,65 @@ export class StyleService {
             sourceHash: sipHash64Hex(styleString)
         } as StyleSourceRef;
 
-        const result = uint8ArrayToWasm(
-            (wasmBuffer: any) => {
-                const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
-                if (featureLayerStyle) {
-                    const report = this.readWasmValidationReport(featureLayerStyle, fallbackSourceRef, styleString);
-                    if (!report.loadable || ((featureLayerStyle as any).isValid && !(featureLayerStyle as any).isValid())) {
-                        featureLayerStyle.delete?.();
-                        return [undefined, [], report];
+        let result: unknown;
+        try {
+            result = uint8ArrayToWasmOrThrow(
+                (wasmBuffer: any) => {
+                    const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
+                    if (featureLayerStyle) {
+                        const report = this.readWasmValidationReport(featureLayerStyle, fallbackSourceRef, styleString);
+                        if (!report.loadable || ((featureLayerStyle as any).isValid && !(featureLayerStyle as any).isValid())) {
+                            featureLayerStyle.delete?.();
+                            return [undefined, [], report];
+                        }
+                        // Transport FeatureStyleOptions from WASM array to JS.
+                        const options: FeatureStyleOptionWithStringType[] = [];
+                        const wasmOptions = featureLayerStyle.options();
+                        for (let i = 0; i < wasmOptions.size(); ++i) {
+                            const option = wasmOptions.get(i) as FeatureStyleOptionWithStringType;
+                            // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
+                            if (option.type === coreLib.FeatureStyleOptionType.Bool) {
+                                option.type = "Bool";
+                            }
+                            if (option.type === coreLib.FeatureStyleOptionType.Color) {
+                                option.type = "Color";
+                            }
+                            if (option.type === coreLib.FeatureStyleOptionType.String) {
+                                option.type = "String";
+                            }
+                            options.push(option);
+                        }
+                        wasmOptions.delete();
+                        return [featureLayerStyle, options, report];
                     }
-                    // Transport FeatureStyleOptions from WASM array to JS.
-                    const options: FeatureStyleOptionWithStringType[] = [];
-                    const wasmOptions = featureLayerStyle.options();
-                    for (let i = 0; i < wasmOptions.size(); ++i) {
-                        const option = wasmOptions.get(i) as FeatureStyleOptionWithStringType;
-                        // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
-                        if (option.type === coreLib.FeatureStyleOptionType.Bool) {
-                            option.type = "Bool";
-                        }
-                        if (option.type === coreLib.FeatureStyleOptionType.Color) {
-                            option.type = "Color";
-                        }
-                        if (option.type === coreLib.FeatureStyleOptionType.String) {
-                            option.type = "String";
-                        }
-                        options.push(option);
-                    }
-                    wasmOptions.delete();
-                    return [featureLayerStyle, options, report];
-                }
-                return undefined;
-            },
-            styleUint8Array);
+                    return undefined;
+                },
+                styleUint8Array);
+        } catch (error) {
+            const detail =
+                error instanceof Error
+                    ? error.message
+                    : String(error);
+            const message =
+                `Style source could not be parsed by WASM: ${detail}`;
+            console.error(
+                `WASM style parsing failed for "${yamlStyleName}".`,
+                error
+            );
+            this.erroredStyleIds.set(
+                yamlStyleName,
+                detail || "WASM Parse Error");
+            const report =
+                this.createClientValidationFailureReport(
+                    styleString,
+                    fallbackSourceRef,
+                    message);
+            this.lastValidationReport = report;
+            this.styleValidationReportService.recordReport(
+                report,
+                fallbackSourceRef);
+            return undefined;
+        }
 
         if (result) {
             const [featureLayerStyle, options, report] = result as [
@@ -726,6 +762,7 @@ export class StyleService {
                 report?.source.styleName ?? yamlStyleName,
                 report?.issues[0]?.message ?? 'Style validation failed');
             if (report) {
+                this.lastValidationReport = report;
                 this.styleValidationReportService.recordReport(report, fallbackSourceRef);
             }
             return undefined;
@@ -733,8 +770,15 @@ export class StyleService {
 
         console.error(`Encountered Uint8Array parsing issue in style "${yamlStyleName}" for the following YAML data:\n${styleString}`)
         this.erroredStyleIds.set(yamlStyleName, "YAML Parse Error");
+        const report =
+            this.createClientValidationFailureReport(
+                styleString,
+                fallbackSourceRef,
+                'Style source could not be parsed by WASM.');
+        this.lastValidationReport = report;
         this.styleValidationReportService.recordReport(
-            this.createClientValidationFailureReport(styleString, fallbackSourceRef, 'Style source could not be parsed by WASM.'));
+            report,
+            fallbackSourceRef);
         return undefined;
     }
 

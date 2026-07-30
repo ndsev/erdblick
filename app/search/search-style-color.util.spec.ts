@@ -13,12 +13,52 @@ import {
     gradientStopsToDraft,
     gradientValueTags,
     normalizeHexColor,
+    searchStyleColorProperties,
     serializableCategoryStops,
     serializableGradientStops,
     sortedGradientStopDrafts
 } from "./search-style-color.util";
 
 describe("search style color helpers", () => {
+    it("uses the fallback while a color scale has no usable stops", () => {
+        expect(searchStyleColorProperties({
+            mode: "categories",
+            field: "warningSign",
+            stops: [],
+            fallbackColor: "#123456"
+        })).toEqual({color: "#123456"});
+
+        expect(searchStyleColorProperties({
+            mode: "gradient",
+            field: "speed",
+            stops: [{value: "not-a-number", color: "#ffffff"}],
+            fallbackColor: "#654321"
+        })).toEqual({color: "#654321"});
+    });
+
+    it("normalizes linear stops into deterministic validator-safe order", () => {
+        expect(searchStyleColorProperties({
+            mode: "gradient",
+            field: "speed",
+            stops: [
+                {value: 80, color: "#800000"},
+                {value: 20, color: "#200000"},
+                {value: 80, color: "#ff0000"}
+            ],
+            fallbackColor: "#000000"
+        })).toEqual({
+            "color-scale": {
+                mode: "linear",
+                expression: "speed",
+                stops: [
+                    [20, "#200000"],
+                    [80, "#ff0000"]
+                ],
+                fallback: "#000000"
+            }
+        });
+    });
+
     it("normalizes hex colors and basic gradient CSS", () => {
         expect(normalizeHexColor("#F17")).toBe("#ff1177");
         expect(normalizeHexColor("not-a-color")).toBe(DEFAULT_SEARCH_STYLE_SOLID_COLOR);

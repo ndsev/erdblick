@@ -21,8 +21,8 @@ function delivery(): TileSubsetDelivery {
         }],
         issues: [],
         info: {
-            "Filter/Entries#terminal": 7,
-            "Filter/Geometry#vertices": 12_345
+            "Filter/Entries/Total#count": 7,
+            "Filter/Geometry/Vertices#count": 12_345
         },
         numEntries: 7,
         geometryVertexCount: 12_345,

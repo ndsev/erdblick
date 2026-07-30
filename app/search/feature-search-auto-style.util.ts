@@ -18,7 +18,7 @@ export interface FeatureSearchAutoStyleAnalysis {
     matchedEnumValues: string[];
 }
 
-/** Selects the first scalar field from the first resolved attribute scope. */
+/** Selects the most semantically relevant scalar field from the first resolved attribute scope. */
 export function preferredSearchAutoStyleField(
     options: FeatureSearchAutoStyleOption[],
     analysis: FeatureSearchAutoStyleAnalysis | undefined
@@ -26,7 +26,7 @@ export function preferredSearchAutoStyleField(
     return searchAutoStyleFieldOptions(options, analysis)[0];
 }
 
-/** Generates automatic search-result rules: one first scalar field per resolved attribute scope. */
+/** Generates automatic search-result rules: one ranked scalar field per resolved attribute scope. */
 export function searchAutoStyleFieldOptions(
     options: FeatureSearchAutoStyleOption[],
     analysis: FeatureSearchAutoStyleAnalysis | undefined
@@ -44,7 +44,16 @@ export function searchAutoStyleFieldOptions(
     const result: FeatureSearchAutoStyleOption[] = [];
     const seen = new Set<string>();
     for (const scope of uniqueScopes) {
-        const fieldOption = attributeOptions.find(option => searchStyleOptionMatchesAttributeScope(option, scope));
+        const fieldOption = attributeOptions
+            .filter(option => searchStyleOptionMatchesAttributeScope(option, scope))
+            .map((option, index) => ({
+                option,
+                index,
+                rank: searchAutoStyleFieldRank(option, scope, analysis)
+            }))
+            .sort((left, right) =>
+                left.rank - right.rank || left.index - right.index)[0]
+            ?.option;
         if (!fieldOption) {
             continue;
         }
@@ -117,4 +126,42 @@ export function searchAutoStyleFieldOptionKey(option: FeatureSearchAutoStyleOpti
 /** Automatic attribute styling only consumes real scalar attribute fields. */
 function isNativeAttributeScalar(option: FeatureSearchAutoStyleOption): boolean {
     return !!option.attrName && !option.value.startsWith("$") && option.valueKind !== "object" && option.valueKind !== "array";
+}
+
+/**
+ * Prefer the field named by the query/schema before falling back to useful
+ * schema types. Attribute names such as WARNING_SIGN naturally map to leaf
+ * fields such as warningSign; an enum field then gives the editor a populated
+ * categorical scale instead of an arbitrary solid rule.
+ */
+function searchAutoStyleFieldRank(
+    option: FeatureSearchAutoStyleOption,
+    scope: FeatureSearchAttributeScopeCandidate,
+    analysis: FeatureSearchAutoStyleAnalysis
+): number {
+    const leaf = option.value.split(".").at(-1) ?? option.value;
+    const normalizedLeaf = normalizedSemanticName(leaf);
+    if (normalizedLeaf &&
+        normalizedLeaf === normalizedSemanticName(scope.attrName)) {
+        return 0;
+    }
+    if (analysis.matchedFieldNames.some(name =>
+        normalizedSemanticName(name) === normalizedLeaf)) {
+        return 1;
+    }
+    const matchedEnums = new Set(analysis.matchedEnumValues);
+    if (option.enumValues?.some(value => matchedEnums.has(value))) {
+        return 2;
+    }
+    if (option.valueKind === "enum") {
+        return 3;
+    }
+    if (option.valueKind === "number" || option.valueKind === "integer") {
+        return 4;
+    }
+    return 5;
+}
+
+function normalizedSemanticName(value: string): string {
+    return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }

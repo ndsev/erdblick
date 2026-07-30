@@ -34,7 +34,7 @@ const option = (partial: Partial<FeatureSearchAutoStyleOption>): FeatureSearchAu
 });
 
 describe("feature search auto-style helpers", () => {
-    it("generates one first scalar field per resolved attribute scope", () => {
+    it("generates one ranked scalar field per resolved attribute scope", () => {
         const warningSignField = option({
             value: "warningSign",
             attrName: "WARNING_SIGN",
@@ -55,6 +55,38 @@ describe("feature search auto-style helpers", () => {
             [warningSignField, pedestrianWayFirstField, pedestrianWaySecondField],
             readyAttributeAnalysis
         )).toEqual([pedestrianWayFirstField]);
+    });
+
+    it("prefers an attribute-named enum field for WARNING_SIGN", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "attribute",
+            attributeScopes: [{
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Routing",
+                featureType: "Link",
+                mapId: "Classic",
+                layerId: "Routing"
+            }],
+            matchedFieldNames: [],
+            matchedEnumValues: []
+        };
+        const arbitraryFirstField = option({
+            value: "attributeValue.additionalText",
+            attrName: "WARNING_SIGN",
+            valueKind: "string"
+        });
+        const warningSignField = option({
+            value: "attributeValue.warningSign",
+            attrName: "WARNING_SIGN",
+            valueKind: "enum",
+            enumValues: ["DANGER"]
+        });
+
+        expect(preferredSearchAutoStyleField(
+            [arbitraryFirstField, warningSignField],
+            analysis
+        )).toBe(warningSignField);
     });
 
     it("uses resolved attribute scopes for default style candidates", () => {

@@ -30,23 +30,30 @@ type StyledLayerProvider = () => Iterable<StyledMapgetLayer>;
 export class ViewLayerDiagnosticsService {
     readonly changed = new Subject<void>();
     private readonly providers = new Map<number, StyledLayerProvider>();
+    private cachedTiles: SubsetDiagnosticsTile[] | null = null;
 
     register(viewIndex: number, provider: StyledLayerProvider): () => void {
         this.providers.set(viewIndex, provider);
+        this.cachedTiles = null;
         this.changed.next();
         return () => {
             if (this.providers.get(viewIndex) === provider) {
                 this.providers.delete(viewIndex);
+                this.cachedTiles = null;
                 this.changed.next();
             }
         };
     }
 
     notifyChanged(): void {
+        this.cachedTiles = null;
         this.changed.next();
     }
 
     currentTiles(): SubsetDiagnosticsTile[] {
+        if (this.cachedTiles) {
+            return this.cachedTiles;
+        }
         const result: SubsetDiagnosticsTile[] = [];
         const sourceInfoSeen = new Set<string>();
         const requestStatusSeen = new Set<string>();
@@ -84,18 +91,31 @@ export class ViewLayerDiagnosticsService {
                         }
                         const values = this.numericValues(rawValue);
                         if (values.length) {
-                            stats.set(key, values);
+                            stats.set(
+                                isFilterStat ? `Rendering/${key}` : key,
+                                values
+                            );
                         }
                     }
                     if (state.subsetBlob) {
                         stats.set(
-                            "Client/Subset/Serialized#kb",
-                            [state.subsetBlob.byteLength / 1024]
+                            "Rendering/Filter/Subset-Size#bytes",
+                            [state.subsetBlob.byteLength]
                         );
                     }
+                    const wasmStatKeys: Record<string, string> = {
+                        deserializeMs: "Deserialize#ms",
+                        renderMs: "Render#ms",
+                        totalMs: "Total#ms",
+                        clientWallMs: "Client-Wall#ms",
+                        vertexCount: "Vertices#count"
+                    };
                     for (const [key, value] of Object.entries(state.renderStats)) {
                         if (Number.isFinite(value)) {
-                            stats.set(`Rendering/Subset/${key}`, [value]);
+                            const mapped = wasmStatKeys[key];
+                            if (mapped) {
+                                stats.set(`Rendering/WASM/${mapped}`, [value]);
+                            }
                         }
                     }
                     const status = layer.latestStatus;
@@ -115,7 +135,10 @@ export class ViewLayerDiagnosticsService {
                                 const value = status[field];
                                 if (typeof value === "number" &&
                                     Number.isFinite(value)) {
-                                    stats.set(`Filter/Request/${field}#count`, [value]);
+                                    stats.set(
+                                        `Rendering/Filter/Request/${field}#count`,
+                                        [value]
+                                    );
                                 }
                             }
                         }
@@ -138,6 +161,7 @@ export class ViewLayerDiagnosticsService {
                 }
             }
         }
+        this.cachedTiles = result;
         return result;
     }
 

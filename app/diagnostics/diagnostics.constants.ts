@@ -19,6 +19,8 @@ export const PEAK_TILE_LIMIT = 5;
 export const UNIT_SUFFIXES: DiagnosticsUnitSuffix[] = [
     {suffix: '#ms', unit: 'ms'},
     {suffix: '-ms', unit: 'ms'},
+    {suffix: '#bytes', unit: 'B'},
+    {suffix: '-bytes', unit: 'B'},
     {suffix: '#kb', unit: 'KB'},
     {suffix: '-kb', unit: 'KB'},
     {suffix: '#mb', unit: 'MB'},

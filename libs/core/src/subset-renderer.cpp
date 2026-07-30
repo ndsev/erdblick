@@ -602,35 +602,22 @@ void TileSubsetLayerRenderer::renderAttribute(
                 std::to_string(channelOrdinal) + ":" +
                 entry->featureId()->toString() + ":" +
                 std::to_string(rule.renderIndex());
-            auto& offsetState =
+            auto& slot =
                 attributeOffsetSlotsByFeature_[slotKey];
-            if (!offsetState.initialized) {
-                offsetState.attributeIndex =
-                    entry->attributeIndex().value_or(
-                        mapget::AttributeValidityEntry::
-                            InvalidAttributeIndex);
-                offsetState.initialized = true;
-            }
-            else if (entry->attributeIndex().value_or(
-                         mapget::AttributeValidityEntry::
-                             InvalidAttributeIndex) !=
-                     offsetState.attributeIndex)
-            {
-                offsetState.attributeIndex =
-                    entry->attributeIndex().value_or(
-                        mapget::AttributeValidityEntry::
-                            InvalidAttributeIndex);
-                ++offsetState.slot;
-            }
-            auto const slot = offsetState.slot;
-            renderGeometryCollection(
+            if (renderGeometryCollection(
                 entry->geometry(),
                 rule,
                 entryEval,
                 pick,
                 rule.offset() +
                     rule.offsetIncrement() *
-                        static_cast<double>(slot));
+                        static_cast<double>(slot)))
+            {
+                // AttributeValidityEntry is the renderer's terminal row. Each
+                // rendered validity (including multiple validities of one
+                // attribute) therefore consumes one presentation slot.
+                ++slot;
+            }
         },
         &hostEval);
 }

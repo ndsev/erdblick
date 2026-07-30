@@ -211,6 +211,86 @@ rules:
 }
 
 TEST_CASE(
+    "TileSubsetLayerRenderer offsets every terminal attribute validity entry",
+    "[erdblick.subset-renderer]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererValidityPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererValidityPool",
+        "TestMap",
+        info,
+        strings,
+        "validities",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{11}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Attribute,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline");
+    channel->newAttributeValidityEntry(
+        featureId,
+        lineGeometry(*subset, "centerline"),
+        0,
+        true,
+        0,
+        2,
+        {},
+        {},
+        "rules",
+        "PROHIBITED_TRANSITION");
+    channel->newAttributeValidityEntry(
+        featureId,
+        lineGeometry(*subset, "centerline"),
+        0,
+        true,
+        1,
+        2,
+        {},
+        {},
+        "rules",
+        "PROHIBITED_TRANSITION");
+
+    auto style = rendererStyle(R"yaml(
+name: ValidityOffsets
+version: 2
+rules:
+  - type: Road
+    scope: attribute
+    geometry: line
+    geometry-name: centerline
+    color: "#ffffff"
+    offset-increment: [0, 0, 5]
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    renderer.run();
+
+    auto result = renderer.renderResult();
+    auto const& positions = result["pathWorld"]["positions"];
+    REQUIRE(positions.size() == 12);
+    REQUIRE(positions[2] == 0.0);
+    REQUIRE(positions[5] == 0.0);
+    REQUIRE(positions[8] == 5.0);
+    REQUIRE(positions[11] == 5.0);
+}
+
+TEST_CASE(
     "TileSubsetLayerRenderer diagnoses entries which match no concrete rule",
     "[erdblick.subset-renderer]")
 {

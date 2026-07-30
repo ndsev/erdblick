@@ -12,6 +12,8 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <set>
@@ -1489,6 +1491,47 @@ rules:
     REQUIRE(reportHasProperty(
         nlohmann::json(style.validationReport()),
         "lod"));
+}
+
+TEST_CASE("Bundled styles pass native style validation", "[erdblick.style]")
+{
+    auto const stylesDirectory =
+        std::filesystem::path(__FILE__)
+            .parent_path()
+            .parent_path() /
+        "config/styles";
+    REQUIRE(
+        std::filesystem::is_directory(
+            stylesDirectory));
+
+    size_t checked = 0;
+    for (auto const& entry :
+         std::filesystem::directory_iterator(
+             stylesDirectory))
+    {
+        if (!entry.is_regular_file() ||
+            entry.path().extension() != ".yaml")
+        {
+            continue;
+        }
+        ++checked;
+        DYNAMIC_SECTION(
+            entry.path().filename().string())
+        {
+            std::ifstream input(
+                entry.path(),
+                std::ios::binary);
+            REQUIRE(input.good());
+            std::string source{
+                std::istreambuf_iterator<char>(
+                    input),
+                std::istreambuf_iterator<char>()};
+            auto style = FeatureLayerStyle(
+                SharedUint8Array(source));
+            REQUIRE(style.isValid());
+        }
+    }
+    REQUIRE(checked > 0);
 }
 
 TEST_CASE("FeatureStyleRuleOffsetIncrementParsing", "[erdblick.style]")

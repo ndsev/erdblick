@@ -157,6 +157,14 @@ export class ViewLayerController {
         this.sceneHandle = null;
     }
 
+    /** Bridges view-local Deck screen-pass timing into global diagnostics. */
+    recordDeckFrameTime(milliseconds: number): void {
+        this.renderService.recordDeckFrameTime(
+            this.viewIndex,
+            milliseconds
+        );
+    }
+
     /** Current regular-presentation styled layers, for diagnostics and grid aggregation. */
     regularStyledLayers(): Iterable<StyledMapgetLayer> {
         return [...this.styledLayers.values()]
@@ -241,6 +249,7 @@ export class ViewLayerController {
             this.destroyOwnedLayer(owned);
         }
         this.retiringRegularLayers.clear();
+        this.renderService.clearDeckFrameTime(this.viewIndex);
         this.unregisterDiagnostics();
         this.sceneHandle = null;
         this.changed.complete();
@@ -384,7 +393,8 @@ export class ViewLayerController {
                             layerId: next.mapgetLayer.layerId,
                             presentationKind: "regular",
                             presentationInstanceId:
-                                `${next.style.id}/f${next.plannedFidelity.value}`
+                                `${next.style.id}:${this.styleVersion(next.style)}` +
+                                `/f${next.plannedFidelity.value}`
                         },
                         next.mapgetLayer,
                         next.style,
@@ -591,7 +601,12 @@ export class ViewLayerController {
         style: ErdblickStyle,
         fidelity: RuleFidelity
     ): string {
-        return `${mapgetLayer.key}/regular/${style.id}/f${fidelity.value}`;
+        return [
+            mapgetLayer.key,
+            "regular",
+            `${style.id}:${this.styleVersion(style)}`,
+            `f${fidelity.value}`
+        ].join("/");
     }
 
     private regularReplacementSlot(
@@ -599,6 +614,18 @@ export class ViewLayerController {
         style: ErdblickStyle
     ): string {
         return `${mapgetLayer.key}/regular/${style.id}`;
+    }
+
+    /**
+     * Identifies one parsed stylesheet incarnation.
+     *
+     * The stable style id intentionally remains the replacement slot, while
+     * transport owners must change whenever presentation semantics change.
+     * Otherwise a style edit can recreate a layer under a still-retiring
+     * filter subscription and wait forever for generation one.
+     */
+    private styleVersion(style: ErdblickStyle): string {
+        return style.sourceRef?.sourceHash ?? sipHash64Hex(style.source);
     }
 
     /** Reconciles service-owned search presentations into this view. */
@@ -729,10 +756,6 @@ export class ViewLayerController {
                     backendFeatureId:
                         stripFeatureInspectionTarget(feature.featureId)
                 }));
-                const restriction = resolvedFeatures
-                    .map(feature =>
-                        `id == ${JSON.stringify(feature.backendFeatureId)}`)
-                    .join(" or ");
                 const roots = resolvedFeatures.map(feature => ({
                     tileId: feature.tileId,
                     featureId: feature.backendFeatureId
@@ -763,11 +786,25 @@ export class ViewLayerController {
                         continue;
                     }
                     const plan = structuredClone(rawPlan);
-                    for (const channel of plan.channels) {
+                    plan.channels = plan.channels.filter(channel => {
+                        const scopedFeatures = channel.scope === "attribute"
+                            ? resolvedFeatures.filter(feature =>
+                                /:attribute#\d+/.test(feature.featureId))
+                            : resolvedFeatures;
+                        // A bare feature selection must not expand every
+                        // attribute/validity merely because the highlight
+                        // stylesheet also contains attribute rules.
+                        if (scopedFeatures.length === 0) {
+                            return false;
+                        }
+                        const scopedRestriction = scopedFeatures
+                            .map(feature =>
+                                `id == ${JSON.stringify(feature.backendFeatureId)}`)
+                            .join(" or ");
                         channel.featureFilter = channel.featureFilter
-                            ? `(${channel.featureFilter}) and (${restriction})`
-                            : restriction;
-                        const entryRestrictions = resolvedFeatures.flatMap(
+                            ? `(${channel.featureFilter}) and (${scopedRestriction})`
+                            : scopedRestriction;
+                        const entryRestrictions = scopedFeatures.flatMap(
                             feature => {
                                 if (channel.scope === "attribute") {
                                     const match = feature.featureId.match(
@@ -799,9 +836,12 @@ export class ViewLayerController {
                                             `$relationIndex == ${Number(match[1])})`
                                         ];
                                     }
-                                    return [
-                                        `($source.id == ${JSON.stringify(feature.backendFeatureId)})`
-                                    ];
+                                    // Exact roots already restrict traversal
+                                    // to this selected feature. Restricting
+                                    // every terminal relation to the root as
+                                    // its source would discard recursively
+                                    // discovered local edges.
+                                    return [];
                                 }
                                 return [];
                             }
@@ -813,6 +853,10 @@ export class ViewLayerController {
                                 ? `(${channel.entryFilter}) and (${entryRestriction})`
                                 : entryRestriction;
                         }
+                        return true;
+                    });
+                    if (!plan.channels.length) {
+                        continue;
                     }
                     const needsRoots = plan.channels.some(channel =>
                         channel.scope === "relation"
@@ -838,6 +882,7 @@ export class ViewLayerController {
                     const presentationId = [
                         group.id,
                         style.id,
+                        this.styleVersion(style),
                         identitySignature
                     ].join(":");
                     const key = [

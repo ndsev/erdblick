@@ -5,7 +5,6 @@ import {
     TileSubsetLayerRenderService
 } from "../mapview/deck/tile-subset-layer-render.service";
 import {
-    SubsetDiagnosticsTile,
     ViewLayerDiagnosticsService
 } from "../mapview/view-layer-diagnostics.service";
 import {
@@ -21,14 +20,13 @@ import {
     TileStateCounts
 } from "./diagnostics.model";
 import {
-    COUNT_KEY_PATTERN,
     LOG_INTERVAL_MS,
     MAX_LOGS,
     PEAK_TILE_LIMIT,
     PERF_INTERVAL_MS,
-    SNAPSHOT_INTERVAL_MS,
-    UNIT_SUFFIXES
+    SNAPSHOT_INTERVAL_MS
 } from "./diagnostics.constants";
+import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
 import {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";
@@ -108,10 +106,20 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     refreshPerfStats(): void {
         if (!this.mapService.tilePipelinePaused) {
-            this.perfStats$.next(buildAggregatedPerfStats(
+            const stats = buildAggregatedPerfStats(
                 this.viewDiagnostics.currentTiles(),
                 PEAK_TILE_LIMIT
-            ));
+            );
+            const deckFrameTimeMs =
+                this.renderService.currentFrameTimeMs();
+            stats.push({
+                key: "Rendering/Deck.gl#ms",
+                path: ["Rendering", "Deck.gl"],
+                unit: "ms",
+                peak: deckFrameTimeMs,
+                average: deckFrameTimeMs
+            });
+            this.perfStats$.next(stats);
         }
     }
 
@@ -178,7 +186,8 @@ export class DiagnosticsDatasource implements OnDestroy {
                 );
             }
             renderedEntries += tile.renderedEntryCount;
-            vertices += tile.stats.get("Rendering/Subset/vertexCount")?.[0] ?? 0;
+            vertices +=
+                tile.stats.get("Rendering/WASM/Vertices#count")?.[0] ?? 0;
         }
         const compression = this.mapService
             .getTileStreamTransportCompressionStats();
@@ -315,79 +324,4 @@ export class DiagnosticsDatasource implements OnDestroy {
             return String(value);
         }
     }
-}
-
-function parsePerfUnit(key: string): string | undefined {
-    const lower = key.toLowerCase();
-    return UNIT_SUFFIXES.find(entry => lower.endsWith(entry.suffix))?.unit;
-}
-
-function stripPerfUnitSuffix(key: string): string {
-    const lower = key.toLowerCase();
-    const suffix = UNIT_SUFFIXES.find(entry => lower.endsWith(entry.suffix));
-    return suffix ? key.slice(0, key.length - suffix.suffix.length) : key;
-}
-
-function resolvePerfUnit(key: string, values: number[]): string | undefined {
-    return parsePerfUnit(key) ??
-        (values.every(Number.isInteger) &&
-        COUNT_KEY_PATTERN.test(stripPerfUnitSuffix(key))
-            ? "count"
-            : undefined);
-}
-
-type AggregatedPerfAccumulator = {
-    sum: number;
-    count: number;
-    peak: number;
-    unit?: string;
-    peakTileIds: Set<string>;
-};
-
-/** Aggregates only current-generation, already deduplicated diagnostics rows. */
-export function buildAggregatedPerfStats(
-    tiles: Iterable<SubsetDiagnosticsTile>,
-    maxPeakTileIds = 5
-): PerfStat[] {
-    const statsByKey = new Map<string, AggregatedPerfAccumulator>();
-    for (const tile of tiles) {
-        if (!tile.ready) {
-            continue;
-        }
-        for (const [rawKey, rawValues] of tile.stats) {
-            const values = rawValues.filter(Number.isFinite);
-            const key = stripPerfUnitSuffix(rawKey);
-            if (!key || !values.length) {
-                continue;
-            }
-            const existing = statsByKey.get(key) ?? {
-                sum: 0,
-                count: 0,
-                peak: -Infinity,
-                unit: resolvePerfUnit(rawKey, values),
-                peakTileIds: new Set<string>()
-            };
-            existing.sum += values.reduce((sum, value) => sum + value, 0);
-            existing.count += values.length;
-            const peak = Math.max(...values);
-            if (peak > existing.peak) {
-                existing.peak = peak;
-                existing.peakTileIds = new Set([tile.tileId.toString()]);
-            } else if (peak === existing.peak) {
-                existing.peakTileIds.add(tile.tileId.toString());
-            }
-            statsByKey.set(key, existing);
-        }
-    }
-    return [...statsByKey.entries()]
-        .filter(([, value]) => value.count > 0)
-        .map(([key, value]) => ({
-            key,
-            path: key.split("/").map(segment => segment.trim()).filter(Boolean),
-            unit: value.unit,
-            peak: value.peak,
-            average: value.sum / value.count,
-            peakTileIds: [...value.peakTileIds].slice(0, maxPeakTileIds)
-        }))
-        .sort((left, right) => left.key.localeCompare(right.key));
 }

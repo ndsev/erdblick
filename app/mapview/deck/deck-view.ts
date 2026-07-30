@@ -277,10 +277,14 @@ export abstract class DeckMapView implements IRenderView {
     private locationLabelTick: (() => void) | null = null;
     private isHoveringFeature = false;
     private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
+    private hoverPickingRestoreTimer: ReturnType<typeof setTimeout> | null = null;
     private pendingHoverInfo: PickingInfo | null = null;
     private lastProcessedHoverPickAtMs = 0;
     private hoverPickingSuspendedUntilMs = 0;
     private isCameraInteracting = false;
+    private deckHoverPickingEnabled = true;
+    private deckFrameStartedAtMs = 0;
+    private readonly deckOnHover = (info: PickingInfo) => this.onHover(info);
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
     /**
@@ -375,10 +379,19 @@ export abstract class DeckMapView implements IRenderView {
             onViewStateChange: ({viewState, interactionState}) =>
                 this.onViewStateChange(viewState as DeckCameraState, interactionState),
             onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
-            onHover: (info) => this.onHover(info),
-            onClick: (info, event) => this.onClick(info, event)
+            onHover: this.deckOnHover,
+            onClick: (info, event) => this.onClick(info, event),
+            onBeforeRender: () => {
+                this.deckFrameStartedAtMs = performance.now();
+            },
+            onAfterRender: () => {
+                this.layerController.recordDeckFrameTime(
+                    performance.now() - this.deckFrameStartedAtMs
+                );
+            }
         };
         this.deck = new DeckGlDeck(deckProps);
+        this.deckHoverPickingEnabled = true;
         this.layerRegistry.setDeck(this.deck);
 
         this.setupSubscriptions();
@@ -399,6 +412,7 @@ export abstract class DeckMapView implements IRenderView {
         this.setFeatureHoverState(false);
         this.hoveredFeatureIds.next(undefined);
         this.cancelHoverPickScheduling();
+        this.cancelHoverPickingRestore();
         this.removeBackgroundLayer();
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
@@ -1153,6 +1167,7 @@ export abstract class DeckMapView implements IRenderView {
             || interactionState.inTransition
         );
         this.hoverPickingSuspendedUntilMs = performance.now() + DeckMapView.HOVER_PICK_SUSPEND_AFTER_CAMERA_MS;
+        this.suspendDeckHoverPicking();
         if (this.isCameraInteracting) {
             this.cancelHoverPickScheduling();
         } else if (this.pendingHoverInfo) {
@@ -1167,6 +1182,52 @@ export abstract class DeckMapView implements IRenderView {
         }
         clearTimeout(this.hoverPickTimer);
         this.hoverPickTimer = null;
+    }
+
+    /**
+     * Removes Deck's own onHover callback while the camera moves.
+     *
+     * Deck performs a full picking pass before invoking onHover, so merely
+     * throttling our callback still paid that cost on every pointer event.
+     */
+    private suspendDeckHoverPicking(): void {
+        this.cancelHoverPickingRestore();
+        if (this.deck && this.deckHoverPickingEnabled) {
+            this.deckHoverPickingEnabled = false;
+            this.deck.setProps({onHover: undefined});
+        }
+        const remaining = Math.max(
+            0,
+            this.hoverPickingSuspendedUntilMs - performance.now()
+        );
+        this.hoverPickingRestoreTimer = setTimeout(
+            () => this.restoreDeckHoverPickingWhenIdle(),
+            remaining
+        );
+    }
+
+    private restoreDeckHoverPickingWhenIdle(): void {
+        this.hoverPickingRestoreTimer = null;
+        const remaining =
+            this.hoverPickingSuspendedUntilMs - performance.now();
+        if (this.isCameraInteracting || remaining > 0) {
+            this.hoverPickingRestoreTimer = setTimeout(
+                () => this.restoreDeckHoverPickingWhenIdle(),
+                Math.max(16, remaining)
+            );
+            return;
+        }
+        if (this.deck && !this.deckHoverPickingEnabled) {
+            this.deckHoverPickingEnabled = true;
+            this.deck.setProps({onHover: this.deckOnHover});
+        }
+    }
+
+    private cancelHoverPickingRestore(): void {
+        if (this.hoverPickingRestoreTimer) {
+            clearTimeout(this.hoverPickingRestoreTimer);
+            this.hoverPickingRestoreTimer = null;
+        }
     }
 
     /** Updates hover coordinates, hover highlights, and the hover-popover source data. */

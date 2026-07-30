@@ -362,6 +362,7 @@ export class FeatureSearchService {
 
     private searchRunCounter = 0;
     private searchSessionCounter = 0;
+    private searchPresentationRevision = 0;
 
     readonly sessionsChanged = new BehaviorSubject<FeatureSearchSession[]>([]);
     readonly progress: BehaviorSubject<FeatureSearchSession|null> = new BehaviorSubject<FeatureSearchSession|null>(null);
@@ -916,7 +917,10 @@ export class FeatureSearchService {
         };
         this.resetServerSearchProgress(session, session.refresh);
         this.progress.next(session);
-        this.syncSearchRequestsToMapService({updateCoverageIds: [session.id]});
+        this.syncSearchRequestsToMapService({
+            forceGenerationIds: [session.id],
+            updateCoverageIds: [session.id]
+        });
         this.stateService.patchFeatureSearch(sessionId, {paused: false});
     }
 
@@ -1500,25 +1504,30 @@ export class FeatureSearchService {
                 if (!presentation ||
                     presentation.mapgetLayer !== mapgetLayer ||
                     presentation.definitionSignature !== definitionSignature) {
-                    if (presentation) {
-                        this.destroySearchPresentation(presentation);
-                    }
+                    let replacement: SearchStyledPresentation;
                     try {
-                        presentation = this.createSearchPresentation(
+                        replacement = this.createSearchPresentation(
                             key,
                             definition,
                             mapgetLayer,
                             featureTypes,
                             definitionSignature
                         );
-                        this.searchPresentations.set(key, presentation);
                     } catch (error) {
                         const session = this.getInternalSession(definition.id);
                         session?.errors.add(
                             error instanceof Error ? error.message : String(error)
                         );
+                        // Keep a complete previous presentation alive when an
+                        // editor intermediate cannot be compiled. A later
+                        // definition or viewport event will retry replacement.
                         continue;
                     }
+                    if (presentation) {
+                        this.destroySearchPresentation(presentation);
+                    }
+                    presentation = replacement;
+                    this.searchPresentations.set(key, presentation);
                 } else if (forceGenerationIds.has(definition.id)) {
                     presentation.styledLayer.refresh();
                 }
@@ -1572,23 +1581,34 @@ export class FeatureSearchService {
             this.mapInfo,
             featureTypes
         );
-        const styledLayer = new StyledMapgetLayer(
-            {
-                viewIndex: -1,
-                mapId: mapgetLayer.mapId,
-                layerId: mapgetLayer.layerId,
-                presentationKind: "search",
-                presentationInstanceId: definition.id
-            },
-            mapgetLayer,
-            compiled.style,
-            {},
-            this.mapInfo,
-            this.tileStream,
-            coreLib.HighlightMode.NO_HIGHLIGHT,
-            coreLib.RuleFidelity.ANY,
-            compiled.filterPlan
-        );
+        let styledLayer: StyledMapgetLayer;
+        try {
+            styledLayer = new StyledMapgetLayer(
+                {
+                    viewIndex: -1,
+                    mapId: mapgetLayer.mapId,
+                    layerId: mapgetLayer.layerId,
+                    presentationKind: "search",
+                    // A replacement is deliberately constructed before its
+                    // predecessor is retired. Give each concrete owner a
+                    // unique transport identity so both may coexist during
+                    // that transactional handoff.
+                    presentationInstanceId:
+                        `${definition.id}:${++this.searchPresentationRevision}`
+                },
+                mapgetLayer,
+                compiled.style,
+                {},
+                this.mapInfo,
+                this.tileStream,
+                coreLib.HighlightMode.NO_HIGHLIGHT,
+                coreLib.RuleFidelity.ANY,
+                compiled.filterPlan
+            );
+        } catch (error) {
+            compiled.style.featureLayerStyle.delete?.();
+            throw error;
+        }
         const presentation: SearchStyledPresentation = {
             key,
             sessionId: definition.id,
@@ -2669,7 +2689,10 @@ export class FeatureSearchService {
             layerBlob: subsetBlob,
             diagnostics,
             entries: [],
-            entryOffset: 0,
+            // Absence means "replace the complete contribution". Only the
+            // bounded row payloads below carry entryOffset and append to this
+            // freshly installed header. Sending offset zero here would append
+            // an empty batch to a previous generation's contribution.
             entriesComplete: resultCount === 0
         };
         this.subsetIngestionLoop.cancel(task =>

@@ -75,6 +75,10 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     # turns an otherwise reportable malformed subset into a poisoned WASM
     # runtime which can only surface the generic "Aborted()" message.
     "-s DISABLE_EXCEPTION_CATCHING=0"
+    # Wrap every C++ exception crossing into JavaScript in an Error carrying
+    # its concrete type, what() text, and throw stack. This also exports the
+    # helpers used by normalizeWasmException at explicit byte boundaries.
+    "-s EXCEPTION_STACK_TRACES=1"
     "-s STACK_OVERFLOW_CHECK=0"
   )
   message(STATUS "Building ${CMAKE_BUILD_TYPE}")

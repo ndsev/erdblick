@@ -9,7 +9,7 @@ import {
 } from '../mapview/view-layer-diagnostics.service';
 import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
 import {PerformanceDiagnosticsScope, PerfStat} from './diagnostics.model';
-import {buildAggregatedPerfStats} from './diagnostics.datasource';
+import {buildAggregatedPerfStats} from './diagnostics.perf-aggregation';
 import {
     COUNT_KEY_PATTERN,
     DISPLAY_DECIMALS,
@@ -530,7 +530,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             layerScopedNonEmptyTiles,
             tileScopedNonEmptyTiles
         );
-        return buildAggregatedPerfStats(tileScopedNonEmptyTiles);
+        const tileStats = buildAggregatedPerfStats(tileScopedNonEmptyTiles);
+        const viewStats = this.diagnostics.perfStats$.getValue().filter(
+            stat => stat.key === 'Rendering/Deck.gl#ms'
+        );
+        return [...tileStats, ...viewStats];
     }
 
     /** Computes tile-scope counts used by the root badges and their tooltips. */
@@ -639,7 +643,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                     maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.average));
                 }
             }
-            if (unit === 'KB' || unit === 'MB') {
+            if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
                 if (this.isFiniteNumber(stat.peak)) {
                     maxAbsBytes = Math.max(maxAbsBytes, Math.abs(this.toBytes(stat.peak, unit)));
                 }
@@ -1032,9 +1036,18 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return 'B';
     }
 
-    /** Converts `KB` or `MB` perf values back to raw bytes. */
-    private toBytes(value: number, unit: 'KB' | 'MB'): number {
-        return unit === 'KB' ? value * 1024 : value * 1024 * 1024;
+    /** Converts a byte-valued perf metric back to raw bytes. */
+    private toBytes(value: number, unit: BytesDisplayUnit): number {
+        switch (unit) {
+            case 'B':
+                return value;
+            case 'KB':
+                return value * 1024;
+            case 'MB':
+                return value * 1024 * 1024;
+            case 'GB':
+                return value * 1024 * 1024 * 1024;
+        }
     }
 
     /** Converts raw bytes into the currently selected display unit. */
@@ -1076,7 +1089,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (unit === 'features') {
             return `${Math.round(value)} features`;
         }
-        if (unit === 'KB' || unit === 'MB') {
+        if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
@@ -1100,7 +1113,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (unit === 'features') {
             return `${Math.round(value)} features`;
         }
-        if (unit === 'KB' || unit === 'MB') {
+        if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;

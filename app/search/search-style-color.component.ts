@@ -86,6 +86,8 @@ import {
                                   optionLabel="label"
                                   optionValue="value"
                                   [filter]="true"
+                                  [virtualScroll]="fieldOptionsForCurrentMode.length > 100"
+                                  [virtualScrollItemSize]="36"
                                   appendTo="body">
                         </p-select>
                     }
@@ -246,6 +248,7 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected viewDraft = defaultSearchStyleColorDraft("");
     protected colorWarning = "";
+    private currentModeFieldOptions: SearchStyleFieldOption[] = [];
     private dataColorWarning = "";
     private pendingUpdateFromData = false;
 
@@ -264,6 +267,9 @@ export class SearchStyleColorComponent implements OnChanges {
             this.viewDraft = cloneSearchStyleColorDraft(this.draft);
             this.nextStopId = this.maxStopId(this.viewDraft) + 1;
         }
+        if (changes["draft"] || changes["fieldOptions"]) {
+            this.refreshCurrentModeFieldOptions();
+        }
         if ((changes["dataSummary"] || changes["dataSummaryStatus"]) && this.dataSummary) {
             this.dataColorWarning = "";
             if (this.pendingUpdateFromData && this.dataSummaryStatus === "ready") {
@@ -280,10 +286,7 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     protected get fieldOptionsForCurrentMode(): SearchStyleFieldOption[] {
-        if (this.viewDraft.mode !== "gradient") {
-            return this.fieldOptions;
-        }
-        return this.fieldOptions.filter(option => isNumericStyleValueKind(option.valueKind));
+        return this.currentModeFieldOptions;
     }
 
     protected get categoryValueOptions(): Array<{label: string; value: string}> {
@@ -319,6 +322,7 @@ export class SearchStyleColorComponent implements OnChanges {
             }
         }
         this.viewDraft = this.autoInitializedDraft({...this.viewDraft, mode, field: nextField});
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -545,6 +549,14 @@ export class SearchStyleColorComponent implements OnChanges {
 
     private firstFieldForCurrentMode(): string {
         return this.fieldOptionsForCurrentMode[0]?.value ?? "";
+    }
+
+    /** Avoids filtering thousands of schema options on every Angular change-detection pass. */
+    private refreshCurrentModeFieldOptions(): void {
+        this.currentModeFieldOptions = this.viewDraft.mode === "gradient"
+            ? this.fieldOptions.filter(option =>
+                isNumericStyleValueKind(option.valueKind))
+            : this.fieldOptions;
     }
 
     private fieldExists(field: string): boolean {

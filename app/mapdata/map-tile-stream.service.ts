@@ -802,10 +802,10 @@ export class MapTileStreamService {
                     ? metadata.layer.scalarFields as Record<string, unknown>
                     : {};
             const rawEntryCount = Number(
-                scalarFields["Filter/Entries#terminal"] ?? 0
+                scalarFields["Filter/Entries/Total#count"] ?? 0
             );
             const rawGeometryVertexCount = Number(
-                scalarFields["Filter/Geometry#vertices"] ?? 0
+                scalarFields["Filter/Geometry/Vertices#count"] ?? 0
             );
             const delivery: TileSubsetDelivery = {
                 blob: subsetBlob,
