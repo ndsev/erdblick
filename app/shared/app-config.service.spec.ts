@@ -7,6 +7,7 @@ import {
     AppConfigService,
     DEFAULT_BACKGROUND_LAYER_ID,
     DEFAULT_BACKGROUND_OPACITY,
+    DEFAULT_STYLE_OPTION_PRESETS_URL,
     DEFAULT_XYZ_BACKGROUND_MAX_ZOOM,
     ServerConfigResponse
 } from "./app-config.service";
@@ -262,6 +263,89 @@ describe("AppConfigService", () => {
         const config = await service.load();
 
         expect(config.styles).toEqual([{url: "static.yaml", additional: false}]);
+    });
+
+    it("normalizes a bare static style-option preset file into the bundled styles directory", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({styleOptionPresets: "customer-presets.yaml"});
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.styleOptionPresets).toBe("bundle/styles/customer-presets.yaml");
+    });
+
+    it("replaces or explicitly disables static style-option presets from server config", async () => {
+        const replacementHarness = createService();
+        replacementHarness.httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({styleOptionPresets: "static-presets.yaml"});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    erdblick: {styleOptionPresets: "/style-option-presets/server.yaml"}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        expect((await replacementHarness.service.load()).styleOptionPresets)
+            .toBe("/style-option-presets/server.yaml");
+
+        const disabledHarness = createService();
+        disabledHarness.httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({styleOptionPresets: "static-presets.yaml"});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    erdblick: {styleOptionPresets: null}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        expect((await disabledHarness.service.load()).styleOptionPresets).toBeNull();
+    });
+
+    it("keeps the static preset source when the server value is empty", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({styleOptionPresets: "static-presets.yaml"});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    erdblick: {styleOptionPresets: "   "}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        expect((await service.load()).styleOptionPresets)
+            .toBe("bundle/styles/static-presets.yaml");
+    });
+
+    it("ignores an invalid preset-source type without discarding the rest of the config", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({
+                    styles: ["static.yaml"],
+                    styleOptionPresets: 42
+                });
+            }
+            return throwError(() => new Error("network"));
+        });
+
+        const config = await service.load();
+
+        expect(config.styles).toEqual([{url: "static.yaml", additional: false}]);
+        expect(config.styleOptionPresets).toBe(DEFAULT_STYLE_OPTION_PRESETS_URL);
     });
 
     it("does not override static extension modules with empty server values", async () => {

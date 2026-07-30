@@ -16,6 +16,9 @@ export const DEFAULT_XYZ_BACKGROUND_MAX_ZOOM = 22;
 /** Highest WMS zoom requested when a custom background does not declare its own maxZoom. */
 export const DEFAULT_WMS_BACKGROUND_MAX_ZOOM = 22;
 
+/** Bundled style-option preset document used when configuration does not select another source. */
+export const DEFAULT_STYLE_OPTION_PRESETS_URL = "bundle/styles/style-option-presets.yaml";
+
 /** Tooltip shown for WMS backgrounds to make the known deck.gl limitations explicit. */
 export const WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP =
     "WMS backgrounds use deck.gl's experimental WMSLayer. They are intended for 2D use first and may lag or render incorrectly in pitched 3D views.";
@@ -155,6 +158,7 @@ export interface RawAppConfig {
     defaultBackgroundLayerId?: string | null;
     locationSearch?: RawLocationSearchConfig;
     externalViewers?: unknown[];
+    styleOptionPresets?: string | null;
     "coordinates-enabled"?: boolean;
     "coordinates-legal-terms"?: string;
 }
@@ -199,6 +203,7 @@ export interface AppConfig {
     defaultBackgroundLayerId: string | null;
     locationSearch: LocationSearchConfig;
     externalViewers: ExternalViewerConfig[];
+    styleOptionPresets: string | null;
     coordinates: CoordinatesConfig;
     serverConfig: AppServerConfigStatus;
 }
@@ -341,6 +346,7 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     defaultBackgroundLayerId: z.string().nullable().optional(),
     locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
     externalViewers: z.array(z.unknown()).optional(),
+    styleOptionPresets: z.string().nullable().optional().catch(undefined),
     "coordinates-enabled": z.boolean().optional(),
     "coordinates-legal-terms": z.string().min(1).optional()
 }).passthrough();
@@ -393,6 +399,7 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     defaultBackgroundLayerId: DEFAULT_BACKGROUND_LAYER_ID,
     locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
     externalViewers: [],
+    styleOptionPresets: DEFAULT_STYLE_OPTION_PRESETS_URL,
     coordinates: {
         enabledByDefault: true,
         legalTermsUrl: null,
@@ -677,6 +684,12 @@ export class AppConfigService {
         if (Array.isArray(serverErdblickConfig.externalViewers)) {
             merged.externalViewers = [...serverErdblickConfig.externalViewers];
         }
+        if (serverErdblickConfig.styleOptionPresets === null) {
+            merged.styleOptionPresets = null;
+        } else if (typeof serverErdblickConfig.styleOptionPresets === "string"
+            && serverErdblickConfig.styleOptionPresets.trim().length > 0) {
+            merged.styleOptionPresets = serverErdblickConfig.styleOptionPresets.trim();
+        }
         if (serverErdblickConfig.locationSearch && isPlainObject(serverErdblickConfig.locationSearch)) {
             const mergedLocationSearch: RawLocationSearchConfig = {
                 ...(merged.locationSearch ?? {}),
@@ -753,6 +766,7 @@ export class AppConfigService {
         );
         const locationSearch = this.normalizeLocationSearch(rawConfig.locationSearch);
         const externalViewers = this.normalizeExternalViewers(rawConfig.externalViewers);
+        const styleOptionPresets = this.normalizeStyleOptionPresetsUrl(rawConfig.styleOptionPresets);
 
         return {
             extensionModules,
@@ -764,6 +778,7 @@ export class AppConfigService {
             defaultBackgroundLayerId,
             locationSearch,
             externalViewers,
+            styleOptionPresets,
             coordinates: {
                 enabledByDefault,
                 legalTermsUrl,
@@ -772,6 +787,21 @@ export class AppConfigService {
             },
             serverConfig: {...serverConfig}
         };
+    }
+
+    /** Resolves a configured preset document to a browser-visible URL. */
+    private normalizeStyleOptionPresetsUrl(rawUrl: string | null | undefined): string | null {
+        if (rawUrl === null) {
+            return null;
+        }
+        const url = rawUrl?.trim();
+        if (!url) {
+            return DEFAULT_STYLE_OPTION_PRESETS_URL;
+        }
+        if (/^https?:\/\//i.test(url) || url.startsWith("bundle/") || url.startsWith("/")) {
+            return url;
+        }
+        return `bundle/styles/${url}`;
     }
 
     /** Loads and validates the configured JSON/YAML coordinate legal-terms document. */

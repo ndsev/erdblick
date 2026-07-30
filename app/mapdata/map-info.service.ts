@@ -23,6 +23,7 @@ import type {
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
 import {MapgetLayer} from "./mapget-layer.model";
+import {StyleOptionPresetService} from "../styledata/style-option-preset.service";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
@@ -30,6 +31,12 @@ interface SourceCatalogEntryUpdate {
     status?: string;
     statusMessage?: string;
     progress?: number | null;
+}
+
+/** One concrete option/view pair invalidated by an atomic style-option transaction. */
+export interface StyleOptionChange {
+    optionNode: StyleOptionNode;
+    viewIndex: number;
 }
 
 
@@ -41,7 +48,7 @@ export class MapInfoService {
     public readonly legalInformationPerMap = new Map<string, Set<string>>();
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
-    public readonly styleOptionChanged = new Subject<[StyleOptionNode, number]>();
+    public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
     /** Emits after ready datasource metadata has been replaced in the shared parser. */
     public readonly dataSourceInfoChanged = new Subject<void>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
@@ -71,10 +78,11 @@ export class MapInfoService {
         private readonly httpClient: HttpClient,
         private readonly stateService: AppStateService,
         private readonly styleService: StyleService,
+        private readonly styleOptionPresetService: StyleOptionPresetService,
         private readonly messageService: InfoMessageService
     ) {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
-            new MapLayerTree([], this.stateService, this.styleService)
+            new MapLayerTree([], this.stateService, this.styleService, this.styleOptionPresetService)
         );
     }
 
@@ -365,12 +373,17 @@ export class MapInfoService {
         this.catalogHasNonReadyEntries = this.sourceCatalogEntries.some(entry => !isDataSourceCatalogEntryReady(entry));
         this.mapgetLayersByKey = this.materializeMapgetLayers(this.sourceCatalogEntries);
         const maps = this.sourceCatalogEntries.filter(entry => !entry.addOn || !isDataSourceCatalogEntryReady(entry));
-        this.maps$.next(new MapLayerTree(
+        const nextTree = new MapLayerTree(
             maps,
             this.stateService,
             this.styleService,
+            this.styleOptionPresetService,
             this.canPruneStateForCurrentCatalog()
-        ));
+        );
+        this.maps.destroy();
+        this.maps$.next(nextTree);
+        this.styleOptionPresetService.setKnownLayerIds(
+            [...nextTree.allFeatureLayers()].map(layer => layer.id));
         this.reapplySyncOptionsForAllViews();
     }
 
@@ -574,21 +587,33 @@ export class MapInfoService {
             return false;
         }
         const result = this.maps.syncViews(viewIndex);
-        for (const [optionNode, targetIndex] of result.styleOptionChanges) {
-            this.styleOptionChanged.next([optionNode, targetIndex]);
-        }
+        this.publishStyleOptionChanges(result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
+            optionNode,
+            viewIndex: targetIndex
+        })));
         return result.viewConfigChanged;
     }
 
     /** Pushes one view's current style-option values into every compatible layer and sibling view. */
     applySyncOptionsForView(viewIndex: number) {
+        const changes: StyleOptionChange[] = [];
         for (const layer of this.maps.allFeatureLayers()) {
-            const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id);
+            const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id, false);
             for (const syncedOption of syncedOptions) {
-                this.styleOptionChanged.next([syncedOption, viewIndex]);
+                changes.push({optionNode: syncedOption, viewIndex});
             }
         }
-        if (this.syncViewsIfEnabled(viewIndex)) {
+        let viewConfigChanged = false;
+        if (this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            const result = this.maps.syncViews(viewIndex, false);
+            viewConfigChanged = result.viewConfigChanged;
+            changes.push(...result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
+                optionNode,
+                viewIndex: targetIndex
+            })));
+        }
+        this.persistAndPublishStyleOptionChanges(changes);
+        if (viewConfigChanged) {
             this.layerStateChanged.next("sync-options");
         }
     }
@@ -634,18 +659,92 @@ export class MapInfoService {
 
     /** Applies a style-option value change and emits it for render invalidation. */
     applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number): void {
-        if (optionNode.value.length <= viewIndex) {
-            return;
-        }
-        this.styleOptionChanged.next([optionNode, viewIndex]);
+        this.applyStyleOptionChanges([optionNode], viewIndex);
+    }
+
+    /** Applies one atomic collection of option mutations and performs synchronization once. */
+    applyStyleOptionChanges(optionNodes: StyleOptionNode[], viewIndex: number): void {
+        const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
+        const sourceLayers = new Set(directNodes.map(optionNode =>
+            `${optionNode.mapId}\u0000${optionNode.layerId}`));
+        this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers);
+    }
+
+    /** Applies preset-owned changes while synchronizing its source layer even for equal values. */
+    applyStylePresetChanges(
+        optionNodes: StyleOptionNode[],
+        viewIndex: number,
+        mapId: string,
+        layerId: string
+    ): void {
+        const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
+        this.applyStyleOptionTransaction(
+            directNodes,
+            viewIndex,
+            new Set([`${mapId}\u0000${layerId}`]));
+    }
+
+    /** Executes one option transaction across direct, layer-synced, and view-synced targets. */
+    private applyStyleOptionTransaction(
+        directNodes: StyleOptionNode[],
+        viewIndex: number,
+        sourceLayers: Set<string>
+    ): void {
+        const changes: StyleOptionChange[] = directNodes.map(optionNode => ({optionNode, viewIndex}));
         if (this.isSyncOptionsForViewEnabled(viewIndex)) {
-            const syncedOptions = this.maps.syncLayers(viewIndex, optionNode.mapId, optionNode.layerId);
-            for (const syncedOption of syncedOptions) {
-                this.styleOptionChanged.next([syncedOption, viewIndex]);
+            for (const sourceLayer of sourceLayers) {
+                const [mapId, layerId] = sourceLayer.split("\u0000");
+                const syncedOptions = this.maps.syncLayers(viewIndex, mapId, layerId, false);
+                changes.push(...syncedOptions.map(optionNode => ({optionNode, viewIndex})));
             }
         }
-        if (this.syncViewsIfEnabled(viewIndex)) {
+        let viewConfigChanged = false;
+        if (this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            const result = this.maps.syncViews(viewIndex, false);
+            viewConfigChanged = result.viewConfigChanged;
+            changes.push(...result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
+                optionNode,
+                viewIndex: targetIndex
+            })));
+        }
+        if (changes.length) {
+            this.persistAndPublishStyleOptionChanges(changes);
+        } else {
+            this.maps.reconcileStylePresetSelections();
+        }
+        if (viewConfigChanged) {
             this.layerStateChanged.next("style-options");
+        }
+    }
+
+    /** Writes changed option arrays once and publishes one deduplicated render transaction. */
+    private persistAndPublishStyleOptionChanges(changes: StyleOptionChange[]): void {
+        if (!changes.length) {
+            return;
+        }
+        const changedOptions = new Map<string, StyleOptionNode>();
+        for (const change of changes) {
+            changedOptions.set(change.optionNode.key, change.optionNode);
+        }
+        this.stateService.setStyleOptionValuesBatch([...changedOptions.values()].map(optionNode => ({
+            mapId: optionNode.mapId,
+            layerId: optionNode.layerId,
+            shortStyleId: optionNode.shortStyleId,
+            optionId: optionNode.id,
+            values: optionNode.value
+        })));
+        this.maps.reconcileStylePresetSelections();
+        this.publishStyleOptionChanges(changes);
+    }
+
+    /** Emits a render batch with duplicate option/view pairs removed in first-seen order. */
+    private publishStyleOptionChanges(changes: StyleOptionChange[]): void {
+        const unique = new Map<string, StyleOptionChange>();
+        for (const change of changes) {
+            unique.set(`${change.viewIndex}\u0000${change.optionNode.key}`, change);
+        }
+        if (unique.size) {
+            this.styleOptionsChanged.next([...unique.values()]);
         }
     }
 

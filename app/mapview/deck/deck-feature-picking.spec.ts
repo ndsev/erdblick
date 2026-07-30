@@ -160,6 +160,45 @@ describe("Deck rendered-feature picking", () => {
             .toHaveBeenCalledWith([top], false);
     });
 
+    it("uses one bounded asynchronous rectangle query with the same eligible layer set", async () => {
+        const view = createView();
+        const baseLayer = {
+            id: "base-path",
+            props: {
+                drillPickEligible: true,
+                tileKey: "map/tile",
+                featureAddressesByPath: [9]
+            }
+        };
+        const gltfLayer = {
+            id: "map/tile/gltf-pick-proxy",
+            props: {pickable: true}
+        };
+        const pickObjectsAsync = vi.fn(async () => [{layer: baseLayer, index: 0}]);
+        (view as any).deck = {
+            props: {layers: [baseLayer, gltfLayer]},
+            pickObjectsAsync
+        };
+
+        const result = await view.pickFeaturesInRectangle(
+            {x: 5, y: 6, width: 70, height: 80},
+            4
+        );
+
+        expect(pickObjectsAsync).toHaveBeenCalledOnce();
+        expect(pickObjectsAsync).toHaveBeenCalledWith({
+            x: 5,
+            y: 6,
+            width: 70,
+            height: 80,
+            layerIds: ["base-path"],
+            maxObjects: 4
+        });
+        expect(result).toEqual({
+            featureIds: [{mapTileKey: "map/tile", featureId: "feature-9"}]
+        });
+    });
+
     it("snaps a thick picked path ribbon to its base XYZ centerline", () => {
         const view = createView();
         const origin: [number, number, number] = [11, 48, 100];

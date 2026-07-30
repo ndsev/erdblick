@@ -653,7 +653,9 @@ export class MapViewState<T> {
             },
             urlParamName: options.urlParamName,
             urlFormEncode: options.urlFormEncode,
-            urlIncludeInVisualizationOnly: options.urlIncludeInVisualizationOnly
+            urlIncludeInVisualizationOnly: options.urlIncludeInVisualizationOnly,
+            snapshotPersist: options.snapshotPersist,
+            configDefault: options.configDefault
         });
     }
 

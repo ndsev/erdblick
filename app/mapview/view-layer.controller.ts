@@ -129,8 +129,8 @@ export class ViewLayerController {
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
             this.mapInfo.layerStateChanged.subscribe(() => this.scheduleReconcile()),
-            this.mapInfo.styleOptionChanged.subscribe(([_, changedView]) => {
-                if (changedView === this.viewIndex) {
+            this.mapInfo.styleOptionsChanged.subscribe(changes => {
+                if (changes.some(change => change.viewIndex === this.viewIndex)) {
                     this.scheduleReconcile();
                 }
             }),

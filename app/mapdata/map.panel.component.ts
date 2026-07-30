@@ -10,7 +10,7 @@ import {
     tileGridMaxLevel
 } from "../shared/appstate.service";
 import {coreLib} from "../integrations/wasm";
-import {MenuItem} from "primeng/api";
+import {MenuItem, TreeNode} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {Popover} from "primeng/popover";
 import {KeyboardService} from "../shared/keyboard.service";
@@ -19,10 +19,13 @@ import {
     CoverageRectItem,
     dataSourceCatalogStatus,
     filterMapTreeNodes,
+    layerStylePresetNode,
+    layerStyleOptions,
     MapInfoItem,
     MapTreeViewNode,
     removeGroupPrefix,
-    StyleOptionNode
+    StyleOptionNode,
+    StylePresetNode
 } from "./map.tree.model";
 import {
     BehaviorSubject,
@@ -50,6 +53,10 @@ import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {InfoMessageService} from "../shared/info.service";
 import {StyleEditorRequestService} from "../styledata/style-editor-request.service";
 import {StyleService} from "../styledata/style.service";
+import {
+    NO_STYLE_OPTION_PRESET_ID,
+    StyleOptionPresetService
+} from "../styledata/style-option-preset.service";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -68,7 +75,7 @@ interface MetadataLayerOption {
 /** Map-tree data projected for display without changing the canonical map or datasource state. */
 interface MapPanelTreeView {
     size: number;
-    nodes: MapTreeViewNode[];
+    nodesByView: MapTreeViewNode[][];
 }
 
 /** Mirrors PrimeNG TreeTable's default delay so rapid typing produces one applied map filter. */
@@ -334,13 +341,15 @@ const MAP_FILTER_DELAY_MS = 300;
                                     <div class="map-tree-message">
                                         No maps loaded.
                                     </div>
-                            } @else if (!mapTreeView.nodes.length) {
+                            } @else if (!mapTreeView.nodesByView[index]?.length) {
                                 <div class="map-tree-message" data-testid="map-filter-empty">
-                                    No matching maps, layers, or options.
+                                    No matching maps, layers, presets, or options.
                                 </div>
                             } @else {
                             <div class="maps-container">
-                                <p-tree [value]="mapTreeView.nodes" [trackBy]="trackMapTreeNode"
+                                <p-tree [value]="mapTreeView.nodesByView[index]" [trackBy]="trackMapTreeNode"
+                                        (onNodeExpand)="updateMapTreeNodeExpansion($event.node, true)"
+                                        (onNodeCollapse)="updateMapTreeNodeExpansion($event.node, false)"
                                         [attr.data-testid]="'map-tree-' + index">
                                     <!-- Template for Group nodes -->
                                     <ng-template let-node pTemplate="Group">
@@ -487,6 +496,45 @@ const MAP_FILTER_DELAY_MS = 300;
                                                    [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"/>
                                         </div>
                                     </ng-template>
+                                    <!-- Template for the leading style-option preset control. -->
+                                    <ng-template let-node pTemplate="Preset">
+                                        <div class="style-preset-row"
+                                             [attr.data-testid]="stylePresetRowTestId(node, index)">
+                                            <p-select class="style-preset-select"
+                                                      [options]="node.selectOptions"
+                                                      [ngModel]="node.selectedPresetIds[index]"
+                                                      (ngModelChange)="selectStylePreset(node, index, $event)"
+                                                      optionLabel="label"
+                                                      optionValue="value"
+                                                      appendTo="body"
+                                                      [disabled]="node.presets.length === 0"
+                                                      [attr.aria-label]="'Style option preset for ' + node.layerId"/>
+                                            @if (node.selectedPresetIds[index]) {
+                                                <p-button onEnterClick
+                                                          class="style-preset-expand-button"
+                                                          [attr.data-testid]="stylePresetExpandTestId(node, index)"
+                                                          [pTooltip]="node.expandedPresetOptions[index]
+                                                              ? 'Hide preset options'
+                                                              : 'Show preset options'"
+                                                          tooltipPosition="bottom"
+                                                          (click)="toggleStylePresetOptions($event, node, index)">
+                                                    <span class="material-symbols-outlined">
+                                                        {{ node.expandedPresetOptions[index] ? "unfold_less" : "unfold_more" }}
+                                                    </span>
+                                                </p-button>
+                                                @for (styleId of selectedPresetStyleIds(node, index); track styleId) {
+                                                    <p-button onEnterClick
+                                                              class="style-option-edit-button"
+                                                              [attr.data-testid]="stylePresetEditButtonTestId(node, index, styleId)"
+                                                              pTooltip="Edit style sheet"
+                                                              tooltipPosition="bottom"
+                                                              (click)="openPresetStyleSheet($event, styleId)">
+                                                        <span class="material-symbols-outlined">brush</span>
+                                                    </p-button>
+                                                }
+                                            }
+                                        </div>
+                                    </ng-template>
                                     <!-- Template for boolean style option nodes -->
                                     <ng-template let-node pTemplate="Bool">
                                         <div class="map-option-row"
@@ -502,6 +550,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                     [(ngModel)]="node.value[index]"
                                                     (ngModelChange)="updateStyleOption(node, index)"
                                                     [binary]="true"
+                                                    [disabled]="isStyleOptionPresetOwned(node, index)"
                                                     [inputId]="index + '_' + node.key"
                                                     [name]="index + '_' + node.key"/>
                                             <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
@@ -559,19 +608,25 @@ export class MapPanelComponent {
         ),
         distinctUntilChanged()
     );
+    private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
         this.mapService.maps$,
         this.appliedMapFilterTextChanges,
         this.styleService.styleGroups,
         this.stateService.numViewsState,
+        this.styleOptionPresetService.presets$,
+        this.stateService.stylePresetSelectionState.appState,
+        this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
             filter(reason => reason === "visibility"),
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText]) => ({
+        map(([mapTree, filterText, _styleGroups, numViews]) => ({
             size: mapTree.size,
-            nodes: filterMapTreeNodes(mapTree.nodes, filterText)
+            nodesByView: Array.from(
+                {length: numViews},
+                (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex))
         }))
     );
 
@@ -614,6 +669,7 @@ export class MapPanelComponent {
                 private readonly featureSearchService: FeatureSearchService,
                 private readonly infoMessageService: InfoMessageService,
                 private readonly styleEditorRequestService: StyleEditorRequestService,
+                private readonly styleOptionPresetService: StyleOptionPresetService,
                 private readonly styleService: StyleService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
@@ -748,6 +804,13 @@ export class MapPanelComponent {
         _index: number,
         node: MapTreeViewNode
     ): string => node.key;
+
+    /** Persists normal tree expansion while keeping filtered projection expansion temporary. */
+    updateMapTreeNodeExpansion(node: TreeNode, expanded: boolean): void {
+        if (!this.mapFilterText.trim() && node.key !== undefined) {
+            this.mapService.maps.setNodeExpanded(node.key, expanded);
+        }
+    }
 
     /** Refreshes independent tile-grid controls from their per-view AppState values. */
     private refreshTileGridControls(): void {
@@ -1229,8 +1292,106 @@ export class MapPanelComponent {
 
     /** Persists a style option change and triggers visualization refresh for the affected view. */
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {
-        this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
         this.mapService.applyStyleOptionChange(node, viewIndex);
+    }
+
+    /** Applies one selected preset to its layer and refreshes the per-view tree projection. */
+    selectStylePreset(node: StylePresetNode, viewIndex: number, presetId: string): void {
+        const normalizedPresetId = presetId || NO_STYLE_OPTION_PRESET_ID;
+        this.mapService.maps.setStylePresetSelection(
+            viewIndex,
+            node.mapId,
+            node.layerId,
+            normalizedPresetId || null);
+        if (!normalizedPresetId) {
+            this.mapService.applyStylePresetChanges(
+                [],
+                viewIndex,
+                node.mapId,
+                node.layerId);
+            this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+            return;
+        }
+
+        const preset = node.presets.find(candidate => candidate.id === normalizedPresetId);
+        const layer = this.mapService.maps.getFeatureLayer(node.mapId, node.layerId);
+        if (!preset || !layer) {
+            this.mapService.maps.setStylePresetSelection(viewIndex, node.mapId, node.layerId, null);
+            this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+            return;
+        }
+
+        const options = layerStyleOptions(layer);
+        const changedOptions: StyleOptionNode[] = [];
+        for (const value of preset.values) {
+            const option = options.find(candidate =>
+                candidate.styleId === value.styleId && candidate.id === value.optionId);
+            if (option && option.value[viewIndex] !== value.value) {
+                option.value[viewIndex] = value.value;
+                changedOptions.push(option);
+            }
+        }
+        this.mapService.applyStylePresetChanges(
+            changedOptions,
+            viewIndex,
+            node.mapId,
+            node.layerId);
+        this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+    }
+
+    /** Toggles projection of read-only options owned by the current preset. */
+    toggleStylePresetOptions(event: Event, node: StylePresetNode, viewIndex: number): void {
+        event.preventDefault();
+        event.stopPropagation();
+        this.mapService.maps.setStylePresetExpanded(
+            viewIndex,
+            node.mapId,
+            node.layerId,
+            !node.expandedPresetOptions[viewIndex]);
+        this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+    }
+
+    /** Returns whether the selected preset owns and therefore locks one option. */
+    isStyleOptionPresetOwned(node: StyleOptionNode, viewIndex: number): boolean {
+        const layer = this.mapService.maps.getFeatureLayer(node.mapId, node.layerId);
+        const presetNode = layer ? layerStylePresetNode(layer) : undefined;
+        const preset = presetNode?.presets.find(candidate =>
+            candidate.id === presetNode.selectedPresetIds[viewIndex]);
+        return !!preset && this.styleOptionPresetService.ownsOption(preset, node);
+    }
+
+    /** Returns the distinct style sheets owned by the selected preset for editor shortcuts. */
+    selectedPresetStyleIds(node: StylePresetNode, viewIndex: number): string[] {
+        const preset = node.presets.find(candidate => candidate.id === node.selectedPresetIds[viewIndex]);
+        return preset ? [...new Set(preset.values.map(value => value.styleId))] : [];
+    }
+
+    /** Opens one style sheet from the preset row's retained edit shortcut. */
+    openPresetStyleSheet(event: Event, styleId: string): void {
+        event.preventDefault();
+        event.stopPropagation();
+        this.styleEditorRequestService.open(styleId);
+    }
+
+    /** Returns the stable test id for one layer/view preset row. */
+    stylePresetRowTestId(node: StylePresetNode, viewIndex: number): string {
+        return `style-preset-${viewIndex}-${this.stylePresetTestIdSuffix(node)}`;
+    }
+
+    /** Returns the stable test id for one preset owned-option expansion control. */
+    stylePresetExpandTestId(node: StylePresetNode, viewIndex: number): string {
+        return `style-preset-expand-${viewIndex}-${this.stylePresetTestIdSuffix(node)}`;
+    }
+
+    /** Returns the stable test id for one preset-row stylesheet shortcut. */
+    stylePresetEditButtonTestId(node: StylePresetNode, viewIndex: number, styleId: string): string {
+        const styleSuffix = styleId.replace(/[^a-zA-Z0-9_-]+/g, "-");
+        return `style-preset-edit-${viewIndex}-${this.stylePresetTestIdSuffix(node)}-${styleSuffix}`;
+    }
+
+    /** Produces a DOM-safe suffix from one concrete preset row identity. */
+    private stylePresetTestIdSuffix(node: StylePresetNode): string {
+        return `${node.mapId}-${node.layerId}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
     }
 
     /** Adds another synchronized map view up to the current supported limit. */

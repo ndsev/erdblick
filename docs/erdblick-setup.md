@@ -56,7 +56,7 @@ Whenever the YAML file changes, mapget applies the new sources immediately; erdb
 
 At startup erdblick loads `/static-config/config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the static config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `/static-config/config.json`.
 
-The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, `coordinates-enabled`, `coordinates-legal-terms`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
+The server `erdblick` object uses the same keys as `config.json`: `styles`, `styleOptionPresets`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, `coordinates-enabled`, `coordinates-legal-terms`, and optional `state`. Empty arrays, empty objects, and empty strings are treated as absent and do not clear bundled config. `styleOptionPresets: null` is an explicit exception that disables the bundled preset document.
 
 The `state` key uses the same snapshot shape exported by Advanced Preferences, not URL query parameter names. It seeds the viewer before local browser storage and URL parameters are applied.
 
@@ -67,6 +67,7 @@ The `config/` directory used to build or host erdblick controls UI-side metadata
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
   - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `/static-config/styles/` and this list defines the base style set.
   - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
+  - `styleOptionPresets`: optional URL of one YAML document containing named Boolean style-option combinations. Plain filenames are requested from `bundle/styles/`; `null` disables configured presets.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
@@ -112,6 +113,23 @@ Style entries that do not start with `http`, `bundle`, or `/` are resolved under
 Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional style URLs are loaded exactly like other browser resources: every URL must already be reachable through the web server. Erdblick itself does not expand wildcards, scan directories, mount host paths, or resolve relative filesystem paths against a backend YAML file. If a host application such as MapViewer accepts relative or absolute filesystem paths in its own YAML config, that application resolves them and publishes browser-reachable URLs before erdblick reads `/config.erdblick`.
 
 Coordinate legal terms follow the same browser-resource rule. Configure `coordinates-legal-terms` with a URL whose response is either `{"legal-terms": "legal text"}` or equivalent YAML. Erdblick renders the value as plain text. If the document is missing, unreadable, or does not contain the required string, coordinate display remains disabled. Hosting products such as MapViewer may mount a local document and rewrite the configured filesystem path to a public URL.
+
+Style-option preset documents also follow normal browser-resource rules. Their version-1 shape is:
+
+```yaml
+version: 1
+presets:
+  - id: example
+    name: Example
+    enabled: true
+    layerAffinity: "^ExampleLayer$"
+    values:
+      - styleId: Example/Style
+        optionId: showGeometry
+        value: true
+```
+
+Preset IDs and names must be unique. Every value references one non-internal Boolean option by full style ID plus option ID, and every offered preset must be completely applicable to the concrete map layer. Users can select presets in the Maps panel and manage availability or create a browser-local override in **Style Sheets -> Presets**. Raw-editor changes are local browser state; they do not rewrite the configured YAML file.
 
 Additional styles are loaded after base styles. If an additional style has the same YAML `name:` as a base style, the additional style is active and the Styles dialog marks it with an **Additional** tag. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style. For colliding base/additional styles, the **Additional** tag opens a read-only comparison against the base style.
 

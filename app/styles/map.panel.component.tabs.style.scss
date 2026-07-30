@@ -159,6 +159,45 @@
     }
   }
 
+  .style-preset-row {
+    align-items: center;
+    display: flex;
+    gap: 0.25em;
+    min-width: 0;
+    min-height: 2em;
+    width: 100%;
+
+    .style-preset-select {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .p-select {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .p-select-label {
+      padding-block: 0.25em;
+      font-size: 1em;
+    }
+
+    .style-preset-expand-button,
+    .style-option-edit-button {
+      flex: 0 0 auto;
+
+      .p-button {
+        height: 1.55rem;
+        padding: 0;
+        width: 1.55rem;
+      }
+
+      .material-symbols-outlined {
+        font-size: 1rem;
+      }
+    }
+  }
+
   .p-tree-root,
   .p-tree-root-children,
   .p-tree-node-children {
@@ -167,7 +206,8 @@
     padding-top: 0;
   }
 
-  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .map-option-row) {
+  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .map-option-row),
+  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .style-preset-row) {
     gap: 0;
   }
 

@@ -3,7 +3,12 @@ import {InfoMessageService} from "../shared/info.service";
 import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle, UpdatedModifiedStyleEntry} from "./style.service";
-import {AppStateService, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
+import {
+    AppStateService,
+    STYLE_EDITOR_DIALOG_LAYOUT_ID,
+    STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID,
+    STYLES_DIALOG_LAYOUT_ID
+} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {KeyValue} from "@angular/common";
@@ -34,6 +39,26 @@ import {
     FeatureSearchStyleRuleDraft,
     SearchStyleRuleDraftCodec
 } from "../search/search-style-rule-editor.model";
+import {
+    isBooleanStyleOption,
+    StyleOptionPresetDefinition,
+    StyleOptionPresetIssue,
+    StyleOptionPresetService
+} from "./style-option-preset.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+
+interface QuickPresetOption {
+    key: string;
+    label: string;
+    styleId: string;
+    optionId: string;
+    defaultValue: boolean;
+}
+
+interface PresetAffinityOption {
+    label: string;
+    value: string | null;
+}
 
 
 @Component({
@@ -47,6 +72,14 @@ import {
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
+                    <p-tab value="presets" data-testid="style-presets-tab">
+                        <span>Presets </span>
+                        @if (presetService.issues$ | async; as presetIssues) {
+                            @if (presetIssues.length) {
+                                <p-badge [value]="presetIssues.length"/>
+                            }
+                        }
+                    </p-tab>
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -169,6 +202,115 @@ import {
                                     </div>
                                 </div>
                             }
+                        </div>
+                    </p-tabpanel>
+                    <p-tabpanel value="presets">
+                        <div class="style-presets-tab" data-testid="style-presets-panel">
+                            <div class="style-presets-toolbar">
+                                <p-button label="Add" icon="pi pi-plus"
+                                          data-testid="style-preset-add-button"
+                                          [disabled]="presetEditorSourceModified"
+                                          (click)="toggleQuickPresetForm()"/>
+                                <p-button label="Edit raw presets" icon="pi pi-file-edit"
+                                          data-testid="style-preset-raw-edit-button"
+                                          (click)="openPresetEditor()"/>
+                                @if (presetService.hasLocalOverride) {
+                                    <p-tag severity="info" value="Local override" [rounded]="true"/>
+                                }
+                            </div>
+
+                            @if (quickPresetFormVisible) {
+                                <div class="quick-preset-form" data-testid="style-preset-add-form">
+                                    <p-iftalabel>
+                                        <input id="quick-preset-name" pInputText
+                                               data-testid="style-preset-name"
+                                               [(ngModel)]="quickPresetName"/>
+                                        <label for="quick-preset-name">Preset name</label>
+                                    </p-iftalabel>
+                                    <p-iftalabel>
+                                        <p-select inputId="quick-preset-affinity"
+                                                  data-testid="style-preset-affinity"
+                                                  [options]="presetAffinityOptions"
+                                                  [(ngModel)]="quickPresetAffinity"
+                                                  optionLabel="label"
+                                                  optionValue="value"
+                                                  appendTo="body"
+                                                  (ngModelChange)="refreshQuickPresetOptions()"/>
+                                        <label for="quick-preset-affinity">Map layer affinity</label>
+                                    </p-iftalabel>
+                                    <p-iftalabel class="quick-preset-options-select">
+                                        <p-multiSelect inputId="quick-preset-options"
+                                                       data-testid="style-preset-options"
+                                                       [options]="quickPresetOptionChoices"
+                                                       [(ngModel)]="quickPresetSelectedOptionKeys"
+                                                       optionLabel="label"
+                                                       optionValue="key"
+                                                       [filter]="true"
+                                                       [showToggleAll]="true"
+                                                       [maxSelectedLabels]="2"
+                                                       selectedItemsLabel="{0} options"
+                                                       placeholder="Select options"
+                                                       appendTo="body"
+                                                       (ngModelChange)="onQuickPresetOptionSelectionChanged()"/>
+                                        <label for="quick-preset-options">Style options</label>
+                                    </p-iftalabel>
+                                    @if (quickPresetSelectedOptions().length) {
+                                        <div class="quick-preset-value-list">
+                                            @for (option of quickPresetSelectedOptions(); track option.key) {
+                                                <div class="quick-preset-value-row">
+                                                    <span>{{ option.label }}</span>
+                                                    <p-toggleswitch
+                                                        [inputId]="'quick-preset-value-' + quickPresetOptionTestId(option)"
+                                                        [(ngModel)]="quickPresetValues[option.key]"
+                                                        [attr.data-testid]="'style-preset-value-' + quickPresetOptionTestId(option)"/>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    <div class="quick-preset-actions">
+                                        <p-button label="Save" icon="pi pi-check"
+                                                  data-testid="style-preset-save-button"
+                                                  [disabled]="!canSaveQuickPreset()"
+                                                  (click)="saveQuickPreset()"/>
+                                        <p-button label="Cancel" icon="pi pi-times"
+                                                  severity="secondary"
+                                                  (click)="closeQuickPresetForm()"/>
+                                    </div>
+                                </div>
+                            }
+
+                            @if (presetService.issues$ | async; as presetIssues) {
+                                @if (presetIssues.length) {
+                                    <div class="style-preset-issues" data-testid="style-preset-issues">
+                                        @for (issue of presetIssues; track $index) {
+                                            <p-message severity="error"
+                                                       [text]="presetIssueText(issue)"/>
+                                        }
+                                    </div>
+                                }
+                            }
+
+                            <div class="style-preset-list">
+                                @for (preset of presetService.presets$ | async; track preset.id) {
+                                    <div class="style-preset-list-row"
+                                         [attr.data-testid]="'style-preset-definition-' + preset.id">
+                                        <p-toggleswitch
+                                            [inputId]="'style-preset-enabled-' + preset.id"
+                                            [ngModel]="presetService.isAvailable(preset)"
+                                            [disabled]="presetEditorSourceModified"
+                                            (ngModelChange)="setPresetAvailability(preset.id, $event)"/>
+                                        <label [for]="'style-preset-enabled-' + preset.id">
+                                            <strong>{{ preset.name }}</strong>
+                                            <span>{{ presetAffinityLabel(preset) }}</span>
+                                        </label>
+                                        <p-tag severity="secondary"
+                                               [value]="preset.values.length + ' options'"
+                                               [rounded]="true"/>
+                                    </div>
+                                } @empty {
+                                    <div class="styles-empty">No style-option presets configured.</div>
+                                }
+                            </div>
                         </div>
                     </p-tabpanel>
                     <p-tabpanel value="errors">
@@ -327,6 +469,42 @@ import {
                 </div>
             </div>
         </app-dialog>
+        <app-dialog header="Style Option Presets" [(visible)]="presetEditorVisible" [modal]="false"
+                    #presetEditorDialog data-testid="style-preset-editor-dialog"
+                    class="editor-dialog style-preset-editor-dialog"
+                    [closable]="false" [closeOnEscape]="false"
+                    [persistLayout]="true" [layoutId]="stylePresetEditorDialogLayoutId"
+                    (onShow)="onPresetEditorDialogShow()">
+            <editor [sessionId]="presetEditorSessionId"></editor>
+            <div class="editor-actions style-editor-actions">
+                <div class="editor-actions-left">
+                    <p-button data-testid="style-preset-editor-apply-button"
+                              label="Apply" icon="pi pi-check"
+                              [disabled]="!presetEditorSourceModified"
+                              (click)="applyPresetEditorSource()"/>
+                    <p-button data-testid="style-preset-editor-close-button"
+                              [label]="presetEditorSourceModified ? 'Discard' : 'Close'"
+                              icon="pi pi-times"
+                              (click)="closePresetEditor($event)"/>
+                </div>
+                <div class="editor-actions-right">
+                    <p-button data-testid="style-preset-editor-reset-button"
+                              label="Reset to Configured" icon="pi pi-refresh"
+                              [disabled]="!presetService.hasLocalOverride && !presetEditorSourceModified"
+                              (click)="resetPresetEditorToConfigured()"/>
+                </div>
+            </div>
+        </app-dialog>
+        <app-dialog header="Discard preset edits?" [(visible)]="presetEditorDiscardDialogVisible"
+                    [modal]="true" [closeOnEscape]="false" #presetEditorDiscardDialog>
+            <p>The raw preset source contains unapplied changes.</p>
+            <div class="dialog-controls">
+                <p-button label="Discard" severity="danger"
+                          (click)="discardPresetEditorChanges($event)"/>
+                <p-button label="Cancel"
+                          (click)="presetEditorDiscardDialog.close($event)"/>
+            </div>
+        </app-dialog>
         <app-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
@@ -421,7 +599,9 @@ import {
 export class StyleComponent implements OnDestroy {
     readonly stylesDialogLayoutId = STYLES_DIALOG_LAYOUT_ID;
     readonly styleEditorDialogLayoutId = STYLE_EDITOR_DIALOG_LAYOUT_ID;
+    readonly stylePresetEditorDialogLayoutId = STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID;
     readonly styleEditorSessionId = 'style-editor';
+    readonly presetEditorSessionId = 'style-option-presets-editor';
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     styleEditorSourceSubscription: Subscription = new Subscription();
@@ -456,11 +636,25 @@ export class StyleComponent implements OnDestroy {
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly styleEditorRequestSubscription: Subscription;
-    stylesDialogTab: 'styles' | 'errors' = 'styles';
+    stylesDialogTab: 'styles' | 'presets' | 'errors' = 'styles';
     styleIssueFilter: string = '';
     styleErrorsOnly: boolean = false;
     styleValidationDialogVisible: boolean = false;
     lastEditorValidationReport?: StyleValidationReport;
+    quickPresetFormVisible = false;
+    quickPresetName = "";
+    quickPresetAffinity: string | null = null;
+    quickPresetSelectedOptionKeys: string[] = [];
+    quickPresetValues: Record<string, boolean> = {};
+    quickPresetOptionChoices: QuickPresetOption[] = [];
+    presetAffinityOptions: PresetAffinityOption[] = [{label: "All", value: null}];
+    presetEditorVisible = false;
+    presetEditorDiscardDialogVisible = false;
+    presetEditorSourceModified = false;
+    private presetEditorOriginalSource = "";
+    private presetEditorSourceSubscription = new Subscription();
+    private presetEditorSaveSubscription = new Subscription();
+    private readonly presetMapSubscription: Subscription;
 
     @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -472,6 +666,8 @@ export class StyleComponent implements OnDestroy {
     @ViewChild('styleValidationDialog') styleValidationDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareDialog') styleCompareDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareHost') styleCompareHost?: ElementRef<HTMLDivElement>;
+    @ViewChild('presetEditorDialog') presetEditorDialog: AppDialogComponent | undefined;
+    @ViewChild('presetEditorDiscardDialog') presetEditorDiscardDialog: AppDialogComponent | undefined;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
@@ -481,6 +677,8 @@ export class StyleComponent implements OnDestroy {
                 public styleValidationReportService: StyleValidationReportService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
+                public presetService: StyleOptionPresetService,
+                private readonly mapInfoService: MapInfoService,
                 private dialogStack: DialogStackService,
                 private ngZone: NgZone,
                 styleEditorRequestService: StyleEditorRequestService) {
@@ -489,6 +687,12 @@ export class StyleComponent implements OnDestroy {
         });
         this.styleEditorRequestSubscription = styleEditorRequestService.requests.subscribe(styleId => {
             this.showStyleEditor(styleId);
+        });
+        this.presetMapSubscription = this.mapInfoService.maps$.subscribe(() => {
+            this.refreshPresetAffinityOptions();
+            if (this.quickPresetFormVisible) {
+                this.refreshQuickPresetOptions();
+            }
         });
     }
 
@@ -518,7 +722,11 @@ export class StyleComponent implements OnDestroy {
         if (this.quickProjectionRefreshTimer) {
             clearTimeout(this.quickProjectionRefreshTimer);
         }
+        this.presetEditorSourceSubscription.unsubscribe();
+        this.presetEditorSaveSubscription.unsubscribe();
+        this.presetMapSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
+        this.editorService.closeSession(this.presetEditorSessionId);
     }
 
     /** Promotes the styles dialog above other overlays. */
@@ -530,6 +738,260 @@ export class StyleComponent implements OnDestroy {
     onEditorDialogShow() {
         this.ensureStyleEditorSession();
         this.dialogStack.bringToFront(this.editorDialog);
+    }
+
+    /** Promotes the raw preset editor above the styles dialog when shown. */
+    onPresetEditorDialogShow(): void {
+        this.dialogStack.bringToFront(this.presetEditorDialog);
+    }
+
+    /** Opens or closes the compact GUI form used to append one local preset. */
+    toggleQuickPresetForm(): void {
+        if (this.quickPresetFormVisible) {
+            this.closeQuickPresetForm();
+            return;
+        }
+        this.quickPresetFormVisible = true;
+        this.refreshQuickPresetOptions();
+    }
+
+    /** Clears and hides the quick preset form. */
+    closeQuickPresetForm(): void {
+        this.quickPresetFormVisible = false;
+        this.quickPresetName = "";
+        this.quickPresetAffinity = null;
+        this.quickPresetSelectedOptionKeys = [];
+        this.quickPresetValues = {};
+        this.refreshQuickPresetOptions();
+    }
+
+    /** Rebuilds exact layer-affinity choices from the concrete datasource catalog. */
+    private refreshPresetAffinityOptions(): void {
+        const layerIds = new Set<string>();
+        for (const layer of this.mapInfoService.maps.allFeatureLayers()) {
+            layerIds.add(layer.id);
+        }
+        this.presetAffinityOptions = [
+            {label: "All", value: null},
+            ...[...layerIds].sort((lhs, rhs) => lhs.localeCompare(rhs))
+                .map(layerId => ({label: layerId, value: layerId}))
+        ];
+        if (this.quickPresetAffinity && !layerIds.has(this.quickPresetAffinity)) {
+            this.quickPresetAffinity = null;
+        }
+    }
+
+    /** Rebuilds editable Boolean option choices for the currently selected affinity. */
+    refreshQuickPresetOptions(): void {
+        const choices: QuickPresetOption[] = [];
+        for (const style of this.styleService.styles.values()) {
+            if (this.quickPresetAffinity
+                && !style.featureLayerStyle.hasLayerAffinity(this.quickPresetAffinity)) {
+                continue;
+            }
+            for (const option of style.options) {
+                if (option.internal || !isBooleanStyleOption(option)) {
+                    continue;
+                }
+                choices.push({
+                    key: `${style.id}\u0000${option.id}`,
+                    label: `${style.id} · ${option.label}`,
+                    styleId: style.id,
+                    optionId: option.id,
+                    defaultValue: Boolean(option.defaultValue)
+                });
+            }
+        }
+        this.quickPresetOptionChoices = choices;
+        const validKeys = new Set(choices.map(option => option.key));
+        this.quickPresetSelectedOptionKeys = this.quickPresetSelectedOptionKeys.filter(key => validKeys.has(key));
+        this.onQuickPresetOptionSelectionChanged();
+    }
+
+    /** Seeds explicit values for newly selected options and drops values for removed choices. */
+    onQuickPresetOptionSelectionChanged(): void {
+        const selectedKeys = new Set(this.quickPresetSelectedOptionKeys);
+        const nextValues: Record<string, boolean> = {};
+        for (const option of this.quickPresetOptionChoices) {
+            if (!selectedKeys.has(option.key)) {
+                continue;
+            }
+            nextValues[option.key] = Object.prototype.hasOwnProperty.call(this.quickPresetValues, option.key)
+                ? this.quickPresetValues[option.key]
+                : option.defaultValue;
+        }
+        this.quickPresetValues = nextValues;
+    }
+
+    /** Returns selected quick-form options in their stable stylesheet order. */
+    quickPresetSelectedOptions(): QuickPresetOption[] {
+        const selectedKeys = new Set(this.quickPresetSelectedOptionKeys);
+        return this.quickPresetOptionChoices.filter(option => selectedKeys.has(option.key));
+    }
+
+    /** Returns whether the current quick form is complete, unique, and applicable to a known layer. */
+    canSaveQuickPreset(): boolean {
+        const name = this.quickPresetName.trim();
+        const selectedOptions = this.quickPresetSelectedOptions();
+        if (this.presetEditorSourceModified
+            || !name
+            || !selectedOptions.length
+            || this.presetService.presets.some(preset =>
+                preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            return false;
+        }
+        if (this.quickPresetAffinity) {
+            return selectedOptions.every(option =>
+                this.styleService.styles.get(option.styleId)?.featureLayerStyle
+                    .hasLayerAffinity(this.quickPresetAffinity!) === true);
+        }
+        const concreteLayerIds = this.presetAffinityOptions
+            .map(option => option.value)
+            .filter((layerId): layerId is string => layerId !== null);
+        return concreteLayerIds.some(layerId => selectedOptions.every(option =>
+            this.styleService.styles.get(option.styleId)?.featureLayerStyle.hasLayerAffinity(layerId) === true));
+    }
+
+    /** Validates and appends the quick-form definition to a normalized local preset document. */
+    saveQuickPreset(): void {
+        if (!this.canSaveQuickPreset()) {
+            return;
+        }
+        const selectedOptions = this.quickPresetSelectedOptions();
+        const preset: StyleOptionPresetDefinition = {
+            id: this.nextPresetId(this.quickPresetName),
+            name: this.quickPresetName.trim(),
+            enabled: true,
+            ...(this.quickPresetAffinity
+                ? {layerAffinity: `^${this.escapeRegularExpression(this.quickPresetAffinity)}$`}
+                : {}),
+            values: selectedOptions.map(option => ({
+                styleId: option.styleId,
+                optionId: option.optionId,
+                value: this.quickPresetValues[option.key]
+            }))
+        };
+        if (this.presetService.addPreset(preset)) {
+            this.messageService.showInfo(`Added style option preset '${preset.name}'.`);
+            this.closeQuickPresetForm();
+        } else {
+            this.messageService.showError(`Could not add style option preset '${preset.name}'.`);
+        }
+    }
+
+    /** Stores one preset's local availability override. */
+    setPresetAvailability(presetId: string, available: boolean): void {
+        this.presetService.setAvailable(presetId, available);
+    }
+
+    /** Formats optional affinity metadata for the management list. */
+    presetAffinityLabel(preset: StyleOptionPresetDefinition): string {
+        return preset.layerAffinity ? `Layer: ${preset.layerAffinity}` : "All layers";
+    }
+
+    /** Formats one preset validation issue with its most specific available identity. */
+    presetIssueText(issue: StyleOptionPresetIssue): string {
+        const prefix = issue.presetId ? `${issue.presetId}: ` : "";
+        const suffix = issue.valueIndex === undefined ? "" : ` (value ${issue.valueIndex + 1})`;
+        return `${prefix}${issue.message}${suffix}`;
+    }
+
+    /** Returns a DOM-safe suffix for one quick-form option identity. */
+    quickPresetOptionTestId(option: QuickPresetOption): string {
+        return `${option.styleId}-${option.optionId}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+    }
+
+    /** Opens a dedicated raw YAML editor session for the current effective preset source. */
+    openPresetEditor(): void {
+        this.closeQuickPresetForm();
+        this.presetEditorSourceSubscription.unsubscribe();
+        this.presetEditorSaveSubscription.unsubscribe();
+        this.editorService.createSession({
+            id: this.presetEditorSessionId,
+            source: this.presetService.source,
+            language: "yaml"
+        });
+        this.presetEditorOriginalSource = this.presetService.source.replace(/\n+$/, "");
+        this.presetEditorSourceSubscription = this.editorService
+            .getSession(this.presetEditorSessionId)!.source$
+            .subscribe(source => {
+                this.presetEditorSourceModified =
+                    source.replace(/\n+$/, "") !== this.presetEditorOriginalSource;
+            });
+        this.presetEditorSaveSubscription = this.editorService
+            .onSaveRequested(this.presetEditorSessionId)!
+            .subscribe(() => this.applyPresetEditorSource());
+        this.presetEditorSourceModified = false;
+        this.presetEditorVisible = true;
+    }
+
+    /** Validates and atomically activates the current raw preset source. */
+    applyPresetEditorSource(): void {
+        const source = this.editorService.getSessionSource(this.presetEditorSessionId);
+        if (!this.presetService.applyOverrideSource(source)) {
+            this.messageService.showError("The preset source is invalid. The previous presets remain active.");
+            return;
+        }
+        this.presetEditorOriginalSource = source.replace(/\n+$/, "");
+        this.presetEditorSourceModified = false;
+        this.messageService.showInfo("Applied style option presets.");
+    }
+
+    /** Restores the configured baseline in both the effective service and raw editor. */
+    resetPresetEditorToConfigured(): void {
+        this.presetService.resetToConfigured();
+        this.presetEditorOriginalSource = this.presetService.source.replace(/\n+$/, "");
+        this.editorService.updateSessionSource(this.presetEditorSessionId, this.presetService.source);
+        this.presetEditorSourceModified = false;
+        this.messageService.showInfo("Restored configured style option presets.");
+    }
+
+    /** Closes the raw editor or asks for confirmation before discarding unsaved changes. */
+    closePresetEditor(event: Event): void {
+        event.stopPropagation();
+        if (this.presetEditorSourceModified) {
+            this.presetEditorDiscardDialogVisible = true;
+            return;
+        }
+        this.closePresetEditorSession(event);
+    }
+
+    /** Discards the raw buffer and closes both the warning and editor dialogs. */
+    discardPresetEditorChanges(event: Event): void {
+        event.stopPropagation();
+        this.presetEditorSourceModified = false;
+        this.presetEditorDiscardDialog?.close(event);
+        this.closePresetEditorSession(event);
+    }
+
+    /** Releases the raw editor session after a confirmed close. */
+    private closePresetEditorSession(event: Event): void {
+        this.presetEditorDialog?.close(event);
+        this.presetEditorSourceSubscription.unsubscribe();
+        this.presetEditorSaveSubscription.unsubscribe();
+        this.editorService.closeSession(this.presetEditorSessionId);
+        this.presetService.restoreEffectiveIssues();
+    }
+
+    /** Derives a unique stable ID from a user-visible preset name. */
+    private nextPresetId(name: string): string {
+        const base = name.trim().toLocaleLowerCase()
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "preset";
+        const ids = new Set(this.presetService.presets.map(preset => preset.id));
+        let candidate = base;
+        let suffix = 2;
+        while (ids.has(candidate)) {
+            candidate = `${base}-${suffix++}`;
+        }
+        return candidate;
+    }
+
+    /** Escapes one concrete layer ID for use as an exact regular expression. */
+    private escapeRegularExpression(value: string): string {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
 
     /** Brings the compare dialog to the front and creates the merge view. */

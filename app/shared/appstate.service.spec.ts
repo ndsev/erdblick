@@ -973,7 +973,85 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('provides non-URL hover-label defaults', () => {
+    it('writes a style-option batch atomically and emits style state once', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.layerNamesState.next(['m1/layerA']);
+        service.numViews = 2;
+        const nextSpy = vi.spyOn(service.stylesState, 'next');
+
+        service.setStyleOptionValuesBatch([
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                shortStyleId: 'overlay',
+                optionId: 'first',
+                values: [true, false]
+            },
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                shortStyleId: 'overlay',
+                optionId: 'second',
+                values: [true]
+            }
+        ]);
+
+        expect(nextSpy).toHaveBeenCalledTimes(1);
+        expect(service.styles.get('m1/layerA/overlay/first')).toEqual([true, false]);
+        expect(service.styles.get('m1/layerA/overlay/second')).toEqual([true, true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects an invalid style-option batch before mutating any option', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.layerNamesState.next(['m1/layerA']);
+
+        expect(() => service.setStyleOptionValuesBatch([
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                shortStyleId: 'overlay',
+                optionId: 'valid',
+                values: [true]
+            },
+            {
+                mapId: 'missing',
+                layerId: 'layer',
+                shortStyleId: 'overlay',
+                optionId: 'invalid',
+                values: [false]
+            }
+        ])).toThrow("Unknown map layer 'missing/layer'");
+        expect(service.styles.size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('stores preset selection by map and layer without serializing it into snapshots', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViews = 2;
+
+        service.setStylePresetSelection(0, 'Vendor/Map', 'Lane', 'lane-topology');
+        service.setStylePresetSelection(1, 'Vendor/Map', 'Lane', 'lane-boundary');
+
+        expect(service.getStylePresetSelection(0, 'Vendor/Map', 'Lane')).toBe('lane-topology');
+        expect(service.getStylePresetSelection(1, 'Vendor/Map', 'Lane')).toBe('lane-boundary');
+        expect(service.exportSnapshot()).not.toHaveProperty('stylePresetSelection');
+
+        service.setStylePresetSelection(0, 'Vendor/Map', 'Lane', null);
+        expect(service.getStylePresetSelection(0, 'Vendor/Map', 'Lane')).toBeNull();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('provides non-URL hover-label defaults for the preview preferences', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
 
