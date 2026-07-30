@@ -1,5 +1,7 @@
 .p-dialog {
   .app-dialog-resize-handle {
+    --app-dialog-resize-hit-depth: 0.5em;
+
     position: absolute;
     display: block;
     width: 3em;
@@ -14,6 +16,7 @@
       box-sizing: border-box;
       content: "";
       opacity: 0;
+      pointer-events: none;
       transition: opacity 120ms ease;
     }
 
@@ -22,11 +25,20 @@
     }
   }
 
+  // Clip each large visual handle to two thin border arms so nearby dialog controls remain clickable.
   .app-dialog-resize-nw {
     top: 0;
     right: auto;
     bottom: auto;
     left: 0;
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% var(--app-dialog-resize-hit-depth),
+      var(--app-dialog-resize-hit-depth) var(--app-dialog-resize-hit-depth),
+      var(--app-dialog-resize-hit-depth) 100%,
+      0 100%
+    );
     cursor: nwse-resize;
 
     &::after {
@@ -43,6 +55,14 @@
     right: 0;
     bottom: auto;
     left: auto;
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 100%,
+      calc(100% - var(--app-dialog-resize-hit-depth)) 100%,
+      calc(100% - var(--app-dialog-resize-hit-depth)) var(--app-dialog-resize-hit-depth),
+      0 var(--app-dialog-resize-hit-depth)
+    );
     cursor: nesw-resize;
 
     &::after {
@@ -59,6 +79,14 @@
     right: auto;
     bottom: 0;
     left: 0;
+    clip-path: polygon(
+      0 0,
+      var(--app-dialog-resize-hit-depth) 0,
+      var(--app-dialog-resize-hit-depth) calc(100% - var(--app-dialog-resize-hit-depth)),
+      100% calc(100% - var(--app-dialog-resize-hit-depth)),
+      100% 100%,
+      0 100%
+    );
     cursor: nesw-resize;
 
     &::after {
@@ -75,6 +103,14 @@
     right: 0;
     bottom: 0;
     left: auto;
+    clip-path: polygon(
+      100% 0,
+      100% 100%,
+      0 100%,
+      0 calc(100% - var(--app-dialog-resize-hit-depth)),
+      calc(100% - var(--app-dialog-resize-hit-depth)) calc(100% - var(--app-dialog-resize-hit-depth)),
+      calc(100% - var(--app-dialog-resize-hit-depth)) 0
+    );
     cursor: nwse-resize;
 
     &::after {
@@ -88,6 +124,10 @@
 }
 
 @media (hover: none), (pointer: coarse) {
+  .p-dialog .app-dialog-resize-handle {
+    --app-dialog-resize-hit-depth: 0.75em;
+  }
+
   .p-dialog .app-dialog-resize-handle::after {
     opacity: 0.5;
   }
