@@ -32,6 +32,7 @@ export class FilterTileState {
     deliveredGeneration = 0;
     subsetBlob: Uint8Array | null = null;
     stringPoolId = "";
+    conversionTimestampMs: number | null = null;
     glbAttachmentName = "";
     valueVersion = 0;
     renderedValueVersion = 0;
@@ -99,6 +100,7 @@ export class FilterTileState {
         this.renderedEntryCount = delivery.numEntries;
         this.geometryVertexCount = delivery.geometryVertexCount;
         this.stringPoolId = delivery.stringPoolId;
+        this.conversionTimestampMs = delivery.conversionTimestampMs;
         this.glbAttachmentName = delivery.glbAttachmentName;
         this.receivedAt = delivery.receivedAt;
     }
@@ -114,6 +116,7 @@ export class FilterTileState {
     dispose(): void {
         this.subsetBlob = null;
         this.stringPoolId = "";
+        this.conversionTimestampMs = null;
         this.glbAttachmentName = "";
         this.dependencies = [];
         this.issues = [];

@@ -1,11 +1,13 @@
 import {describe, expect, it} from "vitest";
 import type {SubsetDiagnosticsTile} from "../mapview/view-layer-diagnostics.service";
+import {CONVERSION_AGE_UNIT} from "./diagnostics.constants";
 import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
 
 function tile(
     tileId: number,
     stats: Array<[string, number[]]>,
-    ready = true
+    ready = true,
+    conversionTimestampMs: number | null = null
 ): SubsetDiagnosticsTile {
     return {
         viewIndex: 0,
@@ -15,6 +17,7 @@ function tile(
         layerName: "Layer",
         tileId,
         mapTileKey: `Features:Map:Layer:${tileId}`,
+        conversionTimestampMs,
         ready,
         error: null,
         sourceFeatureCount: 1,
@@ -74,5 +77,57 @@ describe("performance diagnostics aggregation", () => {
                 peakTileIds: ["7", "3"]
             })
         ]);
+    });
+
+    it("uses the newest and oldest conversion ages with one shared mean", () => {
+        const nowMs = 10_000;
+        const stats = buildAggregatedPerfStats([
+            tile(101, [], true, nowMs - 1_000),
+            tile(102, [], true, nowMs - 3_000),
+            tile(103, [], true, nowMs - 2_000)
+        ], 5, nowMs);
+
+        expect(stats.find(stat => stat.key === "Load+Convert/Age"))
+            .toMatchObject({
+                unit: CONVERSION_AGE_UNIT,
+                peak: 3_000,
+                average: 2_000,
+                peakTileIds: ["102"]
+            });
+        expect(stats.find(stat => stat.key === "Load+Convert/Freshness"))
+            .toMatchObject({
+                unit: CONVERSION_AGE_UNIT,
+                peak: 1_000,
+                average: 2_000,
+                peakTileIds: ["101"]
+            });
+    });
+
+    it("ignores pending tiles and tiles without conversion metadata", () => {
+        const stats = buildAggregatedPerfStats([
+            tile(101, [], true, 8_000),
+            tile(102, [], true, null),
+            tile(103, [], false, 9_000)
+        ], 5, 10_000);
+        const age = stats.find(stat => stat.key === "Load+Convert/Age");
+        const freshness = stats.find(
+            stat => stat.key === "Load+Convert/Freshness"
+        );
+
+        expect(age).toMatchObject({peak: 2_000, average: 2_000});
+        expect(freshness).toMatchObject({peak: 2_000, average: 2_000});
+    });
+
+    it("caps tied newest and oldest tile ids at the requested limit", () => {
+        const stats = buildAggregatedPerfStats([
+            tile(101, [], true, 8_000),
+            tile(102, [], true, 8_000),
+            tile(103, [], true, 8_000)
+        ], 2, 10_000);
+
+        expect(stats.find(stat => stat.key === "Load+Convert/Age")
+            ?.peakTileIds).toEqual(["101", "102"]);
+        expect(stats.find(stat => stat.key === "Load+Convert/Freshness")
+            ?.peakTileIds).toEqual(["101", "102"]);
     });
 });

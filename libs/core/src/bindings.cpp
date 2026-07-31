@@ -800,6 +800,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("error", &TileLayerParser::TileLayerMetadata::error)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)
+        .field("conversionTimestampMs", &TileLayerParser::TileLayerMetadata::conversionTimestampMs)
         .field("scalarFields", &TileLayerParser::TileLayerMetadata::scalarFields);
 
     em::value_object<TileLayerParser::TileSubsetLayerMetadata>("TileSubsetLayerMetadata")

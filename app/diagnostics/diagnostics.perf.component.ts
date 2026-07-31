@@ -11,6 +11,7 @@ import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shar
 import {PerformanceDiagnosticsScope, PerfStat} from './diagnostics.model';
 import {buildAggregatedPerfStats} from './diagnostics.perf-aggregation';
 import {
+    CONVERSION_AGE_UNIT,
     COUNT_KEY_PATTERN,
     DISPLAY_DECIMALS,
     LOAD_CONVERT_ROOT_BADGE_PATTERN,
@@ -53,7 +54,7 @@ interface PerfTreeRowData {
 }
 
 type SupportedUnit = 'ms' | 'count' | 'features';
-type DurationDisplayUnit = 'ms' | 's' | 'm' | 'h';
+type DurationDisplayUnit = 'ms' | 's' | 'm' | 'h' | 'd';
 type BytesDisplayUnit = 'B' | 'KB' | 'MB' | 'GB';
 
 interface ParentAggregate {
@@ -1027,6 +1028,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Chooses the shared duration unit that keeps displayed values readable. */
     private resolveDurationDisplayUnit(maxAbsDurationMs: number): DurationDisplayUnit {
+        if (maxAbsDurationMs >= 86_400_000) {
+            return 'd';
+        }
         if (maxAbsDurationMs >= 3_600_000) {
             return 'h';
         }
@@ -1092,7 +1096,16 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 return ms / 60_000;
             case 'h':
                 return ms / 3_600_000;
+            case 'd':
+                return ms / 86_400_000;
         }
+    }
+
+    /** Formats one tile conversion age without affecting the unit shared by performance timings. */
+    private formatConversionAge(value: number): string {
+        const unit = this.resolveDurationDisplayUnit(Math.abs(value));
+        const converted = this.fromMsToDisplayUnit(value, unit);
+        return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${unit}`;
     }
 
     /** Formats a perf value in the currently selected shared display unit. */
@@ -1110,6 +1123,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
+        }
+        if (unit === CONVERSION_AGE_UNIT) {
+            return this.formatConversionAge(value);
         }
         if (unit === 'ms') {
             const converted = this.fromMsToDisplayUnit(value, this.durationDisplayUnit);
@@ -1134,6 +1150,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
+        }
+        if (unit === CONVERSION_AGE_UNIT) {
+            return this.formatConversionAge(value);
         }
         if (unit === 'ms') {
             const converted = this.fromMsToDisplayUnit(value, this.durationDisplayUnit);

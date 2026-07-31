@@ -63,6 +63,7 @@ public:
         std::string legalInfo;
         std::string error;
         int32_t numFeatures;
+        double conversionTimestampMs;
         NativeJsValue scalarFields;
     };
     /** Parse only cheap tile metadata without constructing the full feature/source-data model. */

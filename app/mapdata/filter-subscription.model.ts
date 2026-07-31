@@ -57,6 +57,7 @@ export interface TileSubsetDelivery {
     readonly tileId: number;
     readonly mapTileKey: string;
     readonly stringPoolId: string;
+    readonly conversionTimestampMs: number | null;
     readonly dependencies: Array<{
         sourceTileKey: string;
         mapId: string;

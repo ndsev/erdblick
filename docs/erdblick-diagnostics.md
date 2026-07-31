@@ -43,6 +43,13 @@ The statistics dialog is the main place to inspect:
 - per-style rendering cost
 - frame-time and FPS
 
+Under **Load+Convert**, the **Age** and **Freshness** rows summarize the same
+conversion-age samples for the currently filtered loaded tiles:
+
+- **Age** uses the oldest (highest) conversion age as its peak.
+- **Freshness** uses the newest (lowest) conversion age as its peak.
+- Both rows show the same mean conversion age in the Average column.
+
 Use it when:
 
 - a map feels slow after enabling more layers or styles

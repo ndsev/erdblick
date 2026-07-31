@@ -12,6 +12,7 @@ function delivery(): TileSubsetDelivery {
         tileId: 42,
         mapTileKey: "Features:Map:Layer:42",
         stringPoolId: "source",
+        conversionTimestampMs: 1_725_000_123_456,
         dependencies: [{
             sourceTileKey: "Features:Map:Layer:42",
             mapId: "Map",
@@ -46,8 +47,10 @@ describe("FilterTileState", () => {
         expect(state.geometryVertexCount).toBe(12_345);
         expect(state.renderedEntryCount).toBe(7);
         expect(state.sourceFeatureCount).toBe(11);
+        expect(state.conversionTimestampMs).toBe(1_725_000_123_456);
 
         state.dispose();
         expect(state.geometryVertexCount).toBe(0);
+        expect(state.conversionTimestampMs).toBeNull();
     });
 });

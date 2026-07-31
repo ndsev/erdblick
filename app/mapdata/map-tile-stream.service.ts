@@ -768,6 +768,7 @@ export class MapTileStreamService {
                 tileId: number;
                 legalInfo?: string;
                 stringPoolId?: string;
+                conversionTimestampMs?: number;
                 scalarFields?: Record<string, unknown>;
             };
             filterId: string;
@@ -808,6 +809,9 @@ export class MapTileStreamService {
             const rawGeometryVertexCount = Number(
                 scalarFields["Filter/Geometry/Vertices#count"] ?? 0
             );
+            const rawConversionTimestampMs = Number(
+                metadata.layer.conversionTimestampMs
+            );
             const delivery: TileSubsetDelivery = {
                 blob: subsetBlob,
                 filterId,
@@ -821,6 +825,10 @@ export class MapTileStreamService {
                     tileId
                 ),
                 stringPoolId: String(metadata.layer.stringPoolId ?? ""),
+                conversionTimestampMs:
+                    Number.isFinite(rawConversionTimestampMs)
+                        ? rawConversionTimestampMs
+                        : null,
                 dependencies: Array.isArray(metadata.dependencies)
                     ? metadata.dependencies
                     : [],

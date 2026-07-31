@@ -12,6 +12,7 @@ export interface SubsetDiagnosticsTile {
     layerName: string;
     tileId: number;
     mapTileKey: string;
+    conversionTimestampMs: number | null;
     ready: boolean;
     error: string | null;
     sourceFeatureCount: number | null;
@@ -264,6 +265,9 @@ export class ViewLayerDiagnosticsService {
                         layerName: state.layerId,
                         tileId: state.tileId,
                         mapTileKey: state.mapTileKey,
+                        conversionTimestampMs: includeSourceInfo
+                            ? state.conversionTimestampMs
+                            : null,
                         ready: this.presentationReady(provider, layer, state),
                         error: state.error,
                         sourceFeatureCount: state.sourceFeatureCount,

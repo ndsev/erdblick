@@ -1421,6 +1421,8 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
             }
         }
     }
+    const auto conversionTimestampMs = std::chrono::duration<double, std::milli>(
+        tileLayer.timestamp().time_since_epoch()).count();
     return {
         tileLayer.id().toString(),
         tileLayer.stringPoolId(),
@@ -1430,6 +1432,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",
         numFeatures,
+        conversionTimestampMs,
         *allScalarFields
     };
 }

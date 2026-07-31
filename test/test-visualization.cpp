@@ -1313,6 +1313,22 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
     REQUIRE_FALSE(offsetsAfterReload.contains("ReloadedNode"));
 }
 
+TEST_CASE("TileLayerParser exposes the tile conversion timestamp in milliseconds", "[erdblick.parser]")
+{
+    using namespace std::chrono;
+
+    TileLayerParser parser;
+    auto tile = TestDataProvider(parser).getTestLayer(42., 11., 13);
+    constexpr int64_t expectedTimestampMs = 1'725'000'123'456;
+    tile->setTimestamp(system_clock::time_point(milliseconds(expectedTimestampMs)));
+
+    std::ostringstream stream;
+    REQUIRE(tile->write(stream));
+
+    auto metadata = parser.readTileLayerMetadata(SharedUint8Array(stream.str()));
+    REQUIRE(metadata.conversionTimestampMs == static_cast<double>(expectedTimestampMs));
+}
+
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
