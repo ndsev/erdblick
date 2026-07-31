@@ -31,6 +31,9 @@ interface SharedLayerEntry {
         contributions: ReadonlyMap<string, unknown>
     ) => {layer: DeckLayerLike | null; order: number};
     contributions: Map<string, unknown>;
+    cachedLayer: DeckLayerLike | null;
+    cachedOrder: number;
+    dirty: boolean;
 }
 
 type RegistryEntry = LayerEntry | SharedLayerEntry;
@@ -106,10 +109,14 @@ export class DeckLayerRegistry {
         if (existing && "buildLayer" in existing) {
             existing.contributions.set(sourceId, contribution);
             existing.buildLayer = buildLayer;
+            existing.dirty = true;
         } else {
             this.entries.set(key, {
                 buildLayer,
-                contributions: new Map([[sourceId, contribution]])
+                contributions: new Map([[sourceId, contribution]]),
+                cachedLayer: null,
+                cachedOrder: 0,
+                dirty: true
             });
         }
         this.markDirty();
@@ -136,6 +143,8 @@ export class DeckLayerRegistry {
         }
         if (entry.contributions.size === 0) {
             this.entries.delete(key);
+        } else {
+            entry.dirty = true;
         }
         this.markDirty();
         return true;
@@ -175,8 +184,15 @@ export class DeckLayerRegistry {
         const layers = [...this.entries.entries()]
             .flatMap(([key, entry]) => {
                 if ("buildLayer" in entry) {
-                    const {layer, order} = entry.buildLayer(key, entry.contributions);
-                    return layer ? [{key, layer, order}] : [];
+                    if (entry.dirty) {
+                        const built = entry.buildLayer(key, entry.contributions);
+                        entry.cachedLayer = built.layer;
+                        entry.cachedOrder = built.order;
+                        entry.dirty = false;
+                    }
+                    return entry.cachedLayer
+                        ? [{key, layer: entry.cachedLayer, order: entry.cachedOrder}]
+                        : [];
                 }
                 return [{key, layer: entry.layer, order: entry.order}];
             })

@@ -14,6 +14,7 @@ import {
     FilterSubscriptionDefinition,
     FilterSubscriptionRef,
     TileAttachmentRef,
+    filterSubscriptionCoverageMembershipEqual,
     type FilterChannelDefinition,
     type TileSubsetDelivery
 } from "./filter-subscription.model";
@@ -65,6 +66,7 @@ export class StyledMapgetLayer {
     latestStatus: MapTileStreamFilterStatusPayload | null = null;
     styleOrder = 0;
     private coverage: FilterSubscriptionCoverage = {tileIds: []};
+    private coverageVersionValue = 0;
     private disposed = false;
     private options: Record<string, boolean | number | string>;
     private readonly retiredTileStates = new Map<number, FilterTileState>();
@@ -128,6 +130,11 @@ export class StyledMapgetLayer {
         return this.options;
     }
 
+    /** Monotonic exact-coverage version used by view-local reconciliation. */
+    get coverageVersion(): number {
+        return this.coverageVersionValue;
+    }
+
     setCoverage(
         tileIds: readonly number[],
         priorityTileIds: readonly number[] = [],
@@ -140,7 +147,10 @@ export class StyledMapgetLayer {
             ...(priorityTileIds.length ? {priorityTileIds: [...priorityTileIds]} : {}),
             ...(roots?.length ? {roots: structuredClone(roots)} : {})
         };
-        if (JSON.stringify(nextCoverage) === JSON.stringify(this.coverage)) {
+        if (filterSubscriptionCoverageMembershipEqual(
+            nextCoverage,
+            this.coverage
+        )) {
             return;
         }
         const demanded = new Set(orderedTileIds);
@@ -159,6 +169,7 @@ export class StyledMapgetLayer {
             }
         }
         this.coverage = nextCoverage;
+        this.coverageVersionValue += 1;
         const previousGeneration = this.generation;
         this.filterRef.setCoverage(nextCoverage);
         if (this.generation !== previousGeneration) {
@@ -204,7 +215,9 @@ export class StyledMapgetLayer {
     setOptions(options: Record<string, boolean | number | string>): void {
         this.assertLive();
         const normalized = {...options};
-        if (JSON.stringify(normalized) === JSON.stringify(this.options)) {
+        const keys = Object.keys(normalized);
+        if (keys.length === Object.keys(this.options).length &&
+            keys.every(key => normalized[key] === this.options[key])) {
             return;
         }
         this.disposeRetiredTileStates();

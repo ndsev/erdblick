@@ -11,7 +11,10 @@ import type {MapgetLayer} from "../mapdata/mapget-layer.model";
 import type {StyleService, ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import type {IRenderSceneHandle} from "./render-view.model";
-import type {MapViewStateService} from "./map-view-state.service";
+import {
+    MapViewStateService,
+    ViewRecalculationReason
+} from "./map-view-state.service";
 import {
     TileSubsetLayerRenderService,
     type TileSubsetLayerRenderPolicyChange
@@ -84,6 +87,8 @@ export class ViewLayerController {
     private sceneHandle: IRenderSceneHandle | null = null;
     private disposed = false;
     private reconcileQueued = false;
+    private fullReconcileRequired = true;
+    private lastViewportPresentationSignature = "";
     private blockAssemblyTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly unregisterDiagnostics: () => void;
 
@@ -101,7 +106,8 @@ export class ViewLayerController {
     ) {
         this.unregisterDiagnostics = diagnostics.register(
             viewIndex,
-            () => this.diagnosticStyledLayers()
+            () => this.diagnosticStyledLayers(),
+            (layer, state) => this.presentationStillDemanded(layer, state)
         );
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
@@ -111,7 +117,11 @@ export class ViewLayerController {
                     this.scheduleReconcile();
                 }
             }),
-            this.viewState.viewStateChanged.subscribe(() => this.scheduleReconcile()),
+            this.viewState.viewStateChanged.subscribe(reason =>
+                this.scheduleReconcile(
+                    reason !== ViewRecalculationReason.Viewport
+                )
+            ),
             this.styleService.styleAddedForId.subscribe(() => this.scheduleReconcile()),
             this.styleService.styleRemovedForId.subscribe(() => this.scheduleReconcile()),
             this.styleService.styleGroups.subscribe(() => this.scheduleReconcile()),
@@ -256,17 +266,69 @@ export class ViewLayerController {
         this.occupancyChanged.complete();
     }
 
-    private scheduleReconcile(): void {
-        if (this.disposed || this.reconcileQueued) {
+    private scheduleReconcile(fullReconcile = true): void {
+        if (this.disposed) {
+            return;
+        }
+        this.fullReconcileRequired ||= fullReconcile;
+        if (this.reconcileQueued) {
             return;
         }
         this.reconcileQueued = true;
         queueMicrotask(() => {
             this.reconcileQueued = false;
-            if (!this.disposed) {
-                this.reconcile();
+            if (this.disposed) {
+                return;
             }
+            const full = this.fullReconcileRequired;
+            this.fullReconcileRequired = false;
+            const viewportSignature =
+                this.viewportPresentationSignature();
+            if (!full &&
+                viewportSignature ===
+                    this.lastViewportPresentationSignature) {
+                return;
+            }
+            this.reconcile();
+            this.lastViewportPresentationSignature =
+                this.viewportPresentationSignature();
         });
+    }
+
+    /**
+     * Exact cheap signature for presentation demand affected by viewport
+     * motion. Regular coverage/fidelity is versioned by ViewVisualizationState;
+     * search coverage is versioned by its StyledMapgetLayer and its density
+     * decision is represented once per occupied source level.
+     */
+    private viewportPresentationSignature(): string {
+        const viewState = this.viewState.viewStateFor(this.viewIndex);
+        const parts = [
+            String(viewState?.coverageVersion ?? -1)
+        ];
+        for (const layer of this.featureSearch
+            .searchStyledLayersForView(this.viewIndex)) {
+            parts.push(layer.ownerId, String(layer.coverageVersion));
+            const levelSamples = new Map<number, number>();
+            for (const tileId of layer.tileStates.keys()) {
+                const level = Number(coreLib.getTileLevel(tileId));
+                if (!levelSamples.has(level)) {
+                    levelSamples.set(level, tileId);
+                }
+            }
+            for (const [level, tileId] of [...levelSamples]
+                .sort(([left], [right]) => left - right)) {
+                parts.push(
+                    `${level}:` +
+                    `${this.featureSearch.shouldRenderSearchStyledLayer(
+                        this.viewIndex,
+                        layer,
+                        tileId
+                    ) ? 1 : 0}`
+                );
+            }
+        }
+        return parts.join("|");
     }
 
     private reconcile(): void {
@@ -479,7 +541,13 @@ export class ViewLayerController {
             ["Success", "Failed", "Aborted"].includes(event.status.state)) {
             this.reconcileOwnedVisualizations(owned);
         }
-        if (event.type === "error" || event.type === "status") {
+        if (event.type === "error") {
+            this.occupancyChanged.next();
+            this.changed.next();
+            this.diagnostics.notifyLayerErrors(this.viewIndex, layer);
+            return;
+        }
+        if (event.type === "status") {
             this.occupancyChanged.next();
             this.changed.next();
             this.diagnostics.notifyChanged();
@@ -521,11 +589,14 @@ export class ViewLayerController {
         owned: OwnedStyledLayer
     ): void {
         const slot = owned.replacementSlot;
-        if (!slot || !this.regularReplacementIsReady(owned)) {
+        if (!slot) {
             return;
         }
         const fallback = this.retiringRegularLayers.get(slot);
         if (!fallback || fallback.owned === owned) {
+            return;
+        }
+        if (!this.regularReplacementIsReady(owned)) {
             return;
         }
         this.retiringRegularLayers.delete(slot);

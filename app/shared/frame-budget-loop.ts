@@ -1,17 +1,23 @@
+export type BudgetLoopScheduler = "frame" | "task";
+
 /**
- * Small consumer-owned requestAnimationFrame work loop.
+ * Small consumer-owned budgeted work loop.
  *
- * It deliberately has no global queue or Angular lifetime. A consumer owns one
- * instance, enqueues replaceable work items, and disposes it with the consumer.
+ * Frame scheduling is the default for presentation work. Task scheduling is
+ * available to transport consumers whose progress must not stop when rendering
+ * misses animation frames. It deliberately has no global queue or Angular
+ * lifetime.
  */
 export class FrameBudgetLoop<T> {
     private readonly queue: T[] = [];
-    private frame: number | null = null;
+    private scheduledWork: ReturnType<typeof setTimeout> | number | null = null;
     private disposed = false;
+    private paused = false;
 
     constructor(
         private readonly work: (item: T, deadline: number) => boolean,
-        private readonly frameBudgetMs = 8
+        private readonly frameBudgetMs = 8,
+        private readonly scheduler: BudgetLoopScheduler = "frame"
     ) {}
 
     enqueue(item: T): void {
@@ -20,6 +26,35 @@ export class FrameBudgetLoop<T> {
         }
         this.queue.push(item);
         this.schedule();
+    }
+
+    /** Adds an already ordered batch without scheduling one callback per item. */
+    enqueueMany(items: readonly T[]): void {
+        if (this.disposed || !items.length) {
+            return;
+        }
+        for (const item of items) {
+            this.queue.push(item);
+        }
+        this.schedule();
+    }
+
+    /** Number of work items which have not completed yet. */
+    get length(): number {
+        return this.queue.length;
+    }
+
+    /** Suspends or resumes processing without discarding queued work. */
+    setPaused(paused: boolean): void {
+        if (this.disposed || this.paused === paused) {
+            return;
+        }
+        this.paused = paused;
+        if (paused && this.scheduledWork !== null) {
+            this.cancelScheduledWork();
+        } else if (!paused) {
+            this.schedule();
+        }
     }
 
     cancel(predicate: (item: T) => boolean): void {
@@ -40,25 +75,45 @@ export class FrameBudgetLoop<T> {
         }
         this.disposed = true;
         this.queue.length = 0;
-        if (this.frame !== null) {
-            cancelAnimationFrame(this.frame);
-            this.frame = null;
+        if (this.scheduledWork !== null) {
+            this.cancelScheduledWork();
         }
     }
 
     private schedule(): void {
-        if (this.frame !== null || !this.queue.length || this.disposed) {
+        if (this.scheduledWork !== null || !this.queue.length ||
+            this.disposed || this.paused) {
             return;
         }
-        this.frame = requestAnimationFrame(() => {
-            this.frame = null;
-            this.runFrame();
-        });
+        const callback = () => {
+            this.scheduledWork = null;
+            this.runSlice();
+        };
+        this.scheduledWork = this.scheduler === "task"
+            ? setTimeout(callback, 0)
+            : requestAnimationFrame(callback);
     }
 
-    private runFrame(): void {
+    private cancelScheduledWork(): void {
+        if (this.scheduledWork === null) {
+            return;
+        }
+        if (this.scheduler === "task") {
+            clearTimeout(this.scheduledWork);
+        } else {
+            cancelAnimationFrame(this.scheduledWork as number);
+        }
+        this.scheduledWork = null;
+    }
+
+    private runSlice(): void {
+        if (this.paused || this.disposed) {
+            return;
+        }
         const deadline = performance.now() + Math.max(1, this.frameBudgetMs);
-        while (this.queue.length && performance.now() < deadline) {
+        while (!this.paused &&
+            this.queue.length &&
+            performance.now() < deadline) {
             const item = this.queue[0];
             if (this.work(item, deadline)) {
                 this.queue.shift();

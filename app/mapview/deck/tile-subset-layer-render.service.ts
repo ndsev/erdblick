@@ -148,7 +148,7 @@ export class TileSubsetLayerRenderService {
     private initialization: Promise<void> = Promise.resolve();
     private nextTaskId = 0;
     private latestNativeRenderMs = 0;
-    private readonly deckFrameTimeMsByView = new Map<number, number>();
+    private readonly deckFrameIntervalsMsByView = new Map<number, number[]>();
     private completedTaskCount = 0;
     private completedTileCount = 0;
     private releasedTaskCount = 0;
@@ -224,19 +224,34 @@ export class TileSubsetLayerRenderService {
     }
 
     currentFrameTimeMs(): number {
-        return Math.max(0, ...this.deckFrameTimeMsByView.values());
+        return Math.max(
+            0,
+            ...[...this.deckFrameIntervalsMsByView.values()]
+                .map(samples => {
+                    if (!samples.length) {
+                        return 0;
+                    }
+                    const ordered = [...samples].sort((left, right) => left - right);
+                    return ordered[Math.ceil(ordered.length * 0.9) - 1] ?? 0;
+                })
+        );
     }
 
-    /** Records one complete Deck screen-pass duration for diagnostics. */
+    /** Records one visible Deck frame interval for cadence diagnostics. */
     recordDeckFrameTime(viewIndex: number, milliseconds: number): void {
         if (Number.isFinite(milliseconds) && milliseconds >= 0) {
-            this.deckFrameTimeMsByView.set(viewIndex, milliseconds);
+            const samples = this.deckFrameIntervalsMsByView.get(viewIndex) ?? [];
+            samples.push(milliseconds);
+            if (samples.length > 30) {
+                samples.splice(0, samples.length - 30);
+            }
+            this.deckFrameIntervalsMsByView.set(viewIndex, samples);
         }
     }
 
     /** Removes the last Deck timing when its logical view is destroyed. */
     clearDeckFrameTime(viewIndex: number): void {
-        this.deckFrameTimeMsByView.delete(viewIndex);
+        this.deckFrameIntervalsMsByView.delete(viewIndex);
     }
 
     debugSnapshot(): TileSubsetLayerRenderDebugSnapshot {

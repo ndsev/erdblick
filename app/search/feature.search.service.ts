@@ -58,6 +58,10 @@ import {
     StyledMapgetLayer,
     type StyledMapgetLayerEvent
 } from "../mapdata/styled-mapget-layer.model";
+import {
+    filterSubscriptionCoverageMembershipEqual,
+    type FilterSubscriptionCoverage
+} from "../mapdata/filter-subscription.model";
 import type {FilterTileState} from "../mapdata/filter-tile-state.model";
 import type {MapgetLayer} from "../mapdata/mapget-layer.model";
 import {MapViewStateService} from "../mapview/map-view-state.service";
@@ -175,7 +179,7 @@ interface SearchStyledPresentation {
     styledLayer: StyledMapgetLayer;
     subscription: Subscription;
     definitionSignature: string;
-    coverageSignature: string;
+    coverage: FilterSubscriptionCoverage | null;
     coverageOrder: Map<number, number>;
 }
 
@@ -387,6 +391,9 @@ export class FeatureSearchService {
     private resultDataRebuildRaf: number | null = null;
     private progressEmissionRaf: number | null = null;
     private readonly searchPresentations = new Map<string, SearchStyledPresentation>();
+    private readonly searchPresentationByLayer =
+        new Map<StyledMapgetLayer, SearchStyledPresentation>();
+    private readonly searchRenderDecisionCache = new Map<string, boolean>();
     private readonly pendingCoverageRefreshIds = new Set<string>();
     private searchPresentationReconcileQueued = false;
     readonly searchPresentationsChanged = new Subject<void>();
@@ -419,6 +426,7 @@ export class FeatureSearchService {
             this.reconcilePersistedFeatureSearchState(entries);
         });
         this.viewState.viewStateChanged.subscribe(() => {
+            this.searchRenderDecisionCache.clear();
             for (const session of this.searchSessions) {
                 if (session.definition.autoUpdate) {
                     this.pendingCoverageRefreshIds.add(session.id);
@@ -1385,6 +1393,7 @@ export class FeatureSearchService {
     private syncSearchRequestsToMapService(options: {
         forceGenerationIds?: Iterable<string>;
         updateCoverageIds?: Iterable<string>;
+        notifyPresentationChange?: boolean;
     } = {}): void {
         const forceGenerationIds = new Set(options.forceGenerationIds ?? []);
         const updateCoverageIds = new Set(options.updateCoverageIds ?? []);
@@ -1412,7 +1421,8 @@ export class FeatureSearchService {
         this.reconcileSearchPresentations(
             resolvedDefinitions,
             forceGenerationIds,
-            updateCoverageIds
+            updateCoverageIds,
+            options.notifyPresentationChange !== false
         );
     }
 
@@ -1438,8 +1448,13 @@ export class FeatureSearchService {
         layer: StyledMapgetLayer,
         tileId: number
     ): boolean {
-        const presentation = [...this.searchPresentations.values()]
-            .find(candidate => candidate.styledLayer === layer);
+        const level = Number(coreLib.getTileLevel(tileId));
+        const cacheKey = `${viewIndex}|${layer.ownerId}|${level}`;
+        const cached = this.searchRenderDecisionCache.get(cacheKey);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const presentation = this.searchPresentationByLayer.get(layer);
         const session = presentation
             ? this.getInternalSession(presentation.sessionId)
             : undefined;
@@ -1449,16 +1464,19 @@ export class FeatureSearchService {
             !session.definition.selectedViewIndices.includes(viewIndex) ||
             !session.definition.renderStrategy.showHighFiGeometry ||
             session.definition.searchStyleRules.length === 0) {
+            this.searchRenderDecisionCache.set(cacheKey, false);
             return false;
         }
         const strategy = session.definition.renderStrategy;
-        return !strategy.showLowFiDots ||
+        const result = !strategy.showLowFiDots ||
             this.viewState.prefersHighFidelityForSearchResultTile(
                 viewIndex,
                 session.id,
                 tileId,
                 strategy.highFidelityMaxVisibleTiles
             );
+        this.searchRenderDecisionCache.set(cacheKey, result);
+        return result;
     }
 
     private scheduleSearchPresentationReconcile(): void {
@@ -1468,15 +1486,22 @@ export class FeatureSearchService {
         this.searchPresentationReconcileQueued = true;
         queueMicrotask(() => {
             this.searchPresentationReconcileQueued = false;
-            this.syncSearchRequestsToMapService();
+            // ViewLayerController is subscribed to the same viewport event and
+            // will reconcile after this microtask. Avoid scheduling a second
+            // full pass for the coverage work completed here.
+            this.syncSearchRequestsToMapService({
+                notifyPresentationChange: false
+            });
         });
     }
 
     private reconcileSearchPresentations(
         definitions: readonly FeatureSearchResolvedDefinition[],
         forceGenerationIds: ReadonlySet<string>,
-        updateCoverageIds: ReadonlySet<string>
+        updateCoverageIds: ReadonlySet<string>,
+        notifyPresentationChange: boolean
     ): void {
+        this.searchRenderDecisionCache.clear();
         const desiredKeys = new Set<string>();
         for (const definition of definitions) {
             for (const ref of definition.selectedMapLayers) {
@@ -1534,7 +1559,7 @@ export class FeatureSearchService {
 
                 presentation.styledLayer.setSuspended(definition.paused);
                 const shouldUpdateCoverage =
-                    !presentation.coverageSignature ||
+                    !presentation.coverage ||
                     definition.autoUpdate ||
                     updateCoverageIds.has(definition.id);
                 if (shouldUpdateCoverage) {
@@ -1542,9 +1567,18 @@ export class FeatureSearchService {
                         definition,
                         presentation.mapgetLayer
                     );
-                    const signature = JSON.stringify(coverage.tileIds);
-                    if (signature !== presentation.coverageSignature) {
-                        presentation.coverageSignature = signature;
+                    if (!presentation.coverage ||
+                        !filterSubscriptionCoverageMembershipEqual(
+                            coverage,
+                            presentation.coverage
+                        )) {
+                        presentation.coverage = {
+                            tileIds: [...coverage.tileIds],
+                            ...(coverage.priorityTileIds
+                                ? {priorityTileIds:
+                                    [...coverage.priorityTileIds]}
+                                : {})
+                        };
                         presentation.coverageOrder = new Map(
                             coverage.tileIds.map((tileId, index) => [tileId, index])
                         );
@@ -1565,7 +1599,9 @@ export class FeatureSearchService {
             this.searchPresentations.delete(key);
             this.destroySearchPresentation(presentation);
         }
-        this.searchPresentationsChanged.next();
+        if (notifyPresentationChange) {
+            this.searchPresentationsChanged.next();
+        }
     }
 
     private createSearchPresentation(
@@ -1617,9 +1653,10 @@ export class FeatureSearchService {
             styledLayer,
             subscription: new Subscription(),
             definitionSignature,
-            coverageSignature: "",
+            coverage: null,
             coverageOrder: new Map()
         };
+        this.searchPresentationByLayer.set(styledLayer, presentation);
         presentation.subscription = styledLayer.events.subscribe(event =>
             this.handleSearchStyledLayerEvent(presentation, event)
         );
@@ -1627,6 +1664,8 @@ export class FeatureSearchService {
     }
 
     private destroySearchPresentation(presentation: SearchStyledPresentation): void {
+        this.searchPresentationByLayer.delete(presentation.styledLayer);
+        this.searchRenderDecisionCache.clear();
         this.subsetIngestionLoop.cancel(
             task => task.presentationKey === presentation.key
         );

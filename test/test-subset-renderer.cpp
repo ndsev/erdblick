@@ -291,6 +291,112 @@ rules:
 }
 
 TEST_CASE(
+    "TileSubsetLayerRenderer stacks shared validity line segments independently",
+    "[erdblick.subset-renderer]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererSegmentStackPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererSegmentStackPool",
+        "TestMap",
+        info,
+        strings,
+        "validities",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{11}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Attribute,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline");
+    auto transitionGeometry =
+        [&](std::array<mapget::Point, 3> const& points) {
+            auto collection = subset->newGeometryCollection(1, true);
+            auto geometry = subset->newGeometry(
+                mapget::GeomType::Line,
+                3,
+                true);
+            geometry->setName("centerline");
+            for (auto const& point : points) {
+                geometry->append(point);
+            }
+            collection->addGeometry(geometry);
+            return collection;
+        };
+    channel->newAttributeValidityEntry(
+        featureId,
+        transitionGeometry({{
+            {10.999, 48.0, 0.0},
+            {11.0, 48.0, 0.0},
+            {11.001, 48.0, 0.0},
+        }}),
+        0,
+        true,
+        0,
+        2,
+        {},
+        {},
+        "rules",
+        "PROHIBITED_TRANSITION");
+    channel->newAttributeValidityEntry(
+        featureId,
+        transitionGeometry({{
+            {11.0, 47.999, 0.0},
+            {11.0, 48.0, 0.0},
+            {11.001, 48.0, 0.0},
+        }}),
+        0,
+        true,
+        1,
+        2,
+        {},
+        {},
+        "rules",
+        "PROHIBITED_TRANSITION");
+
+    auto style = rendererStyle(R"yaml(
+name: SegmentValidityOffsets
+version: 2
+rules:
+  - type: Road
+    scope: attribute
+    geometry: line
+    geometry-name: centerline
+    color: "#ffffff"
+    offset-increment: [2, 0, 0]
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    renderer.run();
+
+    auto const result = renderer.renderResult();
+    auto const& starts = result["pathWorld"]["startIndices"];
+    auto const& positions = result["pathWorld"]["positions"];
+    REQUIRE(starts.size() == 3);
+    REQUIRE(starts[0] == 0);
+    REQUIRE(starts[1] == 3);
+    // The second transition changes from an unshifted incoming link to the
+    // second slot of the shared outgoing link, so its path contains a bridge
+    // between the two independently offset link endpoints.
+    REQUIRE(starts[2] == 7);
+    REQUIRE(positions.size() == 21);
+}
+
+TEST_CASE(
     "TileSubsetLayerRenderer diagnoses entries which match no concrete rule",
     "[erdblick.subset-renderer]")
 {

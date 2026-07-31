@@ -25,6 +25,7 @@ import {
     DeckLayerRegistry,
     makeDeckLayerKey
 } from "./deck-layer-registry";
+import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
 import {
     StaleSubsetRenderError,
     TileSubsetLayerRenderService
@@ -54,6 +55,7 @@ import type {
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
+    renderBufferArena?: DeckRenderBufferArena;
     sceneMode?: SceneMode;
     device?: Device | null;
 }
@@ -154,6 +156,17 @@ interface SharedGltfPickContribution {
     data: DeckGltfPickProxyStyleContribution["data"];
 }
 
+interface SharedPrimitiveContribution<T> {
+    data: T;
+    pickResolver: PickResolver;
+}
+
+interface ArenaRegistration {
+    arena: DeckRenderBufferArena;
+    groupKey: string;
+    sourceId: string;
+}
+
 const MAX_PATHS = 1_000_000;
 const MAX_SURFACES = 1_000_000;
 const MAX_VERTICES = 20_000_000;
@@ -192,6 +205,7 @@ const ARROW_ICON_MAPPING = {
 export class TileSubsetLayerVisualization {
     readonly visualizationId: string;
     private readonly layerKeys = new Set<string>();
+    private readonly arenaRegistrations = new Map<string, ArenaRegistration>();
     private readonly styleCacheKey: string;
     private pickResults: TileSubsetPickResult[] = [];
     private renderedSignature = "";
@@ -329,6 +343,9 @@ export class TileSubsetLayerVisualization {
         if (!fieldDictBlob) {
             return false;
         }
+        const renderOrigin =
+            this.arena(sceneHandle)?.coordinateOrigin(this.blockOrigin) ??
+            this.blockOrigin;
         const signature = [
             ...this.states.map(state =>
                 `${state.mapTileKey}:${state.valueVersion}`
@@ -336,6 +353,7 @@ export class TileSubsetLayerVisualization {
             this.fidelityValue,
             this.owner.style.id,
             this.styleCacheKey,
+            ...renderOrigin,
             this.sceneRevision
         ].join("|");
         if (signature === this.renderedSignature || signature === this.requestedSignature) {
@@ -355,7 +373,7 @@ export class TileSubsetLayerVisualization {
                 blockKey: this.blockKey,
                 mapTileKeys: this.states.map(state => state.mapTileKey),
                 tileIds: this.states.map(state => state.tileId),
-                coordinateOrigin: this.blockOrigin,
+                coordinateOrigin: renderOrigin,
                 mapId: primaryState.mapId,
                 catalogRevision: this.owner.mapInfo.sourceCatalogRevision ?? 0,
                 dataSourceInfoBlob,
@@ -510,6 +528,7 @@ export class TileSubsetLayerVisualization {
             }
         }
         this.layerKeys.clear();
+        this.removeArenaContributions();
         this.removeSharedGltfContributions(registry);
         this.releaseGltfAsset();
         for (const state of this.states) {
@@ -531,10 +550,12 @@ export class TileSubsetLayerVisualization {
             return false;
         }
         const desired = new Set<string>();
+        const desiredArena = new Set<string>();
         this.applyDebugBlockVisualization(registry, desired);
         const origin = this.coordinateOrigin(result.coordinateOrigin);
         if (!origin) {
             this.reconcile(registry, desired);
+            this.reconcileArena(desiredArena);
             return true;
         }
         const preparedGltf = await this.prepareGltf(sceneHandle, result);
@@ -552,24 +573,22 @@ export class TileSubsetLayerVisualization {
 
         for (const surface of this.surfaceData(result.surface, origin)) {
             const key = this.key("surface", surface.depthTest);
-            registry.upsert(key, new SolidPolygonLayer<DeckSurfaceData, DeckPickProps>({
-                id: key,
-                data: surface,
-                coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-                coordinateOrigin: surface.coordinateOrigin,
-                filled: true,
-                extruded: false,
-                wireframe: false,
-                _normalize: false,
-                _full3d: true,
+            if (!this.upsertArenaSurface(
+                sceneHandle,
+                key,
+                surface,
+                pickResolver,
                 modelMatrix,
-                parameters: this.parameters(surface.depthTest),
-                pickable: true,
-                tileKey: this.blockKey,
-                subsetPickResolver: pickResolver,
-                featureAddresses: surface.featureAddresses
-            }), 350 + this.owner.styleOrder);
-            desired.add(key);
+                desiredArena
+            )) {
+                registry.upsert(key, this.surfaceLayer(
+                    key,
+                    surface,
+                    pickResolver,
+                    modelMatrix
+                ), 350 + this.owner.styleOrder);
+                desired.add(key);
+            }
         }
 
         const pathBuckets = [
@@ -578,25 +597,22 @@ export class TileSubsetLayerVisualization {
         ];
         for (const path of pathBuckets) {
             const key = this.key("path", path.depthTest, path.billboard);
-            registry.upsert(key, new PathLayer<DeckPathData, DeckPickProps>({
-                id: key,
-                data: path,
-                coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-                coordinateOrigin: path.coordinateOrigin,
-                _pathType: "open",
-                widthUnits: "pixels",
-                billboard: path.billboard,
+            if (!this.upsertArenaPath(
+                sceneHandle,
+                key,
+                path,
+                pickResolver,
                 modelMatrix,
-                parameters: this.parameters(path.depthTest),
-                capRounded: true,
-                jointRounded: true,
-                pickable: true,
-                extensions: [new PathStyleExtension({dash: true})],
-                tileKey: this.blockKey,
-                subsetPickResolver: pickResolver,
-                featureAddressesByPath: path.featureAddressesByPath
-            }), 400 + this.owner.styleOrder);
-            desired.add(key);
+                desiredArena
+            )) {
+                registry.upsert(key, this.pathLayer(
+                    key,
+                    path,
+                    pickResolver,
+                    modelMatrix
+                ), 400 + this.owner.styleOrder);
+                desired.add(key);
+            }
         }
 
         const pointBuckets = [
@@ -605,23 +621,22 @@ export class TileSubsetLayerVisualization {
         ];
         for (const point of pointBuckets) {
             const key = this.key("point", point.depthTest, point.billboard);
-            registry.upsert(key, new ScatterplotLayer<DeckPointData, DeckPickProps>({
-                id: key,
-                data: point,
-                coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-                coordinateOrigin: point.coordinateOrigin,
-                filled: true,
-                stroked: false,
-                radiusUnits: "pixels",
-                billboard: point.billboard,
+            if (!this.upsertArenaPoint(
+                sceneHandle,
+                key,
+                point,
+                pickResolver,
                 modelMatrix,
-                parameters: this.parameters(point.depthTest),
-                pickable: true,
-                tileKey: this.blockKey,
-                subsetPickResolver: pickResolver,
-                featureAddresses: point.featureAddresses
-            }), 425 + this.owner.styleOrder);
-            desired.add(key);
+                desiredArena
+            )) {
+                registry.upsert(key, this.pointLayer(
+                    key,
+                    point,
+                    pickResolver,
+                    modelMatrix
+                ), 425 + this.owner.styleOrder);
+                desired.add(key);
+            }
         }
 
         const labels = [...result.labelWorld, ...result.labelBillboard];
@@ -709,7 +724,507 @@ export class TileSubsetLayerVisualization {
             preparedGltf
         );
         this.reconcile(registry, desired);
+        this.reconcileArena(desiredArena);
         return true;
+    }
+
+    private surfaceLayer(
+        key: string,
+        surface: DeckSurfaceData,
+        pickResolver: PickResolver,
+        modelMatrix: Matrix4 | null
+    ): SolidPolygonLayer<DeckSurfaceData, DeckPickProps> {
+        return new SolidPolygonLayer<DeckSurfaceData, DeckPickProps>({
+            id: key,
+            data: surface,
+            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+            coordinateOrigin: surface.coordinateOrigin,
+            filled: true,
+            extruded: false,
+            wireframe: false,
+            _normalize: false,
+            _full3d: true,
+            modelMatrix,
+            parameters: this.parameters(surface.depthTest),
+            pickable: true,
+            tileKey: key,
+            subsetPickResolver: pickResolver,
+            featureAddresses: surface.featureAddresses
+        });
+    }
+
+    private pathLayer(
+        key: string,
+        path: DeckPathData,
+        pickResolver: PickResolver,
+        modelMatrix: Matrix4 | null
+    ): PathLayer<DeckPathData, DeckPickProps> {
+        return new PathLayer<DeckPathData, DeckPickProps>({
+            id: key,
+            data: path,
+            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+            coordinateOrigin: path.coordinateOrigin,
+            _pathType: "open",
+            widthUnits: "pixels",
+            billboard: path.billboard,
+            modelMatrix,
+            parameters: this.parameters(path.depthTest),
+            capRounded: true,
+            jointRounded: true,
+            pickable: true,
+            extensions: [new PathStyleExtension({dash: true})],
+            tileKey: key,
+            subsetPickResolver: pickResolver,
+            featureAddressesByPath: path.featureAddressesByPath
+        });
+    }
+
+    private pointLayer(
+        key: string,
+        point: DeckPointData,
+        pickResolver: PickResolver,
+        modelMatrix: Matrix4 | null
+    ): ScatterplotLayer<DeckPointData, DeckPickProps> {
+        return new ScatterplotLayer<DeckPointData, DeckPickProps>({
+            id: key,
+            data: point,
+            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+            coordinateOrigin: point.coordinateOrigin,
+            filled: true,
+            stroked: false,
+            radiusUnits: "pixels",
+            billboard: point.billboard,
+            modelMatrix,
+            parameters: this.parameters(point.depthTest),
+            pickable: true,
+            tileKey: key,
+            subsetPickResolver: pickResolver,
+            featureAddresses: point.featureAddresses
+        });
+    }
+
+    private upsertArenaSurface(
+        sceneHandle: IRenderSceneHandle,
+        _blockKey: string,
+        surface: DeckSurfaceData,
+        pickResolver: PickResolver,
+        modelMatrix: Matrix4 | null,
+        desired: Set<string>
+    ): boolean {
+        const arena = this.arena(sceneHandle);
+        if (!arena) {
+            return false;
+        }
+        const groupKey = this.arenaGroupKey(
+            "surface",
+            surface.depthTest,
+            false,
+            surface.coordinateOrigin
+        );
+        const sourceId = `${this.visualizationId}/surface/${surface.depthTest}`;
+        arena.upsert({
+            groupKey,
+            sourceId,
+            vertexCount: surface.attributes.getPolygon.value.length / 3,
+            contribution: {data: surface, pickResolver} satisfies
+                SharedPrimitiveContribution<DeckSurfaceData>,
+            buildLayer: (key, contributions) => {
+                const merged = this.mergeSurfaceContributions(contributions);
+                return {
+                    layer: merged
+                        ? this.surfaceLayer(
+                            key,
+                            merged.data,
+                            merged.pickResolver,
+                            modelMatrix
+                        )
+                        : null,
+                    order: 350 + this.owner.styleOrder
+                };
+            }
+        });
+        this.trackArenaRegistration(arena, groupKey, sourceId, desired);
+        return true;
+    }
+
+    private upsertArenaPath(
+        sceneHandle: IRenderSceneHandle,
+        _blockKey: string,
+        path: DeckPathData,
+        pickResolver: PickResolver,
+        modelMatrix: Matrix4 | null,
+        desired: Set<string>
+    ): boolean {
+        const arena = this.arena(sceneHandle);
+        if (!arena) {
+            return false;
+        }
+        const groupKey = this.arenaGroupKey(
+            "path",
+            path.depthTest,
+            path.billboard,
+            path.coordinateOrigin
+        );
+        const sourceId = `${this.visualizationId}/path/${path.billboard}/${path.depthTest}`;
+        arena.upsert({
+            groupKey,
+            sourceId,
+            vertexCount: path.attributes.getPath.value.length / 3,
+            contribution: {data: path, pickResolver} satisfies
+                SharedPrimitiveContribution<DeckPathData>,
+            buildLayer: (key, contributions) => {
+                const merged = this.mergePathContributions(contributions);
+                return {
+                    layer: merged
+                        ? this.pathLayer(
+                            key,
+                            merged.data,
+                            merged.pickResolver,
+                            modelMatrix
+                        )
+                        : null,
+                    order: 400 + this.owner.styleOrder
+                };
+            }
+        });
+        this.trackArenaRegistration(arena, groupKey, sourceId, desired);
+        return true;
+    }
+
+    private upsertArenaPoint(
+        sceneHandle: IRenderSceneHandle,
+        _blockKey: string,
+        point: DeckPointData,
+        pickResolver: PickResolver,
+        modelMatrix: Matrix4 | null,
+        desired: Set<string>
+    ): boolean {
+        const arena = this.arena(sceneHandle);
+        if (!arena) {
+            return false;
+        }
+        const groupKey = this.arenaGroupKey(
+            "point",
+            point.depthTest,
+            point.billboard,
+            point.coordinateOrigin
+        );
+        const sourceId = `${this.visualizationId}/point/${point.billboard}/${point.depthTest}`;
+        arena.upsert({
+            groupKey,
+            sourceId,
+            vertexCount: point.length,
+            contribution: {data: point, pickResolver} satisfies
+                SharedPrimitiveContribution<DeckPointData>,
+            buildLayer: (key, contributions) => {
+                const merged = this.mergePointContributions(contributions);
+                return {
+                    layer: merged
+                        ? this.pointLayer(
+                            key,
+                            merged.data,
+                            merged.pickResolver,
+                            modelMatrix
+                        )
+                        : null,
+                    order: 425 + this.owner.styleOrder
+                };
+            }
+        });
+        this.trackArenaRegistration(arena, groupKey, sourceId, desired);
+        return true;
+    }
+
+    private mergeSurfaceContributions(
+        raw: ReadonlyMap<string, unknown>
+    ): SharedPrimitiveContribution<DeckSurfaceData> | null {
+        const contributions = [...raw.values()] as Array<
+            SharedPrimitiveContribution<DeckSurfaceData>>;
+        if (!contributions.length) {
+            return null;
+        }
+        const picks = this.arenaPickTable(contributions);
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const indices: number[] = [];
+        const starts = [0];
+        const addresses: number[] = [];
+        for (const contribution of contributions) {
+            const data = contribution.data;
+            const vertexBase = positions.length / 3;
+            this.appendValues(positions, data.attributes.getPolygon.value);
+            this.appendValues(colors, data.attributes.fillColors.value);
+            for (const index of data.attributes.indices.value) {
+                indices.push(index + vertexBase);
+            }
+            for (let index = 1; index < data.startIndices.length; ++index) {
+                starts.push(vertexBase + data.startIndices[index]);
+            }
+            for (const address of data.featureAddresses) {
+                addresses.push(picks.remap(contribution, address));
+            }
+        }
+        const first = contributions[0].data;
+        return {
+            pickResolver: picks.resolve,
+            data: {
+                length: addresses.length,
+                depthTest: first.depthTest,
+                coordinateOrigin: first.coordinateOrigin,
+                startIndices: new Uint32Array(starts),
+                featureAddresses: new Uint32Array(addresses),
+                attributes: {
+                    getPolygon: {
+                        value: new Float32Array(positions),
+                        size: 3
+                    },
+                    indices: {
+                        value: new Uint32Array(indices),
+                        size: 1
+                    },
+                    fillColors: {
+                        value: new Uint8Array(colors),
+                        size: 4
+                    }
+                }
+            }
+        };
+    }
+
+    private mergePathContributions(
+        raw: ReadonlyMap<string, unknown>
+    ): SharedPrimitiveContribution<DeckPathData> | null {
+        const contributions = [...raw.values()] as Array<
+            SharedPrimitiveContribution<DeckPathData>>;
+        if (!contributions.length) {
+            return null;
+        }
+        const picks = this.arenaPickTable(contributions);
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const widths: number[] = [];
+        const dashes: number[] = [];
+        const starts = [0];
+        const addresses: number[] = [];
+        const hasDashes = contributions.some(contribution =>
+            !!contribution.data.attributes.instanceDashArrays);
+        for (const contribution of contributions) {
+            const data = contribution.data;
+            const vertexBase = positions.length / 3;
+            const vertexCount = data.attributes.getPath.value.length / 3;
+            this.appendValues(positions, data.attributes.getPath.value);
+            this.appendValues(colors, data.attributes.instanceColors.value);
+            this.appendValues(widths, data.attributes.instanceStrokeWidths.value);
+            const contributionDashes =
+                data.attributes.instanceDashArrays?.value;
+            if (hasDashes) {
+                if (contributionDashes) {
+                    this.appendValues(dashes, contributionDashes);
+                } else {
+                    for (let index = 0; index < vertexCount; ++index) {
+                        dashes.push(1, 0);
+                    }
+                }
+            }
+            for (let index = 1; index < data.startIndices.length; ++index) {
+                starts.push(vertexBase + data.startIndices[index]);
+            }
+            for (const address of data.featureAddressesByPath) {
+                addresses.push(picks.remap(contribution, address));
+            }
+        }
+        const first = contributions[0].data;
+        return {
+            pickResolver: picks.resolve,
+            data: {
+                length: addresses.length,
+                billboard: first.billboard,
+                depthTest: first.depthTest,
+                coordinateOrigin: first.coordinateOrigin,
+                startIndices: new Uint32Array(starts),
+                featureAddressesByPath: new Uint32Array(addresses),
+                attributes: {
+                    getPath: {
+                        value: new Float32Array(positions),
+                        size: 3
+                    },
+                    instanceColors: {
+                        value: new Uint8Array(colors),
+                        size: 4
+                    },
+                    instanceStrokeWidths: {
+                        value: new Float32Array(widths),
+                        size: 1
+                    },
+                    ...(hasDashes
+                        ? {instanceDashArrays: {
+                            value: new Float32Array(dashes),
+                            size: 2
+                        }}
+                        : {})
+                }
+            }
+        };
+    }
+
+    private mergePointContributions(
+        raw: ReadonlyMap<string, unknown>
+    ): SharedPrimitiveContribution<DeckPointData> | null {
+        const contributions = [...raw.values()] as Array<
+            SharedPrimitiveContribution<DeckPointData>>;
+        if (!contributions.length) {
+            return null;
+        }
+        const picks = this.arenaPickTable(contributions);
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const radii: number[] = [];
+        const addresses: number[] = [];
+        for (const contribution of contributions) {
+            const data = contribution.data;
+            this.appendValues(positions, data.attributes.getPosition.value);
+            this.appendValues(colors, data.attributes.getFillColor.value);
+            this.appendValues(radii, data.attributes.getRadius.value);
+            for (const address of data.featureAddresses) {
+                addresses.push(picks.remap(contribution, address));
+            }
+        }
+        const first = contributions[0].data;
+        return {
+            pickResolver: picks.resolve,
+            data: {
+                length: addresses.length,
+                billboard: first.billboard,
+                depthTest: first.depthTest,
+                coordinateOrigin: first.coordinateOrigin,
+                featureAddresses: new Uint32Array(addresses),
+                attributes: {
+                    getPosition: {
+                        value: new Float32Array(positions),
+                        size: 3
+                    },
+                    getFillColor: {
+                        value: new Uint8Array(colors),
+                        size: 4
+                    },
+                    getRadius: {
+                        value: new Float32Array(radii),
+                        size: 1
+                    }
+                }
+            }
+        };
+    }
+
+    private arenaPickTable<T>(
+        contributions: Array<SharedPrimitiveContribution<T>>
+    ): {
+        remap: (
+            contribution: SharedPrimitiveContribution<T>,
+            localAddress: number
+        ) => number;
+        resolve: PickResolver;
+    } {
+        const entries: Array<{
+            resolver: PickResolver;
+            localAddress: number;
+        }> = [];
+        const byContribution = new Map<
+            SharedPrimitiveContribution<T>,
+            Map<number, number>>();
+        return {
+            remap: (contribution, localAddress) => {
+                if (localAddress === UNSELECTABLE) {
+                    return UNSELECTABLE;
+                }
+                let addresses = byContribution.get(contribution);
+                if (!addresses) {
+                    addresses = new Map();
+                    byContribution.set(contribution, addresses);
+                }
+                const existing = addresses.get(localAddress);
+                if (existing !== undefined) {
+                    return existing;
+                }
+                const mapped = entries.length;
+                entries.push({
+                    resolver: contribution.pickResolver,
+                    localAddress
+                });
+                addresses.set(localAddress, mapped);
+                return mapped;
+            },
+            resolve: mappedAddress => {
+                const entry = entries[mappedAddress];
+                return entry
+                    ? entry.resolver(entry.localAddress)
+                    : [];
+            }
+        };
+    }
+
+    private appendValues(
+        target: number[],
+        source: ArrayLike<number>
+    ): void {
+        for (let index = 0; index < source.length; ++index) {
+            target.push(Number(source[index]));
+        }
+    }
+
+    private arenaGroupKey(
+        kind: string,
+        depthTest: boolean,
+        billboard: boolean,
+        origin: [number, number, number]
+    ): string {
+        return [
+            "subset-arena",
+            encodeURIComponent(this.owner.ownerId),
+            `view-${this.viewIndex}`,
+            kind,
+            billboard ? "billboard" : "world",
+            depthTest ? "depth" : "overlay",
+            origin.map(value => value.toPrecision(15)).join(",")
+        ].join("/");
+    }
+
+    private trackArenaRegistration(
+        arena: DeckRenderBufferArena,
+        groupKey: string,
+        sourceId: string,
+        desired: Set<string>
+    ): void {
+        const key = `${groupKey}\n${sourceId}`;
+        const previous = this.arenaRegistrations.get(key);
+        if (previous && previous.arena !== arena) {
+            previous.arena.remove(previous.groupKey, previous.sourceId);
+        }
+        this.arenaRegistrations.set(key, {arena, groupKey, sourceId});
+        desired.add(key);
+    }
+
+    private reconcileArena(desired: ReadonlySet<string>): void {
+        for (const [key, registration] of [...this.arenaRegistrations]) {
+            if (desired.has(key)) {
+                continue;
+            }
+            registration.arena.remove(
+                registration.groupKey,
+                registration.sourceId
+            );
+            this.arenaRegistrations.delete(key);
+        }
+    }
+
+    private removeArenaContributions(): void {
+        for (const registration of this.arenaRegistrations.values()) {
+            registration.arena.remove(
+                registration.groupKey,
+                registration.sourceId
+            );
+        }
+        this.arenaRegistrations.clear();
     }
 
     /** Adds one labeled WGS84 rectangle for the actual rendered block. */
@@ -1412,6 +1927,10 @@ export class TileSubsetLayerVisualization {
 
     private registry(sceneHandle: IRenderSceneHandle): DeckLayerRegistry | null {
         return (sceneHandle.scene as DeckScene | undefined)?.layerRegistry ?? null;
+    }
+
+    private arena(sceneHandle: IRenderSceneHandle): DeckRenderBufferArena | null {
+        return (sceneHandle.scene as DeckScene | undefined)?.renderBufferArena ?? null;
     }
 
     private coordinateOrigin(raw: Float64Array): [number, number, number] | null {

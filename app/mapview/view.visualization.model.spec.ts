@@ -49,6 +49,28 @@ describe("ViewVisualizationState", () => {
         expect(state.getTileOrder(3)).toBe(1);
     });
 
+    it("retains request order when camera motion only reprioritizes one set", () => {
+        const state = new ViewVisualizationState();
+        const getTileIds = vi.spyOn(coreLib as any, "getTileIds")
+            .mockReturnValueOnce([7, 3])
+            .mockReturnValueOnce([3, 7]);
+        const getCanonicalCount = vi.spyOn(
+            coreLib as any,
+            "getNumTileIdsForCanonicalCamera"
+        ).mockReturnValue(1);
+        try {
+            state.recalculateTileIds(512, [6], 1000);
+            const version = state.coverageVersion;
+            state.recalculateTileIds(512, [6], 1000);
+            expect(state.coverageVersion).toBe(version);
+        } finally {
+            getTileIds.mockRestore();
+            getCanonicalCount.mockRestore();
+        }
+        expect(state.visibleTileIdsPerLevel.get(6)).toEqual([7, 3]);
+        expect(state.getTileOrder(7)).toBe(0);
+    });
+
     it("uses conservative low fidelity for unknown tiles", () => {
         expect(new ViewVisualizationState().getTileRenderPolicy(1)).toEqual({
             targetFidelity: "low"

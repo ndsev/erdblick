@@ -28,7 +28,58 @@ function jsonFrame(type: number, payload: object, version = {
     return frame;
 }
 
+function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
+    const result = new Uint8Array(
+        frames.reduce((size, frame) => size + frame.byteLength, 0)
+    );
+    let offset = 0;
+    for (const frame of frames) {
+        result.set(frame, offset);
+        offset += frame.byteLength;
+    }
+    return result.buffer;
+}
+
 describe('MapTileStreamClient', () => {
+    it('budgets packed payloads at ordered VTLV frame boundaries', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const observedTypes: number[] = [];
+        vi.useFakeTimers();
+        const now = vi.spyOn(performance, "now");
+        try {
+            client.onFrame = (_frame, type) => observedTypes.push(type);
+            tileStream.enqueueFrame(packedFrames(
+                jsonFrame(41, {ordinal: 1}),
+                jsonFrame(42, {ordinal: 2}),
+                jsonFrame(43, {ordinal: 3})
+            ));
+            while (tileStream.pendingFrameMessages > 0) {
+                await Promise.resolve();
+            }
+
+            expect(client.getPendingFrameQueueSize()).toBe(3);
+            expect(vi.getTimerCount()).toBe(1);
+
+            now
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(5);
+            vi.runOnlyPendingTimers();
+            expect(observedTypes).toEqual([41]);
+            expect(client.getPendingFrameQueueSize()).toBe(2);
+
+            now.mockReturnValue(0);
+            vi.runOnlyPendingTimers();
+            expect(observedTypes).toEqual([41, 42, 43]);
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+            now.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
     it('grows the /interactive/payload batch budget without shrinking it on slow samples', () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;

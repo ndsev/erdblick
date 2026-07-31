@@ -66,13 +66,22 @@ export class MapViewStateService {
     }
 
     /** Updates one view's viewport snapshot and schedules dependent stream/render refreshes. */
-    setViewport(viewIndex: number, viewport: Viewport) {
+    setViewport(
+        viewIndex: number,
+        viewport: Viewport,
+        canonicalCameraAltitudeMeters?: number
+    ) {
         const maxIndex = this.viewVisualizationState.length - 1;
         if (viewIndex > maxIndex) {
             console.warn(`Attempted to write @ viewIndex: ${viewIndex} but it is out of bounds (${maxIndex})`);
             return;
         }
-        this.viewVisualizationState[viewIndex].viewport = viewport;
+        const state = this.viewVisualizationState[viewIndex];
+        state.viewport = viewport;
+        if (Number.isFinite(canonicalCameraAltitudeMeters)) {
+            state.canonicalCameraAltitudeMeters =
+                Number(canonicalCameraAltitudeMeters);
+        }
         this.requestViewRecalculation(ViewRecalculationReason.Viewport);
     }
 
@@ -89,7 +98,9 @@ export class MapViewStateService {
             state.recalculateTileIds(
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
-                this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt,
+                state.canonicalCameraAltitudeMeters ??
+                    this.stateService.cameraViewDataState
+                        .getValue(viewIndex).destination.alt,
                 this.stateService.lowFiTileThreshold
             );
         });

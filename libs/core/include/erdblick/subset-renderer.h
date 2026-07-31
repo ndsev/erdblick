@@ -177,6 +177,12 @@ private:
         BoundEvalFun const& evalFun,
         uint32_t pickIndex,
         glm::dvec3 const& offset);
+    bool renderSegmentStackedLine(
+        mapget::model_ptr<mapget::Geometry> const& geometry,
+        FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
+        uint32_t pickIndex,
+        std::string const& stackPrefix);
     void renderRelationLine(
         mapget::model_ptr<mapget::GeometryCollection> const& sourceGeometry,
         mapget::model_ptr<mapget::GeometryCollection> const& targetGeometry,
@@ -283,6 +289,8 @@ private:
     std::unordered_map<uint32_t, uint32_t> featureOffsetSlotsByRule_;
     std::unordered_map<std::string, uint32_t>
         attributeOffsetSlotsByFeature_;
+    std::unordered_map<std::string, uint32_t>
+        attributeOffsetSlotsBySegment_;
 
     mutable bool hasCoordinateOriginWgs_ = false;
     mutable mapget::Point coordinateOriginWgs_{0.0, 0.0, 0.0};

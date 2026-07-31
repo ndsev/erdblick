@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import type {StyledMapgetLayer} from "../mapdata/styled-mapget-layer.model";
 import type {PresentationKind} from "../mapdata/styled-mapget-layer.model";
+import type {FilterTileState} from "../mapdata/filter-tile-state.model";
 
 export interface SubsetDiagnosticsTile {
     viewIndex: number;
@@ -18,7 +19,34 @@ export interface SubsetDiagnosticsTile {
     stats: Map<string, number[]>;
 }
 
+export interface SubsetDiagnosticsError {
+    viewIndex: number;
+    ownerId: string;
+    presentationKind: PresentationKind;
+    mapName: string;
+    layerName: string;
+    mapTileKey: string;
+    message: string;
+}
+
+export interface ViewLayerDiagnosticsSummary {
+    expected: number;
+    ready: number;
+    errors: number;
+    sourceFeatures: number;
+    vertices: number;
+}
+
 type StyledLayerProvider = () => Iterable<StyledMapgetLayer>;
+type PresentationDemandProvider = (
+    layer: StyledMapgetLayer,
+    state: FilterTileState
+) => boolean;
+
+interface DiagnosticsProvider {
+    layers: StyledLayerProvider;
+    presentationDemanded: PresentationDemandProvider;
+}
 
 /**
  * Read-through registry for current view presentation diagnostics.
@@ -29,25 +57,110 @@ type StyledLayerProvider = () => Iterable<StyledMapgetLayer>;
 @Injectable({providedIn: "root"})
 export class ViewLayerDiagnosticsService {
     readonly changed = new Subject<void>();
-    private readonly providers = new Map<number, StyledLayerProvider>();
+    readonly tileError = new Subject<SubsetDiagnosticsError>();
+    private readonly providers = new Map<number, DiagnosticsProvider>();
     private cachedTiles: SubsetDiagnosticsTile[] | null = null;
+    private cachedSummary: ViewLayerDiagnosticsSummary | null = null;
 
-    register(viewIndex: number, provider: StyledLayerProvider): () => void {
-        this.providers.set(viewIndex, provider);
-        this.cachedTiles = null;
+    register(
+        viewIndex: number,
+        provider: StyledLayerProvider,
+        presentationDemanded: PresentationDemandProvider = () => true
+    ): () => void {
+        const registration = {layers: provider, presentationDemanded};
+        this.providers.set(viewIndex, registration);
+        this.invalidate();
         this.changed.next();
         return () => {
-            if (this.providers.get(viewIndex) === provider) {
+            if (this.providers.get(viewIndex) === registration) {
                 this.providers.delete(viewIndex);
-                this.cachedTiles = null;
+                this.invalidate();
                 this.changed.next();
             }
         };
     }
 
     notifyChanged(): void {
-        this.cachedTiles = null;
+        this.invalidate();
         this.changed.next();
+    }
+
+    /** Invalidates aggregate state and forwards a layer's terminal failures. */
+    notifyLayerErrors(
+        viewIndex: number,
+        layer: StyledMapgetLayer
+    ): void {
+        this.invalidate();
+        for (const state of layer.tileStates.values()) {
+            if (!state.error) {
+                continue;
+            }
+            this.tileError.next({
+                viewIndex,
+                ownerId: layer.ownerId,
+                presentationKind: layer.identity.presentationKind,
+                mapName: state.mapId,
+                layerName: state.layerId,
+                mapTileKey: state.mapTileKey,
+                message: state.error
+            });
+        }
+        this.changed.next();
+    }
+
+    /**
+     * Returns progress counters without constructing per-tile statistic maps.
+     *
+     * This is the normal loading/UI path. `currentTiles()` remains the
+     * intentionally richer on-demand performance/export path.
+     */
+    currentSummary(): ViewLayerDiagnosticsSummary {
+        if (this.cachedSummary) {
+            return this.cachedSummary;
+        }
+        const presentationTileSeen = new Set<string>();
+        const sourceFeatureCounts = new Map<string, number>();
+        const result: ViewLayerDiagnosticsSummary = {
+            expected: 0,
+            ready: 0,
+            errors: 0,
+            sourceFeatures: 0,
+            vertices: 0
+        };
+        for (const [viewIndex, provider] of this.providers) {
+            for (const layer of provider.layers()) {
+                for (const state of layer.tileStates.values()) {
+                    const presentationTileKey =
+                        `${viewIndex}|${layer.ownerId}|${state.mapTileKey}`;
+                    if (presentationTileSeen.has(presentationTileKey)) {
+                        continue;
+                    }
+                    presentationTileSeen.add(presentationTileKey);
+                    result.expected += 1;
+                    if (this.presentationReady(provider, layer, state)) {
+                        result.ready += 1;
+                    }
+                    if (state.error) {
+                        result.errors += 1;
+                    }
+                    if (layer.identity.presentationKind === "regular" &&
+                        state.sourceFeatureCount !== null) {
+                        sourceFeatureCounts.set(
+                            `${state.mapId}|${state.layerId}|${state.mapTileKey}`,
+                            state.sourceFeatureCount
+                        );
+                    }
+                    const vertices = state.renderStats["vertexCount"];
+                    if (Number.isFinite(vertices)) {
+                        result.vertices += vertices;
+                    }
+                }
+            }
+        }
+        result.sourceFeatures = [...sourceFeatureCounts.values()]
+            .reduce((sum, value) => sum + value, 0);
+        this.cachedSummary = result;
+        return result;
     }
 
     currentTiles(): SubsetDiagnosticsTile[] {
@@ -61,7 +174,7 @@ export class ViewLayerDiagnosticsService {
 
         for (const [viewIndex, provider] of [...this.providers.entries()]
             .sort(([left], [right]) => left - right)) {
-            for (const layer of provider()) {
+            for (const layer of provider.layers()) {
                 for (const state of layer.tileStates.values()) {
                     const presentationTileKey = [
                         viewIndex,
@@ -151,8 +264,7 @@ export class ViewLayerDiagnosticsService {
                         layerName: state.layerId,
                         tileId: state.tileId,
                         mapTileKey: state.mapTileKey,
-                        ready: state.status === "ready" &&
-                            state.renderedValueVersion === state.valueVersion,
+                        ready: this.presentationReady(provider, layer, state),
                         error: state.error,
                         sourceFeatureCount: state.sourceFeatureCount,
                         renderedEntryCount: state.renderedEntryCount,
@@ -163,6 +275,21 @@ export class ViewLayerDiagnosticsService {
         }
         this.cachedTiles = result;
         return result;
+    }
+
+    private presentationReady(
+        provider: DiagnosticsProvider,
+        layer: StyledMapgetLayer,
+        state: FilterTileState
+    ): boolean {
+        return state.status === "ready" &&
+            (!provider.presentationDemanded(layer, state) ||
+                state.renderedValueVersion === state.valueVersion);
+    }
+
+    private invalidate(): void {
+        this.cachedTiles = null;
+        this.cachedSummary = null;
     }
 
     private numericValues(value: unknown): number[] {

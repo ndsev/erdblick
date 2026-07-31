@@ -51,6 +51,19 @@ function completedBlock(
 }
 
 describe("TileSubsetLayerRenderService block presentation", () => {
+    it("reports visible Deck cadence at p90 instead of callback duration", () => {
+        const service = new TileSubsetLayerRenderService();
+        for (const interval of [16, 17, 18, 950, 1_000]) {
+            service.recordDeckFrameTime(0, interval);
+        }
+        service.recordDeckFrameTime(1, 33);
+
+        expect(service.currentFrameTimeMs()).toBe(1_000);
+
+        service.clearDeckFrameTime(0);
+        expect(service.currentFrameTimeMs()).toBe(33);
+    });
+
     it("exposes live block policy without allocating workers", () => {
         const workerCount = new BehaviorSubject(0);
         const debugBlocks = new BehaviorSubject(false);

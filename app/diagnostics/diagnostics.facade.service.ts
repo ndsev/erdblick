@@ -1,4 +1,4 @@
-import {Injectable, OnDestroy} from '@angular/core';
+import {Injectable, NgZone, OnDestroy} from '@angular/core';
 import {BehaviorSubject} from 'rxjs';
 import {
     AppStateService,
@@ -45,9 +45,10 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
                 renderService: TileSubsetLayerRenderService,
                 viewDiagnostics: ViewLayerDiagnosticsService,
                 private readonly stateService: AppStateService,
-                styleValidationReportService: StyleValidationReportService) {
+                styleValidationReportService: StyleValidationReportService,
+                ngZone: NgZone) {
         super(mapService, renderService, viewDiagnostics, stateService,
-            styleValidationReportService);
+            styleValidationReportService, ngZone);
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */

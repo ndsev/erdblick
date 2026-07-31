@@ -110,6 +110,83 @@ function cloneCoverage(coverage: FilterSubscriptionCoverage): FilterSubscription
     };
 }
 
+function orderedValuesEqual<T>(
+    left: readonly T[] | undefined,
+    right: readonly T[] | undefined
+): boolean {
+    const leftValues = left ?? [];
+    const rightValues = right ?? [];
+    return leftValues.length === rightValues.length &&
+        leftValues.every((value, index) => value === rightValues[index]);
+}
+
+function unorderedValuesEqual<T>(
+    left: readonly T[] | undefined,
+    right: readonly T[] | undefined
+): boolean {
+    const leftValues = left ?? [];
+    const rightValues = right ?? [];
+    if (leftValues.length !== rightValues.length) {
+        return false;
+    }
+    const leftSet = new Set(leftValues);
+    const rightSet = new Set(rightValues);
+    return leftSet.size === leftValues.length &&
+        rightSet.size === rightValues.length &&
+        leftValues.every(value => rightSet.has(value));
+}
+
+function featureIdsEqual(
+    left: string | Array<string | number>,
+    right: string | Array<string | number>
+): boolean {
+    if (typeof left === "string" || typeof right === "string") {
+        return left === right;
+    }
+    return orderedValuesEqual(left, right);
+}
+
+function rootsEqual(
+    left: FilterSubscriptionCoverage["roots"],
+    right: FilterSubscriptionCoverage["roots"]
+): boolean {
+    const leftRoots = left ?? [];
+    const rightRoots = right ?? [];
+    return leftRoots.length === rightRoots.length &&
+        leftRoots.every((root, index) => {
+            const other = rightRoots[index];
+            return root.tileId === other.tileId &&
+                root.typeId === other.typeId &&
+                featureIdsEqual(root.featureId, other.featureId);
+        });
+}
+
+/** Compares ordered coverage structurally; tile and root order are semantic. */
+export function filterSubscriptionCoverageEqual(
+    left: FilterSubscriptionCoverage,
+    right: FilterSubscriptionCoverage
+): boolean {
+    return orderedValuesEqual(left.tileIds, right.tileIds) &&
+        orderedValuesEqual(left.priorityTileIds, right.priorityTileIds) &&
+        rootsEqual(left.roots, right.roots);
+}
+
+/**
+ * Compares output/priority membership while retaining exact root order.
+ *
+ * Presentation owners use this to avoid replacing an already-running request
+ * merely because continuous camera motion slightly reordered the same tiles.
+ * A later membership change still carries the newest priority order.
+ */
+export function filterSubscriptionCoverageMembershipEqual(
+    left: FilterSubscriptionCoverage,
+    right: FilterSubscriptionCoverage
+): boolean {
+    return unorderedValuesEqual(left.tileIds, right.tileIds) &&
+        unorderedValuesEqual(left.priorityTileIds, right.priorityTileIds) &&
+        rootsEqual(left.roots, right.roots);
+}
+
 /**
  * One independently owned filter demand.
  *
@@ -124,6 +201,7 @@ export class FilterSubscriptionRef {
     private generationValue = 1;
     private releasedValue = false;
     private suspendedValue = false;
+    private coverageTileIds: Set<number>;
 
     constructor(
         private readonly owner: FilterSubscriptionOwner,
@@ -134,6 +212,7 @@ export class FilterSubscriptionRef {
     ) {
         this.definitionValue = cloneDefinition(definition);
         this.coverageValue = cloneCoverage(coverage);
+        this.coverageTileIds = new Set(this.coverageValue.tileIds);
     }
 
     get generation(): number {
@@ -154,11 +233,15 @@ export class FilterSubscriptionRef {
         const nextDefinition = cloneDefinition(definition);
         const nextCoverage = cloneCoverage(coverage);
         if (JSON.stringify(nextDefinition) === JSON.stringify(this.definitionValue)
-            && JSON.stringify(nextCoverage) === JSON.stringify(this.coverageValue)) {
+            && filterSubscriptionCoverageEqual(
+                nextCoverage,
+                this.coverageValue
+            )) {
             return;
         }
         this.definitionValue = nextDefinition;
         this.coverageValue = nextCoverage;
+        this.coverageTileIds = new Set(nextCoverage.tileIds);
         this.advanceGeneration();
     }
 
@@ -166,13 +249,18 @@ export class FilterSubscriptionRef {
     setCoverage(coverage: FilterSubscriptionCoverage): void {
         this.assertLive();
         const nextCoverage = cloneCoverage(coverage);
-        if (JSON.stringify(nextCoverage) === JSON.stringify(this.coverageValue)) {
+        if (filterSubscriptionCoverageEqual(
+            nextCoverage,
+            this.coverageValue
+        )) {
             return;
         }
-        const rootsChanged =
-            JSON.stringify(nextCoverage.roots ?? []) !==
-            JSON.stringify(this.coverageValue.roots ?? []);
+        const rootsChanged = !rootsEqual(
+            nextCoverage.roots,
+            this.coverageValue.roots
+        );
         this.coverageValue = nextCoverage;
+        this.coverageTileIds = new Set(nextCoverage.tileIds);
         if (rootsChanged) {
             this.advanceGeneration();
         } else {
@@ -229,7 +317,7 @@ export class FilterSubscriptionRef {
     accept(delivery: TileSubsetDelivery): boolean {
         if (this.releasedValue || this.suspendedValue ||
             delivery.generation !== this.generationValue ||
-            !this.coverageValue.tileIds.includes(delivery.tileId)) {
+            !this.coverageTileIds.has(delivery.tileId)) {
             return false;
         }
         this.callbacks.onTile(delivery);

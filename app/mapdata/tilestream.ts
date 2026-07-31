@@ -1,5 +1,6 @@
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
+import {FrameBudgetLoop} from "../shared/frame-budget-loop";
 
 export enum MapTileRequestStatus {
     Open = 0,
@@ -107,6 +108,12 @@ interface TileRequestPayload {
     chunk?: TileRequestChunk;
 }
 
+interface QueuedTransportFrame {
+    bytes: Uint8Array;
+    type: number;
+    version: {major: number; minor: number; patch: number};
+}
+
 export interface MapTileStreamTransportCompressionStats {
     totalPullResponses: number;
     totalPullGzipResponses: number;
@@ -187,11 +194,18 @@ export class MapTileStreamClient {
     private latestRequestedRequestId: number | null = null;
     private incomingRequestId: number | null = null;
     private supportsRequestContextFrames: boolean = false;
-    private frameQueue: Array<ArrayBuffer | Blob> = [];
-    private frameQueueTimer: ReturnType<typeof setTimeout> | null = null;
-    private processingFrameQueue: boolean = false;
     private frameProcessingPaused: boolean = false;
-    private readonly frameTimeBudgetMs: number = 10;
+    private frameQueueEpoch = 0;
+    private pendingFrameMessages = 0;
+    private frameMessageChain: Promise<void> = Promise.resolve();
+    private readonly frameLoop = new FrameBudgetLoop<QueuedTransportFrame>(
+        frame => {
+            this.dispatchFrame(frame);
+            return true;
+        },
+        4,
+        "task"
+    );
     private pullClientId: number | null = null;
     private sourcesRevision: number | null = null;
     private pullControllers: AbortController[] = [];
@@ -384,6 +398,7 @@ export class MapTileStreamClient {
         this.awaitingSocketSourcesRevision = false;
         this.stopPullLoops();
         this.clearPendingFrames();
+        this.frameLoop.dispose();
         this.resetCompletionPromise();
         if (this.ownsParser && this.parser) {
             this.parser.delete();
@@ -392,8 +407,9 @@ export class MapTileStreamClient {
 
     /** Drops queued frames that have not yet been handed to the parser or render pipeline. */
     clearPendingFrames() {
-        console.log(`Clearing ${this.frameQueue.length} frames.`)
-        this.frameQueue = [];
+        this.frameQueueEpoch += 1;
+        this.pendingFrameMessages = 0;
+        this.frameLoop.clear();
     }
 
     /** Invalidates in-flight payloads after datasource dictionaries have been replaced. */
@@ -414,9 +430,7 @@ export class MapTileStreamClient {
     /** Pauses or resumes frame handling so the rest of the app can shed load temporarily. */
     setFrameProcessingPaused(paused: boolean) {
         this.frameProcessingPaused = paused;
-        if (!paused && this.frameQueue.length) {
-            this.scheduleFrameProcessing(0);
-        }
+        this.frameLoop.setPaused(paused);
     }
 
     /** Enables or disables gzip-aware `/interactive/payload` pull requests. */
@@ -436,7 +450,7 @@ export class MapTileStreamClient {
 
     /** Returns the number of queued websocket frames waiting to be processed. */
     getPendingFrameQueueSize(): number {
-        return this.frameQueue.length;
+        return this.pendingFrameMessages + this.frameLoop.length;
     }
 
     /** Returns the latest datasource catalog revision announced by request-context frames. */
@@ -501,7 +515,7 @@ export class MapTileStreamClient {
             supportsRequestContextFrames: this.supportsRequestContextFrames,
             pullClientId: this.pullClientId,
             sourcesRevision: this.sourcesRevision,
-            pendingFrameQueueSize: this.frameQueue.length,
+            pendingFrameQueueSize: this.getPendingFrameQueueSize(),
             frameProcessingPaused: this.frameProcessingPaused,
             pullCompressionEnabled: this.pullCompressionEnabled,
             pullBatchMaxBytesBudget: this.pullBatchMaxBytesBudget,
@@ -869,63 +883,45 @@ export class MapTileStreamClient {
         return url.toString();
     }
 
-    /** Queues a raw websocket message for budgeted processing on the next timer tick. */
+    /**
+     * Splits raw websocket/pull messages in arrival order, then queues every
+     * contained VTLV frame as one independently budgeted work item.
+     */
     private enqueueFrame(data: ArrayBuffer | Blob) {
-        this.frameQueue.push(data);
-        if (this.frameProcessingPaused) {
-            return;
-        }
-        this.scheduleFrameProcessing(0);
-    }
-
-    /** Schedules frame processing if no timer is already pending. */
-    private scheduleFrameProcessing(delayMs: number) {
-        if (this.frameProcessingPaused) {
-            return;
-        }
-        if (this.frameQueueTimer) {
-            return;
-        }
-        this.frameQueueTimer = setTimeout(() => {
-            this.frameQueueTimer = null;
-            this.processFrameQueue().catch(err => {
+        const epoch = this.frameQueueEpoch;
+        this.pendingFrameMessages += 1;
+        this.frameMessageChain = this.frameMessageChain
+            .then(async () => {
+                if (epoch !== this.frameQueueEpoch) {
+                    return;
+                }
+                const frames = await this.decodeMessage(data);
+                if (epoch === this.frameQueueEpoch) {
+                    this.frameLoop.enqueueMany(frames);
+                }
+            })
+            .catch(err => {
                 console.error("Tile stream message handler failed.", err);
+            })
+            .finally(() => {
+                if (epoch === this.frameQueueEpoch) {
+                    this.pendingFrameMessages =
+                        Math.max(0, this.pendingFrameMessages - 1);
+                }
             });
-        }, delayMs);
     }
 
-    /** Drains queued websocket messages until the per-tick frame budget is exhausted. */
-    private async processFrameQueue() {
-        if (this.processingFrameQueue || this.frameProcessingPaused) {
-            return;
-        }
-        this.processingFrameQueue = true;
-        try {
-            const startTime = Date.now();
-            let handledMessages = 0;
-            while (this.frameQueue.length) {
-                const data = this.frameQueue.shift()!;
-                try {
-                    await this.handleMessage(data);
-                    ++handledMessages;
-                } catch (err) {
-                    console.error("Tile stream message handler failed.", err);
-                }
-                if (Date.now() - startTime > this.frameTimeBudgetMs) {
-                    break;
-                }
-            }
-        } finally {
-            this.processingFrameQueue = false;
-        }
-
-        if (this.frameQueue.length) {
-            this.scheduleFrameProcessing(0);
-        }
-    }
-
-    /** Normalizes websocket messages to byte arrays and iterates over packed transport frames. */
+    /** Test/auxiliary path which immediately dispatches one complete packed message. */
     private async handleMessage(data: ArrayBuffer | Blob): Promise<void> {
+        for (const frame of await this.decodeMessage(data)) {
+            this.dispatchFrame(frame);
+        }
+    }
+
+    /** Normalizes one message and returns its strictly ordered VTLV frames. */
+    private async decodeMessage(
+        data: ArrayBuffer | Blob
+    ): Promise<QueuedTransportFrame[]> {
         let bytes: Uint8Array;
 
         if (data instanceof ArrayBuffer) {
@@ -934,37 +930,49 @@ export class MapTileStreamClient {
             bytes = new Uint8Array(await data.arrayBuffer());
         } else {
             console.warn("Unexpected WebSocket message payload.");
-            return;
+            return [];
         }
 
         if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
             console.warn("Tile stream frame too small.");
-            return;
+            return [];
         }
 
+        const frames: QueuedTransportFrame[] = [];
         let offset = 0;
         while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
             const header = this.readFrameHeader(bytes, offset);
-            if (!this.isCompatibleProtocol(header.version)) {
-                this.reportProtocolMismatch(header.version);
-                return;
-            }
             const type = header.type;
             const payloadLength = header.payloadLength;
             const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
             if (frameEnd > bytes.length) {
                 console.warn("Tile stream frame size mismatch.");
-                return;
+                return [];
             }
 
-            const frameBytes = bytes.subarray(offset, frameEnd);
-            await this.handleFrame(frameBytes, type);
+            frames.push({
+                bytes: bytes.subarray(offset, frameEnd),
+                type,
+                version: header.version
+            });
             offset = frameEnd;
         }
 
         if (offset !== bytes.length) {
             console.warn("Tile stream frame alignment mismatch.");
+            return [];
         }
+        return frames;
+    }
+
+    /** Applies compatibility checks and dispatches one frame at its FIFO turn. */
+    private dispatchFrame(frame: QueuedTransportFrame): void {
+        if (!this.isCompatibleProtocol(frame.version)) {
+            this.reportProtocolMismatch(frame.version);
+            this.clearPendingFrames();
+            return;
+        }
+        this.handleFrame(frame.bytes, frame.type);
     }
 
     /** Reads the fixed-size VTLV header emitted by mapget's TileLayerStream writer. */
@@ -1007,7 +1015,7 @@ export class MapTileStreamClient {
     }
 
     /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
-    private async handleFrame(bytes: Uint8Array, type: number): Promise<void> {
+    private handleFrame(bytes: Uint8Array, type: number): void {
         if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
             return;
         }

@@ -1,10 +1,11 @@
-import {Injectable, OnDestroy} from "@angular/core";
+import {Injectable, NgZone, OnDestroy} from "@angular/core";
 import {auditTime, BehaviorSubject, interval, Subscription} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService
 } from "../mapview/deck/tile-subset-layer-render.service";
 import {
+    type SubsetDiagnosticsError,
     ViewLayerDiagnosticsService
 } from "../mapview/view-layer-diagnostics.service";
 import {
@@ -64,23 +65,24 @@ export class DiagnosticsDatasource implements OnDestroy {
         private readonly viewDiagnostics: ViewLayerDiagnosticsService,
         private readonly appStateService: AppStateService,
         private readonly styleValidationReportService:
-            StyleValidationReportService
+            StyleValidationReportService,
+        private readonly ngZone: NgZone
     ) {
         this.patchConsoleLogging();
         let wasPaused = this.mapService.tilePipelinePaused;
-        this.subscriptions.push(
-            interval(SNAPSHOT_INTERVAL_MS).subscribe(() => {
-                if (!this.mapService.tilePipelinePaused) {
-                    this.snapshot$.next(this.buildSnapshot());
-                }
-            }),
-            interval(PERF_INTERVAL_MS).subscribe(() =>
-                this.refreshPerfStatsIfVisible()
+        const timerSubscriptions = this.ngZone.runOutsideAngular(() => [
+            interval(SNAPSHOT_INTERVAL_MS).subscribe(() =>
+                this.refreshSnapshot()
             ),
-            interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
+            interval(PERF_INTERVAL_MS).subscribe(() =>
+                this.refreshPerfStatsIfVisible()),
+            interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs())
+        ]);
+        this.subscriptions.push(
+            ...timerSubscriptions,
             this.mapService.tilePipelinePaused$.subscribe(paused => {
                 if (wasPaused && !paused) {
-                    this.snapshot$.next(this.buildSnapshot());
+                    this.refreshSnapshot();
                     this.refreshPerfStatsIfVisible();
                 }
                 wasPaused = paused;
@@ -88,16 +90,26 @@ export class DiagnosticsDatasource implements OnDestroy {
             this.viewDiagnostics.changed
                 .pipe(auditTime(UPDATE_EVENT_DEBOUNCE_MS))
                 .subscribe(() => {
-                    this.snapshot$.next(this.buildSnapshot());
+                    this.refreshSnapshot();
                     this.refreshPerfStatsIfVisible();
                     this.refreshLogs();
                 }),
+            this.viewDiagnostics.tileError.subscribe(error =>
+                this.appendTileError(error)
+            ),
             this.styleValidationReportService.reports$.subscribe(issues =>
                 this.appendStyleValidationLogs(issues)
             )
         );
         this.refreshPerfStatsIfVisible();
         this.refreshLogs();
+    }
+
+    /** Publishes progress only when the pipeline is live. */
+    private refreshSnapshot(): void {
+        if (!this.mapService.tilePipelinePaused) {
+            this.snapshot$.next(this.buildSnapshot());
+        }
     }
 
     ngOnDestroy(): void {
@@ -145,50 +157,14 @@ export class DiagnosticsDatasource implements OnDestroy {
             });
             this.lastBackendConnected = connected;
         }
-        for (const tile of this.viewDiagnostics.currentTiles()) {
-            if (!tile.error) {
-                continue;
-            }
-            const key = `${tile.ownerId}|${tile.mapTileKey}`;
-            if (this.errorTileKeys.has(key)) {
-                continue;
-            }
-            this.errorTileKeys.add(key);
-            entries.push({
-                at: now,
-                level: "error",
-                message: `Subset error: ${tile.error}`,
-                data: {
-                    tileId: tile.mapTileKey,
-                    mapName: tile.mapName,
-                    layerName: tile.layerName,
-                    presentation: tile.presentationKind
-                }
-            });
-        }
         this.appendLogEntries(entries);
     }
 
     private buildSnapshot(): DiagnosticsSnapshot {
-        const tiles = this.viewDiagnostics.currentTiles();
-        const expected = tiles.length;
-        const loaded = tiles.filter(tile => tile.ready).length;
-        const errors = tiles.filter(tile => !!tile.error).length;
-        const sourceFeatures = new Map<string, number>();
-        let vertices = 0;
-        let renderedEntries = 0;
-        for (const tile of tiles) {
-            if (tile.presentationKind === "regular" &&
-                tile.sourceFeatureCount !== null) {
-                sourceFeatures.set(
-                    `${tile.mapName}|${tile.layerName}|${tile.mapTileKey}`,
-                    tile.sourceFeatureCount
-                );
-            }
-            renderedEntries += tile.renderedEntryCount;
-            vertices +=
-                tile.stats.get("Rendering/WASM/Vertices#count")?.[0] ?? 0;
-        }
+        const summary = this.viewDiagnostics.currentSummary();
+        const expected = summary.expected;
+        const loaded = summary.ready;
+        const errors = summary.errors;
         const compression = this.mapService
             .getTileStreamTransportCompressionStats();
         const backend = this.mapService.getBackendRequestProgress();
@@ -213,9 +189,8 @@ export class DiagnosticsDatasource implements OnDestroy {
                 pullCompressionRatioPct: compression.compressionRatioPct,
                 pullCompressionCoveragePct:
                     compression.knownCompressedCoveragePct,
-                features: [...sourceFeatures.values()]
-                    .reduce((sum, value) => sum + value, 0),
-                vertices,
+                features: summary.sourceFeatures,
+                vertices: summary.vertices,
                 parseQueueSize,
                 renderQueueSize,
                 frameTimeMs: this.renderService.currentFrameTimeMs(),
@@ -234,6 +209,25 @@ export class DiagnosticsDatasource implements OnDestroy {
             progress,
             backend: {connected: this.mapService.isTileStreamConnected()}
         };
+    }
+
+    private appendTileError(error: SubsetDiagnosticsError): void {
+        const key = `${error.ownerId}|${error.mapTileKey}`;
+        if (this.errorTileKeys.has(key)) {
+            return;
+        }
+        this.errorTileKeys.add(key);
+        this.appendLogEntries([{
+            at: Date.now(),
+            level: "error",
+            message: `Subset error: ${error.message}`,
+            data: {
+                tileId: error.mapTileKey,
+                mapName: error.mapName,
+                layerName: error.layerName,
+                presentation: error.presentationKind
+            }
+        }]);
     }
 
     private appendStyleValidationLogs(issues: StyleValidationIssue[]): void {

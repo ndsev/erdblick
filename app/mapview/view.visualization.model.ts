@@ -31,9 +31,19 @@ function tileRenderPolicyForCount(
     };
 }
 
+function tileIdSetsEqual(
+    left: ReadonlySet<number> | undefined,
+    right: ReadonlySet<number> | undefined
+): boolean {
+    return !!left && !!right &&
+        left.size === right.size &&
+        [...left].every(tileId => right.has(tileId));
+}
+
 /** Per-view visible coverage and stylesheet fidelity decisions. */
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
+    canonicalCameraAltitudeMeters: number | null = null;
     visibleTileIds = new Set<number>();
     visibleTileIdsPerLevel = new Map<number, number[]>();
     visibleTileIdSetsPerLevel = new Map<number, Set<number>>();
@@ -41,6 +51,7 @@ export class ViewVisualizationState {
     searchVisibleTileIdSetsPerLevel = new Map<number, Set<number>>();
     tileRenderPolicy = new Map<number, TileRenderPolicy>();
     tileOrder = new Map<number, number>();
+    coverageVersion = 0;
 
     recalculateTileIds(
         tileLimit: number,
@@ -48,15 +59,13 @@ export class ViewVisualizationState {
         canonicalCameraAltitudeMeters: number,
         lowFiTileThreshold = DEFAULT_LOW_FI_TILE_THRESHOLD
     ): void {
-        this.visibleTileIds.clear();
-        this.tileRenderPolicy.clear();
-        this.visibleTileIdsPerLevel.clear();
-        this.visibleTileIdSetsPerLevel.clear();
-        this.searchVisibleTileIdsPerLevel.clear();
-        this.searchVisibleTileIdSetsPerLevel.clear();
-        this.tileOrder.clear();
+        const visibleTileIds = new Set<number>();
+        const visibleTileIdsPerLevel = new Map<number, number[]>();
+        const visibleTileIdSetsPerLevel = new Map<number, Set<number>>();
+        const tileRenderPolicy = new Map<number, TileRenderPolicy>();
+        const tileOrder = new Map<number, number>();
         for (const level of levels) {
-            if (this.visibleTileIdsPerLevel.has(level)) {
+            if (visibleTileIdsPerLevel.has(level)) {
                 continue;
             }
             const tileIds = coreLib.getTileIds(
@@ -65,9 +74,9 @@ export class ViewVisualizationState {
                 tileLimit
             ) as number[];
             const tileIdSet = new Set(tileIds);
-            this.visibleTileIdsPerLevel.set(level, tileIds);
-            this.visibleTileIdSetsPerLevel.set(level, tileIdSet);
-            tileIdSet.forEach(tileId => this.visibleTileIds.add(tileId));
+            visibleTileIdsPerLevel.set(level, tileIds);
+            visibleTileIdSetsPerLevel.set(level, tileIdSet);
+            tileIdSet.forEach(tileId => visibleTileIds.add(tileId));
 
             const canonicalTileCount =
                 coreLib.getNumTileIdsForCanonicalCamera(
@@ -79,10 +88,33 @@ export class ViewVisualizationState {
                 lowFiTileThreshold
             );
             tileIds.forEach((tileId, order) => {
-                this.tileRenderPolicy.set(tileId, policy);
-                this.tileOrder.set(tileId, order);
+                tileRenderPolicy.set(tileId, policy);
+                tileOrder.set(tileId, order);
             });
         }
+        const coverageChanged =
+            visibleTileIdsPerLevel.size !== this.visibleTileIdsPerLevel.size ||
+            [...visibleTileIdSetsPerLevel].some(([level, tileIds]) =>
+                !tileIdSetsEqual(
+                    tileIds,
+                    this.visibleTileIdSetsPerLevel.get(level)
+                ) ||
+                [...tileIds].some(tileId =>
+                    tileRenderPolicy.get(tileId)?.targetFidelity !==
+                    this.tileRenderPolicy.get(tileId)?.targetFidelity
+                )
+            );
+        this.searchVisibleTileIdsPerLevel = new Map();
+        this.searchVisibleTileIdSetsPerLevel = new Map();
+        if (!coverageChanged) {
+            return;
+        }
+        this.visibleTileIds = visibleTileIds;
+        this.visibleTileIdsPerLevel = visibleTileIdsPerLevel;
+        this.visibleTileIdSetsPerLevel = visibleTileIdSetsPerLevel;
+        this.tileRenderPolicy = tileRenderPolicy;
+        this.tileOrder = tileOrder;
+        this.coverageVersion += 1;
     }
 
     getTileRenderPolicy(tileId: number): TileRenderPolicy {

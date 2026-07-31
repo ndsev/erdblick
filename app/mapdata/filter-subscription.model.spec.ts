@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {
     FilterSubscriptionRef,
+    filterSubscriptionCoverageMembershipEqual,
     type FilterSubscriptionOwner,
     type TileSubsetDelivery
 } from "./filter-subscription.model";
@@ -49,6 +50,49 @@ describe("FilterSubscriptionRef", () => {
             tileIds: [1, 2],
             priorityTileIds: [2]
         });
+    });
+
+    it("does not resubmit structurally equal ordered coverage", () => {
+        const owner: FilterSubscriptionOwner = {
+            updateFilterSubscription: vi.fn(),
+            releaseFilterSubscription: vi.fn()
+        };
+        const coverage = {
+            tileIds: [1, 2],
+            priorityTileIds: [2],
+            roots: [{
+                tileId: 1,
+                typeId: "Lane",
+                featureId: ["Lane", 1, 42]
+            }]
+        };
+        const ref = new FilterSubscriptionRef(
+            owner,
+            "styled",
+            definition(),
+            coverage,
+            {onTile: vi.fn()}
+        );
+
+        ref.setCoverage(structuredClone(coverage));
+
+        expect(owner.updateFilterSubscription).not.toHaveBeenCalled();
+        expect(ref.generation).toBe(1);
+    });
+
+    it("treats a pure tile-priority reorder as unchanged membership", () => {
+        expect(filterSubscriptionCoverageMembershipEqual(
+            {
+                tileIds: [3, 2, 1],
+                priorityTileIds: [2, 1],
+                roots: [{tileId: 2, featureId: "root"}]
+            },
+            {
+                tileIds: [1, 2, 3],
+                priorityTileIds: [1, 2],
+                roots: [{tileId: 2, featureId: "root"}]
+            }
+        )).toBe(true);
     });
 
     it("advances generation when exact relation roots change", () => {

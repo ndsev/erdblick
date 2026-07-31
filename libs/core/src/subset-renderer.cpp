@@ -403,6 +403,7 @@ void TileSubsetLayerRenderer::run()
         // relation endpoint addresses affect another model pool.
         featureOffsetSlotsByRule_.clear();
         attributeOffsetSlotsByFeature_.clear();
+        attributeOffsetSlotsBySegment_.clear();
         renderedRelationEndpointParts_.clear();
         uint32_t channelOrdinal = 0;
         subset->forEachChannel(
@@ -604,14 +605,51 @@ void TileSubsetLayerRenderer::renderAttribute(
                 std::to_string(rule.renderIndex());
             auto& slot =
                 attributeOffsetSlotsByFeature_[slotKey];
-            if (renderGeometryCollection(
-                entry->geometry(),
-                rule,
-                entryEval,
-                pick,
-                rule.offset() +
-                    rule.offsetIncrement() *
-                        static_cast<double>(slot)))
+            bool rendered = false;
+            if (rule.offsetIncrement().x != 0.0 &&
+                entry->geometry())
+            {
+                entry->geometry()->forEachGeometry(
+                    [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
+                        if (geometry &&
+                            geometry->geomType() == mapget::GeomType::Line)
+                        {
+                            rendered =
+                                renderSegmentStackedLine(
+                                    geometry,
+                                    rule,
+                                    entryEval,
+                                    pick,
+                                    std::to_string(channelOrdinal) + ":" +
+                                        std::to_string(rule.renderIndex())) ||
+                                rendered;
+                        }
+                        else {
+                            rendered =
+                                renderGeometry(
+                                    geometry,
+                                    rule,
+                                    entryEval,
+                                    pick,
+                                    rule.offset() +
+                                        rule.offsetIncrement() *
+                                            static_cast<double>(slot)) ||
+                                rendered;
+                        }
+                        return true;
+                    });
+            }
+            else {
+                rendered = renderGeometryCollection(
+                    entry->geometry(),
+                    rule,
+                    entryEval,
+                    pick,
+                    rule.offset() +
+                        rule.offsetIncrement() *
+                            static_cast<double>(slot));
+            }
+            if (rendered)
             {
                 // AttributeValidityEntry is the renderer's terminal row. Each
                 // rendered validity (including multiple validities of one
@@ -897,6 +935,108 @@ bool TileSubsetLayerRenderer::renderGeometry(
         }
     }
     return !projected.empty();
+}
+
+bool TileSubsetLayerRenderer::renderSegmentStackedLine(
+    mapget::model_ptr<mapget::Geometry> const& geometry,
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
+    uint32_t pick,
+    std::string const& stackPrefix)
+{
+    if (!geometry ||
+        geometry->geomType() != mapget::GeomType::Line ||
+        !rule.supports(mapget::GeomType::Line, geometryName(geometry)))
+    {
+        return false;
+    }
+    auto const source = geometry->toSelfContained();
+    if (source.points_.size() < 2) {
+        return false;
+    }
+    auto color = rule.color(evalFun);
+    if (!color || rule.width(evalFun) <= 0.0f) {
+        return false;
+    }
+
+    auto pointKey = [](mapget::Point const& point) {
+        return std::array<int64_t, 3>{
+            static_cast<int64_t>(std::llround(point.x * 1.0e9)),
+            static_cast<int64_t>(std::llround(point.y * 1.0e9)),
+            static_cast<int64_t>(std::llround(point.z * 1.0e3)),
+        };
+    };
+    auto segmentKey = [&](mapget::Point const& first,
+                          mapget::Point const& second) {
+        auto left = pointKey(first);
+        auto right = pointKey(second);
+        if (right < left) {
+            std::swap(left, right);
+        }
+        std::ostringstream stream;
+        stream << stackPrefix;
+        for (auto const value : left) {
+            stream << ':' << value;
+        }
+        for (auto const value : right) {
+            stream << ':' << value;
+        }
+        return stream.str();
+    };
+
+    std::vector<mapget::Point> projected;
+    projected.reserve(source.points_.size() * 2);
+    std::unordered_set<std::string> occupiedSegments;
+    auto appendDistinct = [&](mapget::Point const& point) {
+        if (projected.empty() ||
+            projected.back().distanceTo(point) > 1.0e-6)
+        {
+            projected.push_back(point);
+        }
+    };
+    for (size_t index = 1; index < source.points_.size(); ++index) {
+        auto const& first = source.points_[index - 1];
+        auto const& second = source.points_[index];
+        if (first.distanceTo(second) <= 1.0e-9) {
+            continue;
+        }
+        auto key = segmentKey(first, second);
+        auto const slot = attributeOffsetSlotsBySegment_[key];
+        auto transformed = applyPresentationTransform(
+            mapget::SelfContainedGeometry{
+                {first, second},
+                {},
+                mapget::GeomType::Line,
+            },
+            rule,
+            rule.offset() +
+                rule.offsetIncrement() *
+                    static_cast<double>(slot));
+        if (transformed.points_.size() != 2) {
+            continue;
+        }
+        appendDistinct(projectWgsPoint(transformed.points_[0]));
+        appendDistinct(projectWgsPoint(transformed.points_[1]));
+        occupiedSegments.insert(std::move(key));
+    }
+    if (projected.size() < 2) {
+        return false;
+    }
+    appendPath(projected, rule, evalFun, *color, pick);
+    for (auto const& key : occupiedSegments) {
+        ++attributeOffsetSlotsBySegment_[key];
+    }
+    if (rule.hasLabel()) {
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            appendLabel(
+                projectWgsPoint(geometryCenter(source)),
+                text,
+                rule,
+                pick);
+        }
+    }
+    return true;
 }
 
 void TileSubsetLayerRenderer::renderRelationLine(

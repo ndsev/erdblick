@@ -1,4 +1,5 @@
 import type {FeatureSearchAttributeScopeCandidate} from "../mapdata/map-runtime.model";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import type {SearchStyleFieldOption} from "./search-style-color.util";
 
 export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {
@@ -7,6 +8,7 @@ export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {
     attrName?: string;
     attrLayerName?: string;
     featureType?: string;
+    mapLayers?: FeatureSearchMapLayerRef[];
 }
 
 export interface FeatureSearchAutoStyleAnalysis {
@@ -44,7 +46,7 @@ export function searchAutoStyleFieldOptions(
     const result: FeatureSearchAutoStyleOption[] = [];
     const seen = new Set<string>();
     for (const scope of uniqueScopes) {
-        const fieldOption = attributeOptions
+        const ranked = attributeOptions
             .filter(option => searchStyleOptionMatchesAttributeScope(option, scope))
             .map((option, index) => ({
                 option,
@@ -52,15 +54,26 @@ export function searchAutoStyleFieldOptions(
                 rank: searchAutoStyleFieldRank(option, scope, analysis)
             }))
             .sort((left, right) =>
-                left.rank - right.rank || left.index - right.index)[0]
-            ?.option;
-        if (!fieldOption) {
+                left.rank - right.rank || left.index - right.index);
+        const bestRank = ranked[0]?.rank;
+        if (bestRank === undefined) {
             continue;
         }
-        const key = searchAutoStyleFieldOptionKey(fieldOption);
-        if (!seen.has(key)) {
-            seen.add(key);
-            result.push(fieldOption);
+        // Heterogeneous schemas can expose the same semantic value at
+        // different paths. Keep every equally good path and let its explicit
+        // source-layer applicability select the correct generated rule.
+        for (const {option, rank, index} of ranked) {
+            if (rank !== bestRank) {
+                break;
+            }
+            if (bestRank > 1 && index !== ranked[0].index) {
+                continue;
+            }
+            const key = searchAutoStyleFieldOptionKey(option);
+            if (!seen.has(key)) {
+                seen.add(key);
+                result.push(option);
+            }
         }
     }
     return result;

@@ -89,6 +89,43 @@ describe("feature search auto-style helpers", () => {
         )).toBe(warningSignField);
     });
 
+    it("keeps equally semantic field paths from heterogeneous WARNING_SIGN schemas", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "attribute",
+            attributeScopes: [{
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Routing",
+                featureType: "Link",
+                mapId: "Classic",
+                layerId: "Routing"
+            }, {
+                attrName: "WARNING_SIGN",
+                attrLayerName: "RoadRules",
+                featureType: "Road",
+                mapId: "Live",
+                layerId: "Road"
+            }],
+            matchedFieldNames: [],
+            matchedEnumValues: []
+        };
+        const classic = option({
+            value: "warningSign",
+            attrName: "WARNING_SIGN",
+            valueKind: "enum",
+            mapLayers: [{mapId: "Classic", layerId: "Routing"}]
+        });
+        const live = option({
+            value: "attributeValue.warningSign",
+            attrName: "WARNING_SIGN",
+            valueKind: "enum",
+            mapLayers: [{mapId: "Live", layerId: "Road"}]
+        });
+
+        expect(searchAutoStyleFieldOptions([classic, live], analysis))
+            .toEqual([classic, live]);
+    });
+
     it("uses resolved attribute scopes for default style candidates", () => {
         const warningSignField = option({
             value: "warningSign",

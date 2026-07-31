@@ -29,7 +29,9 @@ import {
     CameraViewState,
     DEFAULT_MAP_ZOOM_STEP,
     TileFeatureId,
-    TileGridMode
+    TileGridMode,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION
 } from "../../shared/appstate.service";
 import {
     AppConfigService,
@@ -40,6 +42,7 @@ import {
 import {IRenderSceneHandle, IRenderView, RenderViewDestroyOptions} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
+import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
 import {environment} from "../../environments/environment";
 import {coreLib} from "../../integrations/wasm";
 import {
@@ -231,6 +234,8 @@ export abstract class DeckMapView implements IRenderView {
     readonly canvasId: string;
     protected deck: DeckGlDeck<DeckMercatorView> | null = null;
     protected readonly layerRegistry = new DeckLayerRegistry();
+    protected readonly renderBufferArena =
+        new DeckRenderBufferArena(this.layerRegistry);
     protected readonly subscriptions: Subscription[] = [];
     protected viewState: DeckCameraState = {
         longitude: 0,
@@ -284,6 +289,9 @@ export abstract class DeckMapView implements IRenderView {
     private isCameraInteracting = false;
     private deckHoverPickingEnabled = true;
     private deckFrameStartedAtMs = 0;
+    private deckPreviousFrameCompletedAtMs = 0;
+    private cameraStatePushTimer: ReturnType<typeof setTimeout> | null = null;
+    private cameraStatePushPending = false;
     private readonly deckOnHover = (info: PickingInfo) => this.onHover(info);
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
@@ -310,6 +318,7 @@ export abstract class DeckMapView implements IRenderView {
         return !isGltfPickProxyLayer;
     };
     private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
+    private static readonly LIVE_CAMERA_SYNC_INTERVAL_MS = 100;
 
     get viewIndex() {
         return this._viewIndex;
@@ -385,9 +394,17 @@ export abstract class DeckMapView implements IRenderView {
                 this.deckFrameStartedAtMs = performance.now();
             },
             onAfterRender: () => {
-                this.layerController.recordDeckFrameTime(
-                    performance.now() - this.deckFrameStartedAtMs
-                );
+                const completedAtMs = performance.now();
+                const frameIntervalMs = this.deckPreviousFrameCompletedAtMs > 0
+                    ? completedAtMs - this.deckPreviousFrameCompletedAtMs
+                    : completedAtMs - this.deckFrameStartedAtMs;
+                this.deckPreviousFrameCompletedAtMs = completedAtMs;
+                // Ignore a redraw after a genuinely idle view. Intervals up to
+                // two seconds deliberately remain visible so a one-FPS pan is
+                // reported as one FPS instead of as a tiny callback duration.
+                if (frameIntervalMs <= 2000) {
+                    this.layerController.recordDeckFrameTime(frameIntervalMs);
+                }
             }
         };
         this.deck = new DeckGlDeck(deckProps);
@@ -401,6 +418,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Tears down deck, overlay state, and every subscription associated with this view. */
     async destroy(options: RenderViewDestroyOptions = {}): Promise<void> {
+        this.flushPendingViewStatePush();
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.subscriptions.length = 0;
         this.stopTickLoop();
@@ -425,6 +443,7 @@ export abstract class DeckMapView implements IRenderView {
         this.stopLocationLabel();
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
+        this.renderBufferArena.clear();
         this.layerRegistry.destroy();
         if (this.deck) {
             this.deck.finalize();
@@ -713,6 +732,7 @@ export abstract class DeckMapView implements IRenderView {
             scene: {
                 deck: this.deck,
                 layerRegistry: this.layerRegistry,
+                renderBufferArena: this.renderBufferArena,
                 sceneMode: this.sceneMode,
                 device: this.deckDevice
             }
@@ -985,7 +1005,11 @@ export abstract class DeckMapView implements IRenderView {
         if (!viewport) {
             return;
         }
-        this.mapViewState.setViewport(this._viewIndex, viewport);
+        this.mapViewState.setViewport(
+            this._viewIndex,
+            viewport,
+            this.zoomToAltitude(this.viewState.zoom, this.viewState.latitude)
+        );
     }
 
     /**
@@ -1146,12 +1170,16 @@ export abstract class DeckMapView implements IRenderView {
         // Deck is wired in controlled mode (`viewState` prop). User interactions only
         // take effect if we feed the updated camera state back via `setProps`.
         this.updateViewState(rawViewState, true, true);
-        this.pushViewStateToAppState();
+        this.scheduleViewStatePush();
     }
 
     /** Tracks whether the camera is actively moving so hover picking can be suspended. */
     private onInteractionStateChange(interactionState: InteractionState): void {
+        const wasCameraInteracting = this.isCameraInteracting;
         this.noteCameraInteraction(interactionState);
+        if (wasCameraInteracting && !this.isCameraInteracting) {
+            this.flushPendingViewStatePush();
+        }
     }
 
     /** Records the latest camera interaction state and temporarily suppresses expensive hover picking. */
@@ -1420,6 +1448,43 @@ export abstract class DeckMapView implements IRenderView {
                 roll: 0
             }
         );
+    }
+
+    /** Keeps renderer-local camera motion hot and persists only settled state. */
+    private scheduleViewStatePush(): void {
+        if (!this.isCameraInteracting) {
+            this.flushPendingViewStatePush(true);
+            return;
+        }
+        this.cameraStatePushPending = true;
+        if (!this.liveCameraSyncEnabled() ||
+            this.cameraStatePushTimer !== null) {
+            return;
+        }
+        this.cameraStatePushTimer = setTimeout(
+            () => this.flushPendingViewStatePush(),
+            DeckMapView.LIVE_CAMERA_SYNC_INTERVAL_MS
+        );
+    }
+
+    /** Publishes the newest local camera state after interaction settles. */
+    private flushPendingViewStatePush(force = false): void {
+        if (this.cameraStatePushTimer !== null) {
+            clearTimeout(this.cameraStatePushTimer);
+            this.cameraStatePushTimer = null;
+        }
+        if (!force && !this.cameraStatePushPending) {
+            return;
+        }
+        this.cameraStatePushPending = false;
+        this.pushViewStateToAppState();
+    }
+
+    /** Retains bounded live camera motion only when another view consumes it. */
+    private liveCameraSyncEnabled(): boolean {
+        return this.stateService.numViews > 1 &&
+            (this.stateService.viewSync.includes(VIEW_SYNC_POSITION) ||
+                this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT));
     }
 
     /** Builds the deck controller options from the current view mode and persisted zoom-speed preference. */

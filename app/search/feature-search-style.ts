@@ -37,11 +37,16 @@ export function compileFeatureSearchStyle(
     mapInfo: MapInfoService,
     featureTypes: readonly string[]
 ): CompiledFeatureSearchStyle {
+    const applicableRules = definition.searchStyleRules.filter(rule =>
+        !rule.mapLayers?.length ||
+        rule.mapLayers.some(ref =>
+            ref.mapId === mapgetLayer.mapId &&
+            ref.layerId === mapgetLayer.layerId));
     const sourceObject = {
         name: `Search/${definition.id}/${mapgetLayer.mapId}/${mapgetLayer.layerId}`,
         version: 2,
         rules: [syntheticSearchRule(
-            definition.searchStyleRules,
+            applicableRules,
             definition.concreteScope)]
     };
     const source = JSON.stringify(sourceObject);

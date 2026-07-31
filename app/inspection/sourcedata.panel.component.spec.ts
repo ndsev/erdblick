@@ -178,7 +178,7 @@ describe("sourceDataTreePresentation", () => {
         expect(chainChild.expanded).toBe(true);
         expect(chainLeaf.expanded).toBe(true);
         expect(branch.expanded).toBe(true);
-        expect(branch.children[0].expanded).toBeUndefined();
-        expect(branch.children[1].expanded).toBeUndefined();
+        expect(branch.children?.[0].expanded).toBeUndefined();
+        expect(branch.children?.[1].expanded).toBeUndefined();
     });
 });
