@@ -48,7 +48,6 @@ import {
 import {
     IRenderSceneHandle,
     IRenderView,
-    ITileVisualization,
     RenderNavigationTarget,
     RenderedFeaturePickResult,
     RenderViewDestroyOptions

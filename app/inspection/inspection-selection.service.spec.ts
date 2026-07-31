@@ -70,7 +70,8 @@ function createHarness(limit: number, initialPanels: InspectionPanelModel<TileFe
         {} as never,
         {} as never,
         {registerShortcut: vi.fn()} as never,
-        infoMessageService
+        infoMessageService,
+        {run: (callback: () => unknown) => callback()} as never
     );
     return {service, stateService, infoMessageService, panels: () => panels};
 }

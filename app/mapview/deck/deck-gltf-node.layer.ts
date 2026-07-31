@@ -359,6 +359,8 @@ export type DeckGltfPickProxyLayerProps = LayerProps & {
     tileKey: string;
     subsetPickResolver?: (pickIndex: number) => unknown;
     navigationAnchorEligible?: boolean;
+    markerAnchorEligible?: boolean;
+    drillPickEligible?: boolean;
 };
 
 const gltfAssetCacheByDevice = new WeakMap<Device, Map<string, DeckTileGltfAssetCacheEntry>>();

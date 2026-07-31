@@ -7,16 +7,12 @@ import type {TileFeatureId} from "../../shared/appstate.service";
 import {DeckMapView2D} from "./deck-view2d";
 
 function createView() {
-    const resolveTileFeatureIdByAddress = vi.fn((mapTileKey: string, address: number): TileFeatureId => ({
-        mapTileKey,
-        featureId: `feature-${address}`
-    }));
     const view = new DeckMapView2D(
         0,
         "canvas",
         {} as never,
         {} as never,
-        {resolveTileFeatureIdByAddress} as never,
+        {} as never,
         {} as never,
         {} as never,
         {} as never,
@@ -25,18 +21,28 @@ function createView() {
         {} as never,
         {} as never
     );
-    return {view, resolveTileFeatureIdByAddress};
+    return view;
+}
+
+function subsetPickResolver(
+    mapTileKey: string
+): (address: number) => TileFeatureId[] {
+    return address => [{
+        mapTileKey,
+        featureId: `feature-${address}`
+    }];
 }
 
 describe("Deck rendered-feature picking", () => {
     it("uses one configured-radius deep query, excludes untagged layers, and continues after an unresolved hit", () => {
-        const {view} = createView();
+        const view = createView();
         const unselectableLayer = {
             id: "base-unselectable",
             props: {
                 drillPickEligible: true,
                 tileKey: "map-a/tile",
-                featureAddresses: [0xffffffff]
+                featureAddresses: [0xffffffff],
+                subsetPickResolver: subsetPickResolver("map-a/tile")
             }
         };
         const selectableLayer = {
@@ -44,7 +50,8 @@ describe("Deck rendered-feature picking", () => {
             props: {
                 drillPickEligible: true,
                 tileKey: "map-b/tile",
-                featureAddresses: [7]
+                featureAddresses: [7],
+                subsetPickResolver: subsetPickResolver("map-b/tile")
             }
         };
         const highlightLayer = {
@@ -81,24 +88,30 @@ describe("Deck rendered-feature picking", () => {
     });
 
     it("flattens merged objects and deduplicates by the full tile-feature identity", () => {
-        const {view} = createView();
+        const view = createView();
         const mergedLayer = {
             id: "merged-base",
-            props: {drillPickEligible: true}
+            props: {
+                drillPickEligible: true,
+                subsetPickResolver: (address: number): TileFeatureId[] => [{
+                    mapTileKey: address === 0
+                        ? "map-a/tile"
+                        : "map-b/tile",
+                    featureId: "feature-4"
+                }]
+            }
         };
         const pickMultipleObjects = vi.fn(() => [
             {
                 layer: mergedLayer,
                 object: {
-                    featureAddresses: [4, 4, 4],
-                    featureTileKeys: ["map-a/tile", "map-a/tile", "map-b/tile"]
+                    featureAddresses: [0, 0, 1]
                 }
             },
             {
                 layer: mergedLayer,
                 object: {
-                    featureAddresses: [4],
-                    featureTileKeys: ["map-b/tile"]
+                    featureAddresses: [1]
                 }
             }
         ]);
@@ -114,7 +127,7 @@ describe("Deck rendered-feature picking", () => {
     });
 
     it("snaps a thick picked path ribbon to its base XYZ centerline", () => {
-        const {view} = createView();
+        const view = createView();
         const origin: [number, number, number] = [11, 48, 100];
         const positions = new Float32Array([
             0, 0, 0,
@@ -126,6 +139,7 @@ describe("Deck rendered-feature picking", () => {
                 navigationAnchorEligible: true,
                 tileKey: "map/tile",
                 featureAddressesByPath: [12],
+                subsetPickResolver: subsetPickResolver("map/tile"),
                 pathCenterline: {
                     positions,
                     startIndices: new Uint32Array([0, 2]),
@@ -163,14 +177,17 @@ describe("Deck rendered-feature picking", () => {
     });
 
     it("skips a nonphysical label and anchors a marker to the feature point", () => {
-        const {view} = createView();
+        const view = createView();
         const targetFeature = {mapTileKey: "map/tile", featureId: "feature-12"};
         const labelLayer = {
             id: "base-label",
             props: {
                 drillPickEligible: true,
                 tileKey: targetFeature.mapTileKey,
-                featureAddresses: [12]
+                featureAddresses: [12],
+                subsetPickResolver: subsetPickResolver(
+                    targetFeature.mapTileKey
+                )
             }
         };
         const origin: [number, number, number] = [11, 48, 100];
@@ -181,6 +198,9 @@ describe("Deck rendered-feature picking", () => {
                 markerAnchorEligible: true,
                 tileKey: targetFeature.mapTileKey,
                 featureAddresses: [12],
+                subsetPickResolver: subsetPickResolver(
+                    targetFeature.mapTileKey
+                ),
                 coordinateOrigin: origin,
                 anchorPositions: new Float32Array([10, 20, 30])
             }

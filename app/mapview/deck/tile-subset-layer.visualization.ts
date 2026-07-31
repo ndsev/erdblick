@@ -26,10 +26,8 @@ import {
     makeDeckLayerKey
 } from "./deck-layer-registry";
 import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
-import {
-    StaleSubsetRenderError,
-    TileSubsetLayerRenderService
-} from "./tile-subset-layer-render.service";
+import {StaleSubsetRenderError, TileSubsetLayerRenderService} from
+    "./tile-subset-layer-render.service";
 import type {
     TileSubsetLabelDatum,
     TileSubsetLayerRenderBuffers,
@@ -49,9 +47,15 @@ import {
     releaseDeckTileGltfAsset,
     retainDeckTileGltfAsset
 } from "./deck-gltf-node.layer";
-import type {
-    StyleValidationReportService
-} from "../../styledata/style-validation-report.service";
+import type {StyleValidationReportService} from "../../styledata/style-validation-report.service";
+import {
+    deckSubsetGltfPickProxyKey,
+    deckSubsetInteractionProps,
+    remapGltfPickContributions,
+    type DeckSubsetInteractionProps as DeckInteractionProps,
+    type DeckSubsetPickProps as DeckPickProps,
+    type SubsetPickResolver as PickResolver
+} from "./deck-subset-picking";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
@@ -63,15 +67,6 @@ interface DeckScene {
 interface DeckBinaryAttribute<T extends ArrayLike<number>> {
     value: T;
     size: number;
-}
-
-type PickResolver = (pickIndex: number) => TileFeatureId[];
-
-interface DeckPickProps {
-    tileKey: string;
-    subsetPickResolver: PickResolver;
-    featureAddresses?: Uint32Array;
-    featureAddressesByPath?: Uint32Array;
 }
 
 interface DeckPathData {
@@ -154,6 +149,7 @@ interface SharedGltfPickContribution {
     order: number;
     coordinateOrigin: [number, number, number];
     data: DeckGltfPickProxyStyleContribution["data"];
+    pickResolver: PickResolver;
 }
 
 interface SharedPrimitiveContribution<T> {
@@ -569,6 +565,12 @@ export class TileSubsetLayerVisualization {
             return false;
         }
         const modelMatrix = this.modelMatrix(sceneHandle);
+        const interaction = deckSubsetInteractionProps(
+            this.owner.identity.presentationKind,
+            this.owner.highlightMode.value,
+            coreLib.HighlightMode.NO_HIGHLIGHT.value,
+            (sceneHandle.scene as DeckScene | undefined)?.sceneMode
+        );
         const pickResolver: PickResolver = pickIndex => this.resolvePick(pickIndex);
 
         for (const surface of this.surfaceData(result.surface, origin)) {
@@ -579,13 +581,15 @@ export class TileSubsetLayerVisualization {
                 surface,
                 pickResolver,
                 modelMatrix,
+                interaction,
                 desiredArena
             )) {
                 registry.upsert(key, this.surfaceLayer(
                     key,
                     surface,
                     pickResolver,
-                    modelMatrix
+                    modelMatrix,
+                    interaction
                 ), 350 + this.owner.styleOrder);
                 desired.add(key);
             }
@@ -603,13 +607,15 @@ export class TileSubsetLayerVisualization {
                 path,
                 pickResolver,
                 modelMatrix,
+                interaction,
                 desiredArena
             )) {
                 registry.upsert(key, this.pathLayer(
                     key,
                     path,
                     pickResolver,
-                    modelMatrix
+                    modelMatrix,
+                    interaction
                 ), 400 + this.owner.styleOrder);
                 desired.add(key);
             }
@@ -627,13 +633,15 @@ export class TileSubsetLayerVisualization {
                 point,
                 pickResolver,
                 modelMatrix,
+                interaction,
                 desiredArena
             )) {
                 registry.upsert(key, this.pointLayer(
                     key,
                     point,
                     pickResolver,
-                    modelMatrix
+                    modelMatrix,
+                    interaction
                 ), 425 + this.owner.styleOrder);
                 desired.add(key);
             }
@@ -673,7 +681,8 @@ export class TileSubsetLayerVisualization {
                     billboard,
                     modelMatrix,
                     parameters: this.parameters(depthTest),
-                    pickable: true,
+                    pickable: interaction.pickable,
+                    drillPickEligible: interaction.drillPickEligible,
                     tileKey: this.blockKey,
                     subsetPickResolver: pickResolver
                 } as any), 475 + this.owner.styleOrder);
@@ -707,7 +716,8 @@ export class TileSubsetLayerVisualization {
                 billboard: arrow.billboard,
                 modelMatrix,
                 parameters: this.parameters(arrow.depthTest),
-                pickable: true,
+                pickable: interaction.pickable,
+                drillPickEligible: interaction.drillPickEligible,
                 tileKey: this.blockKey,
                 subsetPickResolver: pickResolver,
                 alphaCutoff: 0.05
@@ -721,6 +731,7 @@ export class TileSubsetLayerVisualization {
             origin,
             modelMatrix,
             pickResolver,
+            interaction,
             preparedGltf
         );
         this.reconcile(registry, desired);
@@ -732,7 +743,8 @@ export class TileSubsetLayerVisualization {
         key: string,
         surface: DeckSurfaceData,
         pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null
+        modelMatrix: Matrix4 | null,
+        interaction: DeckInteractionProps
     ): SolidPolygonLayer<DeckSurfaceData, DeckPickProps> {
         return new SolidPolygonLayer<DeckSurfaceData, DeckPickProps>({
             id: key,
@@ -746,7 +758,10 @@ export class TileSubsetLayerVisualization {
             _full3d: true,
             modelMatrix,
             parameters: this.parameters(surface.depthTest),
-            pickable: true,
+            pickable: interaction.pickable,
+            navigationAnchorEligible: interaction.drillPickEligible,
+            markerAnchorEligible: interaction.drillPickEligible,
+            drillPickEligible: interaction.drillPickEligible,
             tileKey: key,
             subsetPickResolver: pickResolver,
             featureAddresses: surface.featureAddresses
@@ -757,7 +772,8 @@ export class TileSubsetLayerVisualization {
         key: string,
         path: DeckPathData,
         pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null
+        modelMatrix: Matrix4 | null,
+        interaction: DeckInteractionProps
     ): PathLayer<DeckPathData, DeckPickProps> {
         return new PathLayer<DeckPathData, DeckPickProps>({
             id: key,
@@ -771,11 +787,19 @@ export class TileSubsetLayerVisualization {
             parameters: this.parameters(path.depthTest),
             capRounded: true,
             jointRounded: true,
-            pickable: true,
+            pickable: interaction.pickable,
+            navigationAnchorEligible: interaction.drillPickEligible,
+            markerAnchorEligible: interaction.drillPickEligible,
+            drillPickEligible: interaction.drillPickEligible,
             extensions: [new PathStyleExtension({dash: true})],
             tileKey: key,
             subsetPickResolver: pickResolver,
-            featureAddressesByPath: path.featureAddressesByPath
+            featureAddressesByPath: path.featureAddressesByPath,
+            pathCenterline: {
+                positions: path.attributes.getPath.value,
+                startIndices: path.startIndices,
+                coordinateOrigin: path.coordinateOrigin
+            }
         });
     }
 
@@ -783,7 +807,8 @@ export class TileSubsetLayerVisualization {
         key: string,
         point: DeckPointData,
         pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null
+        modelMatrix: Matrix4 | null,
+        interaction: DeckInteractionProps
     ): ScatterplotLayer<DeckPointData, DeckPickProps> {
         return new ScatterplotLayer<DeckPointData, DeckPickProps>({
             id: key,
@@ -796,10 +821,13 @@ export class TileSubsetLayerVisualization {
             billboard: point.billboard,
             modelMatrix,
             parameters: this.parameters(point.depthTest),
-            pickable: true,
+            pickable: interaction.pickable,
+            markerAnchorEligible: interaction.drillPickEligible,
+            drillPickEligible: interaction.drillPickEligible,
             tileKey: key,
             subsetPickResolver: pickResolver,
-            featureAddresses: point.featureAddresses
+            featureAddresses: point.featureAddresses,
+            anchorPositions: point.attributes.getPosition.value
         });
     }
 
@@ -809,6 +837,7 @@ export class TileSubsetLayerVisualization {
         surface: DeckSurfaceData,
         pickResolver: PickResolver,
         modelMatrix: Matrix4 | null,
+        interaction: DeckInteractionProps,
         desired: Set<string>
     ): boolean {
         const arena = this.arena(sceneHandle);
@@ -836,7 +865,8 @@ export class TileSubsetLayerVisualization {
                             key,
                             merged.data,
                             merged.pickResolver,
-                            modelMatrix
+                            modelMatrix,
+                            interaction
                         )
                         : null,
                     order: 350 + this.owner.styleOrder
@@ -853,6 +883,7 @@ export class TileSubsetLayerVisualization {
         path: DeckPathData,
         pickResolver: PickResolver,
         modelMatrix: Matrix4 | null,
+        interaction: DeckInteractionProps,
         desired: Set<string>
     ): boolean {
         const arena = this.arena(sceneHandle);
@@ -880,7 +911,8 @@ export class TileSubsetLayerVisualization {
                             key,
                             merged.data,
                             merged.pickResolver,
-                            modelMatrix
+                            modelMatrix,
+                            interaction
                         )
                         : null,
                     order: 400 + this.owner.styleOrder
@@ -897,6 +929,7 @@ export class TileSubsetLayerVisualization {
         point: DeckPointData,
         pickResolver: PickResolver,
         modelMatrix: Matrix4 | null,
+        interaction: DeckInteractionProps,
         desired: Set<string>
     ): boolean {
         const arena = this.arena(sceneHandle);
@@ -924,7 +957,8 @@ export class TileSubsetLayerVisualization {
                             key,
                             merged.data,
                             merged.pickResolver,
-                            modelMatrix
+                            modelMatrix,
+                            interaction
                         )
                         : null,
                     order: 425 + this.owner.styleOrder
@@ -1404,12 +1438,13 @@ export class TileSubsetLayerVisualization {
         origin: [number, number, number],
         modelMatrix: Matrix4 | null,
         pickResolver: PickResolver,
+        interaction: DeckInteractionProps,
         prepared: PreparedGltf | null
     ): void {
         const sourceId = this.owner.ownerId;
         const state = this.primaryState;
         const gltfKey = `${state.mapTileKey}/gltf`;
-        const pickKey = `${state.mapTileKey}/gltf-pick-proxy`;
+        const pickKey = deckSubsetGltfPickProxyKey(state.mapTileKey, this.owner.ownerId);
         const raw = result.gltfNodes;
         const flatTint = this.owner.highlightMode.value !==
             coreLib.HighlightMode.NO_HIGHLIGHT.value;
@@ -1501,7 +1536,8 @@ export class TileSubsetLayerVisualization {
             const contribution: SharedGltfPickContribution = {
                 order: 374 + this.owner.styleOrder,
                 coordinateOrigin: origin,
-                data: proxyData
+                data: proxyData,
+                pickResolver
             };
             registry.upsertShared(
                 pickKey,
@@ -1518,20 +1554,30 @@ export class TileSubsetLayerVisualization {
                         return {layer: null, order: 0};
                     }
                     const first = contributions[0].contribution;
+                    const remapped = remapGltfPickContributions(
+                        contributions.map(item => ({
+                            sourceId: item.sourceId,
+                            data: item.contribution.data,
+                            pickResolver: item.contribution.pickResolver
+                        }))
+                    );
                     return {
                         order: Math.max(...contributions.map(
                             item => item.contribution.order
                         )),
                         layer: new DeckGltfPickProxyLayer({
                             id: key,
-                            contributions: contributions.map(item => ({
-                                sourceId: item.sourceId,
-                                data: item.contribution.data
-                            })),
+                            contributions: remapped.contributions,
                             coordinateOrigin: first.coordinateOrigin,
-                            pickable: true,
+                            pickable: interaction.pickable,
+                            navigationAnchorEligible:
+                                interaction.drillPickEligible,
+                            markerAnchorEligible:
+                                interaction.drillPickEligible,
+                            drillPickEligible:
+                                interaction.drillPickEligible,
                             tileKey: state.mapTileKey,
-                            subsetPickResolver: pickResolver
+                            subsetPickResolver: remapped.pickResolver
                         })
                     };
                 }
@@ -1602,7 +1648,7 @@ export class TileSubsetLayerVisualization {
         }
         if (this.gltfPickSharedSourceActive) {
             registry.removeShared(
-                `${this.primaryState.mapTileKey}/gltf-pick-proxy`,
+                deckSubsetGltfPickProxyKey(this.primaryState.mapTileKey, this.owner.ownerId),
                 this.owner.ownerId
             );
             this.gltfPickSharedSourceActive = false;

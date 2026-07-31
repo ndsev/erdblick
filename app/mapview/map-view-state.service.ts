@@ -6,7 +6,11 @@ import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstat
 import {RenderRectangle} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import {Viewport} from "../../build/libs/core/erdblick-core";
-import {coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibility";
+import {
+    autoTileGridLevel,
+    coarsenedTileLevel,
+    tileGridVisibleCellCount
+} from "./tile-grid-visibility";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
@@ -311,6 +315,36 @@ export class MapViewStateService {
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
+    /** Enables or disables viewport-based automatic tile-grid level selection. */
+    setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
+        if (autoLevel) {
+            const configuredLevel =
+                this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+            this.mapInfo.setViewTileGridLevel(
+                viewIndex,
+                this.autoSelectedTileGridLevel(viewIndex, configuredLevel)
+            );
+        }
+        this.mapInfo.setViewTileGridAutoLevel(viewIndex, autoLevel);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
+    /** Returns whether the tile grid follows the viewport-based auto-level heuristic. */
+    isViewTileGridAutoLevelEnabled(viewIndex: number): boolean {
+        return this.mapInfo.isViewTileGridAutoLevelEnabled(viewIndex);
+    }
+
+    /** Returns the configured grid level or its viewport-derived value in auto mode. */
+    getEffectiveViewTileGridLevel(viewIndex: number): number {
+        const configuredLevel =
+            this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+        if (!this.mapInfo.maps.getViewTileGridAutoLevel(viewIndex)) {
+            return configuredLevel;
+        }
+        return this.autoSelectedTileGridLevel(viewIndex, configuredLevel);
+    }
+
     /** Sets the tile-grid line colour and refreshes affected overlays. */
     setViewTileGridColor(viewIndex: number, color: string): void {
         this.mapInfo.setViewTileGridColor(viewIndex, color);
@@ -380,6 +414,21 @@ export class MapViewStateService {
         if (this.mapInfo.syncBackgroundSettingsFromView(viewIndex)) {
             this.requestViewRecalculation(ViewRecalculationReason.BackgroundSync);
         }
+    }
+
+    /** Chooses the automatic grid level, retaining the configured value before layout exists. */
+    private autoSelectedTileGridLevel(
+        viewIndex: number,
+        fallbackLevel: number
+    ): number {
+        const viewport = this.viewVisualizationState[viewIndex]?.viewport;
+        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+            return fallbackLevel;
+        }
+        return autoTileGridLevel(
+            viewport,
+            this.mapInfo.maps.getViewTileGridMode(viewIndex)
+        );
     }
 
     /** Chooses the deepest advertised level whose tile density stays below the auto-level threshold. */

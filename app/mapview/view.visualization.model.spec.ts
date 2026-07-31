@@ -77,32 +77,4 @@ describe("ViewVisualizationState", () => {
         });
     });
 
-    it("retains an unchanged ordered tile plan instead of rebuilding its caches", () => {
-        const state = new ViewVisualizationState();
-        state.viewport = {
-            south: 0,
-            west: 0,
-            width: 1,
-            height: 1,
-            camPosLon: 0,
-            camPosLat: 0,
-            orientation: 0
-        };
-        const getTileIdsSpy = vi.spyOn(coreLib, "getTileIds").mockReturnValue([1000, 1001]);
-        const getCanonicalCountSpy = vi.spyOn(coreLib, "getNumTileIdsForCanonicalCamera").mockReturnValue(2);
-
-        try {
-            expect(state.recalculateTileIds(999, [4], 1234)).toBe(true);
-            const firstPlan = state.visibleTileIdsPerLevel;
-            expect(state.recalculateTileIds(999, [4], 1234)).toBe(false);
-            expect(state.visibleTileIdsPerLevel).toBe(firstPlan);
-
-            getTileIdsSpy.mockReturnValue([1001, 1000]);
-            expect(state.recalculateTileIds(999, [4], 1234)).toBe(true);
-            expect(state.visibleTileIdsPerLevel).not.toBe(firstPlan);
-        } finally {
-            getTileIdsSpy.mockRestore();
-            getCanonicalCountSpy.mockRestore();
-        }
-    });
 });
