@@ -28,7 +28,7 @@ You can move around the map using a mix of mouse gestures, keyboard shortcuts, a
 - **2D / 3D toggle**: switch between flat Web Mercator-style rendering and the full 3D view.
 - **Focus buttons**: use the target icon in **Maps & Layers** to jump to a map or layer coverage area advertised by the backend.
 
-In 3D mode, rotation and tilt use the rendered surface under the pointer as their pivot when the picked layer supports depth-aware interaction. A ring and centre dot show the active pivot while rotating. GLTF content uses its interaction proxy, so the indicated point can follow the proxy rather than the exact visible mesh surface.
+In 3D mode, pan, zoom, rotation, and tilt can stay anchored to an eligible rendered feature under the pointer. The cyan ring and centre dot show that navigation anchor while it is available or in active use. Path anchors snap to the source centreline, and point anchors use the feature position rather than the billboard surface. GLTF content uses its interaction proxy, so the indicated point can follow the proxy rather than the exact visible mesh surface.
 
 In [split view](erdblick-split.md), navigation targets the currently focused pane. The focused view is outlined in blue. Use `Ctrl+Left` / `Ctrl+Right` to move focus explicitly.
 

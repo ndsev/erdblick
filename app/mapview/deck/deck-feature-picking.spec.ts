@@ -205,7 +205,7 @@ describe("Deck rendered-feature picking", () => {
         expect(target?.position[2]).toBeCloseTo(expected[2], 7);
     });
 
-    it("skips a nonphysical label and anchors a marker to the feature point", () => {
+    it("skips a nonphysical label and anchors navigation and markers to the feature point", () => {
         const view = createView();
         const targetFeature = {mapTileKey: "map/tile", featureId: "feature-12"};
         const labelLayer = {
@@ -224,6 +224,7 @@ describe("Deck rendered-feature picking", () => {
             id: "base-point",
             props: {
                 drillPickEligible: true,
+                navigationAnchorEligible: true,
                 markerAnchorEligible: true,
                 tileKey: targetFeature.mapTileKey,
                 featureAddresses: [12],
@@ -243,6 +244,7 @@ describe("Deck rendered-feature picking", () => {
             pickMultipleObjects
         };
 
+        const navigationTarget = view.pickNavigationTarget({x: 500, y: 350});
         const position = (view as any).markerPositionForFeature(
             {layer: labelLayer, index: 0, coordinate: [11, 48, 999]},
             {x: 500, y: 350},
@@ -252,6 +254,10 @@ describe("Deck rendered-feature picking", () => {
         );
         const expected = addMetersToLngLat(origin, [10, 20, 30]);
 
+        expect(navigationTarget?.featureIds).toEqual([targetFeature]);
+        expect(navigationTarget?.position[0]).toBeCloseTo(expected[0], 7);
+        expect(navigationTarget?.position[1]).toBeCloseTo(expected[1], 7);
+        expect(navigationTarget?.position[2]).toBeCloseTo(expected[2], 7);
         expect(position[0]).toBeCloseTo(expected[0], 7);
         expect(position[1]).toBeCloseTo(expected[1], 7);
         expect(position[2]).toBeCloseTo(expected[2], 7);

@@ -197,6 +197,41 @@ describe("TileSubsetLayerVisualization picking integration", () => {
             DeckVariablePathOffsetExtension);
     });
 
+    it("exposes point positions as navigation and marker anchors", () => {
+        const target = visualization(
+            "regular",
+            coreLib.HighlightMode.NO_HIGHLIGHT
+        ) as any;
+        const positions = new Float32Array([10, 20, 30]);
+        const resolver = vi.fn();
+        const layer = target.pointLayer(
+            "point",
+            {
+                length: 1,
+                billboard: false,
+                depthTest: true,
+                coordinateOrigin: [11, 48, 0],
+                featureAddresses: new Uint32Array([7]),
+                attributes: {
+                    getPosition: {value: positions, size: 3},
+                    getFillColor: {
+                        value: new Uint8Array([255, 255, 255, 255]),
+                        size: 4
+                    },
+                    getRadius: {value: new Float32Array([4]), size: 1}
+                }
+            },
+            resolver,
+            null,
+            {pickable: "3d", drillPickEligible: true}
+        );
+
+        expect(layer.props.pickable).toBe("3d");
+        expect((layer.props as any).navigationAnchorEligible).toBe(true);
+        expect((layer.props as any).markerAnchorEligible).toBe(true);
+        expect((layer.props as any).anchorPositions).toBe(positions);
+    });
+
     it("keeps shared GLTF proxy addresses bound to their owning subset", () => {
         const firstResolver = vi.fn(() => [{
             mapTileKey: "map/tile-a",

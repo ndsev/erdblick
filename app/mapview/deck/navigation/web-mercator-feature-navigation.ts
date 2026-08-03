@@ -1,22 +1,21 @@
 import {WebMercatorViewport} from "@deck.gl/core";
+import type {NavigationAnchor, NavigationScreenPosition} from "./feature-navigation.types";
 
 /** Vertical field of view shared by map rendering and camera-state conversion. */
 export const DECK_MAP_FOV_DEGREES = 60;
 
-/** Near-plane scale chosen to support close inspection without sacrificing excessive depth precision. */
+/** Near-plane scale chosen to support close navigation without sacrificing excessive depth precision. */
 export const DECK_MAP_NEAR_Z_MULTIPLIER = 0.01;
 
 /** deck.gl's horizon-aware far-plane scale. */
 export const DECK_MAP_FAR_Z_MULTIPLIER = 1.01;
 
 /** Closest physical camera distance allowed while zooming around a rendered feature. */
-export const MIN_FEATURE_PIVOT_DISTANCE_METERS = 1;
+export const MIN_NAVIGATION_ANCHOR_DISTANCE_METERS = 1;
 
 /** Normalized front-clip margin used to stop just before a feature reaches the camera. */
-export const MIN_FEATURE_PIVOT_DEPTH = 0.3;
+export const MIN_NAVIGATION_ANCHOR_DEPTH = 0.3;
 
-const WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
-const FULL_LONGITUDE_SPAN = 360;
 const SAFE_ZOOM_SEARCH_STEPS = 24;
 
 /** Returns a longitude in the world copy nearest to the supplied reference. */
@@ -34,15 +33,7 @@ export interface DeckMapCameraState {
     bearing: number;
 }
 
-/** Geographic rectangle consumed by the native tile-selection viewport. */
-export interface ClippedGeographicBounds {
-    west: number;
-    south: number;
-    width: number;
-    height: number;
-}
-
-/** Creates a Web Mercator viewport using erdblick's single map-projection contract. */
+/** Creates a Web Mercator viewport using Erdblick's single map-projection contract. */
 export function createDeckMapViewport(
     state: DeckMapCameraState,
     width: number,
@@ -64,47 +55,16 @@ export function createDeckMapViewport(
     });
 }
 
-/**
- * Returns a padded ground footprint using deck.gl's far-plane clipping at the horizon.
- * Longitudes stay unwrapped around the supplied center so repeated worlds remain continuous.
- */
-export function clippedGeographicBounds(
-    viewport: WebMercatorViewport,
-    centerLon: number,
-    paddingFraction: number
-): ClippedGeographicBounds {
-    const [rawWest, rawSouth, rawEast, rawNorth] = viewport.getBounds({z: 0});
-    const rawWidth = rawEast - rawWest;
-    const rawHeight = rawNorth - rawSouth;
-    const rawCenter = (rawWest + rawEast) / 2;
-    const unwrappedCenter = longitudeInNearestWorld(rawCenter, centerLon);
-    const paddedWidth = rawWidth * (1 + 2 * paddingFraction);
-
-    if (paddedWidth >= FULL_LONGITUDE_SPAN) {
-        // Once every longitude is visible, a canonical full-world rectangle avoids
-        // retaining a projection-dependent width larger than the native tile space.
-        return {
-            west: centerLon - FULL_LONGITUDE_SPAN / 2,
-            south: -WEB_MERCATOR_MAX_LATITUDE,
-            width: FULL_LONGITUDE_SPAN,
-            height: WEB_MERCATOR_MAX_LATITUDE * 2
-        };
-    }
-
-    const south = Math.max(
-        -WEB_MERCATOR_MAX_LATITUDE,
-        rawSouth - rawHeight * paddingFraction
-    );
-    const north = Math.min(
-        WEB_MERCATOR_MAX_LATITUDE,
-        rawNorth + rawHeight * paddingFraction
-    );
-    return {
-        west: unwrappedCenter - rawWidth / 2 - rawWidth * paddingFraction,
-        south,
-        width: paddedWidth,
-        height: north - south
-    };
+/** Resolves an anchor into the repeated-world copy local to a viewport. */
+export function navigationAnchorInViewportWorld(
+    anchor: NavigationAnchor,
+    viewport: WebMercatorViewport
+): NavigationAnchor {
+    return [
+        longitudeInNearestWorld(anchor[0], viewport.longitude),
+        anchor[1],
+        anchor[2]
+    ];
 }
 
 /**
@@ -113,19 +73,17 @@ export function clippedGeographicBounds(
  */
 export function viewStateKeepingAnchor<StateT extends DeckMapCameraState>(
     nextState: StateT,
-    pivot: readonly [number, number, number],
-    pixel: readonly [number, number],
+    anchor: NavigationAnchor,
+    pixel: NavigationScreenPosition,
     width: number,
     height: number,
     orthographic: boolean
 ): StateT {
     const nextViewport = createDeckMapViewport(nextState, width, height, orthographic);
-    const localPivot: [number, number, number] = [
-        longitudeInNearestWorld(pivot[0], nextState.longitude),
-        pivot[1],
-        pivot[2]
-    ];
-    const center = nextViewport.panByPosition3D(localPivot, [...pixel]);
+    const center = nextViewport.panByPosition3D(
+        navigationAnchorInViewportWorld(anchor, nextViewport),
+        pixel
+    );
     return {
         ...nextState,
         longitude: center.longitude ?? nextState.longitude,
@@ -133,58 +91,47 @@ export function viewStateKeepingAnchor<StateT extends DeckMapCameraState>(
     };
 }
 
-/** Resolves a pivot into the repeated-world copy local to a viewport. */
-function localFeaturePivot(
+/** Returns the physical distance between a viewport camera and a WGS84 navigation anchor. */
+export function navigationAnchorDistanceMeters(
     viewport: WebMercatorViewport,
-    pivot: readonly [number, number, number]
-): [number, number, number] {
-    return [
-        longitudeInNearestWorld(pivot[0], viewport.longitude),
-        pivot[1],
-        pivot[2]
-    ];
-}
-
-/** Returns the physical distance between a viewport camera and a WGS84 feature pivot. */
-export function featurePivotDistanceMeters(
-    viewport: WebMercatorViewport,
-    pivot: readonly [number, number, number]
+    anchor: NavigationAnchor
 ): number {
-    const pivotCommon = viewport.projectPosition(localFeaturePivot(viewport, pivot));
+    const localAnchor = navigationAnchorInViewportWorld(anchor, viewport);
+    const anchorCommon = viewport.projectPosition(localAnchor);
     const metersPerUnit = viewport.distanceScales.metersPerUnit;
     return Math.hypot(
-        (pivotCommon[0] - viewport.cameraPosition[0]) * metersPerUnit[0],
-        (pivotCommon[1] - viewport.cameraPosition[1]) * metersPerUnit[1],
-        (pivotCommon[2] - viewport.cameraPosition[2]) * metersPerUnit[2]
+        (anchorCommon[0] - viewport.cameraPosition[0]) * metersPerUnit[0],
+        (anchorCommon[1] - viewport.cameraPosition[1]) * metersPerUnit[1],
+        (anchorCommon[2] - viewport.cameraPosition[2]) * metersPerUnit[2]
     );
 }
 
 /**
- * Returns whether a feature pivot is in front of the camera, inside the clip
- * volume, and far enough from the eye for another anchored camera operation.
+ * Returns whether an anchor is in front of the camera, inside the clip volume,
+ * and far enough from the eye for another anchored camera operation.
  */
-export function isFeaturePivotUsable(
+export function isNavigationAnchorUsable(
     viewport: WebMercatorViewport,
-    pivot: readonly [number, number, number],
+    anchor: NavigationAnchor,
     requireOnScreen = false
 ): boolean {
-    const localPivot = localFeaturePivot(viewport, pivot);
-    const projected = viewport.project(localPivot);
+    const localAnchor = navigationAnchorInViewportWorld(anchor, viewport);
+    const projected = viewport.project(localAnchor);
     if (projected.length < 3 || !projected.every(Number.isFinite)) {
         return false;
     }
 
-    const pivotCommon = viewport.projectPosition(localPivot);
+    const anchorCommon = viewport.projectPosition(localAnchor);
     const viewMatrix = viewport.viewMatrix;
     const viewZ =
-        viewMatrix[2] * pivotCommon[0]
-        + viewMatrix[6] * pivotCommon[1]
-        + viewMatrix[10] * pivotCommon[2]
+        viewMatrix[2] * anchorCommon[0]
+        + viewMatrix[6] * anchorCommon[1]
+        + viewMatrix[10] * anchorCommon[2]
         + viewMatrix[14];
     if (viewZ >= 0
-        || projected[2] < MIN_FEATURE_PIVOT_DEPTH
+        || projected[2] < MIN_NAVIGATION_ANCHOR_DEPTH
         || projected[2] > 1
-        || featurePivotDistanceMeters(viewport, localPivot) < MIN_FEATURE_PIVOT_DISTANCE_METERS) {
+        || navigationAnchorDistanceMeters(viewport, localAnchor) < MIN_NAVIGATION_ANCHOR_DISTANCE_METERS) {
         return false;
     }
 
@@ -199,18 +146,18 @@ export function isFeaturePivotUsable(
  * Applies a feature-anchored camera change and limits zoom-in at the closest
  * safe state instead of allowing a coarse input step to cross the feature.
  */
-export function viewStateKeepingSafeFeatureAnchor<StateT extends DeckMapCameraState>(
+export function viewStateKeepingSafeNavigationAnchor<StateT extends DeckMapCameraState>(
     currentState: StateT,
     requestedState: StateT,
-    pivot: readonly [number, number, number],
-    pixel: readonly [number, number],
+    anchor: NavigationAnchor,
+    pixel: NavigationScreenPosition,
     width: number,
     height: number,
     orthographic: boolean
 ): StateT {
     const requested = viewStateKeepingAnchor(
         requestedState,
-        pivot,
+        anchor,
         pixel,
         width,
         height,
@@ -220,20 +167,20 @@ export function viewStateKeepingSafeFeatureAnchor<StateT extends DeckMapCameraSt
         return requested;
     }
     const requestedViewport = createDeckMapViewport(requested, width, height, orthographic);
-    if (isFeaturePivotUsable(requestedViewport, pivot)) {
+    if (isNavigationAnchorUsable(requestedViewport, anchor)) {
         return requested;
     }
 
     const current = viewStateKeepingAnchor(
         currentState,
-        pivot,
+        anchor,
         pixel,
         width,
         height,
         orthographic
     );
     const currentViewport = createDeckMapViewport(current, width, height, orthographic);
-    if (!isFeaturePivotUsable(currentViewport, pivot)) {
+    if (!isNavigationAnchorUsable(currentViewport, anchor)) {
         return currentState;
     }
 
@@ -248,14 +195,14 @@ export function viewStateKeepingSafeFeatureAnchor<StateT extends DeckMapCameraSt
                 zoom: currentState.zoom
                     + (requestedState.zoom - currentState.zoom) * fraction
             },
-            pivot,
+            anchor,
             pixel,
             width,
             height,
             orthographic
         );
         const viewport = createDeckMapViewport(candidate, width, height, orthographic);
-        if (isFeaturePivotUsable(viewport, pivot)) {
+        if (isNavigationAnchorUsable(viewport, anchor)) {
             safeFraction = fraction;
             safeState = candidate;
         } else {

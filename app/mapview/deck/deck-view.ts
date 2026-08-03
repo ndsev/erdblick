@@ -12,7 +12,6 @@ import {
 import {BitmapLayer, IconLayer, PolygonLayer, ScatterplotLayer, TextLayer} from "@deck.gl/layers";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
-import {addMetersToLngLat} from "@math.gl/web-mercator";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapInfoService} from "../../mapdata/map-info.service";
 import {MapViewStateService} from "../map-view-state.service";
@@ -91,17 +90,24 @@ import {
 } from "../tile-grid-visibility";
 import {ViewLayerController} from "../view-layer.controller";
 import {
-    clippedGeographicBounds,
     createDeckMapViewport,
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
     DECK_MAP_NEAR_Z_MULTIPLIER,
-    isFeaturePivotUsable,
+    isNavigationAnchorUsable,
     longitudeInNearestWorld,
     viewStateKeepingAnchor,
-    viewStateKeepingSafeFeatureAnchor
-} from "./deck-camera-navigation";
-import {NavigationPivot, PivotMapController} from "./pivot-map-controller";
+    viewStateKeepingSafeNavigationAnchor
+} from "./navigation/web-mercator-feature-navigation";
+import {clippedGeographicBounds} from "./deck-viewport-coverage";
+import {FeatureNavigationMapController} from "./navigation/feature-navigation-map-controller";
+import type {NavigationAnchor} from "./navigation/feature-navigation.types";
+import {
+    type DeckFeaturePickLayerProps,
+    markerAnchorFromPickingInfo,
+    navigationAnchorFromPickingInfo,
+    pickNavigationAnchor
+} from "./navigation/erdblick-navigation-anchor";
 import {
     createFirstPersonCoverageViewport,
     createFixedFirstPersonCameraState,
@@ -210,26 +216,6 @@ interface DeckLocationLabelDatum {
     label: string;
     textColor: [number, number, number, number];
     backgroundColor: [number, number, number, number];
-}
-
-/** Metadata Deck pick layers expose for feature identity and physical anchors. */
-interface DeckPickLayerProps {
-    tileKey?: string;
-    searchResultFeatureIds?: string[];
-    featureAddresses?: ArrayLike<number | null>;
-    featureAddressesByPath?: ArrayLike<number | null>;
-    subsetPickResolver?: (pickIndex: number) => TileFeatureId[];
-    navigationAnchorEligible?: boolean;
-    markerAnchorEligible?: boolean;
-    markerAnchorPositionIsWgs84?: boolean;
-    drillPickEligible?: boolean;
-    coordinateOrigin?: [number, number, number];
-    anchorPositions?: ArrayLike<number>;
-    pathCenterline?: {
-        positions: ArrayLike<number>;
-        startIndices: ArrayLike<number>;
-        coordinateOrigin: [number, number, number];
-    };
 }
 
 /** Minimal event shape used by deck click callbacks. */
@@ -356,10 +342,10 @@ export abstract class DeckMapView implements IRenderView {
     private jumpAreaHighlightTick: (() => void) | null = null;
     private locationLabelTick: (() => void) | null = null;
     private isHoveringFeature = false;
-    private hoverNavigationPivot: NavigationPivot | null = null;
+    private hoverNavigationPivot: NavigationAnchor | null = null;
     private hoverNavigationScreenPosition: [number, number] | null = null;
-    private activeNavigationPivot: NavigationPivot | null = null;
-    private retainedNavigationPivot: NavigationPivot | null = null;
+    private activeNavigationPivot: NavigationAnchor | null = null;
+    private retainedNavigationPivot: NavigationAnchor | null = null;
     private firstPersonSession: FirstPersonSession | null = null;
     private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
     private hoverPickingRestoreTimer: ReturnType<typeof setTimeout> | null = null;
@@ -911,22 +897,17 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.deck) {
             return undefined;
         }
-        const pickedObjects = this.deck.pickMultipleObjects({
-            x: screenPos.x,
-            y: screenPos.y,
-            radius: 0,
-            depth: 10,
-            unproject3D: true
-        });
-        for (const picked of pickedObjects) {
-            const position = this.navigationPositionFromPickingInfo(picked);
-            if (!position) {
-                continue;
+        const picked = pickNavigationAnchor(
+            this.deck,
+            [screenPos.x, screenPos.y],
+            pickingInfo => {
+                const featureIds = this.featureIdsFromPickingInfo(pickingInfo);
+                return featureIds.length ? featureIds : null;
             }
-            const featureIds = this.featureIdsFromPickingInfo(picked);
-            if (featureIds.length) {
-                return {position, featureIds};
-            }
+        );
+        if (picked) {
+            const {position, value: featureIds} = picked;
+            return {position, featureIds};
         }
         return undefined;
     }
@@ -973,7 +954,7 @@ export abstract class DeckMapView implements IRenderView {
             if (!entry || typeof entry !== "object") {
                 return;
             }
-            const layer = entry as {id?: unknown; props?: DeckPickLayerProps};
+            const layer = entry as {id?: unknown; props?: DeckFeaturePickLayerProps};
             if (layer.props?.drillPickEligible !== true || typeof layer.id !== "string" || seen.has(layer.id)) {
                 return;
             }
@@ -1007,172 +988,6 @@ export abstract class DeckMapView implements IRenderView {
         return featureIds;
     }
 
-    /** Returns the finite physical coordinate of an eligible camera-navigation pick layer. */
-    private navigationPositionFromPickingInfo(picked: PickingInfo): NavigationPivot | null {
-        const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
-        if (!layerProps?.navigationAnchorEligible) {
-            return null;
-        }
-        return this.physicalPositionFromPickingInfo(picked, layerProps);
-    }
-
-    /** Returns the finite feature coordinate used to place a persistent map marker. */
-    private markerPositionFromPickingInfo(picked: PickingInfo): NavigationPivot | null {
-        const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
-        if (!layerProps?.markerAnchorEligible) {
-            return null;
-        }
-        return this.physicalPositionFromPickingInfo(picked, layerProps);
-    }
-
-    /** Resolves geometry-specific anchor metadata before falling back to the depth coordinate. */
-    private physicalPositionFromPickingInfo(
-        picked: PickingInfo,
-        layerProps: DeckPickLayerProps
-    ): NavigationPivot | null {
-        const pathPosition = this.nearestPathCenterlinePosition(picked, layerProps.pathCenterline);
-        if (pathPosition) {
-            return pathPosition;
-        }
-
-        const pickedIndex = Number(picked.index);
-        if (layerProps.anchorPositions
-            && layerProps.coordinateOrigin
-            && Number.isInteger(pickedIndex)
-            && pickedIndex >= 0) {
-            const offset = pickedIndex * 3;
-            if (offset + 2 < layerProps.anchorPositions.length) {
-                return this.meterOffsetPosition(
-                    layerProps.coordinateOrigin,
-                    [
-                        Number(layerProps.anchorPositions[offset]),
-                        Number(layerProps.anchorPositions[offset + 1]),
-                        Number(layerProps.anchorPositions[offset + 2])
-                    ]
-                );
-            }
-        }
-
-        const objectPosition = picked.object?.position;
-        if (Array.isArray(objectPosition) && objectPosition.length >= 3) {
-            const position: NavigationPivot = [
-                Number(objectPosition[0]),
-                Number(objectPosition[1]),
-                Number(objectPosition[2])
-            ];
-            if (position.every(Number.isFinite)) {
-                if (layerProps.markerAnchorPositionIsWgs84) {
-                    return position;
-                }
-                if (layerProps.coordinateOrigin) {
-                    return this.meterOffsetPosition(layerProps.coordinateOrigin, position);
-                }
-            }
-        }
-
-        const coordinate = picked.coordinate;
-        if (!coordinate || coordinate.length < 3) {
-            return null;
-        }
-        const position: NavigationPivot = [coordinate[0], coordinate[1], coordinate[2]];
-        return position.every(Number.isFinite) ? position : null;
-    }
-
-    /** Converts one local meter-offset coordinate into the layer's WGS84 frame. */
-    private meterOffsetPosition(
-        coordinateOrigin: [number, number, number],
-        offset: [number, number, number]
-    ): NavigationPivot | null {
-        const position = addMetersToLngLat(coordinateOrigin, offset);
-        if (position.length < 3 || !position.every(Number.isFinite)) {
-            return null;
-        }
-        return [position[0], position[1], position[2]];
-    }
-
-    /** Snaps a picked path ribbon point to the nearest point on its base XYZ centerline. */
-    private nearestPathCenterlinePosition(
-        picked: PickingInfo,
-        path: DeckPickLayerProps["pathCenterline"]
-    ): NavigationPivot | null {
-        const viewport = picked.viewport;
-        const coordinate = picked.coordinate;
-        const pathIndex = Number(picked.index);
-        if (!path
-            || !viewport
-            || !coordinate
-            || coordinate.length < 3
-            || !Number.isInteger(pathIndex)
-            || pathIndex < 0
-            || pathIndex + 1 >= path.startIndices.length) {
-            return null;
-        }
-
-        const start = Number(path.startIndices[pathIndex]);
-        const end = Number(path.startIndices[pathIndex + 1]);
-        if (end - start < 2) {
-            return null;
-        }
-
-        const pickedCommon = viewport.projectPosition(coordinate);
-        let bestDistanceSquared = Number.POSITIVE_INFINITY;
-        let bestLocalPosition: [number, number, number] | null = null;
-        for (let vertexIndex = start; vertexIndex + 1 < end; vertexIndex++) {
-            const firstOffset = vertexIndex * 3;
-            const secondOffset = firstOffset + 3;
-            const firstLocal: [number, number, number] = [
-                Number(path.positions[firstOffset]),
-                Number(path.positions[firstOffset + 1]),
-                Number(path.positions[firstOffset + 2])
-            ];
-            const secondLocal: [number, number, number] = [
-                Number(path.positions[secondOffset]),
-                Number(path.positions[secondOffset + 1]),
-                Number(path.positions[secondOffset + 2])
-            ];
-            const firstWgs84 = addMetersToLngLat(path.coordinateOrigin, firstLocal);
-            const secondWgs84 = addMetersToLngLat(path.coordinateOrigin, secondLocal);
-            const firstCommon = viewport.projectPosition(firstWgs84);
-            const secondCommon = viewport.projectPosition(secondWgs84);
-            const segment = [
-                secondCommon[0] - firstCommon[0],
-                secondCommon[1] - firstCommon[1],
-                secondCommon[2] - firstCommon[2]
-            ];
-            const segmentLengthSquared =
-                segment[0] * segment[0]
-                + segment[1] * segment[1]
-                + segment[2] * segment[2];
-            const fraction = segmentLengthSquared > 0
-                ? Math.max(0, Math.min(1, (
-                    (pickedCommon[0] - firstCommon[0]) * segment[0]
-                    + (pickedCommon[1] - firstCommon[1]) * segment[1]
-                    + (pickedCommon[2] - firstCommon[2]) * segment[2]
-                ) / segmentLengthSquared))
-                : 0;
-            const nearestCommon = [
-                firstCommon[0] + segment[0] * fraction,
-                firstCommon[1] + segment[1] * fraction,
-                firstCommon[2] + segment[2] * fraction
-            ];
-            const distanceSquared =
-                Math.pow(pickedCommon[0] - nearestCommon[0], 2)
-                + Math.pow(pickedCommon[1] - nearestCommon[1], 2)
-                + Math.pow(pickedCommon[2] - nearestCommon[2], 2);
-            if (distanceSquared < bestDistanceSquared) {
-                bestDistanceSquared = distanceSquared;
-                bestLocalPosition = [
-                    firstLocal[0] + (secondLocal[0] - firstLocal[0]) * fraction,
-                    firstLocal[1] + (secondLocal[1] - firstLocal[1]) * fraction,
-                    firstLocal[2] + (secondLocal[2] - firstLocal[2]) * fraction
-                ];
-            }
-        }
-        return bestLocalPosition
-            ? this.meterOffsetPosition(path.coordinateOrigin, bestLocalPosition)
-            : null;
-    }
-
     /** Resolves feature ids from metadata already returned by a deck picking operation. */
     private featureIdsFromPickingInfo(picked: PickingInfo): TileFeatureId[] {
         const readFeatureAddress = (buffer: ArrayLike<number | null> | undefined, index: number): number | null => {
@@ -1186,7 +1001,7 @@ export abstract class DeckMapView implements IRenderView {
             return value;
         };
 
-        const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
+        const layerProps = picked.layer?.props as DeckFeaturePickLayerProps | undefined;
         const pickedObject = picked.object;
         const objectFeatureAddresses = pickedObject?.featureAddresses ?? pickedObject?.featureAddress;
         const objectFeatureAddressesAreBinaryBuffer = typeof objectFeatureAddresses === "object"
@@ -1302,7 +1117,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.allowPitchAndBearing) {
             return;
         }
-        const localTarget: NavigationPivot = [
+        const localTarget: NavigationAnchor = [
             this.normalizeLongitude(target.position[0]),
             target.position[1],
             target.position[2]
@@ -1678,7 +1493,7 @@ export abstract class DeckMapView implements IRenderView {
             this.layerRegistry.remove(DeckMapView.ROTATION_PIVOT_LAYER_KEY);
             return;
         }
-        const displayPosition: NavigationPivot = [
+        const displayPosition: NavigationAnchor = [
             longitudeInNearestWorld(position[0], this.viewState.longitude),
             position[1],
             position[2]
@@ -1732,7 +1547,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Replaces the current hover candidate and refreshes the shared pivot overlay. */
     private setHoverNavigationPivot(
-        pivot: NavigationPivot | null,
+        pivot: NavigationAnchor | null,
         screenPosition: [number, number] | null
     ): void {
         this.hoverNavigationPivot = pivot;
@@ -1741,7 +1556,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Resolves one eligible feature pivot for a controller gesture start. */
-    private resolveControllerNavigationPivot(screenPosition: [number, number]): NavigationPivot | null {
+    private resolveControllerNavigationPivot(screenPosition: [number, number]): NavigationAnchor | null {
         if (this.hoverNavigationPivot && this.hoverNavigationScreenPosition) {
             const distance = Math.hypot(
                 screenPosition[0] - this.hoverNavigationScreenPosition[0],
@@ -1755,7 +1570,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Tracks the frozen gesture pivot and retains successful targets for pointerless commands. */
-    private onControllerNavigationPivotChange(pivot: NavigationPivot | null, active: boolean): void {
+    private onControllerNavigationPivotChange(pivot: NavigationAnchor | null, active: boolean): void {
         this.activeNavigationPivot = active ? pivot : null;
         if (pivot) {
             this.retainedNavigationPivot = pivot;
@@ -1871,7 +1686,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         if (!environment.visualizationOnly) {
             const firstPersonPosition = this.firstPersonSession
-                ? this.navigationPositionFromPickingInfo(info)
+                ? navigationAnchorFromPickingInfo(info)
                 : null;
             const cartographic = firstPersonPosition
                 ? {
@@ -1957,7 +1772,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.setFeatureHoverState(true);
         this.setHoverNavigationPivot(
-            this.navigationPositionFromPickingInfo(info),
+            navigationAnchorFromPickingInfo(info),
             [info.x, info.y]
         );
         this.inspectionSelection.setHoveredFeatures(featureIds).then(() => {
@@ -2044,9 +1859,9 @@ export abstract class DeckMapView implements IRenderView {
         targetFeature: TileFeatureId,
         radius: number,
         maxObjects: number
-    ): NavigationPivot | null {
+    ): NavigationAnchor | null {
         if (this.pickingInfoContainsFeature(clickInfo, targetFeature)) {
-            const clickPosition = this.markerPositionFromPickingInfo(clickInfo);
+            const clickPosition = markerAnchorFromPickingInfo(clickInfo);
             if (clickPosition) {
                 return clickPosition;
             }
@@ -2066,7 +1881,7 @@ export abstract class DeckMapView implements IRenderView {
             if (!this.pickingInfoContainsFeature(picked, targetFeature)) {
                 continue;
             }
-            const position = this.markerPositionFromPickingInfo(picked);
+            const position = markerAnchorFromPickingInfo(picked);
             if (position) {
                 return position;
             }
@@ -2238,13 +2053,13 @@ export abstract class DeckMapView implements IRenderView {
             };
         }
         const controllerOptions = {
-            type: PivotMapController,
+            type: FeatureNavigationMapController,
             keyboard: {zoomSpeed: keyboardZoomSpeed},
             scrollZoom: {speed: scrollZoomSpeed},
-            getNavigationPivot: (screenPosition: [number, number]) =>
+            getNavigationAnchor: (screenPosition: [number, number]) =>
                 this.resolveControllerNavigationPivot(screenPosition),
-            getRetainedNavigationPivot: () => this.retainedNavigationPivot,
-            onNavigationPivotChange: (pivot: NavigationPivot | null, active: boolean) =>
+            getRetainedNavigationAnchor: () => this.retainedNavigationPivot,
+            onNavigationAnchorChange: (pivot: NavigationAnchor | null, active: boolean) =>
                 this.onControllerNavigationPivotChange(pivot, active)
         };
         return controllerOptions;
@@ -3727,7 +3542,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Resolves the retained feature, center feature, or center ground point for UI camera commands. */
     private commandNavigationAnchor(): {
-        pivot: NavigationPivot;
+        pivot: NavigationAnchor;
         pixel: [number, number];
         feature: boolean;
     } | null {
@@ -3736,13 +3551,13 @@ export abstract class DeckMapView implements IRenderView {
             return null;
         }
         if (this.retainedNavigationPivot) {
-            const localPivot: NavigationPivot = [
+            const localPivot: NavigationAnchor = [
                 longitudeInNearestWorld(this.retainedNavigationPivot[0], viewport.longitude),
                 this.retainedNavigationPivot[1],
                 this.retainedNavigationPivot[2]
             ];
             const projected = viewport.project(localPivot);
-            if (isFeaturePivotUsable(viewport, localPivot, true)) {
+            if (isNavigationAnchorUsable(viewport, localPivot, true)) {
                 return {
                     pivot: localPivot,
                     pixel: [projected[0], projected[1]],
@@ -3784,7 +3599,7 @@ export abstract class DeckMapView implements IRenderView {
                     anchor.pixel[1] + pixelOffset[1]
                 ];
                 anchoredState = anchor.feature
-                    ? viewStateKeepingSafeFeatureAnchor(
+                    ? viewStateKeepingSafeNavigationAnchor(
                         this.viewState,
                         sanitizedNext,
                         anchor.pivot,

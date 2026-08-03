@@ -940,6 +940,7 @@ export class TileSubsetLayerVisualization {
             modelMatrix,
             parameters: this.parameters(point.depthTest),
             pickable: interaction.pickable,
+            navigationAnchorEligible: interaction.drillPickEligible,
             markerAnchorEligible: interaction.drillPickEligible,
             drillPickEligible: interaction.drillPickEligible,
             tileKey: key,
