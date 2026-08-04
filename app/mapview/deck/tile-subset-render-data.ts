@@ -1,5 +1,6 @@
 import {
     isValidSurfaceRingTopology,
+    surfaceRingNormal,
     triangulateSurfaceIndices
 } from "./surface-triangulation";
 import type {
@@ -63,6 +64,7 @@ export interface DeckSurfaceData {
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
     featureAddresses: Uint32Array;
+    surfaceNormals: Float32Array;
     glowColors?: Uint8Array;
     glowRadii?: Float32Array;
     attributes: {
@@ -342,6 +344,7 @@ export function compileTileSubsetSurfaceData(
         holeStarts: number[];
         colors: number[];
         addresses: number[];
+        normals: number[];
         glowColors: number[];
         glowRadii: number[];
     }>();
@@ -360,9 +363,15 @@ export function compileTileSubsetSurfaceData(
             holeStarts: [0],
             colors: [],
             addresses: [],
+            normals: [],
             glowColors: [],
             glowRadii: []
         };
+        const firstHole = raw.holeIndexStarts.length >= surface + 2
+            && raw.holeIndexStarts[surface] < raw.holeIndexStarts[surface + 1]
+            ? raw.holeIndices[raw.holeIndexStarts[surface]]
+            : end;
+        group.normals.push(...surfaceRingNormal(raw.positions, start, firstHole));
         const groupStart = group.positions.length / 3;
         for (let vertex = start; vertex < end; ++vertex) {
             group.positions.push(
@@ -392,6 +401,7 @@ export function compileTileSubsetSurfaceData(
         coordinateOrigin: origin,
         startIndices: new Uint32Array(group.starts),
         featureAddresses: new Uint32Array(group.addresses),
+        surfaceNormals: new Float32Array(group.normals),
         glowColors: new Uint8Array(group.glowColors),
         glowRadii: new Float32Array(group.glowRadii),
         attributes: {

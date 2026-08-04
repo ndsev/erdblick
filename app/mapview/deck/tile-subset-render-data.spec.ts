@@ -203,6 +203,8 @@ describe("Tile subset render-data compiler", () => {
         expect(buckets.map(bucket => bucket.depthTest)).toEqual([true, false]);
         expect(buckets.map(bucket => [...bucket.featureAddresses]))
             .toEqual([[12], [13]]);
+        expect(buckets.map(bucket => [...bucket.surfaceNormals]))
+            .toEqual([[0, 0, 1], [0, 0, 1]]);
         expect(buckets.map(bucket => bucket.attributes.indices.value.length))
             .toEqual([3, 3]);
     });

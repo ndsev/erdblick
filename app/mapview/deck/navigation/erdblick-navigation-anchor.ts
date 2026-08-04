@@ -1,9 +1,17 @@
 import type {Deck, PickingInfo} from "@deck.gl/core";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 import type {TileFeatureId} from "../../../shared/appstate.service";
-import type {NavigationAnchor, NavigationScreenPosition} from "./feature-navigation.types";
+import type {
+    NavigationAnchor,
+    NavigationScreenPosition,
+    NavigationSurfaceNormal,
+    NavigationVisualTarget
+} from "./feature-navigation.types";
 
-const NAVIGATION_PICK_DEPTH = 10;
+const NAVIGATION_PICK_DEPTH = 32;
+
+/** Fixed CSS-pixel broad-phase tolerance for feature navigation. */
+export const NAVIGATION_PICK_RADIUS_PIXELS = 4;
 
 /** Picking metadata emitted by Erdblick feature-representation layers. */
 export interface DeckFeaturePickLayerProps {
@@ -18,6 +26,7 @@ export interface DeckFeaturePickLayerProps {
     drillPickEligible?: boolean;
     coordinateOrigin?: NavigationAnchor;
     anchorPositions?: ArrayLike<number>;
+    surfaceNormals?: ArrayLike<number>;
     pathCenterline?: {
         positions: ArrayLike<number>;
         startIndices: ArrayLike<number>;
@@ -28,44 +37,71 @@ export interface DeckFeaturePickLayerProps {
 /** Physical coordinate and application value accepted from one Erdblick deep pick. */
 export interface NavigationAnchorPick<ValueT> {
     position: NavigationAnchor;
+    surfaceNormal?: NavigationSurfaceNormal;
     value: ValueT;
 }
 
 /**
- * Resolves the first eligible physical representation whose application value
- * is accepted, continuing behind non-navigation layers and unresolved features.
+ * Resolves the topmost eligible physical representation whose application value
+ * is accepted. When equality is supplied, a deeper representation of the same
+ * feature may contribute a surface normal without changing the topmost anchor.
  */
 export function pickNavigationAnchor<ValueT>(
     deck: Pick<Deck, "pickMultipleObjects">,
     screenPosition: NavigationScreenPosition,
-    resolveValue: (picked: PickingInfo) => ValueT | null
+    resolveValue: (picked: PickingInfo) => ValueT | null,
+    sameValue?: (first: ValueT, second: ValueT) => boolean
 ): NavigationAnchorPick<ValueT> | undefined {
     const pickedObjects = deck.pickMultipleObjects({
         x: screenPosition[0],
         y: screenPosition[1],
-        radius: 0,
+        radius: NAVIGATION_PICK_RADIUS_PIXELS,
         depth: NAVIGATION_PICK_DEPTH,
         unproject3D: true
     });
+    let firstMatch: NavigationAnchorPick<ValueT> | undefined;
     for (const picked of pickedObjects) {
-        const position = navigationAnchorFromPickingInfo(picked);
-        if (!position) {
+        const target = navigationTargetFromPickingInfo(picked);
+        if (!target) {
             continue;
         }
         const value = resolveValue(picked);
-        if (value !== null) {
-            return {position, value};
+        if (value === null) {
+            continue;
+        }
+        if (!firstMatch) {
+            firstMatch = {...target, value};
+            if (target.surfaceNormal || !sameValue) {
+                return firstMatch;
+            }
+            continue;
+        }
+        if (target.surfaceNormal && sameValue?.(firstMatch.value, value)) {
+            return {...firstMatch, surfaceNormal: target.surfaceNormal};
         }
     }
-    return undefined;
+    return firstMatch;
 }
 
 /** Returns the finite physical coordinate of an eligible camera-navigation layer. */
 export function navigationAnchorFromPickingInfo(picked: PickingInfo): NavigationAnchor | null {
+    return navigationTargetFromPickingInfo(picked)?.position ?? null;
+}
+
+/** Returns the finite physical target and optional surface orientation of a camera layer. */
+export function navigationTargetFromPickingInfo(
+    picked: PickingInfo
+): NavigationVisualTarget | null {
     const layerProps = picked.layer?.props as DeckFeaturePickLayerProps | undefined;
-    return layerProps?.navigationAnchorEligible
-        ? physicalAnchorFromPickingInfo(picked, layerProps)
-        : null;
+    if (!layerProps?.navigationAnchorEligible) {
+        return null;
+    }
+    const position = physicalAnchorFromPickingInfo(picked, layerProps);
+    if (!position) {
+        return null;
+    }
+    const surfaceNormal = surfaceNormalFromPickingInfo(picked, layerProps);
+    return surfaceNormal ? {position, surfaceNormal} : {position};
 }
 
 /** Returns the finite physical coordinate of an eligible persistent-marker layer. */
@@ -81,9 +117,9 @@ function physicalAnchorFromPickingInfo(
     picked: PickingInfo,
     layerProps: DeckFeaturePickLayerProps
 ): NavigationAnchor | null {
-    const pathPosition = nearestPathCenterlineAnchor(picked, layerProps.pathCenterline);
-    if (pathPosition) {
-        return pathPosition;
+    if (layerProps.pathCenterline) {
+        const pathAnchor = nearestPathCenterlineAnchor(picked, layerProps.pathCenterline);
+        return pathAnchor;
     }
 
     const pickedIndex = Number(picked.index);
@@ -129,6 +165,32 @@ function physicalAnchorFromPickingInfo(
     return position.every(Number.isFinite) ? position : null;
 }
 
+/** Reads and normalizes one per-surface local east/north/up normal. */
+function surfaceNormalFromPickingInfo(
+    picked: PickingInfo,
+    layerProps: DeckFeaturePickLayerProps
+): NavigationSurfaceNormal | null {
+    const pickedIndex = Number(picked.index);
+    if (!layerProps.surfaceNormals
+        || !Number.isInteger(pickedIndex)
+        || pickedIndex < 0) {
+        return null;
+    }
+    const offset = pickedIndex * 3;
+    if (offset + 2 >= layerProps.surfaceNormals.length) {
+        return null;
+    }
+    const normal: NavigationSurfaceNormal = [
+        Number(layerProps.surfaceNormals[offset]),
+        Number(layerProps.surfaceNormals[offset + 1]),
+        Number(layerProps.surfaceNormals[offset + 2])
+    ];
+    const length = Math.hypot(normal[0], normal[1], normal[2]);
+    return Number.isFinite(length) && length > 1e-6
+        ? [normal[0] / length, normal[1] / length, normal[2] / length]
+        : null;
+}
+
 /** Converts one local meter-offset coordinate into its layer's WGS84 frame. */
 function meterOffsetAnchor(
     coordinateOrigin: NavigationAnchor,
@@ -147,12 +209,15 @@ function nearestPathCenterlineAnchor(
     path: DeckFeaturePickLayerProps["pathCenterline"]
 ): NavigationAnchor | null {
     const viewport = picked.viewport;
-    const coordinate = picked.coordinate;
     const pathIndex = Number(picked.index);
+    const screenPosition: NavigationScreenPosition = [
+        Number(picked.x) - Number(viewport?.x ?? 0),
+        Number(picked.y) - Number(viewport?.y ?? 0)
+    ];
     if (!path
+        || !picked.layer
         || !viewport
-        || !coordinate
-        || coordinate.length < 3
+        || !screenPosition.every(Number.isFinite)
         || !Number.isInteger(pathIndex)
         || pathIndex < 0
         || pathIndex + 1 >= path.startIndices.length) {
@@ -165,9 +230,12 @@ function nearestPathCenterlineAnchor(
         return null;
     }
 
-    const pickedCommon = viewport.projectPosition(coordinate);
     let bestDistanceSquared = Number.POSITIVE_INFINITY;
-    let bestLocalPosition: NavigationAnchor | null = null;
+    let bestSegment: {
+        first: NavigationAnchor;
+        second: NavigationAnchor;
+        fraction: number;
+    } | null = null;
     for (let vertexIndex = start; vertexIndex + 1 < end; vertexIndex++) {
         const firstOffset = vertexIndex * 3;
         const secondOffset = firstOffset + 3;
@@ -181,45 +249,136 @@ function nearestPathCenterlineAnchor(
             Number(path.positions[secondOffset + 1]),
             Number(path.positions[secondOffset + 2])
         ];
-        const firstWgs84 = addMetersToLngLat(path.coordinateOrigin, firstLocal);
-        const secondWgs84 = addMetersToLngLat(path.coordinateOrigin, secondLocal);
-        const firstCommon = viewport.projectPosition(firstWgs84);
-        const secondCommon = viewport.projectPosition(secondWgs84);
-        const segment = [
-            secondCommon[0] - firstCommon[0],
-            secondCommon[1] - firstCommon[1],
-            secondCommon[2] - firstCommon[2]
-        ];
-        const segmentLengthSquared =
-            segment[0] * segment[0]
-            + segment[1] * segment[1]
-            + segment[2] * segment[2];
-        const fraction = segmentLengthSquared > 0
-            ? Math.max(0, Math.min(1, (
-                (pickedCommon[0] - firstCommon[0]) * segment[0]
-                + (pickedCommon[1] - firstCommon[1]) * segment[1]
-                + (pickedCommon[2] - firstCommon[2]) * segment[2]
-            ) / segmentLengthSquared))
-            : 0;
-        const nearestCommon = [
-            firstCommon[0] + segment[0] * fraction,
-            firstCommon[1] + segment[1] * fraction,
-            firstCommon[2] + segment[2] * fraction
-        ];
-        const distanceSquared =
-            Math.pow(pickedCommon[0] - nearestCommon[0], 2)
-            + Math.pow(pickedCommon[1] - nearestCommon[1], 2)
-            + Math.pow(pickedCommon[2] - nearestCommon[2], 2);
-        if (distanceSquared < bestDistanceSquared) {
-            bestDistanceSquared = distanceSquared;
-            bestLocalPosition = [
-                firstLocal[0] + (secondLocal[0] - firstLocal[0]) * fraction,
-                firstLocal[1] + (secondLocal[1] - firstLocal[1]) * fraction,
-                firstLocal[2] + (secondLocal[2] - firstLocal[2]) * fraction
-            ];
+        const firstCommon = picked.layer.projectPosition(firstLocal, {autoOffset: false});
+        const secondCommon = picked.layer.projectPosition(secondLocal, {autoOffset: false});
+        const nearest = closestVisibleProjectedSegmentPoint(
+            viewport.pixelProjectionMatrix,
+            firstCommon,
+            secondCommon,
+            screenPosition
+        );
+        if (nearest && nearest.distanceSquared < bestDistanceSquared) {
+            bestDistanceSquared = nearest.distanceSquared;
+            bestSegment = {
+                first: firstLocal,
+                second: secondLocal,
+                fraction: nearest.fraction
+            };
         }
     }
-    return bestLocalPosition
-        ? meterOffsetAnchor(path.coordinateOrigin, bestLocalPosition)
-        : null;
+    if (!bestSegment
+        || bestDistanceSquared > NAVIGATION_PICK_RADIUS_PIXELS ** 2) {
+        return null;
+    }
+    const fraction = bestSegment.fraction;
+    const localPosition: NavigationAnchor = [
+        bestSegment.first[0] + (bestSegment.second[0] - bestSegment.first[0]) * fraction,
+        bestSegment.first[1] + (bestSegment.second[1] - bestSegment.first[1]) * fraction,
+        bestSegment.first[2] + (bestSegment.second[2] - bestSegment.first[2]) * fraction
+    ];
+    return meterOffsetAnchor(path.coordinateOrigin, localPosition);
+}
+
+interface HomogeneousProjectedPoint {
+    x: number;
+    y: number;
+    w: number;
+    fraction: number;
+}
+
+/**
+ * Returns the closest visible point on one perspective-projected common-space segment.
+ * Segment endpoints are clipped in homogeneous space before division, avoiding the
+ * enormous false projections produced when one source vertex is behind the camera.
+ */
+function closestVisibleProjectedSegmentPoint(
+    pixelProjectionMatrix: number[],
+    first: number[],
+    second: number[],
+    screenPosition: NavigationScreenPosition
+): {fraction: number; distanceSquared: number} | null {
+    let firstProjected = homogeneousProjection(pixelProjectionMatrix, first, 0);
+    let secondProjected = homogeneousProjection(pixelProjectionMatrix, second, 1);
+    const minimumW = Math.max(
+        1,
+        Math.abs(firstProjected.w),
+        Math.abs(secondProjected.w)
+    ) * 1e-9;
+    if (firstProjected.w <= minimumW && secondProjected.w <= minimumW) {
+        return null;
+    }
+    if (firstProjected.w <= minimumW) {
+        firstProjected = clipProjectedEndpoint(firstProjected, secondProjected, minimumW);
+    } else if (secondProjected.w <= minimumW) {
+        secondProjected = clipProjectedEndpoint(secondProjected, firstProjected, minimumW);
+    }
+
+    const firstScreen = [
+        firstProjected.x / firstProjected.w,
+        firstProjected.y / firstProjected.w
+    ];
+    const secondScreen = [
+        secondProjected.x / secondProjected.w,
+        secondProjected.y / secondProjected.w
+    ];
+    if (![...firstScreen, ...secondScreen].every(Number.isFinite)) {
+        return null;
+    }
+    const dx = secondScreen[0] - firstScreen[0];
+    const dy = secondScreen[1] - firstScreen[1];
+    const lengthSquared = dx * dx + dy * dy;
+    const screenFraction = lengthSquared > 0
+        ? Math.max(0, Math.min(1, (
+            (screenPosition[0] - firstScreen[0]) * dx
+            + (screenPosition[1] - firstScreen[1]) * dy
+        ) / lengthSquared))
+        : 0;
+    const nearestX = firstScreen[0] + dx * screenFraction;
+    const nearestY = firstScreen[1] + dy * screenFraction;
+    const denominator = screenFraction * firstProjected.w
+        + (1 - screenFraction) * secondProjected.w;
+    if (!Number.isFinite(denominator) || Math.abs(denominator) <= 1e-12) {
+        return null;
+    }
+    const clippedFraction = screenFraction * firstProjected.w / denominator;
+    return {
+        fraction: firstProjected.fraction
+            + (secondProjected.fraction - firstProjected.fraction) * clippedFraction,
+        distanceSquared:
+            (screenPosition[0] - nearestX) ** 2
+            + (screenPosition[1] - nearestY) ** 2
+    };
+}
+
+/** Multiplies one common-space position by deck's column-major pixel projection matrix. */
+function homogeneousProjection(
+    matrix: number[],
+    position: number[],
+    fraction: number
+): HomogeneousProjectedPoint {
+    const x = Number(position[0]);
+    const y = Number(position[1]);
+    const z = Number(position[2]);
+    return {
+        x: matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
+        y: matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
+        w: matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15],
+        fraction
+    };
+}
+
+/** Clips one behind-camera homogeneous endpoint to a small positive projection divisor. */
+function clipProjectedEndpoint(
+    endpoint: HomogeneousProjectedPoint,
+    visibleEndpoint: HomogeneousProjectedPoint,
+    minimumW: number
+): HomogeneousProjectedPoint {
+    const fraction = (minimumW - endpoint.w) / (visibleEndpoint.w - endpoint.w);
+    return {
+        x: endpoint.x + (visibleEndpoint.x - endpoint.x) * fraction,
+        y: endpoint.y + (visibleEndpoint.y - endpoint.y) * fraction,
+        w: minimumW,
+        fraction: endpoint.fraction
+            + (visibleEndpoint.fraction - endpoint.fraction) * fraction
+    };
 }

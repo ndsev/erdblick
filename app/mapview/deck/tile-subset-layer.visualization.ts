@@ -872,7 +872,8 @@ export class TileSubsetLayerVisualization {
             drillPickEligible: interaction.drillPickEligible,
             tileKey: key,
             subsetPickResolver: pickResolver,
-            featureAddresses: surface.featureAddresses
+            featureAddresses: surface.featureAddresses,
+            surfaceNormals: surface.surfaceNormals
         });
     }
 
@@ -1110,6 +1111,7 @@ export class TileSubsetLayerVisualization {
         const indices: number[] = [];
         const starts = [0];
         const addresses: number[] = [];
+        const normals: number[] = [];
         for (const contribution of contributions) {
             const data = contribution.data;
             const vertexBase = positions.length / 3;
@@ -1124,6 +1126,7 @@ export class TileSubsetLayerVisualization {
             for (const address of data.featureAddresses) {
                 addresses.push(picks.remap(contribution, address));
             }
+            this.appendValues(normals, data.surfaceNormals);
         }
         const first = contributions[0].data;
         return {
@@ -1134,6 +1137,7 @@ export class TileSubsetLayerVisualization {
                 coordinateOrigin: first.coordinateOrigin,
                 startIndices: new Uint32Array(starts),
                 featureAddresses: new Uint32Array(addresses),
+                surfaceNormals: new Float32Array(normals),
                 attributes: {
                     getPolygon: {
                         value: new Float32Array(positions),
@@ -2827,6 +2831,7 @@ export class TileSubsetLayerVisualization {
         const indices: number[] = [];
         const starts = [0];
         const addresses: number[] = [];
+        const normals: number[] = [];
         let triangleOffset = 0;
         for (let surfaceIndex = 0;
              surfaceIndex < source.length;
@@ -2865,6 +2870,9 @@ export class TileSubsetLayerVisualization {
             }
             indices.push(...surfaceIndices.map(index => vertexBase + index));
             addresses.push(address);
+            normals.push(...source.surfaceNormals.subarray(
+                surfaceIndex * 3,
+                surfaceIndex * 3 + 3));
             starts.push(positions.length / 3);
         }
         return addresses.length ? {
@@ -2873,6 +2881,7 @@ export class TileSubsetLayerVisualization {
             coordinateOrigin: source.coordinateOrigin,
             startIndices: new Uint32Array(starts),
             featureAddresses: new Uint32Array(addresses),
+            surfaceNormals: new Float32Array(normals),
             attributes: {
                 getPolygon: {value: new Float32Array(positions), size: 3},
                 indices: {value: new Uint32Array(indices), size: 1},

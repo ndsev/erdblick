@@ -138,7 +138,9 @@ namespace {
 constexpr int MAX_TILE_RESULT_LIMIT = 1 << 20;
 constexpr double PI = 3.14159265358979323846;
 constexpr double RADIANS_TO_DEGREES = 180.0 / PI;
-constexpr double CANONICAL_CAMERA_VERTICAL_FOV_RADIANS = 60.0 * PI / 180.0;
+constexpr double DECK_DEFAULT_CAMERA_ALTITUDE = 1.5;
+const double CANONICAL_CAMERA_VERTICAL_FOV_RADIANS =
+    2.0 * std::atan(0.5 / DECK_DEFAULT_CAMERA_ALTITUDE);
 constexpr double CANONICAL_CAMERA_ASPECT_RATIO = 16.0 / 9.0;
 constexpr double EARTH_RADIUS_METERS = 6378137.0;
 constexpr double WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
@@ -287,8 +289,9 @@ uint32_t getNumTileIdsForBounds(double south, double west, double width, double 
 /**
  * Returns the tile count for a deterministic canonical camera used for fidelity policy decisions.
  *
- * The canonical camera is fixed at the equator, points straight down, and uses a 60-degree
- * vertical field of view with a 16:9 aspect ratio. Only the altitude varies.
+ * The canonical camera is fixed at the equator, points straight down, and explicitly uses
+ * deck.gl's default 1.5-altitude lens (approximately 36.87 degrees) with a 16:9 aspect ratio.
+ * Only the physical altitude varies.
  */
 uint32_t getNumTileIdsForCanonicalCamera(double altitudeMeters, int level)
 {

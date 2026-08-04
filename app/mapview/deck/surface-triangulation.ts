@@ -10,6 +10,35 @@ export interface SurfaceTriangulationInput {
 
 const emptyIndices = new Uint32Array();
 
+/** Computes one stable unit normal from an outer local XYZ surface ring. */
+export function surfaceRingNormal(
+    positions: ArrayLike<number>,
+    startVertex: number,
+    endVertex: number
+): [number, number, number] {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let vertex = startVertex; vertex < endVertex; ++vertex) {
+        const next = vertex + 1 < endVertex ? vertex + 1 : startVertex;
+        const offset = vertex * 3;
+        const nextOffset = next * 3;
+        const currentX = Number(positions[offset]);
+        const currentY = Number(positions[offset + 1]);
+        const currentZ = Number(positions[offset + 2]);
+        const nextX = Number(positions[nextOffset]);
+        const nextY = Number(positions[nextOffset + 1]);
+        const nextZ = Number(positions[nextOffset + 2]);
+        x += (currentY - nextY) * (currentZ + nextZ);
+        y += (currentZ - nextZ) * (currentX + nextX);
+        z += (currentX - nextX) * (currentY + nextY);
+    }
+    const length = Math.hypot(x, y, z);
+    return Number.isFinite(length) && length > 1e-6
+        ? [x / length, y / length, z / length]
+        : [0, 0, 0];
+}
+
 /** Checks that optional polygon-hole metadata is aligned with the surface start-index buffer. */
 export function isValidSurfaceRingTopology(input: SurfaceTriangulationInput, vertexCount: number): boolean {
     const surfaceCount = input.startIndices.length - 1;

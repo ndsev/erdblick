@@ -58,6 +58,7 @@ import {
     DeckInteractionOutlineService,
     isDeckInteractionMaskLayer
 } from "./deck-interaction-outline.service";
+import {NavigationTargetOverlay} from "./deck-navigation-target";
 import {environment} from "../../environments/environment";
 import {coreLib} from "../../integrations/wasm";
 import {
@@ -101,11 +102,17 @@ import {
 } from "./navigation/web-mercator-feature-navigation";
 import {clippedGeographicBounds} from "./deck-viewport-coverage";
 import {FeatureNavigationMapController} from "./navigation/feature-navigation-map-controller";
-import type {NavigationAnchor} from "./navigation/feature-navigation.types";
+import type {
+    NavigationAnchor,
+    NavigationSurfaceNormal,
+    NavigationVisualTarget
+} from "./navigation/feature-navigation.types";
 import {
     type DeckFeaturePickLayerProps,
     markerAnchorFromPickingInfo,
     navigationAnchorFromPickingInfo,
+    NAVIGATION_PICK_RADIUS_PIXELS,
+    navigationTargetFromPickingInfo,
     pickNavigationAnchor
 } from "./navigation/erdblick-navigation-anchor";
 import {
@@ -140,28 +147,6 @@ interface FirstPersonSession {
 }
 
 type DeckView = DeckMercatorView | DeckFirstPersonView;
-
-interface DeckRotationPivotDatum {
-    position: [number, number, number];
-    radius: number;
-    fillColor: [number, number, number, number];
-    lineColor: [number, number, number, number];
-    lineWidth: number;
-}
-
-/** Narrow access to deck's internal size refresh; deck.gl has no public synchronous equivalent in 9.3. */
-interface PrivateDeckResizeUpdate {
-    _updateCanvasSize?: () => void;
-    _onRenderFrame?: () => void;
-}
-
-/** Mutable luma canvas bookkeeping that normally catches up asynchronously via ResizeObserver. */
-interface PrivateCanvasResizeState {
-    cssWidth?: number;
-    cssHeight?: number;
-    devicePixelWidth?: number;
-    devicePixelHeight?: number;
-}
 
 /** Geometry description for one tile-grid overlay level after local normalization. */
 interface TileGridOverlayGeometry {
@@ -247,8 +232,6 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly SEARCH_RESULTS_LAYER_PREFIX = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
     private static readonly LOCATION_LABEL_LAYER_KEY = "builtin/location-label";
-    private static readonly ROTATION_PIVOT_LAYER_KEY = "builtin/rotation-pivot";
-    private static readonly ROTATION_PIVOT_LAYER_ORDER = 1600;
     private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
     private static readonly CANVAS_USE_DEVICE_PIXELS = 1;
     private static readonly CANVAS_STYLE: Partial<CSSStyleDeclaration> = {
@@ -273,6 +256,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly HOVER_PICK_THROTTLE_MS = 75;
     private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
     private static readonly HOVER_PICK_MAX_OBJECTS = 10;
+    private static readonly NAVIGATION_GESTURE_TARGET_REUSE_RADIUS_PX = 12;
     private static readonly NAVIGATION_COMMAND_STEP_PX = 64;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
@@ -318,10 +302,11 @@ export abstract class DeckMapView implements IRenderView {
     private readonly tickCallbacks = new Set<() => void>();
     private tickHandle: number | null = null;
     private deckDevice: Device | null = null;
+    private navigationTargetOverlay: NavigationTargetOverlay | null = null;
     private canvasResizeTimer: ReturnType<typeof setTimeout> | null = null;
     private lastCanvasCssSize?: {width: number; height: number};
-    private layoutResizeRestoreRafFirst?: number;
-    private layoutResizeRestoreRafSecond?: number;
+    private clippedLayoutCanvasCssSize?: {width: number; height: number};
+    private layoutResizeRestoreRaf?: number;
     private backgroundLayerSignature = "";
     private tileGridEnabled = false;
     private tileGridMode: TileGridMode = "nds";
@@ -343,9 +328,12 @@ export abstract class DeckMapView implements IRenderView {
     private locationLabelTick: (() => void) | null = null;
     private isHoveringFeature = false;
     private hoverNavigationPivot: NavigationAnchor | null = null;
-    private hoverNavigationScreenPosition: [number, number] | null = null;
+    private hoverNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
     private activeNavigationPivot: NavigationAnchor | null = null;
+    private activeNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
     private retainedNavigationPivot: NavigationAnchor | null = null;
+    private retainedNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
+    private resolvedControllerNavigationTarget: NavigationVisualTarget | null = null;
     private firstPersonSession: FirstPersonSession | null = null;
     private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
     private hoverPickingRestoreTimer: ReturnType<typeof setTimeout> | null = null;
@@ -371,7 +359,7 @@ export abstract class DeckMapView implements IRenderView {
         this.pendingHoverInfo = null;
         this.cancelHoverPickScheduling();
         this.setFeatureHoverState(false);
-        this.setHoverNavigationPivot(null, null);
+        this.setHoverNavigationPivot(null);
         this.hoveredFeatureIds.next(undefined);
         const destinationOwnsInspectionHover = event.relatedTarget instanceof Element
             && event.relatedTarget.closest("inspection-container") !== null;
@@ -481,6 +469,7 @@ export abstract class DeckMapView implements IRenderView {
         const canvas = this.createDeckCanvas(container);
         canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
         canvas.addEventListener("pointerleave", this.deckCanvasPointerLeave);
+        this.navigationTargetOverlay = new NavigationTargetOverlay(container);
         this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
@@ -497,14 +486,13 @@ export abstract class DeckMapView implements IRenderView {
             layers: [],
             effects: [this.interactionOutlineService],
             controller: false,
+            pickingRadius: NAVIGATION_PICK_RADIUS_PIXELS,
             layerFilter: this.deckLayerFilter,
             onDeviceInitialized: (device) => {
                 this.deckDevice = device;
             },
             onResize: ({width, height}) => {
-                if (!this.firstPersonSession) {
-                    this.preserveTopLeftCoordinateAfterResize(width, height);
-                }
+                this.lastCanvasCssSize = this.normalizedCanvasCssSize(width, height);
                 this.scheduleViewportUpdate();
                 this.scheduleTileGridOverlayUpdate();
                 this.scheduleSearchResultsOverlayUpdate();
@@ -573,7 +561,6 @@ export abstract class DeckMapView implements IRenderView {
         this.removeTileGridLayers();
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
-        this.layerRegistry.remove(DeckMapView.ROTATION_PIVOT_LAYER_KEY);
         this.removeSearchResultLayers();
         this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
@@ -597,8 +584,10 @@ export abstract class DeckMapView implements IRenderView {
             this.deck = null;
         }
         this.deckDevice = null;
+        this.navigationTargetOverlay?.destroy();
+        this.navigationTargetOverlay = null;
         this.lastCanvasCssSize = undefined;
-
+        this.clippedLayoutCanvasCssSize = undefined;
         const container = document.getElementById(this.canvasId);
         if (container) {
             container.innerHTML = "";
@@ -618,7 +607,13 @@ export abstract class DeckMapView implements IRenderView {
         this.deck.redraw(reason);
     }
 
-    /** Pre-renders the map at a known imminent CSS size to avoid one-frame browser canvas stretching. */
+    /**
+     * Keeps the rendered map stationary while the right dock changes the available layout width.
+     *
+     * A camera correction cannot preserve a pitched scene because different elevations project at
+     * different depths. Instead, a shrinking dock clips the existing viewport at the right edge.
+     * Closing the dock restores percentage sizing once the original viewport fits again.
+     */
     prepareForLayoutResize(targetCssSize: {width: number; height: number}): void {
         if (!this.deck) {
             return;
@@ -629,59 +624,68 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        const wasSuppressingViewStateEvents = this.suppressDeckViewStateEvent;
-        this.suppressDeckViewStateEvent = true;
-        try {
-            if (!this.firstPersonSession) {
-                this.preserveTopLeftCoordinateAfterResize(nextSize.width, nextSize.height);
-            }
+        const previousSize = this.clippedLayoutCanvasCssSize ?? this.lastCanvasCssSize;
+        const startsRightEdgeClip = !this.clippedLayoutCanvasCssSize
+            && previousSize
+            && nextSize.width < previousSize.width
+            && nextSize.height === previousSize.height;
+        const keepsRightEdgeClip = this.clippedLayoutCanvasCssSize
+            && nextSize.width < this.clippedLayoutCanvasCssSize.width
+            && nextSize.height === this.clippedLayoutCanvasCssSize.height;
+        if (startsRightEdgeClip || keepsRightEdgeClip) {
+            const clippedSize = this.clippedLayoutCanvasCssSize ?? previousSize!;
+            this.clippedLayoutCanvasCssSize = clippedSize;
+            this.cancelLayoutResizeRestore();
+            this.cancelCanvasResizeScheduling();
+            const clippedStyle = this.canvasStyleAtFixedSize(clippedSize);
             this.deck.setProps({
-                width: nextSize.width,
-                height: nextSize.height,
+                width: clippedSize.width,
+                height: clippedSize.height,
+                style: clippedStyle
+            });
+            Object.assign(this.deck.getCanvas()?.style ?? {}, clippedStyle);
+            this.deckDevice?.getDefaultCanvasContext().setDrawingBufferSize(
+                clippedSize.width,
+                clippedSize.height
+            );
+            this.requestRender("Clip map for layout resize");
+            return;
+        }
+
+        this.clippedLayoutCanvasCssSize = undefined;
+        this.lastCanvasCssSize = nextSize;
+        this.cancelCanvasResizeScheduling();
+        const fixedStyle = this.canvasStyleAtFixedSize(nextSize);
+        this.deck.setProps({
+            width: nextSize.width,
+            height: nextSize.height,
+            style: fixedStyle
+        });
+        Object.assign(this.deck.getCanvas()?.style ?? {}, fixedStyle);
+        this.deckDevice?.getDefaultCanvasContext().setDrawingBufferSize(
+            nextSize.width,
+            nextSize.height
+        );
+        this.cancelLayoutResizeRestore();
+        this.layoutResizeRestoreRaf = window.requestAnimationFrame(() => {
+            this.layoutResizeRestoreRaf = undefined;
+            this.deck?.setProps({
+                width: "100%",
+                height: "100%",
                 style: DeckMapView.CANVAS_STYLE
             });
-            const canvas = this.deck.getCanvas();
-            if (canvas && (canvas.width !== nextSize.width || canvas.height !== nextSize.height)) {
-                canvas.width = nextSize.width;
-                canvas.height = nextSize.height;
-            }
-            const canvasContext = this.deckDevice?.getDefaultCanvasContext();
-            if (canvasContext) {
-                const resizeState = canvasContext as unknown as PrivateCanvasResizeState;
-                resizeState.cssWidth = nextSize.width;
-                resizeState.cssHeight = nextSize.height;
-                resizeState.devicePixelWidth = nextSize.width;
-                resizeState.devicePixelHeight = nextSize.height;
-                const [currentWidth, currentHeight] = canvasContext.getDrawingBufferSize();
-                if (currentWidth !== nextSize.width || currentHeight !== nextSize.height) {
-                    canvasContext.setDrawingBufferSize(nextSize.width, nextSize.height);
-                }
-            }
-            (this.deck as unknown as PrivateDeckResizeUpdate)._updateCanvasSize?.();
-            this.cancelLayoutResizeRestore();
-            this.layoutResizeRestoreRafFirst = window.requestAnimationFrame(() => {
-                this.layoutResizeRestoreRafFirst = undefined;
-                this.layoutResizeRestoreRafSecond = window.requestAnimationFrame(() => {
-                    this.layoutResizeRestoreRafSecond = undefined;
-                    this.deck?.setProps({
-                        width: "100%",
-                        height: "100%",
-                        style: DeckMapView.CANVAS_STYLE
-                    });
-                    (this.deck as unknown as PrivateDeckResizeUpdate | null)?._updateCanvasSize?.();
-                });
-            });
-            this.layerRegistry.flush();
-            this.deck.setProps({viewState: this.activeDeckViewState()});
-            const privateDeck = this.deck as unknown as PrivateDeckResizeUpdate;
-            if (privateDeck._onRenderFrame) {
-                privateDeck._onRenderFrame();
-            } else {
-                this.requestRender("Pre-layout resize");
-            }
-        } finally {
-            this.suppressDeckViewStateEvent = wasSuppressingViewStateEvents;
-        }
+            this.requestRender("Layout resized");
+        });
+        this.requestRender("Prepare layout resize");
+    }
+
+    /** Returns the absolute canvas style used while a side-dock resize clips the old projection. */
+    private canvasStyleAtFixedSize(size: {width: number; height: number}): Partial<CSSStyleDeclaration> {
+        return {
+            ...DeckMapView.CANVAS_STYLE,
+            width: `${size.width}px`,
+            height: `${size.height}px`
+        };
     }
 
     /** Returns the current canvas client rect, or an empty rect if the renderer is unavailable. */
@@ -825,53 +829,10 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Cancels any queued restoration of deck's percentage-sized canvas. */
     private cancelLayoutResizeRestore(): void {
-        if (this.layoutResizeRestoreRafFirst !== undefined) {
-            window.cancelAnimationFrame(this.layoutResizeRestoreRafFirst);
-            this.layoutResizeRestoreRafFirst = undefined;
+        if (this.layoutResizeRestoreRaf !== undefined) {
+            window.cancelAnimationFrame(this.layoutResizeRestoreRaf);
+            this.layoutResizeRestoreRaf = undefined;
         }
-        if (this.layoutResizeRestoreRafSecond !== undefined) {
-            window.cancelAnimationFrame(this.layoutResizeRestoreRafSecond);
-            this.layoutResizeRestoreRafSecond = undefined;
-        }
-    }
-
-    /** Keeps the geographic top-left corner stable while deck's center-based viewport resizes. */
-    private preserveTopLeftCoordinateAfterResize(cssWidth: number, cssHeight: number): boolean {
-        const previousSize = this.lastCanvasCssSize;
-        const nextSize = this.normalizedCanvasCssSize(cssWidth, cssHeight);
-        this.lastCanvasCssSize = nextSize;
-        if (!previousSize) {
-            return false;
-        }
-        if (previousSize.width === nextSize.width && previousSize.height === nextSize.height) {
-            return false;
-        }
-
-        const previousViewport = this.createWebMercatorViewportForSize(previousSize.width, previousSize.height);
-        const nextViewport = this.createWebMercatorViewportForSize(nextSize.width, nextSize.height);
-        if (!previousViewport || !nextViewport) {
-            return false;
-        }
-
-        const topLeftCoordinate = previousViewport.unproject([0, 0], {targetZ: 0});
-        if (!Array.isArray(topLeftCoordinate) || topLeftCoordinate.length < 2) {
-            return false;
-        }
-
-        const nextCenter = nextViewport.panByPosition3D(topLeftCoordinate, [0, 0]);
-        const longitude = nextCenter.longitude;
-        const latitude = nextCenter.latitude;
-        if (typeof longitude !== "number" || typeof latitude !== "number"
-            || !Number.isFinite(longitude) || !Number.isFinite(latitude)) {
-            return false;
-        }
-
-        this.updateViewState({
-            ...this.viewState,
-            longitude,
-            latitude
-        }, true, false);
-        return true;
     }
 
     /** Returns the renderer-agnostic scene handle passed to tile visualizations. */
@@ -903,11 +864,17 @@ export abstract class DeckMapView implements IRenderView {
             pickingInfo => {
                 const featureIds = this.featureIdsFromPickingInfo(pickingInfo);
                 return featureIds.length ? featureIds : null;
-            }
+            },
+            (first, second) => first.some(firstId => second.some(secondId =>
+                firstId.mapTileKey === secondId.mapTileKey
+                && firstId.featureId === secondId.featureId
+            ))
         );
         if (picked) {
-            const {position, value: featureIds} = picked;
-            return {position, featureIds};
+            const {position, surfaceNormal, value: featureIds} = picked;
+            return surfaceNormal
+                ? {position, surfaceNormal, featureIds}
+                : {position, featureIds};
         }
         return undefined;
     }
@@ -1489,95 +1456,110 @@ export abstract class DeckMapView implements IRenderView {
     private updateNavigationPivotOverlay(): void {
         const position = this.activeNavigationPivot
             ?? this.hoverNavigationPivot;
+        const surfaceNormal = this.activeNavigationPivot
+            ? this.activeNavigationSurfaceNormal
+            : this.hoverNavigationSurfaceNormal;
         if (!this.allowPitchAndBearing || this.firstPersonSession || !position) {
-            this.layerRegistry.remove(DeckMapView.ROTATION_PIVOT_LAYER_KEY);
+            this.navigationTargetOverlay?.clear();
             return;
         }
-        const displayPosition: NavigationAnchor = [
-            longitudeInNearestWorld(position[0], this.viewState.longitude),
-            position[1],
-            position[2]
-        ];
-        const data: DeckRotationPivotDatum[] = [
-            {
-                position: displayPosition,
-                radius: 8,
-                fillColor: [0, 0, 0, 0],
-                lineColor: [0, 229, 255, 255],
-                lineWidth: 3
-            },
-            {
-                position: displayPosition,
-                radius: 2.5,
-                fillColor: [0, 229, 255, 255],
-                lineColor: [0, 229, 255, 255],
-                lineWidth: 0
-            }
-        ];
-        this.layerRegistry.upsert(
-            DeckMapView.ROTATION_PIVOT_LAYER_KEY,
-            new ScatterplotLayer<DeckRotationPivotDatum>({
-                id: DeckMapView.ROTATION_PIVOT_LAYER_KEY,
-                data,
-                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                getPosition: datum => datum.position,
-                getRadius: datum => datum.radius,
-                radiusUnits: "pixels",
-                filled: true,
-                stroked: true,
-                getFillColor: datum => datum.fillColor,
-                getLineColor: datum => datum.lineColor,
-                getLineWidth: datum => datum.lineWidth,
-                lineWidthUnits: "pixels",
-                pickable: false,
-                parameters: DeckMapView.NO_DEPTH_PARAMETERS
-            }),
-            DeckMapView.ROTATION_PIVOT_LAYER_ORDER);
-        this.requestRender();
+        const viewport = this.createWebMercatorViewport();
+        if (!viewport) {
+            this.navigationTargetOverlay?.clear();
+            return;
+        }
+        this.navigationTargetOverlay?.update(
+            surfaceNormal ? {position, surfaceNormal} : {position},
+            viewport
+        );
     }
 
     /** Clears all transient navigation-pivot phases and removes their shared overlay. */
     private clearNavigationPivots(): void {
         this.hoverNavigationPivot = null;
-        this.hoverNavigationScreenPosition = null;
+        this.hoverNavigationSurfaceNormal = null;
         this.activeNavigationPivot = null;
+        this.activeNavigationSurfaceNormal = null;
         this.retainedNavigationPivot = null;
+        this.retainedNavigationSurfaceNormal = null;
+        this.resolvedControllerNavigationTarget = null;
         this.updateNavigationPivotOverlay();
     }
 
     /** Replaces the current hover candidate and refreshes the shared pivot overlay. */
-    private setHoverNavigationPivot(
-        pivot: NavigationAnchor | null,
-        screenPosition: [number, number] | null
-    ): void {
-        this.hoverNavigationPivot = pivot;
-        this.hoverNavigationScreenPosition = pivot ? screenPosition : null;
+    private setHoverNavigationPivot(target: NavigationVisualTarget | null): void {
+        this.hoverNavigationPivot = target?.position ?? null;
+        this.hoverNavigationSurfaceNormal = target?.surfaceNormal ?? null;
         this.updateNavigationPivotOverlay();
     }
 
-    /** Resolves one eligible feature pivot for a controller gesture start. */
+    /** Resolves a fresh eligible feature pivot for a controller gesture start. */
     private resolveControllerNavigationPivot(screenPosition: [number, number]): NavigationAnchor | null {
-        if (this.hoverNavigationPivot && this.hoverNavigationScreenPosition) {
-            const distance = Math.hypot(
-                screenPosition[0] - this.hoverNavigationScreenPosition[0],
-                screenPosition[1] - this.hoverNavigationScreenPosition[1]
-            );
-            if (distance <= 4) {
-                return this.hoverNavigationPivot;
-            }
+        const target = this.pickNavigationTarget({x: screenPosition[0], y: screenPosition[1]})
+            ?? this.hoverNavigationTargetNear(screenPosition);
+        this.resolvedControllerNavigationTarget = target
+            ? {position: target.position, surfaceNormal: target.surfaceNormal}
+            : null;
+        return target?.position ?? null;
+    }
+
+    /** Reuses a still-local hover sample only when a close pick is temporarily unavailable. */
+    private hoverNavigationTargetNear(screenPosition: [number, number]): NavigationVisualTarget | null {
+        if (!this.hoverNavigationPivot) {
+            return null;
         }
-        return this.pickNavigationTarget({x: screenPosition[0], y: screenPosition[1]})?.position ?? null;
+        const viewport = this.createWebMercatorViewport();
+        if (!viewport) {
+            return null;
+        }
+        const projected = viewport.project([
+            longitudeInNearestWorld(this.hoverNavigationPivot[0], viewport.longitude),
+            this.hoverNavigationPivot[1],
+            this.hoverNavigationPivot[2]
+        ]);
+        if (projected.length < 3
+            || !projected.every(Number.isFinite)
+            || Math.hypot(
+                projected[0] - screenPosition[0],
+                projected[1] - screenPosition[1]
+            ) > DeckMapView.NAVIGATION_GESTURE_TARGET_REUSE_RADIUS_PX) {
+            return null;
+        }
+        return this.hoverNavigationSurfaceNormal
+            ? {position: this.hoverNavigationPivot, surfaceNormal: this.hoverNavigationSurfaceNormal}
+            : {position: this.hoverNavigationPivot};
     }
 
     /** Tracks the frozen gesture pivot and retains successful targets for pointerless commands. */
     private onControllerNavigationPivotChange(pivot: NavigationAnchor | null, active: boolean): void {
+        const resolvedTarget = pivot
+            && this.resolvedControllerNavigationTarget
+            && this.sameNavigationAnchor(pivot, this.resolvedControllerNavigationTarget.position)
+            ? this.resolvedControllerNavigationTarget
+            : null;
+        const retainedNormal = pivot
+            && this.retainedNavigationPivot
+            && this.sameNavigationAnchor(pivot, this.retainedNavigationPivot)
+            ? this.retainedNavigationSurfaceNormal
+            : null;
+        const surfaceNormal = resolvedTarget?.surfaceNormal ?? retainedNormal;
         this.activeNavigationPivot = active ? pivot : null;
+        this.activeNavigationSurfaceNormal = active ? surfaceNormal : null;
         if (pivot) {
             this.retainedNavigationPivot = pivot;
-            this.hoverNavigationPivot = null;
-            this.hoverNavigationScreenPosition = null;
+            this.retainedNavigationSurfaceNormal = surfaceNormal;
+            this.hoverNavigationPivot = active ? null : pivot;
+            this.hoverNavigationSurfaceNormal = active ? null : surfaceNormal;
         }
+        this.resolvedControllerNavigationTarget = null;
         this.updateNavigationPivotOverlay();
+    }
+
+    /** Compares two retained navigation anchors at renderer precision. */
+    private sameNavigationAnchor(first: NavigationAnchor, second: NavigationAnchor): boolean {
+        return Math.abs(first[0] - second[0]) <= 1e-10
+            && Math.abs(first[1] - second[1]) <= 1e-10
+            && Math.abs(first[2] - second[2]) <= 1e-4;
     }
 
     /** Records the latest camera interaction state and temporarily suppresses expensive hover picking. */
@@ -1598,7 +1580,7 @@ export abstract class DeckMapView implements IRenderView {
             this.pendingHoverInfo = null;
             this.cancelHoverPickScheduling();
             if (this.hoverNavigationPivot) {
-                this.setHoverNavigationPivot(null, null);
+                this.setHoverNavigationPivot(null);
             }
         }
     }
@@ -1663,6 +1645,7 @@ export abstract class DeckMapView implements IRenderView {
         this.pendingHoverInfo = null;
         this.cancelHoverPickScheduling();
         this.setFeatureHoverState(false);
+        this.setHoverNavigationPivot(null);
         this.hoveredFeatureIds.next(undefined);
         void this.inspectionSelection.setHoveredFeatures([]);
     }
@@ -1679,7 +1662,7 @@ export abstract class DeckMapView implements IRenderView {
             this.pendingHoverInfo = null;
             this.cancelHoverPickScheduling();
             this.setFeatureHoverState(false);
-            this.setHoverNavigationPivot(null, null);
+            this.setHoverNavigationPivot(null);
             void this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
@@ -1707,6 +1690,13 @@ export abstract class DeckMapView implements IRenderView {
             this.pendingHoverInfo = null;
             return;
         }
+        const featureIds = this.featureIdsFromPickingInfo(info);
+        this.setFeatureHoverState(featureIds.length > 0);
+        this.setHoverNavigationPivot(
+            featureIds.length
+                ? navigationTargetFromPickingInfo(info)
+                : null
+        );
         this.pendingHoverInfo = info;
         this.scheduleHoverPickProcessing();
     }
@@ -1765,16 +1755,15 @@ export abstract class DeckMapView implements IRenderView {
             : this.featureIdsFromPickingInfo(info);
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
-            this.setHoverNavigationPivot(null, null);
             void this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
         this.setFeatureHoverState(true);
-        this.setHoverNavigationPivot(
-            navigationAnchorFromPickingInfo(info),
-            [info.x, info.y]
-        );
+        const navigationTarget = this.pickNavigationTarget({x: info.x, y: info.y});
+        if (navigationTarget) {
+            this.setHoverNavigationPivot(navigationTarget);
+        }
         this.inspectionSelection.setHoveredFeatures(featureIds).then(() => {
             this.hoveredFeatureIds.next({
                 featureIds,
@@ -1825,7 +1814,7 @@ export abstract class DeckMapView implements IRenderView {
         // Select all action, so dense geometry cannot unexpectedly open a
         // large inspection set.
         const featureIds = pickedFeatureIds.slice(0, 1);
-        const markerPosition = this.stateService.marker && featureIds.length
+        const featurePosition = featureIds.length
             ? this.markerPositionForFeature(
                 info,
                 screenPosition,
@@ -1834,6 +1823,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.stateService.inspectionsLimit
             )
             : null;
+        const markerPosition = this.stateService.marker ? featurePosition : null;
         const cartographic = markerPosition
             ? {lon: markerPosition[0], lat: markerPosition[1], alt: markerPosition[2]}
             : this.pickCartographic(screenPosition);
@@ -1910,10 +1900,13 @@ export abstract class DeckMapView implements IRenderView {
             this.pendingHoverInfo = null;
             this.cancelHoverPickScheduling();
             if (this.hoverNavigationPivot) {
-                this.setHoverNavigationPivot(null, null);
+                this.setHoverNavigationPivot(null);
             }
         }
         this.viewState = sanitized;
+        if (cameraChanged && this.activeNavigationPivot) {
+            this.updateNavigationPivotOverlay();
+        }
         if (this.deck && setDeckProps) {
             const wasSuppressingViewStateEvents = this.suppressDeckViewStateEvent;
             this.suppressDeckViewStateEvent = true;
@@ -3565,10 +3558,15 @@ export abstract class DeckMapView implements IRenderView {
                 };
             }
             this.retainedNavigationPivot = null;
+            this.retainedNavigationSurfaceNormal = null;
         }
         const centerPixel: [number, number] = [viewport.width / 2, viewport.height / 2];
         const centerFeature = this.pickNavigationTarget({x: centerPixel[0], y: centerPixel[1]});
         if (centerFeature) {
+            this.resolvedControllerNavigationTarget = {
+                position: centerFeature.position,
+                surfaceNormal: centerFeature.surfaceNormal
+            };
             this.onControllerNavigationPivotChange(centerFeature.position, false);
             return {pivot: centerFeature.position, pixel: centerPixel, feature: true};
         }

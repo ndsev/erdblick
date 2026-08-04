@@ -450,6 +450,10 @@ describe("TileSubsetLayerVisualization picking integration", () => {
             coordinateOrigin: [11, 48, 0],
             startIndices: new Uint32Array([0, 3, 6]),
             featureAddresses: new Uint32Array([7, 7]),
+            surfaceNormals: new Float32Array([
+                0, 0, 1,
+                0, 0, 1
+            ]),
             attributes: {
                 getPolygon: {
                     value: new Float32Array([
@@ -493,6 +497,7 @@ describe("TileSubsetLayerVisualization picking integration", () => {
             .toEqual([...source.attributes.getPolygon.value]);
         expect([...mask.attributes.fillColors.value])
             .toEqual([...source.attributes.fillColors.value]);
+        expect([...mask.surfaceNormals]).toEqual([...source.surfaceNormals]);
         expect([...mask.attributes.pickingColors.value])
             .toEqual(new Array(6).fill([17, 0, 0, 255]).flat());
         expect(identityColor).toHaveBeenCalledTimes(2);

@@ -5,6 +5,11 @@ import {describe, expect, it, vi} from "vitest";
 
 import type {TileFeatureId} from "../../shared/appstate.service";
 import {DeckMapView2D} from "./deck-view2d";
+import {
+    DECK_MAP_FAR_Z_MULTIPLIER,
+    DECK_MAP_FOV_DEGREES,
+    DECK_MAP_NEAR_Z_MULTIPLIER
+} from "./navigation/web-mercator-feature-navigation";
 
 function createView() {
     const view = new DeckMapView2D(
@@ -185,17 +190,22 @@ describe("Deck rendered-feature picking", () => {
             pitch: 55,
             bearing: 30
         });
+        (pathLayer as any).projectPosition = (position: number[]) =>
+            viewport.projectPosition(addMetersToLngLat(origin, position));
         const ribbonCoordinate = addMetersToLngLat(origin, [50, 8, 0]);
+        const expected = addMetersToLngLat(origin, [50, 0, 0]);
+        const cursor = viewport.project(expected);
         const pickMultipleObjects = vi.fn(() => [{
             layer: pathLayer,
             index: 0,
             coordinate: ribbonCoordinate,
-            viewport
+            viewport,
+            x: cursor[0],
+            y: cursor[1]
         }]);
         (view as any).deck = {pickMultipleObjects};
 
-        const target = view.pickNavigationTarget({x: 500, y: 350});
-        const expected = addMetersToLngLat(origin, [50, 0, 0]);
+        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
 
         expect(target?.featureIds).toEqual([
             {mapTileKey: "map/tile", featureId: "feature-12"}
@@ -203,6 +213,215 @@ describe("Deck rendered-feature picking", () => {
         expect(target?.position[0]).toBeCloseTo(expected[0], 7);
         expect(target?.position[1]).toBeCloseTo(expected[1], 7);
         expect(target?.position[2]).toBeCloseTo(expected[2], 7);
+        expect(pickMultipleObjects).toHaveBeenCalledWith({
+            x: cursor[0],
+            y: cursor[1],
+            radius: 4,
+            depth: 32,
+            unproject3D: true
+        });
+    });
+
+    it("rejects a thick ribbon hit outside the fixed centreline tolerance", () => {
+        const view = createView();
+        const origin: [number, number, number] = [11, 48, 100];
+        const pathLayer = {
+            id: "base-path",
+            props: {
+                navigationAnchorEligible: true,
+                tileKey: "map/tile",
+                featureAddressesByPath: [12],
+                subsetPickResolver: subsetPickResolver("map/tile"),
+                pathCenterline: {
+                    positions: new Float32Array([
+                        0, 0, 0,
+                        100, 0, 0
+                    ]),
+                    startIndices: new Uint32Array([0, 2]),
+                    coordinateOrigin: origin
+                }
+            }
+        };
+        const viewport = new WebMercatorViewport({
+            width: 1000,
+            height: 700,
+            longitude: 11,
+            latitude: 48,
+            zoom: 17,
+            pitch: 55,
+            bearing: 30
+        });
+        (pathLayer as any).projectPosition = (position: number[]) =>
+            viewport.projectPosition(addMetersToLngLat(origin, position));
+        const ribbonCoordinate = addMetersToLngLat(origin, [50, 20, 0]);
+        const cursor = viewport.project(ribbonCoordinate);
+        (view as unknown as {deck: unknown}).deck = {
+            pickMultipleObjects: vi.fn(() => [{
+                layer: pathLayer,
+                index: 0,
+                coordinate: ribbonCoordinate,
+                viewport,
+                x: cursor[0],
+                y: cursor[1]
+            }])
+        };
+
+        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+
+        expect(target).toBeUndefined();
+    });
+
+    it("snaps a path correctly when its other endpoint is behind the camera", () => {
+        const view = createView();
+        const origin: [number, number, number] = [11.62353515625, 48.27392578125, 0];
+        const pathLayer = {
+            id: "base-path",
+            props: {
+                navigationAnchorEligible: true,
+                featureAddressesByPath: [12],
+                subsetPickResolver: subsetPickResolver("map/tile"),
+                pathCenterline: {
+                    positions: new Float32Array([
+                        361.51239013671875, -6038.67333984375, 536.7999877929688,
+                        375.9411926269531, -5995.0078125, 536.75
+                    ]),
+                    startIndices: new Uint32Array([0, 2]),
+                    coordinateOrigin: origin
+                }
+            }
+        };
+        const viewport = new WebMercatorViewport({
+            width: 1555,
+            height: 1391,
+            longitude: 11.625705744539573,
+            latitude: 48.231868116614734,
+            zoom: 16.173423152264448,
+            pitch: 68.44308175262151,
+            bearing: 350.39624489258654,
+            fovy: DECK_MAP_FOV_DEGREES,
+            nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
+            farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER
+        });
+        (pathLayer as any).projectPosition = (position: number[]) =>
+            viewport.projectPosition(addMetersToLngLat(origin, position));
+        const coordinate: [number, number, number] = [
+            11.628603850518628,
+            48.21999052746244,
+            536.7616557379134
+        ];
+        const expected = addMetersToLngLat(origin, [
+            375.9411926269531,
+            -5995.0078125,
+            536.75
+        ]);
+        const cursor = viewport.project(expected);
+        (view as unknown as {deck: unknown}).deck = {
+            pickMultipleObjects: vi.fn(() => [{
+                layer: pathLayer,
+                index: 0,
+                coordinate,
+                viewport,
+                x: cursor[0],
+                y: cursor[1]
+            }])
+        };
+
+        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const projected = viewport.project(target!.position);
+
+        expect(Math.hypot(projected[0] - cursor[0], projected[1] - cursor[1])).toBeLessThanOrEqual(4);
+        expect(projected[2]).toBeGreaterThan(0);
+        expect(projected[2]).toBeLessThan(1);
+    });
+
+    it("returns the normalized surface orientation with an ordinary surface target", () => {
+        const view = createView();
+        const surfaceLayer = {
+            id: "base-surface",
+            props: {
+                navigationAnchorEligible: true,
+                tileKey: "map/tile",
+                featureAddresses: [12],
+                surfaceNormals: new Float32Array([0, -2, 2]),
+                subsetPickResolver: subsetPickResolver("map/tile")
+            }
+        };
+        const coordinate: [number, number, number] = [11, 48, 120];
+        (view as unknown as {deck: unknown}).deck = {
+            pickMultipleObjects: vi.fn(() => [{
+                layer: surfaceLayer,
+                index: 0,
+                coordinate
+            }])
+        };
+
+        const target = view.pickNavigationTarget({x: 500, y: 350});
+
+        expect(target?.position).toEqual(coordinate);
+        expect(target?.surfaceNormal?.[0]).toBe(0);
+        expect(target?.surfaceNormal?.[1]).toBeCloseTo(-Math.SQRT1_2, 6);
+        expect(target?.surfaceNormal?.[2]).toBeCloseTo(Math.SQRT1_2, 6);
+    });
+
+    it("uses a deeper surface orientation for the same topmost path feature", () => {
+        const view = createView();
+        const origin: [number, number, number] = [11, 48, 100];
+        const pathLayer = {
+            id: "base-path",
+            props: {
+                navigationAnchorEligible: true,
+                featureAddressesByPath: [12],
+                subsetPickResolver: subsetPickResolver("map/tile"),
+                pathCenterline: {
+                    positions: new Float32Array([0, 0, 0, 100, 0, 0]),
+                    startIndices: new Uint32Array([0, 2]),
+                    coordinateOrigin: origin
+                }
+            }
+        };
+        const surfaceLayer = {
+            id: "base-surface",
+            props: {
+                navigationAnchorEligible: true,
+                featureAddresses: [12],
+                surfaceNormals: new Float32Array([0, -2, 2]),
+                subsetPickResolver: subsetPickResolver("map/tile")
+            }
+        };
+        const viewport = new WebMercatorViewport({
+            width: 1000,
+            height: 700,
+            longitude: 11,
+            latitude: 48,
+            zoom: 17,
+            pitch: 55,
+            bearing: 30
+        });
+        (pathLayer as any).projectPosition = (position: number[]) =>
+            viewport.projectPosition(addMetersToLngLat(origin, position));
+        const pathCoordinate = addMetersToLngLat(origin, [50, 8, 0]);
+        const expected = addMetersToLngLat(origin, [50, 0, 0]);
+        const cursor = viewport.project(expected);
+        (view as unknown as {deck: unknown}).deck = {
+            pickMultipleObjects: vi.fn(() => [
+                {
+                    layer: pathLayer,
+                    index: 0,
+                    coordinate: pathCoordinate,
+                    viewport,
+                    x: cursor[0],
+                    y: cursor[1]
+                },
+                {layer: surfaceLayer, index: 0, coordinate: [11, 48, 120], viewport}
+            ])
+        };
+
+        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+
+        expect(target?.position[0]).toBeCloseTo(expected[0], 7);
+        expect(target?.position[1]).toBeCloseTo(expected[1], 7);
+        expect(target?.surfaceNormal?.[1]).toBeCloseTo(-Math.SQRT1_2, 6);
+        expect(target?.surfaceNormal?.[2]).toBeCloseTo(Math.SQRT1_2, 6);
     });
 
     it("skips a nonphysical label and anchors navigation and markers to the feature point", () => {

@@ -15,7 +15,8 @@ import {
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
     DECK_MAP_NEAR_Z_MULTIPLIER,
-    longitudeInNearestWorld
+    longitudeInNearestWorld,
+    navigationAnchorDistanceMeters
 } from "./web-mercator-feature-navigation";
 
 const VIEW_STATE = {
@@ -205,6 +206,61 @@ describe("FeatureNavigationMapController", () => {
         controller.finalize();
     });
 
+    it("retains the physical orbit radius during a pure pointer rotation", () => {
+        const position: [number, number] = [360, 290];
+        const anchor = makeAnchor(position, 80);
+        const controller = makeController(() => anchor, vi.fn());
+
+        let state = controller.controllerState.rotateStart({pos: position});
+        const initialViewport = makeViewport(state.getViewportProps());
+        const initialDistance = navigationAnchorDistanceMeters(initialViewport, anchor);
+        state = state.rotate({deltaAngleX: 17, deltaAngleY: -9});
+        const rotatedViewport = makeViewport(state.getViewportProps());
+        const rotatedDistance = navigationAnchorDistanceMeters(rotatedViewport, anchor);
+        const projectedAnchor = rotatedViewport.project(anchor);
+        state.rotateEnd();
+
+        expect(rotatedDistance).toBeCloseTo(initialDistance, 5);
+        expect(projectedAnchor[0]).toBeCloseTo(position[0], 2);
+        expect(projectedAnchor[1]).toBeCloseTo(position[1], 2);
+        controller.finalize();
+    });
+
+    it("keeps a snapped feature at its own pixel instead of pulling it under the pointer", () => {
+        const pointer: [number, number] = [360, 290];
+        const anchorPixel: [number, number] = [368, 286];
+        const anchor = makeAnchor(anchorPixel, 80);
+        const controller = makeController(() => anchor, vi.fn());
+
+        let state = controller.controllerState.rotateStart({pos: pointer});
+        state = state.rotate({deltaAngleX: 17, deltaAngleY: -9});
+        const projected = makeViewport(state.getViewportProps()).project(anchor);
+        state.rotateEnd();
+
+        expect(Math.abs(projected[0] - anchorPixel[0])).toBeLessThan(0.1);
+        expect(Math.abs(projected[1] - anchorPixel[1])).toBeLessThan(0.1);
+        controller.finalize();
+    });
+
+    it("keeps a snapped feature at its own pixel during wheel zoom", () => {
+        vi.useFakeTimers();
+        const pointer: [number, number] = [360, 290];
+        const anchorPixel: [number, number] = [368, 286];
+        const anchor = makeAnchor(anchorPixel, 80);
+        const controller = makeController(() => anchor, vi.fn());
+
+        try {
+            const state = controller.controllerState.zoom({pos: pointer, scale: 1.4});
+            const projected = makeViewport(state.getViewportProps()).project(anchor);
+
+            expect(Math.abs(projected[0] - anchorPixel[0])).toBeLessThan(0.1);
+            expect(Math.abs(projected[1] - anchorPixel[1])).toBeLessThan(0.1);
+        } finally {
+            controller.finalize();
+            vi.useRealTimers();
+        }
+    });
+
     it("anchors one discrete zoom burst to a retained pointer anchor", () => {
         vi.useFakeTimers();
         const position: [number, number] = [520, 330];
@@ -259,6 +315,30 @@ describe("FeatureNavigationMapController", () => {
         }
     });
 
+    it("reuses the same wheel target after close clipping prevents a fresh pick", () => {
+        vi.useFakeTimers();
+        const position: [number, number] = [520, 330];
+        const anchor = makeAnchor(position, 200);
+        const getAnchor = vi.fn<NavigationAnchorProvider>()
+            .mockReturnValueOnce(anchor)
+            .mockReturnValue(null);
+        const controller = makeController(getAnchor, vi.fn());
+
+        try {
+            let state = controller.controllerState.zoom({pos: position, scale: 1.2});
+            vi.advanceTimersByTime(150);
+            state = state.zoom({pos: position, scale: 1.4});
+            const projected = makeViewport(state.getViewportProps()).project(anchor);
+
+            expect(getAnchor).toHaveBeenCalledOnce();
+            expect(Math.abs(projected[0] - position[0])).toBeLessThan(0.1);
+            expect(Math.abs(projected[1] - position[1])).toBeLessThan(0.1);
+        } finally {
+            controller.finalize();
+            vi.useRealTimers();
+        }
+    });
+
     it("releases an unfinished continuous gesture when finalized", () => {
         const position: [number, number] = [360, 290];
         const anchor = makeAnchor(position, 80);
@@ -282,12 +362,14 @@ describe("FeatureNavigationMapController", () => {
         let state = controller.controllerState.zoomIn(1.5);
         let viewport = makeViewport(state.getViewportProps());
         let projectedAnchor = viewport.project(anchor);
+        const distanceBeforeTilt = navigationAnchorDistanceMeters(viewport, anchor);
         expect(Math.abs(projectedAnchor[0] - initialPixel[0])).toBeLessThan(0.1);
         expect(Math.abs(projectedAnchor[1] - initialPixel[1])).toBeLessThan(1);
 
         state = state.rotateUp(8);
         viewport = makeViewport(state.getViewportProps());
         projectedAnchor = viewport.project(anchor);
+        expect(navigationAnchorDistanceMeters(viewport, anchor)).toBeCloseTo(distanceBeforeTilt, 5);
         expect(Math.abs(projectedAnchor[0] - initialPixel[0])).toBeLessThan(0.1);
         expect(Math.abs(projectedAnchor[1] - initialPixel[1])).toBeLessThan(1);
 

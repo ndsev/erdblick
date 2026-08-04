@@ -4,6 +4,7 @@ import {
 } from "@deck.gl/core";
 import {
     navigationAnchorInViewportWorld,
+    viewStateOrbitingNavigationAnchor,
     viewStateKeepingSafeNavigationAnchor
 } from "./web-mercator-feature-navigation";
 import type {
@@ -37,7 +38,11 @@ export class FeatureNavigationMapController extends MapController {
     private onNavigationAnchorChange?: NavigationAnchorChangeHandler;
     private readonly activeOperations = new Set<NavigationOperation>();
     private lockedAnchor: NavigationAnchor | null = null;
+    private lockedAnchorPixel: NavigationScreenPosition | null = null;
     private discreteZoomAnchor: NavigationAnchor | null = null;
+    private discreteZoomAnchorPixel: NavigationScreenPosition | null = null;
+    private rememberedZoomAnchor: NavigationAnchor | null = null;
+    private rememberedZoomPosition: NavigationScreenPosition | null = null;
     private discreteZoomReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
     /**
@@ -60,6 +65,23 @@ export class FeatureNavigationMapController extends MapController {
 
         /** Returns the coordinate shared by every active part of the gesture. */
         const getLockedAnchor = (): NavigationAnchor | null => this.lockedAnchor;
+
+        /** Returns the anchor's projected pixel captured at rotation start. */
+        const getLockedAnchorPixel = (): NavigationScreenPosition | null => this.lockedAnchorPixel;
+
+        /** Captures the anchor's current projected pixel without snapping it to the pointer. */
+        const setLockedAnchorPixel = (pixel: NavigationScreenPosition | null): void => {
+            this.lockedAnchorPixel = pixel;
+        };
+
+        /** Returns the projected feature pixel frozen for one wheel burst. */
+        const getDiscreteZoomAnchorPixel = (): NavigationScreenPosition | null =>
+            this.discreteZoomAnchorPixel;
+
+        /** Freezes the projected feature pixel for one wheel burst. */
+        const setDiscreteZoomAnchorPixel = (pixel: NavigationScreenPosition): void => {
+            this.discreteZoomAnchorPixel = pixel;
+        };
 
         /** Returns whether one continuous operation currently owns the gesture coordinate. */
         const isOperationActive = (operation: NavigationOperation): boolean =>
@@ -122,12 +144,46 @@ export class FeatureNavigationMapController extends MapController {
                 const localAnchor = anchor && viewport instanceof WebMercatorViewport
                     ? navigationAnchorInViewportWorld(anchor, viewport)
                     : anchor;
+                const projectedAnchor = localAnchor && viewport instanceof WebMercatorViewport
+                    ? viewport.project(localAnchor)
+                    : null;
+                setLockedAnchorPixel(projectedAnchor?.slice(0, 2).every(Number.isFinite)
+                    ? [projectedAnchor[0], projectedAnchor[1]]
+                    : null);
                 return this._getUpdatedState({
                     startRotatePos: pos,
                     startRotateLngLat: localAnchor ?? undefined,
                     startBearing: viewportProps.bearing,
                     startPitch: viewportProps.pitch
                 });
+            }
+
+            /** Uses deck's rotation angles while retaining OrbitState's fixed-radius invariant. */
+            override rotate(params: {
+                pos?: NavigationScreenPosition;
+                deltaAngleX?: number;
+                deltaAngleY?: number;
+            }) {
+                const anchor = getLockedAnchor();
+                if (!anchor) {
+                    return super.rotate(params);
+                }
+                const currentProps = this.getViewportProps();
+                const viewport = this.makeViewport(currentProps);
+                const stockState = super.rotate(params);
+                const anchorPixel = getLockedAnchorPixel();
+                if (!(viewport instanceof WebMercatorViewport) || !anchorPixel) {
+                    return stockState;
+                }
+                return this._getUpdatedState(viewStateOrbitingNavigationAnchor(
+                    currentProps,
+                    stockState.getViewportProps(),
+                    anchor,
+                    anchorPixel,
+                    viewport.width,
+                    viewport.height,
+                    viewport.orthographic
+                ));
             }
 
             /** Retains deck.gl's rotation math and releases the shared anchor lock. */
@@ -139,7 +195,17 @@ export class FeatureNavigationMapController extends MapController {
 
             /** Captures one coordinate for a continuous pinch gesture. */
             override zoomStart({pos}: {pos: NavigationScreenPosition}) {
-                beginOperation("zoom", pos);
+                const anchor = beginOperation("zoom", pos);
+                const viewport = this.makeViewport(this.getViewportProps());
+                const localAnchor = anchor && viewport instanceof WebMercatorViewport
+                    ? navigationAnchorInViewportWorld(anchor, viewport)
+                    : null;
+                const projectedAnchor = localAnchor && viewport instanceof WebMercatorViewport
+                    ? viewport.project(localAnchor)
+                    : null;
+                setLockedAnchorPixel(projectedAnchor?.slice(0, 2).every(Number.isFinite)
+                    ? [projectedAnchor[0], projectedAnchor[1]]
+                    : null);
                 return super.zoomStart({pos});
             }
 
@@ -163,12 +229,27 @@ export class FeatureNavigationMapController extends MapController {
                 if (!(viewport instanceof WebMercatorViewport)) {
                     return stockState;
                 }
+                const continuousZoom = isOperationActive("zoom");
+                let anchorPixel = continuousZoom
+                    ? getLockedAnchorPixel()
+                    : getDiscreteZoomAnchorPixel();
+                if (!anchorPixel) {
+                    const projected = viewport.project(
+                        navigationAnchorInViewportWorld(anchor, viewport)
+                    );
+                    anchorPixel = [projected[0], projected[1]];
+                    if (continuousZoom) {
+                        setLockedAnchorPixel(anchorPixel);
+                    } else {
+                        setDiscreteZoomAnchorPixel(anchorPixel);
+                    }
+                }
 
                 return this._getUpdatedState(viewStateKeepingSafeNavigationAnchor(
                     currentProps,
                     {...currentProps, zoom},
                     anchor,
-                    params.pos,
+                    anchorPixel,
                     viewport.width,
                     viewport.height,
                     viewport.orthographic
@@ -204,32 +285,32 @@ export class FeatureNavigationMapController extends MapController {
 
             /** Zooms in around the retained coordinate rather than the ground-plane center. */
             override zoomIn(speed = 2): MapControllerState {
-                return this.changePoseKeepingAnchor(() => super.zoomIn(speed));
+                return this.changePoseKeepingAnchor(() => super.zoomIn(speed), "zoom");
             }
 
             /** Zooms out around the retained coordinate rather than the ground-plane center. */
             override zoomOut(speed = 2): MapControllerState {
-                return this.changePoseKeepingAnchor(() => super.zoomOut(speed));
+                return this.changePoseKeepingAnchor(() => super.zoomOut(speed), "zoom");
             }
 
             /** Rotates left around the retained coordinate. */
             override rotateLeft(speed = 15): MapControllerState {
-                return this.changePoseKeepingAnchor(() => super.rotateLeft(speed));
+                return this.changePoseKeepingAnchor(() => super.rotateLeft(speed), "rotate");
             }
 
             /** Rotates right around the retained coordinate. */
             override rotateRight(speed = 15): MapControllerState {
-                return this.changePoseKeepingAnchor(() => super.rotateRight(speed));
+                return this.changePoseKeepingAnchor(() => super.rotateRight(speed), "rotate");
             }
 
             /** Tilts up around the retained coordinate. */
             override rotateUp(speed = 10): MapControllerState {
-                return this.changePoseKeepingAnchor(() => super.rotateUp(speed));
+                return this.changePoseKeepingAnchor(() => super.rotateUp(speed), "rotate");
             }
 
             /** Tilts down around the retained coordinate. */
             override rotateDown(speed = 10): MapControllerState {
-                return this.changePoseKeepingAnchor(() => super.rotateDown(speed));
+                return this.changePoseKeepingAnchor(() => super.rotateDown(speed), "rotate");
             }
 
             /** Applies one keyboard pan using the same three-dimensional anchor invariant. */
@@ -274,7 +355,8 @@ export class FeatureNavigationMapController extends MapController {
 
             /** Corrects stock keyboard zoom/rotation around the retained 3D coordinate. */
             private changePoseKeepingAnchor(
-                getStockState: () => MapControllerState
+                getStockState: () => MapControllerState,
+                operation: "rotate" | "zoom"
             ): MapControllerState {
                 const anchor = resolveCommandAnchor(this);
                 if (!anchor) {
@@ -290,7 +372,10 @@ export class FeatureNavigationMapController extends MapController {
                 const currentAnchor = navigationAnchorInViewportWorld(anchor, currentViewport);
                 const projected = currentViewport.project(currentAnchor);
                 emitNavigationAnchor(anchor, false);
-                return this._getUpdatedState(viewStateKeepingSafeNavigationAnchor(
+                const applyChange = operation === "rotate"
+                    ? viewStateOrbitingNavigationAnchor
+                    : viewStateKeepingSafeNavigationAnchor;
+                return this._getUpdatedState(applyChange(
                     this.getViewportProps(),
                     stockState.getViewportProps(),
                     anchor,
@@ -314,6 +399,8 @@ export class FeatureNavigationMapController extends MapController {
     /** Releases timers and active anchors before controller teardown. */
     override finalize(): void {
         this.releaseDiscreteZoomAnchor();
+        this.rememberedZoomAnchor = null;
+        this.rememberedZoomPosition = null;
         this.cancelActiveOperations();
         super.finalize();
     }
@@ -325,7 +412,14 @@ export class FeatureNavigationMapController extends MapController {
     ): NavigationAnchor | null {
         if (this.activeOperations.size === 0) {
             this.releaseDiscreteZoomAnchor();
-            this.lockedAnchor = this.resolveNavigationAnchor(position);
+            this.lockedAnchorPixel = null;
+            if (operation !== "zoom") {
+                this.rememberedZoomAnchor = null;
+                this.rememberedZoomPosition = null;
+            }
+            this.lockedAnchor = operation === "zoom"
+                ? this.resolveZoomAnchor(position)
+                : this.resolveNavigationAnchor(position);
             this.emitNavigationAnchor(this.lockedAnchor, true);
         }
         this.activeOperations.add(operation);
@@ -339,6 +433,7 @@ export class FeatureNavigationMapController extends MapController {
         }
         const anchor = this.lockedAnchor;
         this.lockedAnchor = null;
+        this.lockedAnchorPixel = null;
         this.emitNavigationAnchor(anchor, false);
     }
 
@@ -350,16 +445,18 @@ export class FeatureNavigationMapController extends MapController {
         const anchor = this.lockedAnchor;
         this.activeOperations.clear();
         this.lockedAnchor = null;
+        this.lockedAnchorPixel = null;
         this.emitNavigationAnchor(anchor, false);
     }
 
     /** Keeps one coordinate across a burst of wheel or double-click zoom events. */
     private retainDiscreteZoomAnchor(screenPosition: NavigationScreenPosition): NavigationAnchor | null {
         if (!this.discreteZoomAnchor) {
-            this.discreteZoomAnchor = this.resolveNavigationAnchor(screenPosition);
+            this.discreteZoomAnchor = this.resolveZoomAnchor(screenPosition);
             if (!this.discreteZoomAnchor) {
                 return null;
             }
+            this.discreteZoomAnchorPixel = null;
             this.emitNavigationAnchor(this.discreteZoomAnchor, true);
         }
         if (this.discreteZoomReleaseTimer) {
@@ -372,17 +469,39 @@ export class FeatureNavigationMapController extends MapController {
         return this.discreteZoomAnchor;
     }
 
+    /** Reuses the last wheel target at the same pixel when close clipping prevents a fresh pick. */
+    private resolveZoomAnchor(screenPosition: NavigationScreenPosition): NavigationAnchor | null {
+        if (this.rememberedZoomAnchor
+            && this.rememberedZoomPosition
+            && Math.hypot(
+                screenPosition[0] - this.rememberedZoomPosition[0],
+                screenPosition[1] - this.rememberedZoomPosition[1]
+            ) <= 1) {
+            return this.rememberedZoomAnchor;
+        }
+        const resolved = this.resolveNavigationAnchor(screenPosition);
+        if (resolved) {
+            this.rememberedZoomAnchor = resolved;
+            this.rememberedZoomPosition = [...screenPosition];
+            return resolved;
+        }
+        this.rememberedZoomAnchor = null;
+        this.rememberedZoomPosition = null;
+        return null;
+    }
+
     /** Ends one debounced discrete zoom burst and reports its released coordinate. */
     private releaseDiscreteZoomAnchor(): void {
         if (this.discreteZoomReleaseTimer) {
             clearTimeout(this.discreteZoomReleaseTimer);
             this.discreteZoomReleaseTimer = null;
         }
-        if (!this.discreteZoomAnchor) {
-            return;
-        }
         const anchor = this.discreteZoomAnchor;
         this.discreteZoomAnchor = null;
+        this.discreteZoomAnchorPixel = null;
+        if (!anchor) {
+            return;
+        }
         this.emitNavigationAnchor(anchor, false);
     }
 

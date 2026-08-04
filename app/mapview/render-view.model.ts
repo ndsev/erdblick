@@ -27,6 +27,7 @@ export interface RenderVector3 {
 export interface RenderNavigationTarget {
     position: [longitude: number, latitude: number, altitude: number];
     featureIds: TileFeatureId[];
+    surfaceNormal?: [east: number, north: number, up: number];
 }
 
 /** Logical feature result returned by bounded rendered-object picking operations. */

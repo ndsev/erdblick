@@ -19,6 +19,7 @@ export interface DeckSubsetPickProps {
     drillPickEligible?: boolean;
     coordinateOrigin?: [number, number, number];
     anchorPositions?: ArrayLike<number>;
+    surfaceNormals?: ArrayLike<number>;
     pathCenterline?: {
         positions: ArrayLike<number>;
         startIndices: ArrayLike<number>;
