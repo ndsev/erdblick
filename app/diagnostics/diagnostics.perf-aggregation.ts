@@ -29,18 +29,44 @@ type AggregatedPerfAccumulator = {
     sum: number;
     count: number;
     peak: number;
+    min: number;
     unit?: string;
     peakTileIds: Set<string>;
 };
 
-type ConversionAgeAccumulator = {
-    sum: number;
-    count: number;
-    newest: number;
-    oldest: number;
-    newestTileIds: Set<string>;
-    oldestTileIds: Set<string>;
-};
+/** Adds one tile's finite samples to the aggregate for a normalized metric key. */
+function accumulatePerfValues(
+    statsByKey: Map<string, AggregatedPerfAccumulator>,
+    rawKey: string,
+    rawValues: number[],
+    tileId: string,
+    unitOverride?: string
+): void {
+    const values = rawValues.filter(Number.isFinite);
+    const key = stripPerfUnitSuffix(rawKey);
+    if (!key || !values.length) {
+        return;
+    }
+    const existing = statsByKey.get(key) ?? {
+        sum: 0,
+        count: 0,
+        peak: -Infinity,
+        min: Infinity,
+        unit: unitOverride ?? resolvePerfUnit(rawKey, values),
+        peakTileIds: new Set<string>()
+    };
+    existing.sum += values.reduce((sum, value) => sum + value, 0);
+    existing.count += values.length;
+    existing.min = Math.min(existing.min, ...values);
+    const peak = Math.max(...values);
+    if (peak > existing.peak) {
+        existing.peak = peak;
+        existing.peakTileIds = new Set([tileId]);
+    } else if (peak === existing.peak) {
+        existing.peakTileIds.add(tileId);
+    }
+    statsByKey.set(key, existing);
+}
 
 /** Aggregates only current-generation, already deduplicated diagnostics rows. */
 export function buildAggregatedPerfStats(
@@ -49,14 +75,6 @@ export function buildAggregatedPerfStats(
     nowMs = Date.now()
 ): PerfStat[] {
     const statsByKey = new Map<string, AggregatedPerfAccumulator>();
-    const conversionAges: ConversionAgeAccumulator = {
-        sum: 0,
-        count: 0,
-        newest: Infinity,
-        oldest: -Infinity,
-        newestTileIds: new Set<string>(),
-        oldestTileIds: new Set<string>()
-    };
     for (const tile of tiles) {
         if (!tile.ready) {
             continue;
@@ -65,47 +83,19 @@ export function buildAggregatedPerfStats(
         if (tile.conversionTimestampMs !== null &&
             Number.isFinite(tile.conversionTimestampMs)) {
             const age = nowMs - tile.conversionTimestampMs;
-            conversionAges.sum += age;
-            conversionAges.count += 1;
-            if (age < conversionAges.newest) {
-                conversionAges.newest = age;
-                conversionAges.newestTileIds = new Set([tileId]);
-            } else if (age === conversionAges.newest) {
-                conversionAges.newestTileIds.add(tileId);
-            }
-            if (age > conversionAges.oldest) {
-                conversionAges.oldest = age;
-                conversionAges.oldestTileIds = new Set([tileId]);
-            } else if (age === conversionAges.oldest) {
-                conversionAges.oldestTileIds.add(tileId);
-            }
+            accumulatePerfValues(
+                statsByKey,
+                "Load+Convert/Age",
+                [age],
+                tileId,
+                CONVERSION_AGE_UNIT
+            );
         }
         for (const [rawKey, rawValues] of tile.stats) {
-            const values = rawValues.filter(Number.isFinite);
-            const key = stripPerfUnitSuffix(rawKey);
-            if (!key || !values.length) {
-                continue;
-            }
-            const existing = statsByKey.get(key) ?? {
-                sum: 0,
-                count: 0,
-                peak: -Infinity,
-                unit: resolvePerfUnit(rawKey, values),
-                peakTileIds: new Set<string>()
-            };
-            existing.sum += values.reduce((sum, value) => sum + value, 0);
-            existing.count += values.length;
-            const peak = Math.max(...values);
-            if (peak > existing.peak) {
-                existing.peak = peak;
-                existing.peakTileIds = new Set([tileId]);
-            } else if (peak === existing.peak) {
-                existing.peakTileIds.add(tileId);
-            }
-            statsByKey.set(key, existing);
+            accumulatePerfValues(statsByKey, rawKey, rawValues, tileId);
         }
     }
-    const aggregated = [...statsByKey.entries()]
+    return [...statsByKey.entries()]
         .filter(([, value]) => value.count > 0)
         .map(([key, value]) => ({
             key,
@@ -113,28 +103,8 @@ export function buildAggregatedPerfStats(
             unit: value.unit,
             peak: value.peak,
             average: value.sum / value.count,
+            min: value.min,
             peakTileIds: [...value.peakTileIds].slice(0, maxPeakTileIds)
-        }));
-    if (conversionAges.count > 0) {
-        const average = conversionAges.sum / conversionAges.count;
-        aggregated.push({
-            key: "Load+Convert/Age",
-            path: ["Load+Convert", "Age"],
-            unit: CONVERSION_AGE_UNIT,
-            peak: conversionAges.oldest,
-            average,
-            peakTileIds: [...conversionAges.oldestTileIds]
-                .slice(0, maxPeakTileIds)
-        });
-        aggregated.push({
-            key: "Load+Convert/Freshness",
-            path: ["Load+Convert", "Freshness"],
-            unit: CONVERSION_AGE_UNIT,
-            peak: conversionAges.newest,
-            average,
-            peakTileIds: [...conversionAges.newestTileIds]
-                .slice(0, maxPeakTileIds)
-        });
-    }
-    return aggregated.sort((left, right) => left.key.localeCompare(right.key));
+        }))
+        .sort((left, right) => left.key.localeCompare(right.key));
 }

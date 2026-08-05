@@ -42,21 +42,24 @@ describe("performance diagnostics aggregation", () => {
                 path: ["Rendering", "Filter", "Process-Entries"],
                 unit: "ms",
                 peak: 4.5,
-                average: 4.5
+                average: 4.5,
+                min: 4.5
             }),
             expect.objectContaining({
                 key: "Rendering/Filter/Subset-Size",
                 path: ["Rendering", "Filter", "Subset-Size"],
                 unit: "B",
                 peak: 1536,
-                average: 1536
+                average: 1536,
+                min: 1536
             }),
             expect.objectContaining({
                 key: "Rendering/WASM/Vertices",
                 path: ["Rendering", "WASM", "Vertices"],
                 unit: "count",
                 peak: 12,
-                average: 12
+                average: 12,
+                min: 12
             })
         ]);
     });
@@ -74,12 +77,13 @@ describe("performance diagnostics aggregation", () => {
                 unit: "ms",
                 peak: 6,
                 average: 14 / 3,
+                min: 2,
                 peakTileIds: ["7", "3"]
             })
         ]);
     });
 
-    it("uses the newest and oldest conversion ages with one shared mean", () => {
+    it("aggregates conversion age as one metric with peak, average, and min", () => {
         const nowMs = 10_000;
         const stats = buildAggregatedPerfStats([
             tile(101, [], true, nowMs - 1_000),
@@ -92,15 +96,11 @@ describe("performance diagnostics aggregation", () => {
                 unit: CONVERSION_AGE_UNIT,
                 peak: 3_000,
                 average: 2_000,
+                min: 1_000,
                 peakTileIds: ["102"]
             });
         expect(stats.find(stat => stat.key === "Load+Convert/Freshness"))
-            .toMatchObject({
-                unit: CONVERSION_AGE_UNIT,
-                peak: 1_000,
-                average: 2_000,
-                peakTileIds: ["101"]
-            });
+            .toBeUndefined();
     });
 
     it("ignores pending tiles and tiles without conversion metadata", () => {
@@ -110,15 +110,12 @@ describe("performance diagnostics aggregation", () => {
             tile(103, [], false, 9_000)
         ], 5, 10_000);
         const age = stats.find(stat => stat.key === "Load+Convert/Age");
-        const freshness = stats.find(
-            stat => stat.key === "Load+Convert/Freshness"
-        );
 
-        expect(age).toMatchObject({peak: 2_000, average: 2_000});
-        expect(freshness).toMatchObject({peak: 2_000, average: 2_000});
+        expect(age).toMatchObject({peak: 2_000, average: 2_000, min: 2_000});
+        expect(stats).toHaveLength(1);
     });
 
-    it("caps tied newest and oldest tile ids at the requested limit", () => {
+    it("caps tied peak tile ids at the requested limit", () => {
         const stats = buildAggregatedPerfStats([
             tile(101, [], true, 8_000),
             tile(102, [], true, 8_000),
@@ -126,8 +123,6 @@ describe("performance diagnostics aggregation", () => {
         ], 2, 10_000);
 
         expect(stats.find(stat => stat.key === "Load+Convert/Age")
-            ?.peakTileIds).toEqual(["101", "102"]);
-        expect(stats.find(stat => stat.key === "Load+Convert/Freshness")
             ?.peakTileIds).toEqual(["101", "102"]);
     });
 });

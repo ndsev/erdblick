@@ -72,6 +72,7 @@ export interface PerfStat {
     unit?: string;
     peak: number;
     average?: number;
+    min: number;
     peakTileIds?: string[];
 }
 

@@ -137,7 +137,8 @@ export class DiagnosticsDatasource implements OnDestroy {
                 scope: "view",
                 unit,
                 peak,
-                average: value
+                average: value,
+                min: value
             });
             addLiveStat(
                 ["Rendering", "Deck.gl", "Frame Time (p90)"],

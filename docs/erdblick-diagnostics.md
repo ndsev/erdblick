@@ -43,12 +43,14 @@ The statistics dialog is the main place to inspect:
 - per-style rendering cost
 - frame-time and FPS
 
-Under **Load+Convert**, the **Age** and **Freshness** rows summarize the same
-conversion-age samples for the currently filtered loaded tiles:
+Under **Load+Convert**, the **Age** row summarizes conversion-age samples for
+the currently filtered loaded tiles:
 
-- **Age** uses the oldest (highest) conversion age as its peak.
-- **Freshness** uses the newest (lowest) conversion age as its peak.
-- Both rows show the same mean conversion age in the Average column.
+- **Peak** shows the oldest (highest) conversion age.
+- **Average** shows the mean conversion age.
+- **Min** shows the newest (lowest) conversion age.
+
+The Peak, Average, and Min columns are available for every performance metric.
 
 Use it when:
 

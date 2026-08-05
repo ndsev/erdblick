@@ -39,14 +39,18 @@ interface PerfTreeRowData {
     pathKey: string;
     peak?: number;
     average?: number;
+    min?: number;
     unit?: string;
     displayPeak?: string;
     displayAverage?: string;
+    displayMin?: string;
     basePeakTooltip?: string;
     baseAverageTooltip?: string;
+    baseMinTooltip?: string;
     peakTileIds?: string;
     peakClass?: string;
     averageClass?: string;
+    minClass?: string;
     rowClass?: string;
     rootBadgeDt?: Record<string, any>;
     rootBadgeValue?: number;
@@ -63,6 +67,7 @@ interface ParentAggregate {
     unit?: SupportedUnit;
     peak?: number;
     average?: number;
+    min?: number;
 }
 
 interface PerfTileScopeCounts {
@@ -122,23 +127,25 @@ interface PerfTileScopeCounts {
                          (onNodeCollapse)="onNodeCollapse($event.node)">
                 <ng-template pTemplate="header">
                     <tr>
-                        <th ttResizableColumn style="width: 50%;">Key</th>
-                        <th ttResizableColumn style="width: 15%;" class="diagnostics-perf-value">Peak</th>
-                        <th ttResizableColumn style="width: 15%;" class="diagnostics-perf-value">Average</th>
-                        <th ttResizableColumn style="width: 20%;" class="diagnostics-perf-value">Peak Tile IDs</th>
+                        <th ttResizableColumn style="width: 40%;">Key</th>
+                        <th ttResizableColumn style="width: 13%;" class="diagnostics-perf-value">Peak</th>
+                        <th ttResizableColumn style="width: 13%;" class="diagnostics-perf-value">Average</th>
+                        <th ttResizableColumn style="width: 13%;" class="diagnostics-perf-value">Min</th>
+                        <th ttResizableColumn style="width: 21%;" class="diagnostics-perf-value">Peak Tile IDs</th>
                     </tr>
                 </ng-template>
                 <ng-template pTemplate="colgroup">
                     <colgroup>
-                        <col style="width: 50%;">
-                        <col style="width: 15%;">
-                        <col style="width: 15%;">
-                        <col style="width: 20%;">
+                        <col style="width: 40%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 21%;">
                     </colgroup>
                 </ng-template>
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                     <tr [ttRow]="rowNode" [ngClass]="rowData.rowClass">
-                        <td class="diagnostics-cell" style="width: 50%;">
+                        <td class="diagnostics-cell" style="width: 40%;">
                             <div class="diagnostics-key-cell diagnostics-ellipsis">
                                 <p-treeTableToggler [rowNode]="rowNode"></p-treeTableToggler>
                                 <span class="diagnostics-key-text"
@@ -161,7 +168,7 @@ interface PerfTileScopeCounts {
                         </td>
                         <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
                             [ngClass]="rowData.peakClass"
-                            style="width: 15%;"
+                            style="width: 13%;"
                             [pTooltip]="rowData.basePeakTooltip"
                             tooltipPosition="top"
                             [tooltipDisabled]="!rowData.basePeakTooltip">
@@ -169,14 +176,22 @@ interface PerfTileScopeCounts {
                         </td>
                         <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
                             [ngClass]="rowData.averageClass"
-                            style="width: 15%;"
+                            style="width: 13%;"
                             [pTooltip]="rowData.baseAverageTooltip"
                             tooltipPosition="top"
                             [tooltipDisabled]="!rowData.baseAverageTooltip">
                             {{ rowData.displayAverage ?? '' }}
                         </td>
                         <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
-                            style="width: 20%;"
+                            [ngClass]="rowData.minClass"
+                            style="width: 13%;"
+                            [pTooltip]="rowData.baseMinTooltip"
+                            tooltipPosition="top"
+                            [tooltipDisabled]="!rowData.baseMinTooltip">
+                            {{ rowData.displayMin ?? '' }}
+                        </td>
+                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                            style="width: 21%;"
                             [pTooltip]="rowData.peakTileIds ?? ''"
                             tooltipPosition="left"
                             [tooltipDisabled]="!rowData.peakTileIds">
@@ -186,7 +201,7 @@ interface PerfTileScopeCounts {
                 </ng-template>
                 <ng-template pTemplate="emptymessage">
                     <tr>
-                        <td colspan="4">No performance statistics available.</td>
+                        <td colspan="5">No performance statistics available.</td>
                     </tr>
                 </ng-template>
             </p-treeTable>
@@ -643,6 +658,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 if (this.isFiniteNumber(stat.average)) {
                     maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.average));
                 }
+                if (this.isFiniteNumber(stat.min)) {
+                    maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.min));
+                }
             }
             if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
                 if (this.isFiniteNumber(stat.peak)) {
@@ -650,6 +668,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 }
                 if (this.isFiniteNumber(stat.average)) {
                     maxAbsBytes = Math.max(maxAbsBytes, Math.abs(this.toBytes(stat.average, unit)));
+                }
+                if (this.isFiniteNumber(stat.min)) {
+                    maxAbsBytes = Math.max(maxAbsBytes, Math.abs(this.toBytes(stat.min, unit)));
                 }
             }
         }
@@ -715,16 +736,20 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                         ?? this.inferCountUnitFromKey(currentPath);
                     const peakNumber = stat.peak;
                     const averageNumber = stat.average;
+                    const minNumber = stat.min;
                     node.data = {
                         key: segment,
                         pathKey: currentPath,
                         peak: peakNumber,
                         average: averageNumber,
+                        min: minNumber,
                         unit,
                         displayPeak: this.formatValueWithUnit(peakNumber, unit),
                         displayAverage: this.formatValueWithUnit(averageNumber, unit),
+                        displayMin: this.formatValueWithUnit(minNumber, unit),
                         basePeakTooltip: this.formatBaseTooltip(peakNumber, unit),
                         baseAverageTooltip: this.formatBaseTooltip(averageNumber, unit),
+                        baseMinTooltip: this.formatBaseTooltip(minNumber, unit),
                         peakTileIds: stat.peakTileIds?.join(', ')
                     };
                 }
@@ -795,7 +820,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         visit(nodes, 0);
     }
 
-    /** Propagates aggregate peak and average values up the tree hierarchy. */
+    /** Propagates aggregate peak, average, and minimum values up the tree hierarchy. */
     private propagateParentStats(nodes: TreeTableNode[]) {
         nodes.forEach(node => this.buildParentAggregate(node));
     }
@@ -868,8 +893,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const averageValues = aggregatesForCalculation
             .map(aggregate => aggregate.average)
             .filter((value): value is number => this.isFiniteNumber(value));
+        const minValues = aggregatesForCalculation
+            .map(aggregate => aggregate.min)
+            .filter((value): value is number => this.isFiniteNumber(value));
 
-        if (!peakValues.length || !averageValues.length) {
+        if (!peakValues.length || !averageValues.length || !minValues.length) {
             return {
                 hasNumeric: true,
                 eligible: false
@@ -878,13 +906,17 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         const peak = Math.max(...peakValues);
         const average = averageValues.reduce((sum, value) => sum + value, 0) / averageValues.length;
+        const min = Math.min(...minValues);
         rowData.unit = unit;
         rowData.peak = peak;
         rowData.average = average;
+        rowData.min = min;
         rowData.displayPeak = this.formatValueWithUnit(peak, unit);
         rowData.displayAverage = this.formatValueWithUnit(average, unit);
+        rowData.displayMin = this.formatValueWithUnit(min, unit);
         rowData.basePeakTooltip = this.formatBaseTooltip(peak, unit);
         rowData.baseAverageTooltip = this.formatBaseTooltip(average, unit);
+        rowData.baseMinTooltip = this.formatBaseTooltip(min, unit);
         if (hasChildren) {
             rowData.peakTileIds = undefined;
         }
@@ -894,13 +926,16 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             eligible: true,
             unit,
             peak,
-            average
+            average,
+            min
         };
     }
 
     /** Extracts the aggregate contribution of one row when it has numeric values. */
     private extractNodeAggregate(rowData: PerfTreeRowData): ParentAggregate {
-        const hasNumeric = this.isFiniteNumber(rowData.peak) || this.isFiniteNumber(rowData.average);
+        const hasNumeric = this.isFiniteNumber(rowData.peak) ||
+            this.isFiniteNumber(rowData.average) ||
+            this.isFiniteNumber(rowData.min);
         if (!hasNumeric) {
             return {
                 hasNumeric: false,
@@ -909,7 +944,10 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const unit = this.toSupportedUnit(rowData.unit);
-        if (!unit || !this.isFiniteNumber(rowData.peak) || !this.isFiniteNumber(rowData.average)) {
+        if (!unit ||
+            !this.isFiniteNumber(rowData.peak) ||
+            !this.isFiniteNumber(rowData.average) ||
+            !this.isFiniteNumber(rowData.min)) {
             return {
                 hasNumeric: true,
                 eligible: false
@@ -921,7 +959,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             eligible: true,
             unit,
             peak: rowData.peak,
-            average: rowData.average
+            average: rowData.average,
+            min: rowData.min
         };
     }
 
@@ -946,6 +985,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 const rowData = this.getRowData(node);
                 rowData.peakClass = undefined;
                 rowData.averageClass = undefined;
+                rowData.minClass = undefined;
                 const hasChildren = !!node.children?.length;
                 if (rowData.unit === 'ms') {
                     const target = hasChildren
@@ -956,6 +996,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                     }
                     this.collectPositiveFiniteValue(target, rowData.peak);
                     this.collectPositiveFiniteValue(target, rowData.average);
+                    this.collectPositiveFiniteValue(target, rowData.min);
                 }
                 if (hasChildren) {
                     collect(node.children!, depth + 1);
@@ -982,6 +1023,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                     const median = hasChildren ? parentMediansByDepth.get(depth) : leafMedian;
                     rowData.peakClass = this.resolveSuspiciousClass(rowData.peak, median);
                     rowData.averageClass = this.resolveSuspiciousClass(rowData.average, median);
+                    rowData.minClass = this.resolveSuspiciousClass(rowData.min, median);
                 }
                 if (hasChildren) {
                     apply(node.children!, depth + 1);
