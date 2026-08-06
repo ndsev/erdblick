@@ -13,6 +13,7 @@ import {PackedTileId} from "@ndsev/ndslive-math";
 import type {FilterTileState} from "../../mapdata/filter-tile-state.model";
 import type {StyledMapgetLayer} from "../../mapdata/styled-mapget-layer.model";
 import type {TileFeatureId} from "../../shared/appstate.service";
+import {formatFeatureInspectionTarget} from "../../shared/tile-feature-id";
 import {sipHash64Hex} from "../../styledata/hash";
 import {SceneMode} from "../../integrations/geo";
 import {coreLib} from "../../integrations/wasm";
@@ -1939,15 +1940,29 @@ export class TileSubsetLayerVisualization {
             }));
         }
         let featureId = result.featureId;
-        if (Number.isInteger(result.attributeIndex)) {
-            featureId += `:attribute#${result.attributeIndex}`;
-            if (result.hasValidity && Number.isInteger(result.validityIndex)) {
-                featureId += `:validity#${result.validityIndex}`;
-            }
+        const attributeIndex = result.attributeIndex;
+        const validityIndex = result.validityIndex;
+        const relationIndex = result.relationIndex;
+        if (typeof attributeIndex === "number" &&
+            Number.isInteger(attributeIndex)) {
+            featureId = formatFeatureInspectionTarget({
+                scope: "attribute",
+                baseFeatureId: result.featureId,
+                attributeIndex,
+                ...(result.hasValidity &&
+                    typeof validityIndex === "number" &&
+                    Number.isInteger(validityIndex)
+                    ? {validityIndex}
+                    : {})
+            });
         } else if (result.relationSourceFeatureId &&
-                   Number.isInteger(result.relationIndex)) {
-            featureId =
-                `${result.relationSourceFeatureId}:relation#${result.relationIndex}`;
+                   typeof relationIndex === "number" &&
+                   Number.isInteger(relationIndex)) {
+            featureId = formatFeatureInspectionTarget({
+                scope: "relation",
+                baseFeatureId: result.relationSourceFeatureId,
+                relationIndex
+            });
         }
         return [{mapTileKey: state.mapTileKey, featureId}];
     }

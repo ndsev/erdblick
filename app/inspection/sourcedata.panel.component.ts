@@ -6,7 +6,6 @@ import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
-    MapTileRequestStatus,
     MapTileStreamClient,
 } from "../mapdata/tilestream";
 import {MapInfoService} from "../mapdata/map-info.service";
@@ -15,6 +14,7 @@ import {
     expandSingleChildSourceDataPaths,
     sourceDataTreePresentation
 } from "./sourcedata-tree.presentation";
+import {waitForSourceDataRequest} from "./source-data-request";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -139,37 +139,38 @@ export class SourceDataPanelComponent {
         };
 
         let layer: TileSourceDataLayer | null = null;
-        let sourceDataParseError: Error | null = null;
         const socket = new MapTileStreamClient("/interactive");
         const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
         if (dataSourceInfoJson) {
             socket.setDataSourceInfoJson(dataSourceInfoJson);
         }
 
-        socket.withSourceDataCallback((payload) => {
-            try {
-                const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
-                    return socket.parser.readTileSourceDataLayer(wasmBlob);
-                }, payload);
-                if (parsedLayer) {
+        const sourceDataReceived = new Promise<void>((resolve, reject) => {
+            socket.withSourceDataCallback((payload) => {
+                try {
+                    const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
+                        return socket.parser.readTileSourceDataLayer(wasmBlob);
+                    }, payload);
+                    if (!parsedLayer) {
+                        reject(new Error(this.noSourceDataMessage(mapTileKey)));
+                        return;
+                    }
                     const currentLayer = layer as TileSourceDataLayer | null;
                     currentLayer?.delete();
                     layer = parsedLayer;
+                    resolve();
+                } catch (err) {
+                    reject(err instanceof Error ? err : new Error(`${err}`));
                 }
-            } catch (err) {
-                sourceDataParseError = err instanceof Error ? err : new Error(`${err}`);
-            }
+            });
         });
 
-        let status;
         try {
             socket.sendRequest(requestBody);
-            status = await socket.waitForCompletion();
-
-            const waitUntil = Date.now() + 5000;
-            while (!layer && !sourceDataParseError && Date.now() < waitUntil) {
-                await new Promise(resolve => setTimeout(resolve, 25));
-            }
+            await waitForSourceDataRequest(
+                socket.waitForCompletion(),
+                sourceDataReceived
+            );
         } catch (err) {
             const currentLayer = layer as TileSourceDataLayer | null;
             currentLayer?.delete();
@@ -178,26 +179,9 @@ export class SourceDataPanelComponent {
             socket.destroy();
         }
 
-        if (sourceDataParseError) {
-            const currentLayer = layer as TileSourceDataLayer | null;
-            currentLayer?.delete();
-            throw sourceDataParseError;
-        }
-
-        const statusMessage = status.message || "";
-        const failures = (status.requests || []).filter(req => req.status !== MapTileRequestStatus.Success);
-        if (failures.length) {
-            const summary = failures
-                .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
-                .join(", ");
-            const currentLayer = layer as TileSourceDataLayer | null;
-            currentLayer?.delete();
-            throw new Error(`Tile request failed: ${summary}`);
-        }
-
         const loadedLayer = layer as TileSourceDataLayer | null;
         if (!loadedLayer) {
-            throw new Error(statusMessage || this.noSourceDataMessage(mapTileKey));
+            throw new Error(this.noSourceDataMessage(mapTileKey));
         }
 
         const error = loadedLayer.getError();

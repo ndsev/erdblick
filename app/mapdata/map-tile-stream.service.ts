@@ -34,6 +34,7 @@ import {
     TileFeatureId
 } from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
+import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 
 export interface BackendRequestProgress {
     done: number;
@@ -365,7 +366,7 @@ export class MapTileStreamService {
                 ids = [];
                 group.tiles.set(tileId, ids);
             }
-            const baseId = this.baseFeatureId(feature.featureId);
+            const baseId = stripFeatureInspectionTarget(feature.featureId);
             if (!ids.includes(baseId)) {
                 ids.push(baseId);
             }
@@ -510,7 +511,7 @@ export class MapTileStreamService {
             return parsed
                 ? {
                     mapId: parsed[0],
-                    featureId: this.baseFeatureId(feature.featureId)
+                    featureId: stripFeatureInspectionTarget(feature.featureId)
                 }
                 : null;
         });
@@ -569,7 +570,7 @@ export class MapTileStreamService {
     }
 
     private featureIdentityKey(feature: TileFeatureId): string {
-        return `${feature.mapTileKey}\n${this.baseFeatureId(feature.featureId)}`;
+        return `${feature.mapTileKey}\n${stripFeatureInspectionTarget(feature.featureId)}`;
     }
 
     parseMapTileKeySafe(tileKey: string): [string, string, number] | null {
@@ -1052,17 +1053,6 @@ export class MapTileStreamService {
             }
             this.sourceCatalogRefreshTargetRevision = target;
         }
-    }
-
-    private baseFeatureId(featureId: string): string {
-        const markers = [":attribute#", ":relation#"];
-        for (const marker of markers) {
-            const index = featureId.indexOf(marker);
-            if (index >= 0) {
-                return featureId.slice(0, index);
-            }
-        }
-        return featureId;
     }
 
     private showInfo(message: string): void {

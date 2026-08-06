@@ -23,7 +23,11 @@ import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData, type InspectionTreeExpansionState} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    isFeatureInspectionSubTarget,
+    parseFeatureInspectionTarget,
+    stripFeatureInspectionTarget
+} from "../shared/tile-feature-id";
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
@@ -1248,7 +1252,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             if (this.inspectionMenuItems.length) {
                 this.inspectionMenuItems.push({separator: true});
             }
-            const targetLabel = inspectionTarget.includes(":relation#") ? "Relation/Validity" : "Attr/Validity";
+            const targetLabel = parseFeatureInspectionTarget(inspectionTarget)
+                .scope === "relation"
+                ? "Relation/Validity"
+                : "Attr/Validity";
             this.inspectionMenuItems.push({
                 label: this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
                     ? `Unhighlight ${targetLabel}`
@@ -1278,7 +1285,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             rowData?.["softHoverGroupId"]
         ];
         return candidates.find((value): value is string =>
-            typeof value === "string" && (value.includes(":attribute#") || value.includes(":relation#")));
+            typeof value === "string" && isFeatureInspectionSubTarget(value));
     }
 
     /** Checks whether this panel already highlights the requested attribute/validity target. */

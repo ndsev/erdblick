@@ -4,6 +4,25 @@ export interface TileFeatureIdLike {
     mapTileKey: string;
 }
 
+/** Parsed identity of a feature or one of its inspectable child rows. */
+export type FeatureInspectionTarget =
+    | {
+        scope: "feature";
+        baseFeatureId: string;
+    }
+    | {
+        scope: "attribute";
+        baseFeatureId: string;
+        attributeIndex: number;
+        validityIndex?: number;
+    }
+    | {
+        scope: "relation";
+        baseFeatureId: string;
+        relationIndex: number;
+        validityIndex?: number;
+    };
+
 const COMPACT_TILE_FEATURE_ID_PREFIX = "tfid:";
 
 interface DecodedCompactTileFeaturePayload {
@@ -58,10 +77,88 @@ export function normalizeTileFeatureId(value: TileFeatureIdLike | string | null 
     return decodeCompactTileFeatureId(value) ?? value;
 }
 
+/**
+ * Parses the inspection suffix shared by native picking, search results, and
+ * inspection panels. The comma before `validity` is accepted for old URLs;
+ * newly formatted targets always use a colon.
+ */
+export function parseFeatureInspectionTarget(targetId: string): FeatureInspectionTarget {
+    const match = targetId.match(
+        /^(.*):(attribute|relation)#(\d+)(?:(?::|,)validity#(\d+))?$/
+    );
+    if (!match) {
+        return {scope: "feature", baseFeatureId: targetId};
+    }
+    const baseFeatureId = match[1];
+    const entryIndex = Number(match[3]);
+    const validityIndex = match[4] === undefined
+        ? undefined
+        : Number(match[4]);
+    if (match[2] === "attribute") {
+        return {
+            scope: "attribute",
+            baseFeatureId,
+            attributeIndex: entryIndex,
+            ...(validityIndex === undefined ? {} : {validityIndex})
+        };
+    }
+    return {
+        scope: "relation",
+        baseFeatureId,
+        relationIndex: entryIndex,
+        ...(validityIndex === undefined ? {} : {validityIndex})
+    };
+}
+
+/** Formats one parsed inspection target using the canonical suffix grammar. */
+export function formatFeatureInspectionTarget(
+    target: FeatureInspectionTarget
+): string {
+    if (target.scope === "feature") {
+        return target.baseFeatureId;
+    }
+    const entryIndex = target.scope === "attribute"
+        ? target.attributeIndex
+        : target.relationIndex;
+    const validitySuffix = target.validityIndex === undefined
+        ? ""
+        : `:validity#${target.validityIndex}`;
+    return `${target.baseFeatureId}:${target.scope}#${entryIndex}${validitySuffix}`;
+}
+
+/** Returns true when an id addresses an attribute or relation inspection row. */
+export function isFeatureInspectionSubTarget(targetId: string): boolean {
+    return parseFeatureInspectionTarget(targetId).scope !== "feature";
+}
+
+/** Returns true when an id addresses one exact validity row. */
+export function hasFeatureInspectionValidity(targetId: string): boolean {
+    const target = parseFeatureInspectionTarget(targetId);
+    return target.scope !== "feature" && target.validityIndex !== undefined;
+}
+
+/** Removes only the validity suffix and retains its attribute or relation row. */
+export function stripFeatureInspectionValidity(targetId: string): string {
+    const target = parseFeatureInspectionTarget(targetId);
+    if (target.scope === "feature" || target.validityIndex === undefined) {
+        return targetId;
+    }
+    return target.scope === "attribute"
+        ? formatFeatureInspectionTarget({
+            scope: "attribute",
+            baseFeatureId: target.baseFeatureId,
+            attributeIndex: target.attributeIndex
+        })
+        : formatFeatureInspectionTarget({
+            scope: "relation",
+            baseFeatureId: target.baseFeatureId,
+            relationIndex: target.relationIndex
+        });
+}
+
 /** Removes inspection sub-target suffixes while preserving the base feature id. */
 export function stripFeatureInspectionTarget(featureId: string): string {
-    const suffixPosition = featureId.search(/:(?:attribute|relation)#/);
-    return suffixPosition >= 0 ? featureId.slice(0, suffixPosition) : featureId;
+    return parseFeatureInspectionTarget(featureId).baseFeatureId;
 }
 
 /** Returns whether two picking targets describe the exact same interaction row. */

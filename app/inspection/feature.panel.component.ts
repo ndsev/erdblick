@@ -5,7 +5,12 @@ import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 import {Feature} from '../../build/libs/core/erdblick-core';
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    hasFeatureInspectionValidity,
+    isFeatureInspectionSubTarget,
+    stripFeatureInspectionTarget,
+    stripFeatureInspectionValidity
+} from "../shared/tile-feature-id";
 
 /** Click target metadata emitted by C++ for propagated scalar value pills. */
 interface InspectionValueBubble {
@@ -225,11 +230,11 @@ export class FeaturePanelComponent implements OnDestroy {
     private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): number | undefined {
         const selectedTargetIds = (this.selectedFeatures ?? [])
             .map(feature => feature.featureId)
-            .filter(featureId => featureId.includes(":attribute#") || featureId.includes(":relation#"));
+            .filter(isFeatureInspectionSubTarget);
         const exactTargetIds = new Set(selectedTargetIds);
         const parentTargetIds = new Set(selectedTargetIds
-            .map(featureId => featureId.replace(/:validity#\d+$/, ""))
-            .filter(featureId => featureId.includes(":attribute#") || featureId.includes(":relation#")));
+            .map(stripFeatureInspectionValidity)
+            .filter(isFeatureInspectionSubTarget));
         if (!exactTargetIds.size) {
             return undefined;
         }
@@ -258,7 +263,10 @@ export class FeaturePanelComponent implements OnDestroy {
                 highlightedNode = node;
                 highlightedParents = parents;
                 selectedHighlightTarget = matchedTarget;
-                selectedHighlightMode = matchedTarget?.includes(":validity#") ? "strong" : "soft";
+                selectedHighlightMode = matchedTarget &&
+                    hasFeatureInspectionValidity(matchedTarget)
+                    ? "strong"
+                    : "soft";
                 for (const parent of parents) {
                     parent.expanded = true;
                 }
@@ -362,15 +370,6 @@ export class FeaturePanelComponent implements OnDestroy {
                 return null;
             }
             return trimmed;
-        };
-
-        /** Removes validity suffixes from displayed inspection names. */
-        const stripValiditySuffix = (hoverId: string): string => {
-            const validityIndex = hoverId.indexOf(":validity#");
-            if (validityIndex >= 0) {
-                return hoverId.slice(0, validityIndex);
-            }
-            return hoverId;
         };
 
         /** Builds a stable tree node id from the current traversal path. */
@@ -477,8 +476,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 let nextSoftHoverGroupId = context.softHoverGroupId;
                 let nextStrongHoverGroupId = context.strongHoverGroupId;
                 if (typeof data?.hoverId === "string") {
-                    if (data.hoverId.includes(":validity#")) {
-                        nextSoftHoverGroupId = stripValiditySuffix(data.hoverId);
+                    if (hasFeatureInspectionValidity(data.hoverId)) {
+                        nextSoftHoverGroupId =
+                            stripFeatureInspectionValidity(data.hoverId);
                         nextStrongHoverGroupId = data.hoverId;
                     } else {
                         nextSoftHoverGroupId = data.hoverId;

@@ -69,6 +69,7 @@ import {
     compileFeatureSearchStyle,
     type CompiledFeatureSearchStyle
 } from "./feature-search-style";
+import {formatFeatureInspectionTarget} from "../shared/tile-feature-id";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -3439,14 +3440,22 @@ export class FeatureSearchService {
 
     /** Builds the feature-id suffix consumed by native highlight code for attribute/validity hover. */
     private searchResultHoverFeatureId(featureId: string, entry: SearchResultTileEntry): string {
-        let hoverFeatureId = featureId;
-        if (this.hasFiniteIndex(entry.attributeIndex)) {
-            hoverFeatureId += `:attribute#${Math.max(0, Math.floor(entry.attributeIndex))}`;
+        if (!this.hasFiniteIndex(entry.attributeIndex)) {
+            return featureId;
         }
-        if (this.hasFiniteIndex(entry.validityIndex)) {
-            hoverFeatureId += `:validity#${Math.max(0, Math.floor(entry.validityIndex))}`;
-        }
-        return hoverFeatureId;
+        return formatFeatureInspectionTarget({
+            scope: "attribute",
+            baseFeatureId: featureId,
+            attributeIndex: Math.max(0, Math.floor(entry.attributeIndex)),
+            ...(this.hasFiniteIndex(entry.validityIndex)
+                ? {
+                    validityIndex: Math.max(
+                        0,
+                        Math.floor(entry.validityIndex)
+                    )
+                }
+                : {})
+        });
     }
 
     /** Creates a compact human-readable label for the result tree. */

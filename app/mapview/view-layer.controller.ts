@@ -44,9 +44,13 @@ import type {
 } from "../shared/appstate.service";
 import {sipHash64Hex} from "../styledata/hash";
 import {
-    stripFeatureInspectionTarget,
     tileFeatureInteractionTargetsEqual
 } from "../shared/tile-feature-id";
+import {
+    interactionScopeTargetKey,
+    interactionTargetKey,
+    planRemoteInteractionHighlight
+} from "./interaction-highlight-plan";
 import type {
     ViewLayerDiagnosticsService
 } from "./view-layer-diagnostics.service";
@@ -859,18 +863,6 @@ export class ViewLayerController {
             for (const {mapgetLayer, features} of byLayer.values()) {
                 const localVisualizations =
                     this.localInteractionVisualizations(mapgetLayer);
-                const resolvedFeatures = features.map(feature => ({
-                    ...feature,
-                    backendFeatureId:
-                        stripFeatureInspectionTarget(feature.featureId)
-                }));
-                const roots = resolvedFeatures.map(feature => ({
-                    tileId: feature.tileId,
-                    featureId: feature.backendFeatureId
-                }));
-                const tileIds = [...new Set(
-                    resolvedFeatures.map(feature => feature.tileId)
-                )];
                 for (let styleIndex = 0;
                      styleIndex < orderedStyles.length;
                      ++styleIndex) {
@@ -919,7 +911,7 @@ export class ViewLayerController {
                                         feature,
                                         scope)) {
                                         localScopedTargets.add(
-                                            this.interactionScopeTargetKey(
+                                            interactionScopeTargetKey(
                                                 scope,
                                                 feature));
                                     }
@@ -932,8 +924,8 @@ export class ViewLayerController {
                                 const existing = byId.get(overlayId);
                                 if (existing) {
                                     if (!existing.targets.some(target =>
-                                        this.interactionTargetKey(target) ===
-                                            this.interactionTargetKey(feature))) {
+                                        interactionTargetKey(target) ===
+                                            interactionTargetKey(feature))) {
                                         byId.set(overlayId, {
                                             ...existing,
                                             targets: [...existing.targets, feature]
@@ -967,87 +959,14 @@ export class ViewLayerController {
                     if (!rawPlan.valid || !rawPlan.channels.length) {
                         continue;
                     }
-                    const plan = structuredClone(rawPlan);
-                    plan.channels = plan.channels.filter(channel => {
-                        const scopedFeatures = channel.scope === "attribute"
-                            ? resolvedFeatures.filter(feature =>
-                                /:attribute#\d+/.test(feature.featureId))
-                            : resolvedFeatures;
-                        const remoteFeatures = scopedFeatures.filter(feature =>
-                            !this.localInteractionSatisfiesChannel(
-                                channel.scope,
-                                feature,
-                                localScopedTargets));
-                        // A bare feature selection must not expand every
-                        // attribute/validity merely because the highlight
-                        // stylesheet also contains attribute rules.
-                        if (remoteFeatures.length === 0) {
-                            return false;
-                        }
-                        const scopedRestriction = remoteFeatures
-                            .map(feature =>
-                                `id == ${JSON.stringify(feature.backendFeatureId)}`)
-                            .join(" or ");
-                        channel.featureFilter = channel.featureFilter
-                            ? `(${channel.featureFilter}) and (${scopedRestriction})`
-                            : scopedRestriction;
-                        const entryRestrictions = remoteFeatures.flatMap(
-                            feature => {
-                                if (channel.scope === "attribute") {
-                                    const match = feature.featureId.match(
-                                        /:attribute#(\d+)(?:[:,]validity#(\d+))?/
-                                    );
-                                    const conditions = [
-                                        `$feature.id == ${JSON.stringify(feature.backendFeatureId)}`
-                                    ];
-                                    if (match) {
-                                        conditions.push(
-                                            `$attributeIndex == ${Number(match[1])}`
-                                        );
-                                        if (match[2] !== undefined) {
-                                            conditions.push(
-                                                "$hasValidity",
-                                                `$validityIndex == ${Number(match[2])}`
-                                            );
-                                        }
-                                    }
-                                    return [`(${conditions.join(" and ")})`];
-                                }
-                                if (channel.scope === "relation") {
-                                    const match = feature.featureId.match(
-                                        /:relation#(\d+)/
-                                    );
-                                    if (match) {
-                                        return [
-                                            `($source.id == ${JSON.stringify(feature.backendFeatureId)} and ` +
-                                            `$relationIndex == ${Number(match[1])})`
-                                        ];
-                                    }
-                                    // Exact roots already restrict traversal
-                                    // to this selected feature. Restricting
-                                    // every terminal relation to the root as
-                                    // its source would discard recursively
-                                    // discovered local edges.
-                                    return [];
-                                }
-                                return [];
-                            }
-                        );
-                        if (entryRestrictions.length) {
-                            const entryRestriction =
-                                entryRestrictions.join(" or ");
-                            channel.entryFilter = channel.entryFilter
-                                ? `(${channel.entryFilter}) and (${entryRestriction})`
-                                : entryRestriction;
-                        }
-                        return true;
-                    });
-                    if (!plan.channels.length) {
+                    const remotePlan = planRemoteInteractionHighlight(
+                        rawPlan,
+                        features,
+                        localScopedTargets
+                    );
+                    if (!remotePlan) {
                         continue;
                     }
-                    const needsRoots = plan.channels.some(channel =>
-                        channel.scope === "relation"
-                    );
                     const identitySignature = sipHash64Hex(JSON.stringify({
                         features: features.map(feature => [
                             feature.mapTileKey,
@@ -1073,9 +992,9 @@ export class ViewLayerController {
                         presentationKind: group.kind,
                         presentationId,
                         options,
-                        plan,
-                        tileIds,
-                        roots: needsRoots ? roots : [],
+                        plan: remotePlan.plan,
+                        tileIds: remotePlan.tileIds,
+                        roots: remotePlan.roots,
                         styleOrder: styleIndex +
                             (group.kind === "hover" ? 3000 : 2000)
                     });
@@ -1174,39 +1093,6 @@ export class ViewLayerController {
             collect(owned);
         }
         return [...result];
-    }
-
-    private localInteractionSatisfiesChannel(
-        scope: string,
-        feature: TileFeatureId,
-        localTargets: ReadonlySet<string>
-    ): boolean {
-        if (!localTargets.has(this.interactionScopeTargetKey(
-            scope,
-            feature))) {
-            return false;
-        }
-        if (scope === "attribute") {
-            return /:attribute#\d+/.test(feature.featureId);
-        }
-        if (scope === "relation") {
-            return /:relation#\d+/.test(feature.featureId);
-        }
-        if (scope === "feature") {
-            return !/:attribute#\d+|:relation#\d+/.test(feature.featureId);
-        }
-        return true;
-    }
-
-    private interactionScopeTargetKey(
-        scope: string,
-        feature: TileFeatureId
-    ): string {
-        return `${scope}\n${this.interactionTargetKey(feature)}`;
-    }
-
-    private interactionTargetKey(feature: TileFeatureId): string {
-        return `${feature.mapTileKey}\n${feature.featureId}`;
     }
 
     private parseFeatureTileId(feature: TileFeatureId): {

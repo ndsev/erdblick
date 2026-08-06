@@ -4,17 +4,7 @@ import type {
 } from "../../build/libs/core/erdblick-core";
 import {uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileFeatureId} from "../shared/appstate.service";
-
-/** Attribute and relation pseudo-identities inspect their host feature. */
-function normalizeFeatureIdForLookup(featureId: string): string {
-    for (const marker of [":attribute#", ":relation#"]) {
-        const index = featureId.indexOf(marker);
-        if (index >= 0) {
-            return featureId.slice(0, index);
-        }
-    }
-    return featureId;
-}
+import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 
 /**
  * One feature-restricted `/tiles` response retained only by inspection models.
@@ -73,7 +63,7 @@ export class InspectionFeatureTile {
 
     contains(featureId: string): boolean {
         return this.peek(layer => {
-            const feature = layer.find(normalizeFeatureIdForLookup(featureId));
+            const feature = layer.find(stripFeatureInspectionTarget(featureId));
             try {
                 return !feature.isNull();
             } finally {
@@ -97,7 +87,7 @@ export class FeatureWrapper implements TileFeatureId {
     peek<T>(callback: (feature: any) => T): T | null {
         return this.featureTile.peek(layer => {
             const feature = layer.find(
-                normalizeFeatureIdForLookup(this.featureId)
+                stripFeatureInspectionTarget(this.featureId)
             );
             if (feature.isNull()) {
                 feature.delete();
