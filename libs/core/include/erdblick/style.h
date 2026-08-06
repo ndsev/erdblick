@@ -61,6 +61,34 @@ struct FeatureStyleOption
     }
 };
 
+/** Literal or option-backed color used by a constrained interaction effect. */
+struct InteractionEffectColor
+{
+    std::optional<glm::fvec4> literal;
+    std::optional<std::string> optionId;
+};
+
+/** Presentation-only effect applied to already materialized interaction geometry. */
+struct InteractionEffect
+{
+    std::optional<InteractionEffectColor> tint;
+    float tintMix = 1.0f;
+    float opacity = 1.0f;
+    float edgeWidth = 0.0f;
+    std::optional<InteractionEffectColor> haloColor;
+    float haloRadius = 0.0f;
+    float haloOpacity = 0.0f;
+    std::optional<InteractionEffectColor> stripeColor;
+    float stripeSpacing = 0.0f;
+    float stripeWidth = 0.0f;
+    float stripeOpacity = 0.0f;
+    float stripeAngle = 45.0f;
+    float stripeOffset = 0.0f;
+    float stripeSoftness = 1.0f;
+
+    [[nodiscard]] NativeJsValue toJsValue(NativeJsValue const& options) const;
+};
+
 /**
  * Parsed feature-layer style sheet containing rules, options, and quick lookup caches.
  *
@@ -90,6 +118,12 @@ public:
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
     /** Check whether the style declares rules for the given highlight mode. */
     [[nodiscard]] bool supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const;
+    /** Check whether the style declares a local/fetched overlay effect for the mode. */
+    [[nodiscard]] bool supportsInteractionEffect(FeatureStyleRule::HighlightMode mode) const;
+    /** Return the effect recipe as a plain JS object, or undefined when absent. */
+    [[nodiscard]] NativeJsValue interactionEffect(
+        FeatureStyleRule::HighlightMode mode,
+        NativeJsValue const& options) const;
     /** Report whether the style differentiates explicitly between low-fi and high-fi rules. */
     [[nodiscard]] bool hasExplicitLowFidelityRules() const;
     /** Check whether any rule for the given highlight mode targets relations. */
@@ -152,6 +186,7 @@ private:
     std::optional<std::regex> layerAffinity_;
     std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> ruleIndicesByModeAndFidelity_{};
     uint32_t highlightModeMask_ = 0;
+    std::array<std::optional<InteractionEffect>, 2> interactionEffects_{};
     bool hasExplicitLowFidelityRules_ = false;
     mutable std::unordered_map<std::string, RuleIndexCacheEntry, TransparentStringHash, TransparentStringEqual>
         ruleIndicesByTypeCache_;

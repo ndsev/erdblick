@@ -55,6 +55,10 @@ import {
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
+import {
+    DeckInteractionOutlineService,
+    isDeckInteractionMaskLayer
+} from "./deck-interaction-outline.service";
 import {environment} from "../../environments/environment";
 import {coreLib} from "../../integrations/wasm";
 import {
@@ -282,6 +286,7 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly SEARCH_RESULT_SOURCE_TILE_HASH_PRIME = 0x01000193;
     private static readonly HOVER_PICK_THROTTLE_MS = 75;
     private static readonly HOVER_PICK_SUSPEND_AFTER_CAMERA_MS = 150;
+    private static readonly HOVER_PICK_MAX_OBJECTS = 10;
     private static readonly NAVIGATION_COMMAND_STEP_PX = 64;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
@@ -299,6 +304,8 @@ export abstract class DeckMapView implements IRenderView {
     protected readonly layerRegistry = new DeckLayerRegistry();
     protected readonly renderBufferArena =
         new DeckRenderBufferArena(this.layerRegistry);
+    protected readonly interactionOutlineService =
+        new DeckInteractionOutlineService(this.layerRegistry);
     protected readonly subscriptions: Subscription[] = [];
     protected viewState: DeckCameraState = {
         longitude: 0,
@@ -357,6 +364,7 @@ export abstract class DeckMapView implements IRenderView {
     private hoverPickTimer: ReturnType<typeof setTimeout> | null = null;
     private hoverPickingRestoreTimer: ReturnType<typeof setTimeout> | null = null;
     private pendingHoverInfo: PickingInfo | null = null;
+    private deckCanvasPointerInside = false;
     private lastProcessedHoverPickAtMs = 0;
     private hoverPickingSuspendedUntilMs = 0;
     private isCameraInteracting = false;
@@ -366,6 +374,25 @@ export abstract class DeckMapView implements IRenderView {
     private cameraStatePushTimer: ReturnType<typeof setTimeout> | null = null;
     private cameraStatePushPending = false;
     private readonly deckOnHover = (info: PickingInfo) => this.onHover(info);
+    private readonly deckCanvasPointerEnter = () => {
+        this.deckCanvasPointerInside = true;
+    };
+    private readonly deckCanvasPointerLeave = (event: PointerEvent) => {
+        this.deckCanvasPointerInside = false;
+        // Deck throttles expensive drill picks. A sample queued just before
+        // the pointer enters an inspection panel must not run afterward and
+        // erase the panel-owned validity hover.
+        this.pendingHoverInfo = null;
+        this.cancelHoverPickScheduling();
+        this.setFeatureHoverState(false);
+        this.setHoverNavigationPivot(null, null);
+        this.hoveredFeatureIds.next(undefined);
+        const destinationOwnsInspectionHover = event.relatedTarget instanceof Element
+            && event.relatedTarget.closest("inspection-container") !== null;
+        if (!destinationOwnsInspectionHover) {
+            void this.inspectionSelection.setHoveredFeatures([]);
+        }
+    };
     private desktopDrillPickingEnabled = true;
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
@@ -377,6 +404,9 @@ export abstract class DeckMapView implements IRenderView {
      */
     private readonly deckLayerFilter: DeckProps<DeckView>["layerFilter"] = ({layer, isPicking}) => {
         const layerId = String(layer.id ?? "");
+        if (isDeckInteractionMaskLayer(layerId)) {
+            return false;
+        }
         const layerPickable = Boolean((layer.props as {pickable?: boolean | "3d"} | undefined)?.pickable);
         const isGltfPickProxyLayer = layerId.includes("/gltf-pick-proxy");
         const isVisibleGltfLayer = layerId.includes("/gltf") && !isGltfPickProxyLayer;
@@ -463,6 +493,8 @@ export abstract class DeckMapView implements IRenderView {
         }
         container.innerHTML = "";
         const canvas = this.createDeckCanvas(container);
+        canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
+        canvas.addEventListener("pointerleave", this.deckCanvasPointerLeave);
         this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
@@ -477,6 +509,7 @@ export abstract class DeckMapView implements IRenderView {
             views: this.createMapDeckView(this.createDeckControllerOptions()),
             viewState: this.viewState,
             layers: [],
+            effects: [this.interactionOutlineService],
             controller: false,
             layerFilter: this.deckLayerFilter,
             onDeviceInitialized: (device) => {
@@ -515,6 +548,10 @@ export abstract class DeckMapView implements IRenderView {
                 if (frameIntervalMs <= 2000) {
                     this.layerController.recordDeckFrameTime(frameIntervalMs);
                 }
+                this.layerController.recordDeckPresentationDiagnostics(
+                    this.layerRegistry.size,
+                    this.renderBufferArena.debugSnapshot()
+                );
             }
         };
         this.deck = new DeckGlDeck(deckProps);
@@ -562,6 +599,14 @@ export abstract class DeckMapView implements IRenderView {
         this.renderBufferArena.clear();
         this.layerRegistry.destroy();
         if (this.deck) {
+            this.deck.getCanvas()?.removeEventListener(
+                "pointerenter",
+                this.deckCanvasPointerEnter
+            );
+            this.deck.getCanvas()?.removeEventListener(
+                "pointerleave",
+                this.deckCanvasPointerLeave
+            );
             this.deck.finalize();
             this.deck = null;
         }
@@ -851,6 +896,7 @@ export abstract class DeckMapView implements IRenderView {
                 deck: this.deck,
                 layerRegistry: this.layerRegistry,
                 renderBufferArena: this.renderBufferArena,
+                interactionOutlineService: this.interactionOutlineService,
                 sceneMode: this.sceneMode,
                 device: this.deckDevice
             }
@@ -905,7 +951,11 @@ export abstract class DeckMapView implements IRenderView {
             layerIds: this.drillPickLayerIds(),
             unproject3D: false
         });
-        return {featureIds: this.uniqueFeatureIdsFromPickingInfos(pickedObjects)};
+        return {
+            featureIds: this.uniqueFeatureIdsFromPickingInfos(
+                pickedObjects,
+                maxObjects)
+        };
     }
 
     /** Returns the current top-level layer ids explicitly marked as ordinary feature representations. */
@@ -935,7 +985,10 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Expands merged objects and deduplicates exact map-tile/feature identities in pick traversal order. */
-    private uniqueFeatureIdsFromPickingInfos(pickedObjects: PickingInfo[]): TileFeatureId[] {
+    private uniqueFeatureIdsFromPickingInfos(
+        pickedObjects: PickingInfo[],
+        maxFeatures = Number.POSITIVE_INFINITY
+    ): TileFeatureId[] {
         const featureIds: TileFeatureId[] = [];
         const seen = new Set<string>();
         for (const picked of pickedObjects) {
@@ -946,6 +999,9 @@ export abstract class DeckMapView implements IRenderView {
                 }
                 seen.add(identity);
                 featureIds.push(featureId);
+                if (featureIds.length >= maxFeatures) {
+                    return featureIds;
+                }
             }
         }
         return featureIds;
@@ -1798,6 +1854,12 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Updates hover coordinates, hover highlights, and the hover-popover source data. */
     private onHover(info: PickingInfo): void {
+        // Deck may flush one final hover callback after the native pointer has
+        // already crossed into an overlaid inspection panel. Native canvas
+        // ownership wins over that stale renderer sample.
+        if (!this.deckCanvasPointerInside) {
+            return;
+        }
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
             this.pendingHoverInfo = null;
             this.cancelHoverPickScheduling();
@@ -1847,6 +1909,10 @@ export abstract class DeckMapView implements IRenderView {
         const delayMs = Math.max(0, nextEligibleAt - now);
         this.hoverPickTimer = setTimeout(() => {
             this.hoverPickTimer = null;
+            if (!this.deckCanvasPointerInside) {
+                this.pendingHoverInfo = null;
+                return;
+            }
             if (this.isCameraInteracting || performance.now() < this.hoverPickingSuspendedUntilMs) {
                 if (this.pendingHoverInfo) {
                     // Keep the newest pointer sample queued while the camera is still settling.
@@ -1867,9 +1933,21 @@ export abstract class DeckMapView implements IRenderView {
         }, delayMs);
     }
 
-    /** Updates hover state from deck's existing hover pick without another GPU readback. */
+    /** Updates hover state from every ordinary rendered feature beneath the pointer. */
     private processHoverPick(info: PickingInfo): void {
-        const featureIds = this.featureIdsFromPickingInfo(info);
+        if (!this.deckCanvasPointerInside) {
+            return;
+        }
+        const drilledFeatureIds = this.drillPickFeatures(
+            {x: info.x, y: info.y},
+            0,
+            DeckMapView.HOVER_PICK_MAX_OBJECTS
+        ).featureIds;
+        // Preserve a resolvable specialized top hit when no ordinary drill
+        // layer participated in this pick.
+        const featureIds = drilledFeatureIds.length
+            ? drilledFeatureIds
+            : this.featureIdsFromPickingInfo(info);
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
             this.setHoverNavigationPivot(null, null);
@@ -1920,13 +1998,18 @@ export abstract class DeckMapView implements IRenderView {
         const screenPosition = {x: info.x, y: info.y};
         const useDesktopDrillPick = this.desktopDrillPickingEnabled
             && (!srcEvent?.pointerType || srcEvent.pointerType === "mouse");
-        const featureIds = useDesktopDrillPick
+        const pickedFeatureIds = useDesktopDrillPick
             ? this.drillPickFeatures(
                 screenPosition,
                 this.stateService.drillPickRadius,
                 this.stateService.inspectionsLimit
             ).featureIds
             : this.featureIdsFromPickingInfo(info);
+        // Primary click means "the top rendered feature". Multi-selection is
+        // deliberately explicit through Ctrl-click or the context menu's
+        // Select all action, so dense geometry cannot unexpectedly open a
+        // large inspection set.
+        const featureIds = pickedFeatureIds.slice(0, 1);
         const markerPosition = this.stateService.marker && featureIds.length
             ? this.markerPositionForFeature(
                 info,

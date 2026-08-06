@@ -2,7 +2,6 @@
   "extensionModules": {
     "distribVersions": "distribution_versions"
   },
-  "coordinates-enabled": true,
   "surveys": [],
   "styles": [
     {"url": "nds_live_display.yaml"},
@@ -11,6 +10,7 @@
     {"url": "nds_live_roadsurface.yaml"},
     {"url": "nds_live_localization.yaml"},
     {"url": "nds_live_pois.yaml"},
+    {"url": "nds_live_indirect.yaml"},
     {"url": "nds_live_roads.yaml"},
     {"url": "nds_classic_bmd.yaml"},
        {"url": "nds_classic_landmarks.yaml"},
@@ -23,28 +23,6 @@
     {"url": "devsrc_buildings.yaml"},
     {"url": "devsrc_intersections.yaml"},
     {"url": "devsrc_roads.yaml"}
-  ],
-  "externalViewers": [
-    {
-      "id": "e:gm",
-      "name": "Open in Google Maps",
-      "urlTemplate": "https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    },
-    {
-      "id": "e:google-street-view",
-      "name": "Open in Google Street View",
-      "urlTemplate": "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
-    },
-    {
-      "id": "e:osm",
-      "name": "Open in OpenStreetMap",
-      "urlTemplate": "https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=16/{lat}/{lon}"
-    },
-    {
-      "id": "e:bing-maps",
-      "name": "Open in Bing Maps",
-      "urlTemplate": "https://bing.com/maps/default.aspx?cp={lat}~{lon}&lvl=18&style=r"
-    }
   ],
   "backgroundLayers": [
     {

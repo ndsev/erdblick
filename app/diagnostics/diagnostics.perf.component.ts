@@ -501,10 +501,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Filters aggregated perf stats by the active layer and tile-id selections. */
     private computeFilteredPerfStats(): PerfStat[] {
+        const viewStats = this.diagnostics.perfStats$.getValue().filter(
+            stat => stat.scope === 'view'
+        );
         const selectedLayerKeys = new Set(this.selectedMapLayers.map(selection => selection.key));
         if (!selectedLayerKeys.size) {
             this.perfTileScopeCounts = this.createEmptyTileScopeCounts();
-            return [];
+            return viewStats;
         }
 
         const selectedTileIdSet = new Set(this.selectedTileIds.map(selection => selection.tileId));
@@ -531,9 +534,6 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             tileScopedNonEmptyTiles
         );
         const tileStats = buildAggregatedPerfStats(tileScopedNonEmptyTiles);
-        const viewStats = this.diagnostics.perfStats$.getValue().filter(
-            stat => stat.key === 'Rendering/Deck.gl#ms'
-        );
         return [...tileStats, ...viewStats];
     }
 
@@ -810,6 +810,23 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const childAggregates = node.children!.map(child => this.buildParentAggregate(child));
+        if (rowData.pathKey === 'Rendering' ||
+            rowData.pathKey === 'Rendering/Buffer Arena') {
+            // These are organizational groups containing incomparable live
+            // counters. Showing the largest child as their own value suggests
+            // a meaningful aggregate which does not exist.
+            rowData.peak = undefined;
+            rowData.average = undefined;
+            rowData.unit = undefined;
+            rowData.displayPeak = undefined;
+            rowData.displayAverage = undefined;
+            rowData.basePeakTooltip = undefined;
+            rowData.baseAverageTooltip = undefined;
+            return {
+                hasNumeric: childAggregates.some(value => value.hasNumeric),
+                eligible: false
+            };
+        }
         const aggregatesForCalculation: ParentAggregate[] = [];
         let hasNumericDescendants = false;
 

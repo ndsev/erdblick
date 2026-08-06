@@ -1,4 +1,13 @@
-import {AfterViewInit, Component, ElementRef, HostListener, OnDestroy, Renderer2, ViewChild} from "@angular/core";
+import {
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    HostListener,
+    OnDestroy,
+    Renderer2,
+    ViewChild
+} from "@angular/core";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
@@ -208,6 +217,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     };
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
     private dismissedCompletionSignature: string | null = null;
+    private destroyed = false;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
@@ -369,7 +379,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
                 private locationSearchService: LocationSearchService,
-                private externalViewerService: ExternalViewerService) {
+                private externalViewerService: ExternalViewerService,
+                private changeDetectorRef: ChangeDetectorRef) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
         this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -386,13 +397,24 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             debounce(() => timer(this.locationSearchService.debounceMs)),
             switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
         ).subscribe(matches => {
-            if (!this.shouldRequestLocationSearch(this.searchInputValue)) {
-                return;
-            }
-            this.locationSearchItems = matches.map(match => this.locationSearchService.createSearchTarget(match));
-            this.setCurrentSearchItems(this.currentSearchItems());
-            this.reloadSearchHistory();
-            this.refreshSearchMenu();
+            const completedQuery = this.searchInputValue.trim();
+            // A cached provider can complete synchronously while Angular is
+            // checking the search-menu ngFor inputs. Publish the replacement
+            // in the next task and discard it if the input has moved on.
+            setTimeout(() => {
+                if (this.destroyed ||
+                    this.searchInputValue.trim() !== completedQuery ||
+                    !this.shouldRequestLocationSearch(this.searchInputValue)) {
+                    return;
+                }
+                this.locationSearchItems = matches.map(match =>
+                    this.locationSearchService.createSearchTarget(match)
+                );
+                this.setCurrentSearchItems(this.currentSearchItems());
+                this.reloadSearchHistory();
+                this.refreshSearchMenu();
+                this.changeDetectorRef.markForCheck();
+            }, 0);
         }));
 
         this.subscriptions.add(this.stateService.locationSearchResultLimitState.subscribe(() => {
@@ -428,6 +450,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
                 this.completionItems = [];
                 this.completion.visible = false;
+                this.changeDetectorRef.markForCheck();
                 return;
             }
             this.completionItems = value.filter((item, index, array) => {
@@ -458,12 +481,14 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 this.refreshCompletionZIndex();
             }
             this.completion.visible = length > 0 && focusValid;
+            this.changeDetectorRef.markForCheck();
         }));
 
         this.subscriptions.add(this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
             if (pending && this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
                 this.completion.pending = false;
                 this.completion.visible = false;
+                this.changeDetectorRef.markForCheck();
                 return;
             }
             const textarea = this.textarea?.nativeElement;
@@ -479,6 +504,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             } else if (this.completionItems.length === 0) {
                 this.completion.visible = false;
             }
+            this.changeDetectorRef.markForCheck();
         }));
 
         this.subscriptions.add(this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
@@ -510,6 +536,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
     ngOnDestroy() {
+        this.destroyed = true;
         this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
         this.subscriptions.unsubscribe();
         this.searchInputChanged.complete();

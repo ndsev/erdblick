@@ -18,7 +18,8 @@ import {
     AppDialogBounds,
     AppDialogResizeCorner,
     AppDialogResizeLimits,
-    resizeAppDialogBounds
+    resizeAppDialogBounds,
+    resolveAppDialogCssLength
 } from './app-dialog-resize';
 
 interface AppDialogResizeSession {
@@ -355,10 +356,18 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Reads finite CSS resize constraints and clamps them to the current viewport. */
     private resizeLimits(computedStyle: CSSStyleDeclaration): AppDialogResizeLimits {
-        const minWidth = this.cssPixelValue(computedStyle.minWidth, 1);
-        const minHeight = this.cssPixelValue(computedStyle.minHeight, 1);
-        const maxWidth = this.cssPixelValue(computedStyle.maxWidth, window.innerWidth);
-        const maxHeight = this.cssPixelValue(computedStyle.maxHeight, window.innerHeight);
+        const minWidth = resolveAppDialogCssLength(computedStyle.minWidth, window.innerWidth, 1);
+        const minHeight = resolveAppDialogCssLength(computedStyle.minHeight, window.innerHeight, 1);
+        const maxWidth = resolveAppDialogCssLength(
+            computedStyle.maxWidth,
+            window.innerWidth,
+            window.innerWidth
+        );
+        const maxHeight = resolveAppDialogCssLength(
+            computedStyle.maxHeight,
+            window.innerHeight,
+            window.innerHeight
+        );
         return {
             viewportWidth: window.innerWidth,
             viewportHeight: window.innerHeight,
@@ -367,12 +376,6 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             maxWidth: Math.max(minWidth, Math.min(maxWidth, window.innerWidth)),
             maxHeight: Math.max(minHeight, Math.min(maxHeight, window.innerHeight))
         };
-    }
-
-    /** Converts one computed CSS pixel value to a finite number or returns its fallback. */
-    private cssPixelValue(value: string, fallback: number): number {
-        const parsed = Number.parseFloat(value);
-        return Number.isFinite(parsed) ? parsed : fallback;
     }
 
     /** Removes custom handles and restores body interaction styles if a resize was interrupted. */

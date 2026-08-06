@@ -151,6 +151,24 @@ describe("search style color helpers", () => {
         ]);
     });
 
+    it("preserves numeric category keys learned for a custom expression", () => {
+        const draft = defaultSearchStyleColorDraft(
+            "count(attributes.layer.Lane.*)"
+        );
+        draft.mode = "categories";
+        draft.customField = true;
+        draft.categoryValueKind = "number";
+        draft.categoryStops = [
+            {id: 1, valueText: "1", color: "#2149ff"},
+            {id: 2, valueText: "2", color: "#ff1726"}
+        ];
+
+        expect(serializableCategoryStops(draft)).toEqual([
+            {value: 1, color: "#2149ff"},
+            {value: 2, color: "#ff1726"}
+        ]);
+    });
+
     it("keeps invalid gradient drafts out of persisted output", () => {
         const draft = defaultSearchStyleColorDraft("speed");
         draft.gradientStops = [

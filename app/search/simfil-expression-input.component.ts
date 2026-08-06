@@ -85,6 +85,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     private applyingExternalValue = false;
     private completionMapLayersSignature = "";
     private dismissedCompletionSignature: string | null = null;
+    private completionBindingQueued = false;
 
     completionItems: CompletionCandidate[] = [];
     completion = {
@@ -112,8 +113,10 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         });
         this.applySingleLineClass();
         this.observeTheme();
-        this.bindCompletionOwner();
-        this.updateCursorPosition();
+        // BehaviorSubjects emit synchronously when bound. Defer those
+        // template-visible mutations until Angular's current view check has
+        // completed, then coalesce any same-turn input changes into this bind.
+        this.scheduleCompletionBinding();
     }
 
     /** Applies input changes without rebuilding the CodeMirror view. */
@@ -138,7 +141,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             });
         }
         if (changes["completionOwnerId"]) {
-            this.bindCompletionOwner();
+            this.scheduleCompletionBinding();
         }
         if (changes["completionScope"] || this.completionMapLayersChanged()) {
             this.resetCompletion();
@@ -147,11 +150,29 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     /** Releases CodeMirror, completion subscriptions, and pending backend completion requests. */
     ngOnDestroy(): void {
+        this.viewReady = false;
         this.modeObserver?.disconnect();
         this.completionSubscriptions.unsubscribe();
         this.subscriptions.unsubscribe();
         this.searchService.clearCurrentCompletion(this.ownerId());
         this.editorView?.destroy();
+        this.editorView = undefined;
+    }
+
+    /** Defers one completion-stream bind beyond the active Angular check. */
+    private scheduleCompletionBinding(): void {
+        if (!this.viewReady || this.completionBindingQueued) {
+            return;
+        }
+        this.completionBindingQueued = true;
+        queueMicrotask(() => {
+            this.completionBindingQueued = false;
+            if (!this.viewReady || !this.editorView) {
+                return;
+            }
+            this.bindCompletionOwner();
+            this.updateCursorPosition();
+        });
     }
 
     /** Focuses the inline editor. */

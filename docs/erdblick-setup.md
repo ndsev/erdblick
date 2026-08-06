@@ -26,7 +26,7 @@ Some container images or products ship a prebuilt erdblick bundle in a directory
 ## Running from source
 
 1. Install Node.js LTS and PNPM (or npm) according to the requirements in `package.json`.
-2. From the erdblick repository root, run `./build-ui.bash .` for an optimized production bundle. Set `NG_DEVELOP=true` before running the script if you need source maps and more verbose stack traces. Advanced setups can also use `./ci/20_linux_rebuild.bash` as part of a larger build pipeline.
+2. From the erdblick repository root, run `./build-ui.bash .` for an optimized production bundle. Set `NG_DEVELOP=true` before running the script if you need a development build. Advanced setups can also use `./ci/20_linux_rebuild.bash`: its default profiling build keeps the release WASM and production Angular optimizer, but preserves JavaScript identifiers and source maps. Pass `production` for the compact deployment build.
 3. Serve the build output directory with `mapget serve -w <path-to-dist>` or run a development server with:
    ```bash
    npm install

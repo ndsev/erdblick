@@ -64,6 +64,15 @@ export function stripFeatureInspectionTarget(featureId: string): string {
     return suffixPosition >= 0 ? featureId.slice(0, suffixPosition) : featureId;
 }
 
+/** Returns whether two picking targets describe the exact same interaction row. */
+export function tileFeatureInteractionTargetsEqual(
+    first: TileFeatureIdLike,
+    second: TileFeatureIdLike
+): boolean {
+    return first.mapTileKey === second.mapTileKey &&
+        first.featureId === second.featureId;
+}
+
 /** Removes inspection sub-target suffixes while preserving the base feature id for display. */
 export function displayFeatureId(featureId: string): string {
     return stripFeatureInspectionTarget(featureId);

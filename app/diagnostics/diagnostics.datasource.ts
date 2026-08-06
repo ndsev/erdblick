@@ -124,14 +124,86 @@ export class DiagnosticsDatasource implements OnDestroy {
             );
             const deckFrameTimeMs =
                 this.renderService.currentFrameTimeMs();
-            stats.push({
-                key: "Rendering/Deck.gl#ms",
-                path: ["Rendering", "Deck.gl"],
-                unit: "ms",
-                peak: deckFrameTimeMs,
-                average: deckFrameTimeMs
+            const presentation =
+                this.renderService.currentDeckPresentationDiagnostics();
+            const addLiveStat = (
+                path: string[],
+                value: number,
+                unit: string,
+                peak = value
+            ) => stats.push({
+                key: path.join("/"),
+                path,
+                scope: "view",
+                unit,
+                peak,
+                average: value
             });
-            this.perfStats$.next(stats);
+            addLiveStat(
+                ["Rendering", "Deck.gl", "Frame Time (p90)"],
+                deckFrameTimeMs,
+                "ms"
+            );
+            addLiveStat(
+                ["Rendering", "Deck.gl", "Frame Rate (from p90)"],
+                deckFrameTimeMs > 0 ? 1000 / deckFrameTimeMs : 0,
+                "fps"
+            );
+            addLiveStat(
+                ["Rendering", "Deck.gl", "Logical Layers"],
+                presentation.layers,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Compatibility Groups"],
+                presentation.groups,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Active Pages"],
+                presentation.pages,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Reusable Empty Pages"],
+                presentation.reusablePages,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Block Contributions"],
+                presentation.contributions,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Vertices Used"],
+                presentation.usedVertices,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Vertex Capacity"],
+                presentation.capacityVertices,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Page Fill"],
+                presentation.capacityVertices > 0
+                    ? presentation.usedVertices /
+                        presentation.capacityVertices * 100
+                    : 0,
+                "%"
+            );
+            addLiveStat(
+                ["Rendering", "Buffer Arena", "Blocks per Page"],
+                presentation.pages > 0
+                    ? presentation.contributions / presentation.pages
+                    : 0,
+                "count",
+                presentation.maxContributionsPerPage
+            );
+            // The polling timer deliberately runs outside Angular. Re-enter
+            // only for the single observable publication so an open
+            // performance dialog visibly refreshes its live frame cadence.
+            this.ngZone.run(() => this.perfStats$.next(stats));
         }
     }
 

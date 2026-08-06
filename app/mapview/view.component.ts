@@ -280,6 +280,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewerContextMenu?.hide();
             })
         );
+        this.subscriptions.push(
+            this.stateService.hoverLabelFeatureIdState.subscribe(enabled => {
+                if (!enabled) {
+                    this.featureIdsContent = [];
+                    this.featureIdsPopover?.hide();
+                }
+            })
+        );
         this.firstPersonViewRequestSubscription = this.menuService.firstPersonViewRequests.subscribe(request => {
             if (request.viewIndex !== this.viewIndex()) {
                 return;
@@ -455,7 +463,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             });
             this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
                 this.featureIdsContent = [];
-                if (!result || !result.featureIds.length) {
+                if (!this.stateService.hoverLabelFeatureId ||
+                    !result || !result.featureIds.length) {
                     this.featureIdsPopover.hide();
                     return;
                 }

@@ -67,6 +67,8 @@ export interface DiagnosticsSnapshot {
 export interface PerfStat {
     key: string;
     path: string[];
+    /** View-wide live value which is independent of the tile/layer filter. */
+    scope?: 'view';
     unit?: string;
     peak: number;
     average?: number;

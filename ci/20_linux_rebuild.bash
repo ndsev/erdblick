@@ -10,7 +10,26 @@ export PATH="$PATH:$ci_dir/../node_modules/.bin/"
 
 cd "$ci_dir/.."
 
-CMAKE_PRESET="${1:-release}"
+BUILD_VARIANT="${1:-profiling}"
+case "$BUILD_VARIANT" in
+  profiling|profile)
+    CMAKE_PRESET="release"
+    export ERDBLICK_PROFILE_BUILD="TRUE"
+    unset NG_DEVELOP NG_BUILD_MANGLE
+    ;;
+  production|release)
+    CMAKE_PRESET="release"
+    unset ERDBLICK_PROFILE_BUILD NG_DEVELOP NG_BUILD_MANGLE
+    ;;
+  debug|debug-wasm)
+    CMAKE_PRESET="$BUILD_VARIANT"
+    unset ERDBLICK_PROFILE_BUILD NG_BUILD_MANGLE
+    ;;
+  *)
+    echo "Unsupported build variant '$BUILD_VARIANT'. Use profiling, production, debug, or debug-wasm." >&2
+    exit 2
+    ;;
+esac
 
 # Reconfigure on each rebuild so preset switches (e.g. release -> debug) update CMAKE_BUILD_TYPE
 # in the existing build directory before invoking the build.

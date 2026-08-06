@@ -169,6 +169,8 @@ Common primitive fields include:
 - `opacity`;
 - `width` and optional `width-scale`;
 - `offset` and `offset-increment`;
+- `lateral-offset-unit`: `meter`, `meters`, `m`, `pixel`, `pixels`, or `px`;
+- literal screen-space `glow` material;
 - `flat`, `billboard`, and `depth-test`;
 - `dashed`, `dash-length`, `dash-pattern`, and `gap-color`;
 - `arrow` / `arrow-expression`;
@@ -179,6 +181,157 @@ Common primitive fields include:
 
 Literal values are resolved without projection. Every expression-backed field
 is collected by the planner and transported in the appropriate field list.
+
+`lateral-offset-unit` changes only the first (lateral) component of `offset`
+and `offset-increment`. Meter offsets are baked into projected geometry.
+Pixel offsets remain absolute pixels in native renderer buffers. The Deck
+adapter divides constant offsets by authored width only at the stock
+PathStyleExtension boundary. Generated transitions additionally carry an
+explicit local-map XY pixel vector per vertex. Adjacent vectors are packed as
+one segment `uvec4`: its four words encode the exact
+left/start/end/right vectors as signed 12-bit fixed-point pairs plus a compact
+adaptive-scale threshold.
+`DeckVariableOffsetPathLayer` displaces the projected
+previous/current/next centerline positions before Deck computes extrusion and
+joins. Both segments touching a joint therefore see the same three displaced
+points instead of extrapolating different neighbours. At far zooms, an inside
+offset can consume or reverse the bend's projected forward motion—the cusp of
+an inside parallel curve. The native renderer derives a metres-per-pixel
+safety threshold from the exact sampled centerline and offset-vector motion.
+Sharp and almost-reversing cross-road turns therefore contract sooner than
+gentle turns instead of relying on one trim-radius estimate. Every maneuver of
+the same host/rule, including a U-turn, uses that common threshold, so the
+shader contracts the complete displacement uniformly and preserves the
+relative lane stack instead of locally wrinkling or collapsing lanes. Authored
+stroke, picking mask, glow mask, and terminal arrow share the same displacement
+vector and scale.
+
+A transition geometry is already ordered from the incoming road through the
+junction to the outgoing road. The renderer derives its visible side from the
+local maneuver: a right turn is right-of-traversal, a left turn is
+left-of-traversal, and a transition returning to the same connected end of the
+same road is a conventional left-side U-turn. An acute or almost-reversing
+transition between different roads remains an ordinary turn. The lateral
+`offset` and `offset-increment` values are distances for transition rules;
+their YAML sign is only the stable tie-breaker for a straight maneuver.
+Connected-end metadata converts the visible path side into each road's
+digitization-relative physical side for stack ownership.
+
+Incoming and outgoing physical road sides reserve their slots independently.
+The line stays at the incoming distance along that road, rotates its offset
+normal while interpolating the lane radius through the junction fillet, and
+stays at the outgoing distance thereafter. Interpolating the XY components
+directly is incorrect: it shrinks a constant-radius corner and collapses an
+opposing-direction U-turn through zero.
+This is why generated transitions, unlike constant-offset ordinary paths, use
+the packed variable-offset extension. Bend sampling is refined by turn angle,
+so sharp joins do not expose a coarse terminal chord. Straight transitions
+choose the least occupied compatible pair of sides. A pixel-offset U-turn
+keeps a compact, non-overshooting undisplaced bridge; its normal rotates in the
+winding that advances with both road legs and produces the visible hairpin
+before Deck calculates the join. It inherits the host/rule scale without
+contributing the compact bridge's old trim-radius estimate. Arrowheads use the
+same terminal vertex and exact local XY pixel vector as their owning leg
+through `DeckLocalPixelOffsetExtension`.
+The icon shader transforms the local direction directly (without subtracting
+two large projected positions), so arrow anchors retain the terminal lateral
+offset at Web-Mercator float precision.
+Longitudinal and vertical components remain world-space and follow the
+respective leg slot.
+
+`glow` adds a shadow or halo to emitted vector geometry without changing its
+authored color or width:
+
+```yaml
+glow: {color: black, radius: 5, opacity: 0.28}
+```
+
+`radius` is required and measured in screen pixels (`0..12`); `color` defaults
+to black and `opacity` defaults to one. The material is intentionally literal
+in the first version. It applies to paths (including their generated
+arrowheads), points, polygons, meshes, and AABBs through the shared GPU mask
+compositor. Labels, arbitrary style icons, and GLTF attachments do not yet
+participate. One union identity per material removes internal overlaps,
+triangle seams, and render-block seams. Unlike an interaction halo, authored
+glow is strictly exterior and can never darken the primitive's own fill.
+
+## Interaction effects
+
+Routine feature hover and selection use a constrained, style-owned material
+instead of another server filter when the picked typed entry is already
+rendered:
+
+```yaml
+interaction-effects:
+  hover:
+    tint: yellow
+    tint-mix: 1
+    edge-width: 1
+    halo: {color: black, radius: 5, opacity: 0.22}
+    stripe:
+      spacing: 24
+      width: 12
+      opacity: 0.02
+      angle: 45
+      offset: 0
+      softness: 0.9
+  selection:
+    tint: {option: selectableFeatureHighlightColor}
+    tint-mix: 1
+    edge-width: 2
+    halo: {color: black, radius: 6, opacity: 0.28}
+    stripe: {spacing: 24, width: 12, opacity: 0.05, angle: 45, offset: 0, softness: 0.9}
+```
+
+`tint`, `halo.color`, and optional `stripe.color` accept a literal color or
+`{option: id}`. A stripe without a color uses the tint. Numeric values must be
+finite; mix and opacity are in `[0, 1]`, while widths, radius, and spacing are
+non-negative. `stripe.spacing`, `stripe.width` (the visible stripe thickness),
+and `stripe.softness` are screen pixels;
+`stripe.angle` is the visible clockwise direction in screen degrees;
+`stripe.offset` shifts the repeating pattern along its perpendicular axis; and
+`stripe.softness` controls its edge transition. Stripe spacing remains in
+screen pixels, but its phase is pinned to a projected world anchor so panning
+does not slide the pattern across the selected geometry. Effects alter only
+material already emitted for a feature, validity, relation, or group. They do
+not select geometry, evaluate SIMFIL, or traverse relations.
+
+Existing `mode: hover|selection` rules remain the semantic materializer for
+data absent from active subsets—for example an attribute-panel validity or a
+recursive topology request. That exact-root `/filter` result is already an
+interaction visualization and is rendered exactly as authored; it is not fed
+back into `interaction-effects` a second time.
+Bundled routine feature-highlight rules are therefore unnecessary, while
+attribute and relation highlight rules remain expressive fallbacks.
+Selection dominates hover for the same inspection target and for a direct
+parent/child target pair (feature/attribute/validity); sibling attribute or
+relation targets remain independently hoverable.
+
+Paths, points, polygons, and mapget meshes all enter one view-owned identity
+mask system and one shader compositor. Both interaction materials and the
+rule-level `glow` field reuse it. Three full-resolution Gaussian fields are
+derived from it: union coverage, a semantic edge field sized only by
+`edge-width`, and an independent semantic halo field sized only by
+`halo.radius`. The same edge contour is used at the outer silhouette and at a
+boundary between nested selected objects, so enabling or widening a halo
+cannot thicken or soften the tint edge. The shader classifies shape locally,
+not by primitive tag: a narrow object has no stable interior and is tinted
+solid, while a wide line or area keeps its authored core and receives the edge
+and subtle hatch. The behavior therefore changes continuously with on-screen
+width and zoom.
+
+Stable semantic-feature mask IDs suppress triangle and render-block seams;
+adjacent distinct objects retain a semantic identity boundary and a closed
+mesh naturally produces its screen-space silhouette. The fields are bounded
+to 12 screen pixels and evaluated only while an interaction or authored glow
+group is active.
+The halo field is spatially excluded from the crisp edge core. The compositor
+emits only tint, stripe, and halo deltas over the
+already-rendered map; it never redraws an area's authored fill. No CPU edge
+extraction, duplicated widened path, or wireframe fallback is involved. GLTF
+nodes initially retain their separate flat-tint/opacity path.
+This constrained material contract intentionally does not synthesize missing
+geometry or emulate arbitrary style rules.
 
 ## Color modes
 
@@ -330,6 +483,19 @@ Expression context adds `$feature`, `$layer`, `$name`, `$attributeIndex`,
 The renderer consumes explicit `GeometryCollection` values. Validity-required
 rules receive effective validity geometry; a one-element collection is still
 a collection.
+
+Feature-transition validities additionally preserve their from/to feature
+IDs, connected ends, and a pivot index. Their one line contains the real
+incoming ten-metre road slice, an explicit intersection pivot, and the real
+outgoing ten-metre slice. A genuinely shorter complete road is extended only
+along its outer endpoint tangent. The renderer allocates stack slots per
+`(rule, road ID, connected end, canonical physical side)`. It derives the
+visible side from the incoming/outgoing headings, converts it through each
+connected end, reserves each leg independently, and joins the resulting
+distances with a tangent-continuous variable-offset fillet while retaining one
+pick identity and terminal arrow. Returning to the same connected end of the
+same road uses the compact left-side U-turn hairpin described above;
+opposite-heading cross-road legs retain the ordinary fillet.
 
 ## Relation rules
 

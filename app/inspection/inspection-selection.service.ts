@@ -3,7 +3,6 @@ import {BehaviorSubject} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {
-    featureSetContains,
     featureSetsEqual,
     FeatureWrapper
 } from "../mapdata/feature-inspection.model";
@@ -19,6 +18,10 @@ import {InfoMessageService} from "../shared/info.service";
 import {Cartesian3} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {deepEquals} from "../shared/app-state";
+import {
+    stripFeatureInspectionTarget,
+    tileFeatureInteractionTargetsEqual
+} from "../shared/tile-feature-id";
 
 interface Wgs84Point {
     x: number;
@@ -133,13 +136,11 @@ export class InspectionSelectionService {
                     !selectedPanels.some(panel =>
                         panel.features.some(feature => feature.equals(hoveredFeature)))));
             }
-            const selectedIdentities = new Set(
-                this.selectionIdsTopic.getValue()
-                    .flatMap(panel => panel.features)
-                    .map(feature => `${feature.mapTileKey}\n${feature.featureId}`)
-            );
+            const selectedTargets = this.selectionIdsTopic.getValue()
+                .flatMap(panel => panel.features);
             const hoverIds = this.hoverIdsTopic.getValue().filter(feature =>
-                !selectedIdentities.has(`${feature.mapTileKey}\n${feature.featureId}`)
+                !selectedTargets.some(selected =>
+                    tileFeatureInteractionTargetsEqual(feature, selected))
             );
             if (hoverIds.length !== this.hoverIdsTopic.getValue().length) {
                 this.hoverIdsTopic.next(hoverIds);
@@ -247,8 +248,9 @@ export class InspectionSelectionService {
 
     /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */
     async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
-        const requestSignature = tileFeatureIds
-            .filter((id): id is TileFeatureId => !!id)
+        const requestedTargets = tileFeatureIds
+            .filter((id): id is TileFeatureId => !!id);
+        const requestSignature = requestedTargets
             .map((id) => `${id.mapTileKey}/${id.featureId}`)
             .sort()
             .join("|");
@@ -256,51 +258,53 @@ export class InspectionSelectionService {
             return;
         }
         this.lastHoverRequestSignature = requestSignature;
-        const selectedIdentities = new Set(
-            this.stateService.selectionState.getValue()
-                .flatMap(panel => panel.features)
-                .map(feature => `${feature.mapTileKey}\n${feature.featureId}`)
-        );
+        const selectedTargets = this.stateService.selectionState.getValue()
+            .flatMap(panel => panel.features);
         this.hoverIdsTopic.next(
-            tileFeatureIds
-                .filter((id): id is TileFeatureId => !!id)
-                .filter(id =>
-                    !selectedIdentities.has(`${id.mapTileKey}\n${id.featureId}`)
-                )
+            requestedTargets.filter(id =>
+                !selectedTargets.some(selected =>
+                    tileFeatureInteractionTargetsEqual(id, selected))
+            )
         );
         const revision = ++this.hoverConversionRevision;
         const features = await this.tileStream.loadFeatures(tileFeatureIds);
         if (revision !== this.hoverConversionRevision) {
             return;
         }
-        const selectedIdentitiesAfterLocate = new Set(
-            this.selectionIdsTopic.getValue()
-                .flatMap(panel => panel.features)
-                .map(feature => `${feature.mapTileKey}\n${feature.featureId}`)
+        const selectedTargetsAfterLocate = this.selectionIdsTopic.getValue()
+            .flatMap(panel => panel.features);
+        const resolvedBaseTargets = new Set(features.map(feature => {
+            const key = feature.key();
+            return `${key.mapTileKey}\n${stripFeatureInspectionTarget(
+                key.featureId)}`;
+        }));
+        // Feature loading intentionally resolves inspection suffixes to their
+        // owning full feature. Keep the authored sub-target for rendering;
+        // replacing it with FeatureWrapper::key() would turn a validity hover
+        // into its selected parent feature and immediately suppress it.
+        const resolvedHoverTargets = requestedTargets.filter(target =>
+            resolvedBaseTargets.has(
+                `${target.mapTileKey}\n${stripFeatureInspectionTarget(
+                    target.featureId)}`
+            ) &&
+            !selectedTargetsAfterLocate.some(selected =>
+                tileFeatureInteractionTargetsEqual(target, selected))
         );
-        this.hoverIdsTopic.next(features
-            .map(feature => feature.key())
-            .filter(feature => !selectedIdentitiesAfterLocate.has(
-                `${feature.mapTileKey}\n${feature.featureId}`
-            )));
+        this.hoverIdsTopic.next(resolvedHoverTargets);
         if (!features.length) {
             this.hoverTopic.next(features);
             return;
         }
 
-        const selectedFeatures = this.selectionTopic.getValue().flatMap(panel => panel.features);
+        const selectedFeatures = this.selectionTopic.getValue()
+            .flatMap(panel => panel.features);
         const currentHover = this.hoverTopic.getValue();
-
-        if (featureSetsEqual(selectedFeatures, features) || featureSetsEqual(currentHover, features)) {
+        const unselectedFeatures = features.filter(feature =>
+            !selectedFeatures.some(selected => selected.equals(feature)));
+        if (featureSetsEqual(currentHover, unselectedFeatures)) {
             return;
         }
-        if (featureSetContains(selectedFeatures, features)) {
-            if (currentHover.length) {
-                this.hoverTopic.next([]);
-            }
-            return;
-        }
-        this.hoverTopic.next(features);
+        this.hoverTopic.next(unselectedFeatures);
     }
 
     /** Loads a feature and centers the target view on its reported center point. */

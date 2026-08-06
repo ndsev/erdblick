@@ -12,6 +12,7 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -1545,6 +1546,105 @@ offset-increment: [4.0, 5.0, 6.0]
     FeatureStyleRule rule(yaml, 0);
     REQUIRE(rule.offset() == glm::dvec3(1.0, 2.0, 3.0));
     REQUIRE(rule.offsetIncrement() == glm::dvec3(4.0, 5.0, 6.0));
+}
+
+TEST_CASE("FeatureStyleRuleLateralOffsetUnitAliases", "[erdblick.style]")
+{
+    for (auto const& alias : {"pixel", "pixels", "px"}) {
+        auto rule = FeatureStyleRule(YAML::Load(
+            "type: Way\ngeometry: [line]\nlateral-offset-unit: " +
+            std::string(alias)), 0);
+        REQUIRE(rule.lateralOffsetUnit() ==
+            FeatureStyleRule::LateralOffsetUnit::Pixel);
+    }
+    for (auto const& alias : {"meter", "meters", "m"}) {
+        auto rule = FeatureStyleRule(YAML::Load(
+            "type: Way\ngeometry: [line]\nlateral-offset-unit: " +
+            std::string(alias)), 0);
+        REQUIRE(rule.lateralOffsetUnit() ==
+            FeatureStyleRule::LateralOffsetUnit::Meter);
+    }
+}
+
+TEST_CASE("FeatureStyleRuleGlowParsing", "[erdblick.style]")
+{
+    auto rule = FeatureStyleRule(YAML::Load(R"yaml(
+type: Way
+geometry: line
+glow: {color: "#102030", radius: 5, opacity: 0.25}
+)yaml"), 0);
+    REQUIRE(rule.glow().has_value());
+    REQUIRE(rule.glow()->radius == 5.0f);
+    REQUIRE(rule.glow()->opacity == 0.25f);
+    REQUIRE(std::abs(rule.glow()->color.r - 16.0f / 255.0f) < 1.0e-6f);
+    REQUIRE(std::abs(rule.glow()->color.g - 32.0f / 255.0f) < 1.0e-6f);
+    REQUIRE(std::abs(rule.glow()->color.b - 48.0f / 255.0f) < 1.0e-6f);
+}
+
+TEST_CASE("FeatureLayerStyle resolves constrained interaction effects", "[erdblick.style]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: InteractionEffects
+version: 2
+options:
+  - id: selectionColor
+    label: Selection color
+    type: string
+    default: yellow
+interaction-effects:
+  hover:
+    tint: "#102030"
+    tint-mix: 0.6
+    opacity: 0.75
+    edge-width: 2
+    halo: {color: black, radius: 5, opacity: 0.4}
+    stripe:
+      color: cyan
+      spacing: 10
+      width: 1.5
+      opacity: 0.08
+      angle: 30
+      offset: 2
+      softness: 0.5
+  selection:
+    tint: {option: selectionColor}
+rules:
+  - type: Way
+    geometry: line
+)yaml"));
+    REQUIRE(style.isValid());
+    REQUIRE(style.supportsInteractionEffect(
+        FeatureStyleRule::HoverHighlight));
+    REQUIRE(style.supportsInteractionEffect(
+        FeatureStyleRule::SelectionHighlight));
+    REQUIRE_FALSE(style.supportsInteractionEffect(
+        FeatureStyleRule::NoHighlight));
+
+    auto hover = nlohmann::json(style.interactionEffect(
+        FeatureStyleRule::HoverHighlight,
+        nlohmann::json::object()));
+    REQUIRE(hover["tint"] == nlohmann::json::array({16, 32, 48, 255}));
+    REQUIRE(hover["tintMix"] == 0.6f);
+    REQUIRE(hover["opacity"] == 0.75f);
+    REQUIRE(hover["edgeWidth"] == 2.0f);
+    REQUIRE(hover["haloColor"] ==
+        nlohmann::json::array({0, 0, 0, 255}));
+    REQUIRE(hover["haloRadius"] == 5.0f);
+    REQUIRE(hover["haloOpacity"] == 0.4f);
+    REQUIRE(hover["stripeSpacing"] == 10.0f);
+    REQUIRE(hover["stripeWidth"] == 1.5f);
+    REQUIRE(hover["stripeOpacity"] == 0.08f);
+    REQUIRE(hover["stripeAngle"] == 30.0f);
+    REQUIRE(hover["stripeOffset"] == 2.0f);
+    REQUIRE(hover["stripeSoftness"] == 0.5f);
+    REQUIRE(hover["stripeColor"] ==
+        nlohmann::json::array({0, 255, 255, 255}));
+
+    auto selection = nlohmann::json(style.interactionEffect(
+        FeatureStyleRule::SelectionHighlight,
+        nlohmann::json{{"selectionColor", "#abcdef"}}));
+    REQUIRE(selection["tint"] ==
+        nlohmann::json::array({171, 205, 239, 255}));
 }
 
 TEST_CASE("FeatureStyleRuleAllOfParsing", "[erdblick.style]")

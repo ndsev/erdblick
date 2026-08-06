@@ -130,16 +130,21 @@ describe("RightClickMenuService", () => {
         service.setPickedFeatures([topmost, repeatedTile, otherMap, otherFeature]);
 
         const items = service.menuItems.getValue();
-        expect(items.slice(0, 3).map(item => item.label)).toEqual(["same", "same", "other"]);
-        expect(items.slice(0, 3).map(item => item["mapIdLabel"])).toEqual(["map-a", "map-b", "map-a"]);
-        expect(items.slice(0, 3).map(item => item.icon)).toEqual([undefined, undefined, undefined]);
-        expect(new Set(items.slice(0, 3).map(item => item.id)).size).toBe(3);
-        expect(items[3].separator).toBe(true);
+        expect(items.slice(0, 4).map(item => item.label)).toEqual([
+            "Select all", "same", "same", "other"
+        ]);
+        expect(items.slice(1, 4).map(item => item["mapIdLabel"])).toEqual(["map-a", "map-b", "map-a"]);
+        expect(items.slice(1, 4).map(item => item.icon)).toEqual([undefined, undefined, undefined]);
+        expect(new Set(items.slice(1, 4).map(item => item.id)).size).toBe(3);
+        expect(items[4].separator).toBe(true);
         items[0].command?.({} as never);
         items[1].command?.({} as never);
 
-        expect(inspectionSelection.inspectFeatureIds).toHaveBeenNthCalledWith(1, [topmost]);
-        expect(inspectionSelection.inspectFeatureIds).toHaveBeenNthCalledWith(2, [otherMap]);
+        expect(inspectionSelection.inspectFeatureIds).toHaveBeenNthCalledWith(
+            1,
+            [topmost, otherMap, otherFeature]
+        );
+        expect(inspectionSelection.inspectFeatureIds).toHaveBeenNthCalledWith(2, [topmost]);
 
         service.setPickedFeatures([]);
         expect(service.menuItems.getValue()[0].label).toBe("Inspect Source Data for Tile");

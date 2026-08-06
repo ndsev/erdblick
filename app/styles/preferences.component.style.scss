@@ -204,6 +204,7 @@
     }
 
     .p-dialog-content {
+      container: editor-dialog-content / inline-size;
       padding: 0.5em;
       display: flex;
       flex: 1 1 auto;
@@ -269,6 +270,48 @@
     min-width: 0;
     color: silver;
     font-size: 1em;
+  }
+
+  .style-editor-actions {
+    flex-wrap: nowrap;
+
+    .editor-actions-left {
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
+
+    .editor-actions-right {
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+
+    .editor-shortcuts {
+      white-space: nowrap;
+    }
+  }
+
+  @container editor-dialog-content (max-width: 40em) {
+    .style-editor-actions .editor-actions-left {
+      flex: 0 0 auto;
+    }
+
+    .style-editor-actions .editor-shortcuts {
+      display: none;
+    }
+  }
+
+  @container editor-dialog-content (max-width: 28em) {
+    .style-editor-actions,
+    .style-editor-actions .editor-actions-left,
+    .style-editor-actions .editor-actions-right {
+      gap: 0.25em;
+    }
+
+    .style-editor-actions .p-button {
+      font-size: 0.875rem;
+      gap: 0.35rem;
+      padding: 0.5rem 0.625rem;
+    }
   }
 
   .editor-status-warning {

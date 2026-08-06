@@ -26,6 +26,7 @@ import {
     SearchStyleColorDraft,
     SearchStyleColorMode,
     SearchStyleFieldOption,
+    SearchStyleFieldValueKind,
     SearchStyleGradientStopDraft,
     sortedGradientStopDrafts
 } from "./search-style-color.util";
@@ -341,7 +342,11 @@ export class SearchStyleColorComponent implements OnChanges {
     protected setFieldMode(mode: "field" | "custom"): void {
         this.clearDataWarning();
         if (mode === "custom") {
-            this.viewDraft = {...this.viewDraft, customField: true};
+            this.viewDraft = {
+                ...this.viewDraft,
+                customField: true,
+                categoryValueKind: undefined
+            };
             this.updateColorWarning();
             this.emitChange();
             return;
@@ -369,7 +374,12 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected setCustomField(field: string): void {
         this.clearDataWarning();
-        this.viewDraft = {...this.viewDraft, field: field ?? "", customField: true};
+        this.viewDraft = {
+            ...this.viewDraft,
+            field: field ?? "",
+            customField: true,
+            categoryValueKind: undefined
+        };
         this.updateColorWarning();
         this.emitChange();
     }
@@ -533,7 +543,10 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     private selectedFieldIsNumeric(): boolean {
-        return isNumericStyleValueKind(this.selectedFieldOption()?.valueKind);
+        return isNumericStyleValueKind(
+            this.selectedFieldOption()?.valueKind ??
+                this.viewDraft.categoryValueKind
+        );
     }
 
     private selectedFieldSupportsGradient(): boolean {
@@ -622,12 +635,15 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
 
+        const valueKind = this.observedCategoryValueKind(summary)
+            ?? this.selectedFieldOption()?.valueKind;
         this.viewDraft = {
             ...this.viewDraft,
+            categoryValueKind: valueKind,
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
                 values,
-                this.selectedFieldOption()?.valueKind,
+                valueKind,
                 () => this.nextStopId++
             )
         };
@@ -636,6 +652,26 @@ export class SearchStyleColorComponent implements OnChanges {
             : "";
         this.emitChange();
         this.updateColorWarning();
+    }
+
+    /** Infers one safe scalar category type from the value-summary kind counters. */
+    private observedCategoryValueKind(
+        summary: SearchValueSummary
+    ): SearchStyleFieldValueKind | undefined {
+        const numeric = summary.kinds.integer + summary.kinds.number;
+        const boolean = summary.kinds.boolean;
+        const string = summary.kinds.string;
+        const scalar = numeric + boolean + string;
+        if (numeric > 0 && scalar === numeric) {
+            return "number";
+        }
+        if (boolean > 0 && scalar === boolean) {
+            return "boolean";
+        }
+        if (string > 0 && scalar === string) {
+            return "string";
+        }
+        return undefined;
     }
 
     /** Explains why observed data is not available yet and kicks off lazy aggregation. */

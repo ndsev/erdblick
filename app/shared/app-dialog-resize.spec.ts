@@ -2,7 +2,8 @@ import {describe, expect, it} from "vitest";
 import {
     AppDialogBounds,
     AppDialogResizeLimits,
-    resizeAppDialogBounds
+    resizeAppDialogBounds,
+    resolveAppDialogCssLength
 } from "./app-dialog-resize";
 
 const START: AppDialogBounds = {left: 200, top: 100, width: 400, height: 300};
@@ -14,6 +15,14 @@ const LIMITS: AppDialogResizeLimits = {
     maxWidth: 700,
     maxHeight: 600
 };
+
+describe("resolveAppDialogCssLength", () => {
+    it("resolves PrimeNG percentage limits against the viewport instead of treating them as pixels", () => {
+        expect(resolveAppDialogCssLength("90%", 800, 800)).toBe(720);
+        expect(resolveAppDialogCssLength("384px", 800, 1)).toBe(384);
+        expect(resolveAppDialogCssLength("none", 800, 800)).toBe(800);
+    });
+});
 
 describe("resizeAppDialogBounds", () => {
     it("resizes southeast while preserving the northwest corner", () => {

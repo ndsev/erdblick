@@ -19,9 +19,15 @@ import {
     TileSubsetLayerRenderService,
     type TileSubsetLayerRenderPolicyChange
 } from "./deck/tile-subset-layer-render.service";
+import type {
+    DeckRenderBufferArenaDebugSnapshot
+} from "./deck/deck-render-buffer-arena";
 import {
-    TileSubsetLayerVisualization
+    TileSubsetLayerVisualization,
+    type TileSubsetInteractionOverlay
 } from "./deck/tile-subset-layer.visualization";
+import {resolveDeckInteractionEffect} from
+    "./deck/deck-interaction-effect";
 import {
     fitsMortonPresentationVertexBudget,
     MORTON_AGGREGATE_BLOCK_BIT_COUNTS,
@@ -37,7 +43,10 @@ import type {
     TileFeatureId
 } from "../shared/appstate.service";
 import {sipHash64Hex} from "../styledata/hash";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    stripFeatureInspectionTarget,
+    tileFeatureInteractionTargetsEqual
+} from "../shared/tile-feature-id";
 import type {
     ViewLayerDiagnosticsService
 } from "./view-layer-diagnostics.service";
@@ -175,6 +184,18 @@ export class ViewLayerController {
         );
     }
 
+    /** Bridges the view-owned Deck scene and arena counters into global diagnostics. */
+    recordDeckPresentationDiagnostics(
+        layers: number,
+        arena: DeckRenderBufferArenaDebugSnapshot
+    ): void {
+        this.renderService.recordDeckPresentationDiagnostics(
+            this.viewIndex,
+            layers,
+            arena
+        );
+    }
+
     /** Current regular-presentation styled layers, for diagnostics and grid aggregation. */
     regularStyledLayers(): Iterable<StyledMapgetLayer> {
         return [...this.styledLayers.values()]
@@ -260,6 +281,7 @@ export class ViewLayerController {
         }
         this.retiringRegularLayers.clear();
         this.renderService.clearDeckFrameTime(this.viewIndex);
+        this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
         this.unregisterDiagnostics();
         this.sceneHandle = null;
         this.changed.complete();
@@ -746,6 +768,8 @@ export class ViewLayerController {
 
     /** Reconciles exact-ID hover and selection bundles through the normal filter path. */
     private reconcileHighlightLayers(orderedStyles: readonly ErdblickStyle[]): void {
+        const selectedTargets = this.inspection.selectionIdsTopic.getValue()
+            .flatMap(panel => panel.features);
         const groups: Array<{
             kind: "selection" | "hover";
             id: string;
@@ -765,7 +789,14 @@ export class ViewLayerController {
             {
                 kind: "hover",
                 id: "current",
-                features: this.inspection.hoverIdsTopic.getValue(),
+                // Selection dominates hover only for the exact same semantic
+                // target. Nested attribute/validity rows remain hoverable so
+                // their authored inspection visualizations can still run.
+                features: this.inspection.hoverIdsTopic.getValue().filter(
+                    hovered => !selectedTargets.some(selected =>
+                        tileFeatureInteractionTargetsEqual(
+                            hovered,
+                            selected))),
                 mode: coreLib.HighlightMode.HOVER_HIGHLIGHT
             }
         ];
@@ -781,6 +812,10 @@ export class ViewLayerController {
             roots: Array<{tileId: number; featureId: string}>;
             styleOrder: number;
         }>();
+        const localOverlays = new Map<
+            TileSubsetLayerVisualization,
+            Map<string, TileSubsetInteractionOverlay>
+        >();
 
         for (const group of groups) {
             const byLayer = new Map<string, {
@@ -822,6 +857,8 @@ export class ViewLayerController {
             }
 
             for (const {mapgetLayer, features} of byLayer.values()) {
+                const localVisualizations =
+                    this.localInteractionVisualizations(mapgetLayer);
                 const resolvedFeatures = features.map(feature => ({
                     ...feature,
                     backendFeatureId:
@@ -840,10 +877,84 @@ export class ViewLayerController {
                     const style = orderedStyles[styleIndex];
                     if (!style.featureLayerStyle.hasLayerAffinity(
                         mapgetLayer.layerId
-                    ) ||
-                        !style.featureLayerStyle.supportsHighlightMode(
-                            group.mode
-                        )) {
+                    )) {
+                        continue;
+                    }
+                    const options = {
+                        ...(this.mapInfo.maps.getLayerStyleOptions(
+                            this.viewIndex,
+                            mapgetLayer.mapId,
+                            mapgetLayer.layerId,
+                            style.id
+                        ) ?? {})
+                    };
+                    if (group.color) {
+                        options["selectableFeatureHighlightColor"] = group.color;
+                    }
+                    const effect = resolveDeckInteractionEffect(
+                        style.featureLayerStyle,
+                        group.mode,
+                        options);
+                    const localScopedTargets = new Set<string>();
+                    if (effect) {
+                        const overlayId = [
+                            group.kind,
+                            group.id,
+                            style.id,
+                            this.styleVersion(style),
+                            sipHash64Hex(JSON.stringify(options))
+                        ].join(":");
+                        for (const feature of features) {
+                            for (const visualization of localVisualizations) {
+                                if (!visualization.hasLocalInteractionTarget(feature)) {
+                                    continue;
+                                }
+                                for (const scope of [
+                                    "feature",
+                                    "attribute",
+                                    "relation",
+                                    "group"
+                                ] as const) {
+                                    if (visualization.hasLocalInteractionTarget(
+                                        feature,
+                                        scope)) {
+                                        localScopedTargets.add(
+                                            this.interactionScopeTargetKey(
+                                                scope,
+                                                feature));
+                                    }
+                                }
+                                let byId = localOverlays.get(visualization);
+                                if (!byId) {
+                                    byId = new Map();
+                                    localOverlays.set(visualization, byId);
+                                }
+                                const existing = byId.get(overlayId);
+                                if (existing) {
+                                    if (!existing.targets.some(target =>
+                                        this.interactionTargetKey(target) ===
+                                            this.interactionTargetKey(feature))) {
+                                        byId.set(overlayId, {
+                                            ...existing,
+                                            targets: [...existing.targets, feature]
+                                        });
+                                    }
+                                }
+                                else {
+                                    byId.set(overlayId, {
+                                        id: overlayId,
+                                        targets: [feature],
+                                        effect,
+                                        order: styleIndex +
+                                            (group.kind === "hover" ? 3_000 : 2_000)
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if (!style.featureLayerStyle.supportsHighlightMode(
+                        group.mode
+                    )) {
                         continue;
                     }
                     const rawPlan = this.mapInfo.planStyleFilter(
@@ -862,20 +973,25 @@ export class ViewLayerController {
                             ? resolvedFeatures.filter(feature =>
                                 /:attribute#\d+/.test(feature.featureId))
                             : resolvedFeatures;
+                        const remoteFeatures = scopedFeatures.filter(feature =>
+                            !this.localInteractionSatisfiesChannel(
+                                channel.scope,
+                                feature,
+                                localScopedTargets));
                         // A bare feature selection must not expand every
                         // attribute/validity merely because the highlight
                         // stylesheet also contains attribute rules.
-                        if (scopedFeatures.length === 0) {
+                        if (remoteFeatures.length === 0) {
                             return false;
                         }
-                        const scopedRestriction = scopedFeatures
+                        const scopedRestriction = remoteFeatures
                             .map(feature =>
                                 `id == ${JSON.stringify(feature.backendFeatureId)}`)
                             .join(" or ");
                         channel.featureFilter = channel.featureFilter
                             ? `(${channel.featureFilter}) and (${scopedRestriction})`
                             : scopedRestriction;
-                        const entryRestrictions = scopedFeatures.flatMap(
+                        const entryRestrictions = remoteFeatures.flatMap(
                             feature => {
                                 if (channel.scope === "attribute") {
                                     const match = feature.featureId.match(
@@ -932,17 +1048,6 @@ export class ViewLayerController {
                     const needsRoots = plan.channels.some(channel =>
                         channel.scope === "relation"
                     );
-                    const options = {
-                        ...(this.mapInfo.maps.getLayerStyleOptions(
-                            this.viewIndex,
-                            mapgetLayer.mapId,
-                            mapgetLayer.layerId,
-                            style.id
-                        ) ?? {})
-                    };
-                    if (group.color) {
-                        options["selectableFeatureHighlightColor"] = group.color;
-                    }
                     const identitySignature = sipHash64Hex(JSON.stringify({
                         features: features.map(feature => [
                             feature.mapTileKey,
@@ -1040,6 +1145,68 @@ export class ViewLayerController {
             );
             this.reconcileOwnedVisualizations(owned);
         }
+
+        for (const visualization of this.localInteractionVisualizations()) {
+            visualization.setInteractionOverlays(
+                [...(localOverlays.get(visualization)?.values() ?? [])]
+            );
+        }
+    }
+
+    private localInteractionVisualizations(
+        mapgetLayer?: MapgetLayer
+    ): TileSubsetLayerVisualization[] {
+        const result = new Set<TileSubsetLayerVisualization>();
+        const collect = (owned: OwnedStyledLayer) => {
+            const kind = owned.layer.identity.presentationKind;
+            if ((kind !== "regular" && kind !== "search") ||
+                (mapgetLayer && owned.layer.mapgetLayer !== mapgetLayer)) {
+                return;
+            }
+            for (const visualization of owned.visualizations.values()) {
+                result.add(visualization);
+            }
+        };
+        for (const owned of this.styledLayers.values()) {
+            collect(owned);
+        }
+        for (const {owned} of this.retiringRegularLayers.values()) {
+            collect(owned);
+        }
+        return [...result];
+    }
+
+    private localInteractionSatisfiesChannel(
+        scope: string,
+        feature: TileFeatureId,
+        localTargets: ReadonlySet<string>
+    ): boolean {
+        if (!localTargets.has(this.interactionScopeTargetKey(
+            scope,
+            feature))) {
+            return false;
+        }
+        if (scope === "attribute") {
+            return /:attribute#\d+/.test(feature.featureId);
+        }
+        if (scope === "relation") {
+            return /:relation#\d+/.test(feature.featureId);
+        }
+        if (scope === "feature") {
+            return !/:attribute#\d+|:relation#\d+/.test(feature.featureId);
+        }
+        return true;
+    }
+
+    private interactionScopeTargetKey(
+        scope: string,
+        feature: TileFeatureId
+    ): string {
+        return `${scope}\n${this.interactionTargetKey(feature)}`;
+    }
+
+    private interactionTargetKey(feature: TileFeatureId): string {
+        return `${feature.mapTileKey}\n${feature.featureId}`;
     }
 
     private parseFeatureTileId(feature: TileFeatureId): {
@@ -1417,6 +1584,11 @@ export class ViewLayerController {
                     );
                     if (owned) {
                         this.releaseRegularFallbackWhenReady(owned);
+                    }
+                    if (this.inspection.hoverIdsTopic.getValue().length ||
+                        this.inspection.selectionIdsTopic.getValue().some(
+                            panel => panel.features.length)) {
+                        this.scheduleReconcile(false);
                     }
                     this.diagnostics.notifyChanged();
                 }

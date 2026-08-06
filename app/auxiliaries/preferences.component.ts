@@ -250,7 +250,7 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
                                                     [(ngModel)]="stateService.hoverLabelDirection"/>
                                 </div>
                                 <div class="hover-label-preview-notice">
-                                    Preview only. These options are not yet applied to map hover labels.
+                                    Feature ID controls the live map popover. The remaining options are preview-only.
                                 </div>
                             </section>
                             <section class="hover-label-preview-section" aria-labelledby="hover-label-preview-title">

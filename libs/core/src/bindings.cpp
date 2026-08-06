@@ -650,7 +650,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
         .function("hasExplicitLowFidelityRules", &FeatureLayerStyle::hasExplicitLowFidelityRules)
         .function("hasRelationRules", &FeatureLayerStyle::hasRelationRules)
-        .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
+        .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode)
+        .function("supportsInteractionEffect", &FeatureLayerStyle::supportsInteractionEffect)
+        .function("interactionEffect", &FeatureLayerStyle::interactionEffect);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")

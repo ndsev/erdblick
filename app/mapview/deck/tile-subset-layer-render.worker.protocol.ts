@@ -50,6 +50,8 @@ export interface TileSubsetPointBuffers {
     radii: Float32Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
+    glowColors: Uint8Array;
+    glowRadii: Float32Array;
 }
 
 export interface TileSubsetSurfaceBuffers {
@@ -60,6 +62,8 @@ export interface TileSubsetSurfaceBuffers {
     colors: Uint8Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
+    glowColors: Uint8Array;
+    glowRadii: Float32Array;
 }
 
 export interface TileSubsetPathBuffers {
@@ -67,8 +71,19 @@ export interface TileSubsetPathBuffers {
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
+    /** Absolute screen-space lateral displacement for every path vertex. */
+    lateralOffsetsPx: Float32Array;
+    /**
+     * Transition-only local XY displacement vectors in absolute screen pixels.
+     * Ordinary path buffers leave this empty and use Deck's stock offset path.
+     */
+    lateralOffsetVectorsPx: Float32Array;
+    /** One adaptive metres-per-pixel displacement threshold per path. */
+    lateralOffsetScaleThresholds: Float32Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
+    glowColors: Uint8Array;
+    glowRadii: Float32Array;
     dashArrays?: Float32Array;
 }
 
@@ -131,6 +146,8 @@ export interface TileSubsetLayerRenderBuffers {
     surface: TileSubsetSurfaceBuffers;
     pathWorld: TileSubsetPathBuffers;
     pathBillboard: TileSubsetPathBuffers;
+    transitionPathWorld: TileSubsetPathBuffers;
+    transitionPathBillboard: TileSubsetPathBuffers;
     arrowWorld: TileSubsetPathBuffers;
     arrowBillboard: TileSubsetPathBuffers;
     gltfNodes: TileSubsetGltfBuffers;

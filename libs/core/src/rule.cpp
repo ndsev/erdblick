@@ -1,5 +1,7 @@
 #include "rule.h"
+#include <algorithm>
 #include <charconv>
+#include <cctype>
 #include <cmath>
 #include <iostream>
 #include "simfil/value.h"
@@ -279,6 +281,21 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
         widthScale_ = std::move(scale);
     }
+    if (yaml["glow"].IsDefined()) {
+        auto const glowYaml = yaml["glow"];
+        Glow glow;
+        if (glowYaml["color"].IsDefined()) {
+            glow.color = Color(
+                glowYaml["color"].as<std::string>()).toFVec4();
+        }
+        if (glowYaml["radius"].IsDefined()) {
+            glow.radius = glowYaml["radius"].as<float>();
+        }
+        if (glowYaml["opacity"].IsDefined()) {
+            glow.opacity = glowYaml["opacity"].as<float>();
+        }
+        glow_ = glow;
+    }
     if (yaml["depth-test"].IsDefined()) {
         depthTest_ = yaml["depth-test"].as<bool>();
     }
@@ -315,6 +332,16 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         offsetIncrement_.x = yaml["offset-increment"][0].as<double>();
         offsetIncrement_.y = yaml["offset-increment"][1].as<double>();
         offsetIncrement_.z = yaml["offset-increment"][2].as<double>();
+    }
+    if (yaml["lateral-offset-unit"].IsDefined()) {
+        auto unit = yaml["lateral-offset-unit"].as<std::string>();
+        std::ranges::transform(unit, unit.begin(), [](unsigned char value) {
+            return static_cast<char>(std::tolower(value));
+        });
+        lateralOffsetUnit_ =
+            unit == "pixel" || unit == "pixels" || unit == "px"
+            ? LateralOffsetUnit::Pixel
+            : LateralOffsetUnit::Meter;
     }
     if (yaml["point-merge-grid-cell"].IsDefined() && yaml["point-merge-grid-cell"].size() >= 3) {
         pointMergeGridCellSize_ = glm::dvec3();
@@ -1030,6 +1057,11 @@ float FeatureStyleRule::outlineWidth() const
     return outlineWidth_;
 }
 
+std::optional<FeatureStyleRule::Glow> const& FeatureStyleRule::glow() const
+{
+    return glow_;
+}
+
 float FeatureStyleRule::relationLineHeightOffset() const
 {
     return relationLineHeightOffset_;
@@ -1191,6 +1223,11 @@ glm::dvec3 const& FeatureStyleRule::offset() const
 glm::dvec3 const& FeatureStyleRule::offsetIncrement() const
 {
     return offsetIncrement_;
+}
+
+FeatureStyleRule::LateralOffsetUnit FeatureStyleRule::lateralOffsetUnit() const
+{
+    return lateralOffsetUnit_;
 }
 
 std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() const

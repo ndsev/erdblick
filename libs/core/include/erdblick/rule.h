@@ -71,6 +71,12 @@ public:
         DoubleArrow
     };
 
+    /** Unit system used by the lateral component of line offsets. */
+    enum class LateralOffsetUnit {
+        Meter,
+        Pixel,
+    };
+
     /** Describes how nested rule fragments are evaluated. */
     enum class BranchMode {
         None,
@@ -161,6 +167,8 @@ public:
     [[nodiscard]] glm::dvec3 const& offset() const;
     /** Return the per-slot local XYZ increment used for stacked rendering. */
     [[nodiscard]] glm::dvec3 const& offsetIncrement() const;
+    /** Return whether lateral line offsets are world-space metres or screen pixels. */
+    [[nodiscard]] LateralOffsetUnit lateralOffsetUnit() const;
     /** Return the optional point-merge grid cell size for feature aggregation. */
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
@@ -267,6 +275,15 @@ public:
         std::vector<WidthScaleStop> stops;
         std::optional<float> fallback;
     };
+    /** Literal screen-space glow material for vector geometry. */
+    struct Glow {
+        glm::fvec4 color{0.0f, 0.0f, 0.0f, 1.0f};
+        float radius = 0.0f;
+        float opacity = 1.0f;
+    };
+
+    /** Return the optional screen-space glow attached to emitted geometry. */
+    [[nodiscard]] std::optional<Glow> const& glow() const;
 
 private:
     Scope scope_ = Feature;
@@ -284,6 +301,7 @@ private:
     bool hasExplicitOpacity_ = false;
     float width_ = 1.;
     std::optional<WidthScale> widthScale_;
+    std::optional<Glow> glow_;
     bool depthTest_ = true;
     std::optional<bool> billboard_;
     bool flat_ = false;
@@ -297,6 +315,7 @@ private:
     float outlineWidth_ = .0;
     glm::dvec3 offset_{.0, .0, .0};
     glm::dvec3 offsetIncrement_{.0, .0, .0};
+    LateralOffsetUnit lateralOffsetUnit_ = LateralOffsetUnit::Meter;
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
     // Labels' rules

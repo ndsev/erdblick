@@ -30,6 +30,180 @@ constexpr double kArrowHeadLengthMaxMeters = 24.0;
 constexpr double kArrowHeadLengthFraction = 0.35;
 constexpr double kArrowHeadWidthFraction = 0.55;
 constexpr double kArrowSegmentEpsilonMeters = 1e-6;
+constexpr double kTransitionFilletMeters = 6.0;
+constexpr double kTransitionUTurnTrimMeters = 0.9;
+constexpr size_t kTransitionFilletSamples = 8;
+constexpr double kTransitionMaximumAngularStep = 5.0 * kDegToRad;
+// Once adaptive contraction is active, an offset-vector change may consume at
+// most half of the corresponding centerline segment's forward motion. This is
+// evaluated on the exact sampled path below; unlike a trim-radius estimate it
+// remains valid for acute and almost-reversing cross-road turns.
+constexpr double kTransitionMaximumReverseMotionFraction = 0.5;
+
+double planarDistance(mapget::Point const& left, mapget::Point const& right)
+{
+    return std::hypot(left.x - right.x, left.y - right.y);
+}
+
+mapget::Point interpolatePoint(
+    mapget::Point const& from,
+    mapget::Point const& to,
+    double amount)
+{
+    return mapget::Point{
+        from.x + (to.x - from.x) * amount,
+        from.y + (to.y - from.y) * amount,
+        from.z + (to.z - from.z) * amount,
+    };
+}
+
+double lineLength(std::vector<mapget::Point> const& points)
+{
+    double result = 0.0;
+    for (size_t index = 1; index < points.size(); ++index) {
+        result += planarDistance(points[index - 1], points[index]);
+    }
+    return result;
+}
+
+std::vector<mapget::Point> trimLineEnd(
+    std::vector<mapget::Point> const& points,
+    double trimMeters)
+{
+    if (points.size() < 2 || trimMeters <= 0.0) {
+        return points;
+    }
+    double remaining = trimMeters;
+    for (size_t index = points.size() - 1; index > 0; --index) {
+        auto const segmentLength = planarDistance(points[index - 1], points[index]);
+        if (segmentLength <= 1.0e-9) {
+            continue;
+        }
+        if (segmentLength >= remaining) {
+            auto result = std::vector<mapget::Point>(
+                points.begin(),
+                points.begin() + static_cast<std::ptrdiff_t>(index));
+            result.push_back(interpolatePoint(
+                points[index],
+                points[index - 1],
+                remaining / segmentLength));
+            return result;
+        }
+        remaining -= segmentLength;
+    }
+    return {points.front()};
+}
+
+std::vector<mapget::Point> trimLineStart(
+    std::vector<mapget::Point> const& points,
+    double trimMeters)
+{
+    if (points.size() < 2 || trimMeters <= 0.0) {
+        return points;
+    }
+    double remaining = trimMeters;
+    for (size_t index = 1; index < points.size(); ++index) {
+        auto const segmentLength = planarDistance(points[index - 1], points[index]);
+        if (segmentLength <= 1.0e-9) {
+            continue;
+        }
+        if (segmentLength >= remaining) {
+            std::vector<mapget::Point> result;
+            result.reserve(points.size() - index + 1);
+            result.push_back(interpolatePoint(
+                points[index - 1],
+                points[index],
+                remaining / segmentLength));
+            result.insert(
+                result.end(),
+                points.begin() + static_cast<std::ptrdiff_t>(index),
+                points.end());
+            return result;
+        }
+        remaining -= segmentLength;
+    }
+    return {points.back()};
+}
+
+std::optional<std::array<double, 2>> terminalDirection(
+    std::vector<mapget::Point> const& points,
+    bool atEnd)
+{
+    if (points.size() < 2) {
+        return std::nullopt;
+    }
+    if (atEnd) {
+        for (size_t index = points.size() - 1; index > 0; --index) {
+            auto const dx = points[index].x - points[index - 1].x;
+            auto const dy = points[index].y - points[index - 1].y;
+            auto const length = std::hypot(dx, dy);
+            if (length > 1.0e-9) {
+                return std::array{dx / length, dy / length};
+            }
+        }
+    }
+    else {
+        for (size_t index = 1; index < points.size(); ++index) {
+            auto const dx = points[index].x - points[index - 1].x;
+            auto const dy = points[index].y - points[index - 1].y;
+            auto const length = std::hypot(dx, dy);
+            if (length > 1.0e-9) {
+                return std::array{dx / length, dy / length};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+mapget::Point cubicPoint(
+    mapget::Point const& p0,
+    mapget::Point const& p1,
+    mapget::Point const& p2,
+    mapget::Point const& p3,
+    double t)
+{
+    auto const u = 1.0 - t;
+    auto const a = u * u * u;
+    auto const b = 3.0 * u * u * t;
+    auto const c = 3.0 * u * t * t;
+    auto const d = t * t * t;
+    return mapget::Point{
+        a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+        a * p0.y + b * p1.y + c * p2.y + d * p3.y,
+        a * p0.z + b * p1.z + c * p2.z + d * p3.z,
+    };
+}
+
+double transitionOffsetScaleThreshold(
+    std::span<mapget::Point const> points,
+    std::span<glm::fvec2 const> offsetVectorsPx)
+{
+    if (points.size() < 2 || offsetVectorsPx.size() < points.size()) {
+        return 0.0;
+    }
+    auto threshold = std::numeric_limits<double>::infinity();
+    for (size_t index = 1; index < points.size(); ++index) {
+        auto const baseX = points[index].x - points[index - 1].x;
+        auto const baseY = points[index].y - points[index - 1].y;
+        auto const baseLengthSquared = baseX * baseX + baseY * baseY;
+        if (baseLengthSquared <= 1.0e-12) {
+            continue;
+        }
+        auto const offsetX = static_cast<double>(
+            offsetVectorsPx[index].x - offsetVectorsPx[index - 1].x);
+        auto const offsetY = static_cast<double>(
+            offsetVectorsPx[index].y - offsetVectorsPx[index - 1].y);
+        auto const reverseMotion = -(baseX * offsetX + baseY * offsetY);
+        if (reverseMotion <= 1.0e-12) {
+            continue;
+        }
+        threshold = std::min(
+            threshold,
+            kTransitionMaximumReverseMotionFraction *
+                baseLengthSquared / reverseMotion);
+    }
+    return std::isfinite(threshold) ? threshold : 0.0;
+}
 
 bool hasLocalOffset(glm::dvec3 const& offset)
 {
@@ -196,6 +370,8 @@ JsValue pointBuffersToJs(
         {"radii", JsValue::Float32Array(buffers.radii)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
+        {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
+        {"glowRadii", JsValue::Float32Array(buffers.glowRadii)},
     });
 }
 
@@ -210,6 +386,8 @@ JsValue surfaceBuffersToJs(
         {"colors", JsValue::Uint8Array(buffers.colors)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
+        {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
+        {"glowRadii", JsValue::Float32Array(buffers.glowRadii)},
     });
 }
 
@@ -222,8 +400,15 @@ JsValue pathBuffersToJs(
         {"startIndices", JsValue::Uint32Array(buffers.startIndices)},
         {"colors", JsValue::Uint8Array(buffers.colors)},
         {"widths", JsValue::Float32Array(buffers.widths)},
+        {"lateralOffsetsPx", JsValue::Float32Array(buffers.lateralOffsetsPx)},
+        {"lateralOffsetVectorsPx",
+         JsValue::Float32Array(buffers.lateralOffsetVectorsPx)},
+        {"lateralOffsetScaleThresholds",
+         JsValue::Float32Array(buffers.lateralOffsetScaleThresholds)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
+        {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
+        {"glowRadii", JsValue::Float32Array(buffers.glowRadii)},
     });
     if (includeDashArrays) {
         result.set(
@@ -293,6 +478,8 @@ TileSubsetLayerRenderer::TileSubsetLayerRenderer(
     buffers_.surfaces.holeIndexStarts.push_back(0);
     buffers_.pathWorld.startIndices.push_back(0);
     buffers_.pathBillboard.startIndices.push_back(0);
+    buffers_.transitionPathWorld.startIndices.push_back(0);
+    buffers_.transitionPathBillboard.startIndices.push_back(0);
     buffers_.arrowWorld.startIndices.push_back(0);
     buffers_.arrowBillboard.startIndices.push_back(0);
     buffers_.gltfPickProxies.startIndices.push_back(0);
@@ -302,7 +489,7 @@ TileSubsetLayerRenderer::~TileSubsetLayerRenderer() = default;
 
 uint32_t TileSubsetLayerRenderer::abiVersion() const
 {
-    return 3U;
+    return 4U;
 }
 
 void TileSubsetLayerRenderer::setCoordinateOrigin(
@@ -404,7 +591,10 @@ void TileSubsetLayerRenderer::run()
         featureOffsetSlotsByRule_.clear();
         attributeOffsetSlotsByFeature_.clear();
         attributeOffsetSlotsBySegment_.clear();
+        attributeOffsetSlotsByTransitionLeg_.clear();
         renderedRelationEndpointParts_.clear();
+        renderedRelationEndpointLabels_.clear();
+        relationEndpointLabelIdentity_.reset();
         uint32_t channelOrdinal = 0;
         subset->forEachChannel(
             [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
@@ -606,7 +796,11 @@ void TileSubsetLayerRenderer::renderAttribute(
             auto& slot =
                 attributeOffsetSlotsByFeature_[slotKey];
             bool rendered = false;
-            if (rule.offsetIncrement().x != 0.0 &&
+            if ((entry->isFeatureTransition() ||
+                 rule.offsetIncrement().x != 0.0 ||
+                 (rule.lateralOffsetUnit() ==
+                      FeatureStyleRule::LateralOffsetUnit::Pixel &&
+                  rule.offset().x != 0.0)) &&
                 entry->geometry())
             {
                 entry->geometry()->forEachGeometry(
@@ -614,15 +808,23 @@ void TileSubsetLayerRenderer::renderAttribute(
                         if (geometry &&
                             geometry->geomType() == mapget::GeomType::Line)
                         {
-                            rendered =
-                                renderSegmentStackedLine(
+                            auto const stackPrefix =
+                                std::to_string(channelOrdinal) + ":" +
+                                std::to_string(rule.renderIndex());
+                            rendered = (entry->isFeatureTransition()
+                                ? renderTransitionLine(
+                                    entry,
                                     geometry,
                                     rule,
                                     entryEval,
                                     pick,
-                                    std::to_string(channelOrdinal) + ":" +
-                                        std::to_string(rule.renderIndex())) ||
-                                rendered;
+                                    stackPrefix)
+                                : renderSegmentStackedLine(
+                                    geometry,
+                                    rule,
+                                    entryEval,
+                                    pick,
+                                    stackPrefix)) || rendered;
                         }
                         else {
                             rendered =
@@ -765,10 +967,9 @@ void TileSubsetLayerRenderer::renderRelation(
                     [&](FeatureStyleRule const& endpointRule) {
                         std::ostringstream key;
                         key << currentSubsetOrdinal_ << ':'
-                            << endpoint->addr().value_ << ':'
-                            << geometry->addr().value_ << ':'
-                            << endpointRule.renderIndex() << ':'
-                            << endpointRole;
+                            << endpoint->featureId()->mapId() << ':'
+                            << endpoint->featureId()->toString() << ':'
+                            << endpointRule.renderIndex();
                         if (!renderedRelationEndpointParts_
                                  .insert(key.str())
                                  .second)
@@ -781,12 +982,19 @@ void TileSubsetLayerRenderer::renderRelation(
                             endpointRole,
                             endpointRule.selectable(),
                             pickResult(entry, endpointRole));
+                        auto const previousLabelIdentity =
+                            relationEndpointLabelIdentity_;
+                        relationEndpointLabelIdentity_ =
+                            endpoint->featureId()->mapId() + "\n" +
+                            endpoint->featureId()->toString();
                         renderGeometryCollection(
                             geometry,
                             endpointRule,
                             endpointEval,
                             endpointPick,
                             endpointRule.offset());
+                        relationEndpointLabelIdentity_ =
+                            previousLabelIdentity;
                     });
             };
 
@@ -811,21 +1019,47 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
     glm::dvec3 const& offset)
 {
     bool rendered = false;
+    std::optional<mapget::Point> labelPosition;
     if (!collection) {
         return rendered;
     }
     collection->forEachGeometry(
         [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
-            rendered =
-                renderGeometry(
-                    geometry,
+            auto const renderedGeometry = renderGeometry(
+                geometry,
+                rule,
+                evalFun,
+                pick,
+                offset,
+                false);
+            if (renderedGeometry && !labelPosition && rule.hasLabel() &&
+                geometry)
+            {
+                auto presentationOffset = offset;
+                if (geometry->geomType() == mapget::GeomType::Line &&
+                    rule.lateralOffsetUnit() ==
+                        FeatureStyleRule::LateralOffsetUnit::Pixel)
+                {
+                    presentationOffset.x = 0.0;
+                }
+                auto transformed = applyPresentationTransform(
+                    geometry->toSelfContained(),
                     rule,
-                    evalFun,
-                    pick,
-                    offset) ||
-                rendered;
+                    presentationOffset);
+                if (!transformed.points_.empty()) {
+                    labelPosition = projectWgsPoint(
+                        geometryCenter(transformed));
+                }
+            }
+            rendered = renderedGeometry || rendered;
             return true;
         });
+    if (rendered && labelPosition && rule.hasLabel()) {
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            appendLabel(*labelPosition, text, rule, pick);
+        }
+    }
     return rendered;
 }
 
@@ -834,7 +1068,8 @@ bool TileSubsetLayerRenderer::renderGeometry(
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     uint32_t pick,
-    glm::dvec3 const& offset)
+    glm::dvec3 const& offset,
+    bool renderLabel)
 {
     if (!geometry) {
         return false;
@@ -884,10 +1119,18 @@ bool TileSubsetLayerRenderer::renderGeometry(
         return true;
     }
 
+    auto presentationOffset = offset;
+    auto const pixelLateralOffset =
+        type == mapget::GeomType::Line &&
+        rule.lateralOffsetUnit() ==
+            FeatureStyleRule::LateralOffsetUnit::Pixel;
+    if (pixelLateralOffset) {
+        presentationOffset.x = 0.0;
+    }
     auto transformed = applyPresentationTransform(
         geometry->toSelfContained(),
         rule,
-        offset);
+        presentationOffset);
     std::vector<mapget::Point> projected;
     projected.reserve(transformed.points_.size());
     for (auto const& point : transformed.points_) {
@@ -906,7 +1149,20 @@ bool TileSubsetLayerRenderer::renderGeometry(
         }
         break;
     case mapget::GeomType::Line:
-        appendPath(projected, rule, evalFun, *color, pick);
+        if (pixelLateralOffset) {
+            appendPath(
+                projected,
+                rule,
+                evalFun,
+                *color,
+                pick,
+                std::vector<float>(
+                    projected.size(),
+                    static_cast<float>(offset.x)));
+        }
+        else {
+            appendPath(projected, rule, evalFun, *color, pick);
+        }
         break;
     case mapget::GeomType::Polygon:
         appendSurface(
@@ -924,7 +1180,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
         break;
     }
 
-    if (rule.hasLabel() && !transformed.points_.empty()) {
+    if (renderLabel && rule.hasLabel() && !transformed.points_.empty()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
             appendLabel(
@@ -935,6 +1191,575 @@ bool TileSubsetLayerRenderer::renderGeometry(
         }
     }
     return !projected.empty();
+}
+
+bool TileSubsetLayerRenderer::renderTransitionLine(
+    mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
+    mapget::model_ptr<mapget::Geometry> const& geometry,
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
+    uint32_t pick,
+    std::string const& stackPrefix)
+{
+    if (!entry || !entry->isFeatureTransition() || !geometry ||
+        geometry->geomType() != mapget::GeomType::Line ||
+        !rule.supports(mapget::GeomType::Line, geometryName(geometry)))
+    {
+        return false;
+    }
+    auto const source = geometry->toSelfContained();
+    auto const pivot = entry->transitionPivotIndex();
+    auto const fromId = entry->transitionFromFeatureId();
+    auto const toId = entry->transitionToFeatureId();
+    auto const fromEnd = entry->transitionFromConnectedEnd();
+    auto const toEnd = entry->transitionToConnectedEnd();
+    if (!pivot || *pivot == 0 || *pivot + 1 >= source.points_.size() ||
+        !fromId || !toId || !fromEnd || !toEnd)
+    {
+        return false;
+    }
+    auto color = rule.color(evalFun);
+    auto const width = rule.width(evalFun);
+    if (!color || width <= 0.0f) {
+        return false;
+    }
+
+    std::vector<mapget::Point> incomingWgs(
+        source.points_.begin(),
+        source.points_.begin() + static_cast<std::ptrdiff_t>(*pivot));
+    std::vector<mapget::Point> outgoingWgs(
+        source.points_.begin() + static_cast<std::ptrdiff_t>(*pivot + 1),
+        source.points_.end());
+    if (incomingWgs.size() < 2 || outgoingWgs.size() < 2) {
+        return false;
+    }
+
+    auto projectLeg = [&](std::vector<mapget::Point> const& points) {
+        std::vector<mapget::Point> projected;
+        projected.reserve(points.size());
+        for (auto const& point : points) {
+            projected.push_back(projectWgsPoint(point));
+        }
+        return projected;
+    };
+    auto const incomingCenterline = projectLeg(incomingWgs);
+    auto const outgoingCenterline = projectLeg(outgoingWgs);
+    auto const incomingDirection =
+        terminalDirection(incomingCenterline, true);
+    auto const outgoingDirection =
+        terminalDirection(outgoingCenterline, false);
+    if (!incomingDirection || !outgoingDirection) {
+        return false;
+    }
+
+    // Deck and offsetGeometryLocally both define positive lateral offset as
+    // right-of-traversal.  Transition geometry is ordered outer -> junction ->
+    // outer, so the signed cross product gives the desired visible road side:
+    // clockwise/right turns are positive and counter-clockwise/left turns are
+    // negative.  Connected-end metadata is only needed to translate that
+    // visible side into the road's canonical digitization side for stacking.
+    auto const headingCross =
+        (*incomingDirection)[0] * (*outgoingDirection)[1] -
+        (*incomingDirection)[1] * (*outgoingDirection)[0];
+    // A sharp cross-road turn is still an ordinary transition: it needs the
+    // full fillet and ordinary safety calculation. Geometry alone cannot
+    // distinguish it from a U-turn. The latter returns to the same connected
+    // end of the same road and receives the deliberately compact hairpin
+    // construction below.
+    auto const uTurn =
+        fromId->toString() == toId->toString() && *fromEnd == *toEnd;
+    constexpr double kTurnSideThreshold = 0.05;
+
+    auto legKey = [&](mapget::model_ptr<mapget::FeatureId> const& id,
+                      mapget::ValidityData::TransitionEnd end,
+                      int canonicalSide) {
+        return stackPrefix + ":" + id->toString() + ":" +
+            (end == mapget::ValidityData::End ? "end" : "start") + ":" +
+            (canonicalSide > 0 ? "right" : "left");
+    };
+
+    auto stackKeys = [&](int pathSide) {
+        // Incoming traversal follows digitization when the connected road end
+        // is End. Outgoing traversal follows it when the connected end is
+        // Start. Reversed traversal swaps the road's physical left/right side.
+        auto const fromCanonicalSide =
+            *fromEnd == mapget::ValidityData::End
+            ? pathSide
+            : -pathSide;
+        auto const toCanonicalSide =
+            *toEnd == mapget::ValidityData::Start
+            ? pathSide
+            : -pathSide;
+        return std::pair{
+            legKey(fromId, *fromEnd, fromCanonicalSide),
+            legKey(toId, *toEnd, toCanonicalSide),
+        };
+    };
+
+    int pathSide = headingCross > kTurnSideThreshold
+        ? -1
+        : headingCross < -kTurnSideThreshold
+            ? 1
+            : uTurn
+                // A geometrically exact U-turn has no cross-product sign.
+                // Prefer the conventional left-side hairpin.
+                ? -1
+                : 0;
+    if (pathSide == 0) {
+        // Straight transitions have no intrinsic side. Put them on the side
+        // whose two physical road-side stacks are least occupied. Preserve
+        // the authored sign only as the stable tie-breaker.
+        auto authoredSide = rule.offset().x;
+        if (std::abs(authoredSide) <= 1.0e-12) {
+            authoredSide = rule.offsetIncrement().x;
+        }
+        auto const preferredSide = authoredSide < 0.0 ? -1 : 1;
+        auto sideCost = [&](int candidate) {
+            auto const [candidateFrom, candidateTo] = stackKeys(candidate);
+            auto const fromCount =
+                attributeOffsetSlotsByTransitionLeg_[candidateFrom];
+            auto const toCount =
+                attributeOffsetSlotsByTransitionLeg_[candidateTo];
+            return std::pair{
+                std::max(fromCount, toCount),
+                fromCount + toCount,
+            };
+        };
+        auto const preferredCost = sideCost(preferredSide);
+        auto const alternateCost = sideCost(-preferredSide);
+        pathSide = alternateCost < preferredCost
+            ? -preferredSide
+            : preferredSide;
+    }
+
+    auto const [fromKey, toKey] = stackKeys(pathSide);
+    auto const fromSlot = attributeOffsetSlotsByTransitionLeg_[fromKey];
+    auto const toSlot = attributeOffsetSlotsByTransitionLeg_[toKey];
+    auto lateralOffsetForSlot = [&](uint32_t slot) {
+        // Turn direction owns the sign; the style owns lane distance and
+        // spacing. This prevents a positive YAML offset from forcing every
+        // maneuver onto the right side.
+        auto const magnitude = std::abs(
+            rule.offset().x +
+            rule.offsetIncrement().x * static_cast<double>(slot));
+        return static_cast<double>(pathSide) * magnitude;
+    };
+    auto const fromLateralOffset = lateralOffsetForSlot(fromSlot);
+    auto const toLateralOffset = lateralOffsetForSlot(toSlot);
+
+    auto transformLeg = [&](std::vector<mapget::Point> const& points,
+                            uint32_t selectedSlot,
+                            double lateralOffset) {
+        auto offset = rule.offset() +
+            rule.offsetIncrement() * static_cast<double>(selectedSlot);
+        if (rule.lateralOffsetUnit() ==
+            FeatureStyleRule::LateralOffsetUnit::Pixel)
+        {
+            offset.x = 0.0;
+        }
+        else {
+            offset.x = lateralOffset;
+        }
+        auto transformed = applyPresentationTransform(
+            mapget::SelfContainedGeometry{
+                points,
+                {},
+                mapget::GeomType::Line,
+            },
+            rule,
+            offset);
+        return projectLeg(transformed.points_);
+    };
+    auto incoming = transformLeg(
+        incomingWgs,
+        fromSlot,
+        fromLateralOffset);
+    auto outgoing = transformLeg(
+        outgoingWgs,
+        toSlot,
+        toLateralOffset);
+    auto const incomingLength = lineLength(incoming);
+    auto const outgoingLength = lineLength(outgoing);
+    auto const maximumTrim = std::min({
+        uTurn ? kTransitionUTurnTrimMeters : kTransitionFilletMeters,
+        incomingLength * 0.4,
+        outgoingLength * 0.4,
+    });
+    if (maximumTrim <= 1.0e-6) {
+        return false;
+    }
+    // Slightly different U-turn trim distances keep the two centerline
+    // endpoints distinct. Together with the pixel-side displacement this
+    // produces a compact hairpin instead of a large self-returning teardrop.
+    auto const incomingTrim = uTurn ? maximumTrim * 0.75 : maximumTrim;
+    auto const outgoingTrim = uTurn ? maximumTrim * 1.25 : maximumTrim;
+    incoming = trimLineEnd(incoming, incomingTrim);
+    outgoing = trimLineStart(outgoing, outgoingTrim);
+    auto const curveIncomingDirection = terminalDirection(incoming, true);
+    auto const curveOutgoingDirection = terminalDirection(outgoing, false);
+    if (incoming.size() < 2 || outgoing.size() < 2 ||
+        !curveIncomingDirection || !curveOutgoingDirection)
+    {
+        return false;
+    }
+
+    auto const pixelOffsets =
+        rule.lateralOffsetUnit() ==
+        FeatureStyleRule::LateralOffsetUnit::Pixel;
+    auto const fromLateralOffsetPx = pixelOffsets
+        ? static_cast<float>(fromLateralOffset)
+        : 0.0f;
+    auto const toLateralOffsetPx = pixelOffsets
+        ? static_cast<float>(toLateralOffset)
+        : 0.0f;
+    auto offsetVector = [](std::array<double, 2> const& direction,
+                           float lateralOffsetPx) {
+        return glm::fvec2{
+            static_cast<float>(direction[1]) * lateralOffsetPx,
+            static_cast<float>(-direction[0]) * lateralOffsetPx,
+        };
+    };
+    auto const fromOffsetVectorPx =
+        offsetVector(*curveIncomingDirection, fromLateralOffsetPx);
+    auto const toOffsetVectorPx =
+        offsetVector(*curveOutgoingDirection, toLateralOffsetPx);
+    auto const maximumLateralOffsetPx = std::max(
+        std::abs(fromLateralOffsetPx),
+        std::abs(toLateralOffsetPx));
+    auto const fromOffsetUnit =
+        offsetVector(*curveIncomingDirection, static_cast<float>(pathSide));
+    auto const toOffsetUnit =
+        offsetVector(*curveOutgoingDirection, static_cast<float>(pathSide));
+    auto const offsetUnitCross =
+        static_cast<double>(fromOffsetUnit.x) * toOffsetUnit.y -
+        static_cast<double>(fromOffsetUnit.y) * toOffsetUnit.x;
+    auto const offsetUnitDot =
+        static_cast<double>(fromOffsetUnit.x) * toOffsetUnit.x +
+        static_cast<double>(fromOffsetUnit.y) * toOffsetUnit.y;
+    auto offsetRotation = std::atan2(offsetUnitCross, offsetUnitDot);
+    if (uTurn) {
+        // The offset-vector arc itself forms the visible compact hairpin. It
+        // must initially advance with the incoming road and finish with the
+        // outgoing road, which is the opposite rotation direction from an
+        // inside parallel curve. Pick that winding while retaining the exact
+        // (possibly slightly non-antiparallel) endpoint vector.
+        if (pathSide < 0 && offsetRotation >= 0.0) {
+            offsetRotation -= 2.0 * kPi;
+        }
+        else if (pathSide > 0 && offsetRotation <= 0.0) {
+            offsetRotation += 2.0 * kPi;
+        }
+    }
+    else if (offsetUnitDot < -0.999999 &&
+             std::abs(offsetUnitCross) <= 1.0e-6)
+    {
+        // A geometrically exact cross-road hairpin has two equally short
+        // inside curves. Keep its winding deterministic from the chosen side.
+        offsetRotation = pathSide < 0 ? kPi : -kPi;
+    }
+    auto const bridgeSamples = std::max<size_t>(
+        kTransitionFilletSamples,
+        static_cast<size_t>(std::ceil(
+            std::abs(offsetRotation) /
+            kTransitionMaximumAngularStep)));
+    auto interpolateOffsetVector = [&](double progress) {
+        if (progress <= 0.0) {
+            return fromOffsetVectorPx;
+        }
+        if (progress >= 1.0) {
+            return toOffsetVectorPx;
+        }
+        auto const magnitude =
+            std::abs(static_cast<double>(fromLateralOffsetPx)) +
+            (std::abs(static_cast<double>(toLateralOffsetPx)) -
+             std::abs(static_cast<double>(fromLateralOffsetPx))) * progress;
+        auto const angle = offsetRotation * progress;
+        auto const cosine = std::cos(angle);
+        auto const sine = std::sin(angle);
+        return glm::fvec2{
+            static_cast<float>(
+                (fromOffsetUnit.x * cosine -
+                 fromOffsetUnit.y * sine) * magnitude),
+            static_cast<float>(
+                (fromOffsetUnit.x * sine +
+                 fromOffsetUnit.y * cosine) * magnitude),
+        };
+    };
+
+    std::vector<mapget::Point> path = incoming;
+    std::vector<float> lateralOffsetsPx(
+        incoming.size(),
+        fromLateralOffsetPx);
+    std::vector<glm::fvec2> lateralOffsetVectorsPx(
+        incoming.size(),
+        fromOffsetVectorPx);
+    auto const p0 = incoming.back();
+    auto const p3 = outgoing.front();
+    auto appendCubic = [&](mapget::Point const& start,
+                           mapget::Point const& control1,
+                           mapget::Point const& control2,
+                           mapget::Point const& end,
+                           size_t samples,
+                           double progressStart,
+                           double progressEnd) {
+        for (size_t sample = 1; sample <= samples; ++sample) {
+            auto const t = static_cast<double>(sample) /
+                static_cast<double>(samples);
+            path.push_back(cubicPoint(
+                start,
+                control1,
+                control2,
+                end,
+                t));
+            auto const progress =
+                progressStart + (progressEnd - progressStart) * t;
+            // Smoothstep makes the screen-space displacement tangent to both
+            // constant road-leg stacks. Rotate the road normal while
+            // interpolating its radius: component-wise interpolation shrinks
+            // a 20 px 90-degree turn to 14.1 px at its midpoint and collapses
+            // an exact U-turn through zero, visually erasing the lane stack.
+            auto const eased =
+                progress * progress * (3.0 - 2.0 * progress);
+            lateralOffsetsPx.push_back(static_cast<float>(
+                static_cast<double>(fromLateralOffsetPx) +
+                (static_cast<double>(toLateralOffsetPx) -
+                 fromLateralOffsetPx) * eased));
+            lateralOffsetVectorsPx.push_back(
+                interpolateOffsetVector(eased));
+        }
+    };
+    if (pixelOffsets) {
+        // Screen-space transition vectors already provide the visible bend
+        // between the two leg stacks. Keep the underlying world bridge a
+        // compact, non-overshooting Hermite curve. This is especially
+        // important for U-turns: a world-space side loop plus a fixed-pixel
+        // side change can cancel and form a second loop at one zoom level.
+        auto const chordLength = planarDistance(p0, p3);
+        auto const handle = std::min(
+            maximumTrim * 0.5,
+            chordLength * 0.5);
+        auto const p1 = mapget::Point{
+            p0.x + (*curveIncomingDirection)[0] * handle,
+            p0.y + (*curveIncomingDirection)[1] * handle,
+            p0.z + (p3.z - p0.z) / 3.0,
+        };
+        auto const p2 = mapget::Point{
+            p3.x - (*curveOutgoingDirection)[0] * handle,
+            p3.y - (*curveOutgoingDirection)[1] * handle,
+            p3.z - (p3.z - p0.z) / 3.0,
+        };
+        appendCubic(
+            p0,
+            p1,
+            p2,
+            p3,
+            bridgeSamples,
+            0.0,
+            1.0);
+    }
+    else if (uTurn) {
+        // A U-turn needs a genuine curve: a single cubic with collinear,
+        // opposite endpoint tangents collapses and gives PathLayer an
+        // undefined 180-degree join. Keep this hairpin deliberately compact;
+        // its lane separation remains the style's zoom-independent pixels.
+        auto forwardX =
+            (*curveIncomingDirection)[0] - (*curveOutgoingDirection)[0];
+        auto forwardY =
+            (*curveIncomingDirection)[1] - (*curveOutgoingDirection)[1];
+        auto const forwardLength = std::hypot(forwardX, forwardY);
+        if (forwardLength <= 1.0e-9) {
+            return false;
+        }
+        forwardX /= forwardLength;
+        forwardY /= forwardLength;
+        // (dy, -dx) is right of forward; pathSide selects right/left.
+        auto const sideX = forwardY * static_cast<double>(pathSide);
+        auto const sideY = -forwardX * static_cast<double>(pathSide);
+        auto const center = mapget::Point{
+            (p0.x + p3.x) * 0.5,
+            (p0.y + p3.y) * 0.5,
+            (p0.z + p3.z) * 0.5,
+        };
+        auto const forwardReach = maximumTrim;
+        auto const sideReach = maximumTrim * 0.45;
+        auto const apex = mapget::Point{
+            center.x + forwardX * forwardReach + sideX * sideReach,
+            center.y + forwardY * forwardReach + sideY * sideReach,
+            center.z,
+        };
+        auto const handle = maximumTrim * 0.55;
+        auto const startControl = mapget::Point{
+            p0.x + (*curveIncomingDirection)[0] * handle,
+            p0.y + (*curveIncomingDirection)[1] * handle,
+            p0.z + (apex.z - p0.z) * 0.5,
+        };
+        auto const apexControlDistance = sideReach * 0.5;
+        auto const incomingApexControl = mapget::Point{
+            apex.x - sideX * apexControlDistance,
+            apex.y - sideY * apexControlDistance,
+            apex.z,
+        };
+        auto const outgoingApexControl = mapget::Point{
+            apex.x + sideX * apexControlDistance,
+            apex.y + sideY * apexControlDistance,
+            apex.z,
+        };
+        auto const endControl = mapget::Point{
+            p3.x - (*curveOutgoingDirection)[0] * handle,
+            p3.y - (*curveOutgoingDirection)[1] * handle,
+            p3.z - (p3.z - apex.z) * 0.5,
+        };
+        auto const halfSamples = std::max<size_t>(
+            2,
+            (bridgeSamples + 1) / 2);
+        appendCubic(
+            p0,
+            startControl,
+            incomingApexControl,
+            apex,
+            halfSamples,
+            0.0,
+            0.5);
+        appendCubic(
+            apex,
+            outgoingApexControl,
+            endControl,
+            p3,
+            halfSamples,
+            0.5,
+            1.0);
+    }
+    else {
+        auto const handle = maximumTrim * 0.75;
+        auto const p1 = mapget::Point{
+            p0.x + (*curveIncomingDirection)[0] * handle,
+            p0.y + (*curveIncomingDirection)[1] * handle,
+            p0.z + (p3.z - p0.z) / 3.0,
+        };
+        auto const p2 = mapget::Point{
+            p3.x - (*curveOutgoingDirection)[0] * handle,
+            p3.y - (*curveOutgoingDirection)[1] * handle,
+            p3.z - (p3.z - p0.z) / 3.0,
+        };
+        appendCubic(
+            p0,
+            p1,
+            p2,
+            p3,
+            bridgeSamples,
+            0.0,
+            1.0);
+    }
+    path.insert(path.end(), outgoing.begin() + 1, outgoing.end());
+    lateralOffsetsPx.insert(
+        lateralOffsetsPx.end(),
+        outgoing.size() - 1,
+        toLateralOffsetPx);
+    lateralOffsetVectorsPx.insert(
+        lateralOffsetVectorsPx.end(),
+        outgoing.size() - 1,
+        toOffsetVectorPx);
+
+    auto lateralOffsetScaleThreshold = 0.0f;
+    TransitionOffsetScaleGroup* scaleGroup = nullptr;
+    if (pixelOffsets && maximumLateralOffsetPx > 1.0e-6f) {
+        // Every maneuver rendered for one host/rule contracts by the same
+        // factor, otherwise stack spacing changes relative to its neighbors.
+        // Ordinary turns contribute a bound measured from their exact sampled
+        // centerline and vector motion. A semantic U-turn's correctly wound
+        // vector arc advances with both legs and cannot fold; it inherits the
+        // group's bound without imposing its former, overly aggressive 0.9 m
+        // trim-radius estimate.
+        auto const scaleGroupKey =
+            stackPrefix + ":" + entry->featureId()->toString() + ":turn";
+        scaleGroup = &transitionOffsetScaleGroups_[scaleGroupKey];
+        auto const pathScaleThreshold = uTurn
+            ? 0.0
+            : transitionOffsetScaleThreshold(
+                path,
+                lateralOffsetVectorsPx);
+        if (pathScaleThreshold > 0.0) {
+            scaleGroup->scaleThresholdMetersPerPixel =
+                scaleGroup->scaleThresholdMetersPerPixel > 0.0
+                ? std::min(
+                    scaleGroup->scaleThresholdMetersPerPixel,
+                    pathScaleThreshold)
+                : pathScaleThreshold;
+        }
+        lateralOffsetScaleThreshold = static_cast<float>(
+            scaleGroup->scaleThresholdMetersPerPixel);
+        auto thresholdBuffer = [&](TransitionOffsetBuffer buffer)
+            -> PathBuffers& {
+            switch (buffer) {
+            case TransitionOffsetBuffer::PathWorld:
+                return buffers_.transitionPathWorld;
+            case TransitionOffsetBuffer::PathBillboard:
+                return buffers_.transitionPathBillboard;
+            case TransitionOffsetBuffer::ArrowWorld:
+                return buffers_.arrowWorld;
+            case TransitionOffsetBuffer::ArrowBillboard:
+                return buffers_.arrowBillboard;
+            }
+            return buffers_.transitionPathWorld;
+        };
+        for (auto const& slot : scaleGroup->slots) {
+            auto& thresholds = thresholdBuffer(slot.buffer)
+                .lateralOffsetScaleThresholds;
+            if (slot.index < thresholds.size()) {
+                thresholds[slot.index] = lateralOffsetScaleThreshold;
+            }
+        }
+    }
+
+    auto const billboard = rule.billboard().value_or(false);
+    auto& transitionBuffers = billboard
+        ? buffers_.transitionPathBillboard
+        : buffers_.transitionPathWorld;
+    auto& arrowBuffers = billboard
+        ? buffers_.arrowBillboard
+        : buffers_.arrowWorld;
+    auto const transitionThresholdIndex =
+        transitionBuffers.lateralOffsetScaleThresholds.size();
+    auto const firstArrowThresholdIndex =
+        arrowBuffers.lateralOffsetScaleThresholds.size();
+    appendPath(
+        path,
+        rule,
+        evalFun,
+        *color,
+        pick,
+        lateralOffsetsPx,
+        lateralOffsetVectorsPx,
+        lateralOffsetScaleThreshold);
+    if (scaleGroup) {
+        scaleGroup->slots.push_back({
+            billboard
+                ? TransitionOffsetBuffer::PathBillboard
+                : TransitionOffsetBuffer::PathWorld,
+            transitionThresholdIndex,
+        });
+        for (auto index = firstArrowThresholdIndex;
+             index < arrowBuffers.lateralOffsetScaleThresholds.size();
+             ++index) {
+            scaleGroup->slots.push_back({
+                billboard
+                    ? TransitionOffsetBuffer::ArrowBillboard
+                    : TransitionOffsetBuffer::ArrowWorld,
+                index,
+            });
+        }
+    }
+    attributeOffsetSlotsByTransitionLeg_[fromKey] = fromSlot + 1U;
+    if (toKey != fromKey) {
+        attributeOffsetSlotsByTransitionLeg_[toKey] = toSlot + 1U;
+    }
+    if (rule.hasLabel()) {
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            appendLabel(path[path.size() / 2], text, rule, pick);
+        }
+    }
+    return true;
 }
 
 bool TileSubsetLayerRenderer::renderSegmentStackedLine(
@@ -955,7 +1780,8 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
         return false;
     }
     auto color = rule.color(evalFun);
-    if (!color || rule.width(evalFun) <= 0.0f) {
+    auto const width = rule.width(evalFun);
+    if (!color || width <= 0.0f) {
         return false;
     }
 
@@ -984,47 +1810,59 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
         return stream.str();
     };
 
-    std::vector<mapget::Point> projected;
-    projected.reserve(source.points_.size() * 2);
     std::unordered_set<std::string> occupiedSegments;
-    auto appendDistinct = [&](mapget::Point const& point) {
-        if (projected.empty() ||
-            projected.back().distanceTo(point) > 1.0e-6)
-        {
-            projected.push_back(point);
-        }
-    };
     for (size_t index = 1; index < source.points_.size(); ++index) {
         auto const& first = source.points_[index - 1];
         auto const& second = source.points_[index];
         if (first.distanceTo(second) <= 1.0e-9) {
             continue;
         }
-        auto key = segmentKey(first, second);
-        auto const slot = attributeOffsetSlotsBySegment_[key];
-        auto transformed = applyPresentationTransform(
-            mapget::SelfContainedGeometry{
-                {first, second},
-                {},
-                mapget::GeomType::Line,
-            },
-            rule,
-            rule.offset() +
-                rule.offsetIncrement() *
-                    static_cast<double>(slot));
-        if (transformed.points_.size() != 2) {
-            continue;
+        occupiedSegments.insert(segmentKey(first, second));
+    }
+    if (occupiedSegments.empty()) {
+        return false;
+    }
+    uint32_t slot = 0;
+    for (auto const& key : occupiedSegments) {
+        slot = std::max(slot, attributeOffsetSlotsBySegment_[key]);
+    }
+    auto presentationOffset = rule.offset() +
+        rule.offsetIncrement() * static_cast<double>(slot);
+    auto lateralOffsetPx = 0.0f;
+    if (rule.lateralOffsetUnit() ==
+        FeatureStyleRule::LateralOffsetUnit::Pixel)
+    {
+        lateralOffsetPx = static_cast<float>(presentationOffset.x);
+        presentationOffset.x = 0.0;
+    }
+    auto transformed = applyPresentationTransform(
+        source,
+        rule,
+        presentationOffset);
+    std::vector<mapget::Point> projected;
+    projected.reserve(transformed.points_.size());
+    for (auto const& point : transformed.points_) {
+        auto const projectedPoint = projectWgsPoint(point);
+        if (projected.empty() ||
+            projected.back().distanceTo(projectedPoint) > 1.0e-6)
+        {
+            projected.push_back(projectedPoint);
         }
-        appendDistinct(projectWgsPoint(transformed.points_[0]));
-        appendDistinct(projectWgsPoint(transformed.points_[1]));
-        occupiedSegments.insert(std::move(key));
     }
     if (projected.size() < 2) {
         return false;
     }
-    appendPath(projected, rule, evalFun, *color, pick);
+    std::vector<float> lateralOffsetsPx(
+        projected.size(), lateralOffsetPx);
+    appendPath(
+        projected,
+        rule,
+        evalFun,
+        *color,
+        pick,
+        lateralOffsetsPx);
     for (auto const& key : occupiedSegments) {
-        ++attributeOffsetSlotsBySegment_[key];
+        attributeOffsetSlotsBySegment_[key] = slot + 1U;
     }
     if (rule.hasLabel()) {
         auto text = rule.labelText(evalFun);
@@ -1316,6 +2154,7 @@ void TileSubsetLayerRenderer::appendPoint(
             rule.width(evalFun) * 0.5f));
     buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
     buffers.featureAddresses.push_back(pick);
+    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
     ++vertexCount_;
 }
 
@@ -1359,6 +2198,7 @@ void TileSubsetLayerRenderer::appendSurface(
         static_cast<uint32_t>(buffers.holeIndices.size()));
     buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
     buffers.featureAddresses.push_back(pick);
+    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
     buffers.startIndices.push_back(
         static_cast<uint32_t>(buffers.positions.size() / 3));
     vertexCount_ += static_cast<uint32_t>(points.size());
@@ -1385,20 +2225,30 @@ void TileSubsetLayerRenderer::appendPath(
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
-    uint32_t pick)
+    uint32_t pick,
+    std::span<float const> lateralOffsetsPx,
+    std::span<glm::fvec2 const> lateralOffsetVectorsPx,
+    float lateralOffsetScaleThreshold)
 {
     auto const width =
         std::max(0.0f, rule.width(evalFun));
     if (points.size() < 2 || width <= 0.0f) {
         return;
     }
-    auto& buffers = rule.billboard().value_or(false)
-        ? buffers_.pathBillboard
-        : buffers_.pathWorld;
+    auto const hasOffsetVectors =
+        lateralOffsetVectorsPx.size() >= points.size();
+    auto& buffers = hasOffsetVectors
+        ? (rule.billboard().value_or(false)
+            ? buffers_.transitionPathBillboard
+            : buffers_.transitionPathWorld)
+        : (rule.billboard().value_or(false)
+            ? buffers_.pathBillboard
+            : buffers_.pathWorld);
     auto const dashed = rule.isDashed();
     auto const dashLength =
         static_cast<float>(std::max(1, rule.dashLength()));
-    for (auto const& point : points) {
+    for (size_t pointIndex = 0; pointIndex < points.size(); ++pointIndex) {
+        auto const& point = points[pointIndex];
         buffers.positions.insert(
             buffers.positions.end(),
             {
@@ -1415,16 +2265,47 @@ void TileSubsetLayerRenderer::appendPath(
                 toColorByte(color.a),
             });
         buffers.widths.push_back(width);
+        buffers.lateralOffsetsPx.push_back(
+            pointIndex < lateralOffsetsPx.size()
+                ? lateralOffsetsPx[pointIndex]
+                : 0.0f);
+        if (hasOffsetVectors) {
+            buffers.lateralOffsetVectorsPx.push_back(
+                lateralOffsetVectorsPx[pointIndex].x);
+            buffers.lateralOffsetVectorsPx.push_back(
+                lateralOffsetVectorsPx[pointIndex].y);
+        }
         buffers.dashArrays.push_back(dashed ? dashLength : 1.0f);
         buffers.dashArrays.push_back(dashed ? dashLength : 0.0f);
     }
     buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
     buffers.featureAddresses.push_back(pick);
+    buffers.lateralOffsetScaleThresholds.push_back(
+        hasOffsetVectors
+            ? std::max(0.0f, lateralOffsetScaleThreshold)
+            : 0.0f);
+    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
     buffers.startIndices.push_back(
         static_cast<uint32_t>(buffers.positions.size() / 3));
     vertexCount_ += static_cast<uint32_t>(points.size());
 
     auto const arrow = rule.arrow(evalFun);
+    auto endpointOffsetVector = [&](size_t begin,
+                                    size_t end,
+                                    size_t offsetIndex,
+                                    float lateralOffsetPx) {
+        if (hasOffsetVectors) {
+            return lateralOffsetVectorsPx[offsetIndex];
+        }
+        auto const dx = points[end].x - points[begin].x;
+        auto const dy = points[end].y - points[begin].y;
+        auto const length = std::hypot(dx, dy);
+        return length > kArrowSegmentEpsilonMeters
+            ? glm::fvec2{
+                static_cast<float>(dy / length) * lateralOffsetPx,
+                static_cast<float>(-dx / length) * lateralOffsetPx}
+            : glm::fvec2{};
+    };
     if (arrow == FeatureStyleRule::ForwardArrow ||
         arrow == FeatureStyleRule::DoubleArrow)
     {
@@ -1434,7 +2315,15 @@ void TileSubsetLayerRenderer::appendPath(
             rule,
             width,
             color,
-            pick);
+            pick,
+            endpointOffsetVector(
+                points.size() - 2,
+                points.size() - 1,
+                points.size() - 1,
+                lateralOffsetsPx.size() >= points.size()
+                    ? lateralOffsetsPx.back()
+                    : 0.0f),
+            lateralOffsetScaleThreshold);
     }
     if (arrow == FeatureStyleRule::BackwardArrow ||
         arrow == FeatureStyleRule::DoubleArrow)
@@ -1445,7 +2334,15 @@ void TileSubsetLayerRenderer::appendPath(
             rule,
             width,
             color,
-            pick);
+            pick,
+            endpointOffsetVector(
+                0,
+                1,
+                0,
+                !lateralOffsetsPx.empty()
+                    ? lateralOffsetsPx.front()
+                    : 0.0f),
+            lateralOffsetScaleThreshold);
     }
 }
 
@@ -1455,7 +2352,9 @@ void TileSubsetLayerRenderer::appendArrowHead(
     FeatureStyleRule const& rule,
     float width,
     glm::fvec4 const& color,
-    uint32_t pick)
+    uint32_t pick,
+    glm::fvec2 lateralOffsetVectorPx,
+    float lateralOffsetScaleThreshold)
 {
     auto const dx = tip.x - previous.x;
     auto const dy = tip.y - previous.y;
@@ -1520,9 +2419,17 @@ void TileSubsetLayerRenderer::appendArrowHead(
             });
         buffers.widths.push_back(
             std::max(1.0f, width));
+        buffers.lateralOffsetsPx.push_back(0.0f);
+        buffers.lateralOffsetVectorsPx.push_back(
+            lateralOffsetVectorPx.x);
+        buffers.lateralOffsetVectorsPx.push_back(
+            lateralOffsetVectorPx.y);
     }
     buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
     buffers.featureAddresses.push_back(pick);
+    buffers.lateralOffsetScaleThresholds.push_back(
+        std::max(0.0f, lateralOffsetScaleThreshold));
+    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
     buffers.startIndices.push_back(
         static_cast<uint32_t>(buffers.positions.size() / 3));
     vertexCount_ += 3;
@@ -1671,6 +2578,12 @@ void TileSubsetLayerRenderer::appendLabel(
     FeatureStyleRule const& rule,
     uint32_t pick)
 {
+    if (relationEndpointLabelIdentity_) {
+        auto const key = *relationEndpointLabelIdentity_ + "\n" + text;
+        if (!renderedRelationEndpointLabels_.insert(key).second) {
+            return;
+        }
+    }
     auto params = JsValue::Dict({
         {"featureAddress", JsValue(pick)},
         {"position", JsValue::Dict({
@@ -1841,6 +2754,26 @@ uint8_t TileSubsetLayerRenderer::toColorByte(float value)
         std::clamp(value, 0.0f, 1.0f) * 255.0f));
 }
 
+void TileSubsetLayerRenderer::appendGlow(
+    FeatureStyleRule const& rule,
+    std::vector<uint8_t>& colors,
+    std::vector<float>& radii)
+{
+    auto const& glow = rule.glow();
+    if (!glow || glow->radius <= 0.0f || glow->opacity <= 0.0f) {
+        colors.insert(colors.end(), {0U, 0U, 0U, 0U});
+        radii.push_back(0.0f);
+        return;
+    }
+    colors.insert(colors.end(), {
+        toColorByte(glow->color.r),
+        toColorByte(glow->color.g),
+        toColorByte(glow->color.b),
+        toColorByte(glow->color.a * glow->opacity),
+    });
+    radii.push_back(std::max(0.0f, glow->radius));
+}
+
 JsValue TileSubsetLayerRenderer::geometryBuffersToJs(
     GeometryBuffers const& buffers)
 {
@@ -1860,6 +2793,10 @@ JsValue TileSubsetLayerRenderer::geometryBuffersToJs(
         {"surface", surfaceBuffersToJs(buffers.surfaces)},
         {"pathWorld", pathBuffersToJs(buffers.pathWorld, true)},
         {"pathBillboard", pathBuffersToJs(buffers.pathBillboard, true)},
+        {"transitionPathWorld",
+         pathBuffersToJs(buffers.transitionPathWorld, true)},
+        {"transitionPathBillboard",
+         pathBuffersToJs(buffers.transitionPathBillboard, true)},
         {"arrowWorld", pathBuffersToJs(buffers.arrowWorld, false)},
         {"arrowBillboard", pathBuffersToJs(buffers.arrowBillboard, false)},
         {"gltfNodes", gltfBuffersToJs(buffers.gltfNodes)},

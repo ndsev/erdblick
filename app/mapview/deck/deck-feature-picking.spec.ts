@@ -105,7 +105,7 @@ describe("Deck rendered-feature picking", () => {
             {
                 layer: mergedLayer,
                 object: {
-                    featureAddresses: [0, 0, 1]
+                    featureAddresses: [0, 0, 1, 2]
                 }
             },
             {
@@ -124,6 +124,35 @@ describe("Deck rendered-feature picking", () => {
             {mapTileKey: "map-a/tile", featureId: "feature-4"},
             {mapTileKey: "map-b/tile", featureId: "feature-4"}
         ]);
+    });
+
+    it("selects only the top unique feature on primary click", () => {
+        const view = createView() as any;
+        const top = {mapTileKey: "map/tile", featureId: "top"};
+        const lower = {mapTileKey: "map/tile", featureId: "lower"};
+        view.desktopDrillPickingEnabled = true;
+        view.stateService = {
+            focusedView: 0,
+            drillPickRadius: 2,
+            inspectionsLimit: 10,
+            marker: false,
+            unsetUnlockedSelections: vi.fn()
+        };
+        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.coordinatesService = {
+            mouseClickCoordinates: {next: vi.fn()}
+        };
+        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.drillPickFeatures = vi.fn(() => ({featureIds: [top, lower]}));
+        view.pickCartographic = vi.fn(() => null);
+
+        view.onClick(
+            {x: 10, y: 20},
+            {srcEvent: {button: 0, pointerType: "mouse", ctrlKey: false}}
+        );
+
+        expect(view.inspectionSelection.inspectFeatureIds)
+            .toHaveBeenCalledWith([top], false);
     });
 
     it("snaps a thick picked path ribbon to its base XYZ centerline", () => {

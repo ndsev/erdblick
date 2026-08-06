@@ -22,6 +22,7 @@ uniform gltfNodeUniforms {
   vec3 tilePosition;
   vec3 tilePosition64Low;
   vec4 tintColor;
+  float tintMix;
   vec3 pickingColor;
   float flatTint;
 } gltfNode;
@@ -149,8 +150,10 @@ void main(void) {
     #endif
   #endif
   if (gltfNode.flatTint > 0.5) {
-    float tintAlpha = clamp(vColor.a, 0.0, 1.0);
-    fragColor = vec4(mix(baseColor.rgb, vColor.rgb, tintAlpha), tintAlpha);
+    fragColor = vec4(
+      mix(baseColor.rgb, vColor.rgb, clamp(gltfNode.tintMix, 0.0, 1.0)),
+      baseColor.a * clamp(vColor.a, 0.0, 1.0)
+    );
     DECKGL_FILTER_COLOR(fragColor, geometry);
     return;
   }
@@ -209,6 +212,7 @@ type GltfNodeUniformProps = {
     tilePosition: [number, number, number];
     tilePosition64Low: [number, number, number];
     tintColor: [number, number, number, number];
+    tintMix: number;
     pickingColor: [number, number, number];
     flatTint: number;
 };
@@ -221,6 +225,7 @@ const gltfNodeUniforms = {
         tilePosition: "vec3<f32>",
         tilePosition64Low: "vec3<f32>",
         tintColor: "vec4<f32>",
+        tintMix: "f32",
         pickingColor: "vec3<f32>",
         flatTint: "f32"
     }
@@ -307,6 +312,8 @@ export interface DeckGltfNodeDatum {
     nodeIndex: number;
     featureAddress: number;
     color: [number, number, number, number];
+    /** Texture-to-tint interpolation used only by flat interaction passes. */
+    tintMix?: number;
     depthTest: boolean;
     flatTint: boolean;
     renderPriority: number;
@@ -343,6 +350,7 @@ interface DeckGltfNodeBucketDatum {
     nodeIndex: number;
     featureAddress: number;
     color: [number, number, number, number];
+    tintMix?: number;
 }
 
 type DeckGltfNodeBucket = {
@@ -674,7 +682,8 @@ function resolveBuckets(
         bucket.data.push({
             nodeIndex: datum.nodeIndex,
             featureAddress: datum.featureAddress,
-            color: datum.color
+            color: datum.color,
+            tintMix: datum.tintMix
         });
         const drawRecords = nodeDrawRecords.get(datum.nodeIndex);
         if (!drawRecords) {
@@ -1038,6 +1047,7 @@ export class DeckGltfNodeLayer extends Layer<Required<DeckGltfNodeLayerProps>> {
                                 tilePosition,
                                 tilePosition64Low: tilePositionLow,
                                 tintColor: [tintColor[0], tintColor[1], tintColor[2], tintColor[3] * layerOpacity],
+                                tintMix: item.tintMix ?? 1,
                                 pickingColor: ZERO_PICKING_COLOR,
                                 flatTint: bucket.flatTint ? 1 : 0
                             }

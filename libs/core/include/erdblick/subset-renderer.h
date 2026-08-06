@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -49,6 +50,8 @@ public:
         std::vector<float> radii;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
+        std::vector<uint8_t> glowColors;
+        std::vector<float> glowRadii;
     };
 
     struct SurfaceBuffers {
@@ -59,6 +62,8 @@ public:
         std::vector<uint8_t> colors;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
+        std::vector<uint8_t> glowColors;
+        std::vector<float> glowRadii;
     };
 
     struct PathBuffers {
@@ -66,9 +71,24 @@ public:
         std::vector<uint32_t> startIndices;
         std::vector<uint8_t> colors;
         std::vector<float> widths;
+        // Absolute screen-space displacement. The TypeScript Deck adapter
+        // converts pixels to Deck's width-relative path-offset attribute.
+        std::vector<float> lateralOffsetsPx;
+        // Transition-only local XY vectors whose magnitudes are absolute
+        // screen pixels. Kept out of ordinary path buffers to avoid paying
+        // two extra floats for every rendered road/lane vertex.
+        std::vector<float> lateralOffsetVectorsPx;
+        // One metres-per-pixel safety threshold per path. At zoom levels
+        // where offset-vector motion would consume the projected centerline's
+        // forward motion, the Deck adapter uniformly contracts the whole
+        // path's displacement instead of allowing an inside curve to fold.
+        // Zero disables adaptive contraction.
+        std::vector<float> lateralOffsetScaleThresholds;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
         std::vector<float> dashArrays;
+        std::vector<uint8_t> glowColors;
+        std::vector<float> glowRadii;
     };
 
     struct GltfBuffers {
@@ -93,6 +113,8 @@ public:
         SurfaceBuffers surfaces;
         PathBuffers pathWorld;
         PathBuffers pathBillboard;
+        PathBuffers transitionPathWorld;
+        PathBuffers transitionPathBillboard;
         PathBuffers arrowWorld;
         PathBuffers arrowBillboard;
         GltfBuffers gltfNodes;
@@ -139,6 +161,23 @@ private:
         std::vector<std::string> memberFeatureIds;
     };
 
+    enum class TransitionOffsetBuffer : uint8_t {
+        PathWorld,
+        PathBillboard,
+        ArrowWorld,
+        ArrowBillboard,
+    };
+
+    struct TransitionOffsetThresholdSlot {
+        TransitionOffsetBuffer buffer = TransitionOffsetBuffer::PathWorld;
+        size_t index = 0;
+    };
+
+    struct TransitionOffsetScaleGroup {
+        double scaleThresholdMetersPerPixel = 0.0;
+        std::vector<TransitionOffsetThresholdSlot> slots;
+    };
+
     [[nodiscard]] ChannelBinding bindingFor(
         mapget::model_ptr<mapget::TileSubsetChannel> const& channel);
     [[nodiscard]] FeatureStyleRule const* ruleForChannel(
@@ -176,8 +215,16 @@ private:
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         uint32_t pickIndex,
-        glm::dvec3 const& offset);
+        glm::dvec3 const& offset,
+        bool renderLabel = true);
     bool renderSegmentStackedLine(
+        mapget::model_ptr<mapget::Geometry> const& geometry,
+        FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
+        uint32_t pickIndex,
+        std::string const& stackPrefix);
+    bool renderTransitionLine(
+        mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
         mapget::model_ptr<mapget::Geometry> const& geometry,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
@@ -243,14 +290,19 @@ private:
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
-        uint32_t pickIndex);
+        uint32_t pickIndex,
+        std::span<float const> lateralOffsetsPx = {},
+        std::span<glm::fvec2 const> lateralOffsetVectorsPx = {},
+        float lateralOffsetScaleThreshold = 0.0f);
     void appendArrowHead(
         mapget::Point const& tip,
         mapget::Point const& previous,
         FeatureStyleRule const& rule,
         float width,
         glm::fvec4 const& color,
-        uint32_t pickIndex);
+        uint32_t pickIndex,
+        glm::fvec2 lateralOffsetVectorPx = {},
+        float lateralOffsetScaleThreshold = 0.0f);
     void appendAabb(
         mapget::Point const& origin,
         mapget::Point const& size,
@@ -271,6 +323,10 @@ private:
     [[nodiscard]] static JsValue geometryBuffersToJs(
         GeometryBuffers const& buffers);
     [[nodiscard]] static uint8_t toColorByte(float value);
+    static void appendGlow(
+        FeatureStyleRule const& rule,
+        std::vector<uint8_t>& colors,
+        std::vector<float>& radii);
 
     FeatureLayerStyle const& style_;
     FeatureStyleRule::HighlightMode highlightMode_;
@@ -286,11 +342,17 @@ private:
     std::vector<RuntimeIssue> runtimeIssues_;
     std::unordered_map<std::string, size_t> runtimeIssueIndices_;
     std::unordered_set<std::string> renderedRelationEndpointParts_;
+    std::unordered_set<std::string> renderedRelationEndpointLabels_;
+    std::optional<std::string> relationEndpointLabelIdentity_;
     std::unordered_map<uint32_t, uint32_t> featureOffsetSlotsByRule_;
     std::unordered_map<std::string, uint32_t>
         attributeOffsetSlotsByFeature_;
     std::unordered_map<std::string, uint32_t>
         attributeOffsetSlotsBySegment_;
+    std::unordered_map<std::string, uint32_t>
+        attributeOffsetSlotsByTransitionLeg_;
+    std::unordered_map<std::string, TransitionOffsetScaleGroup>
+        transitionOffsetScaleGroups_;
 
     mutable bool hasCoordinateOriginWgs_ = false;
     mutable mapget::Point coordinateOriginWgs_{0.0, 0.0, 0.0};

@@ -175,6 +175,15 @@
                 }
               ]
             },
+            "profiling": {
+              "sourceMap": {
+                "scripts": true,
+                "styles": false,
+                "hidden": false,
+                "vendor": true
+              },
+              "namedChunks": true
+            },
             "test": {
               "optimization": {
                 "scripts": false,

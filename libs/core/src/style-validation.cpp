@@ -693,6 +693,44 @@ bool validateWidthScale(
     return true;
 }
 
+bool validateGlow(
+    YAML::Node const& ruleYaml,
+    std::string const& rulePath,
+    StyleValidationReport& report,
+    uint32_t ruleIndex)
+{
+    auto glow = ruleYaml["glow"];
+    if (!glow.IsDefined()) {
+        return true;
+    }
+    auto fail = [&](std::string message, YAML::Node const& node) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            std::move(message),
+            locationForNode(node));
+        issue.ruleIndex = ruleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "glow";
+        return false;
+    };
+    if (!glow.IsMap()) {
+        return fail("glow must be a map.", glow);
+    }
+    if (!glow["radius"].IsDefined()) {
+        return fail("glow.radius is required.", glow);
+    }
+    bool ok = true;
+    ok = validateColorValue(
+        glow, "color", rulePath, report, ruleIndex) && ok;
+    ok = validateNumericRange(
+        glow, "radius", 0.0, 12.0, rulePath, report, ruleIndex) && ok;
+    ok = validateNumericRange(
+        glow, "opacity", 0.0, 1.0, rulePath, report, ruleIndex) && ok;
+    return ok;
+}
+
 bool validateNestedRule(
     YAML::Node const& parent,
     std::string const& property,
@@ -1062,6 +1100,13 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "attribute-validity-geom", {"any", "required", "none"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "offset-type", {"miter"}, rulePath, report, sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "lateral-offset-unit",
+        {"meter", "meters", "m", "pixel", "pixels", "px"},
+        rulePath,
+        report,
+        sourceRuleIndex));
 
     rejectRemoved(
         "aspect",
@@ -1147,6 +1192,7 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateExpression(ruleYaml, "label-text-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateColorScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateWidthScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateGlow(ruleYaml, rulePath, report, sourceRuleIndex));
 
     uint32_t colorModeCount = 0;
     colorModeCount += ruleYaml["color"].IsDefined() ? 1U : 0U;

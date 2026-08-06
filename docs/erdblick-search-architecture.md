@@ -155,8 +155,12 @@ models.
 
 ## Hover, selection, and inspection
 
-Hovering or selecting a result creates/updates ordinary highlight
-presentations. Exact canonical feature identity is passed to the controller.
+Hovering or selecting a result passes exact canonical feature identity to the
+controller. If that typed search/regular entry is still rendered, a local
+interaction overlay applies the stylesheet's `interaction-effects` material
+without a backend request. Only a requested validity/relation semantic absent
+from every active subset creates an exact-root highlight presentation; its
+output is fed through the same overlay material path.
 
 Inspection is separate:
 

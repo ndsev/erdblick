@@ -11,6 +11,9 @@ import type {
     TileSubsetLayerRenderTask,
     TileSubsetLayerRenderWorkerOutbound
 } from "./tile-subset-layer-render.worker.protocol";
+import type {
+    DeckRenderBufferArenaDebugSnapshot
+} from "./deck-render-buffer-arena";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
@@ -115,6 +118,13 @@ export interface TileSubsetLayerRenderDebugSnapshot {
     oldestReadyMs: number;
 }
 
+/** Aggregate of the live per-view Deck scene and buffer-arena counters. */
+export interface DeckPresentationDebugSnapshot
+    extends DeckRenderBufferArenaDebugSnapshot {
+    views: number;
+    layers: number;
+}
+
 export class StaleSubsetRenderError extends Error {
     constructor() {
         super("A newer render input replaced this TileSubsetLayer render.");
@@ -149,6 +159,10 @@ export class TileSubsetLayerRenderService {
     private nextTaskId = 0;
     private latestNativeRenderMs = 0;
     private readonly deckFrameIntervalsMsByView = new Map<number, number[]>();
+    private readonly deckPresentationByView = new Map<number, {
+        layers: number;
+        arena: DeckRenderBufferArenaDebugSnapshot;
+    }>();
     private completedTaskCount = 0;
     private completedTileCount = 0;
     private releasedTaskCount = 0;
@@ -252,6 +266,52 @@ export class TileSubsetLayerRenderService {
     /** Removes the last Deck timing when its logical view is destroyed. */
     clearDeckFrameTime(viewIndex: number): void {
         this.deckFrameIntervalsMsByView.delete(viewIndex);
+    }
+
+    /** Records the latest stable Deck layer and consolidation counters for one view. */
+    recordDeckPresentationDiagnostics(
+        viewIndex: number,
+        layers: number,
+        arena: DeckRenderBufferArenaDebugSnapshot
+    ): void {
+        this.deckPresentationByView.set(viewIndex, {
+            layers: Math.max(0, Math.trunc(layers)),
+            arena: {...arena}
+        });
+    }
+
+    /** Removes presentation counters when their logical view is destroyed. */
+    clearDeckPresentationDiagnostics(viewIndex: number): void {
+        this.deckPresentationByView.delete(viewIndex);
+    }
+
+    /** Sums additive counters and retains the largest packed page across all views. */
+    currentDeckPresentationDiagnostics(): DeckPresentationDebugSnapshot {
+        const result: DeckPresentationDebugSnapshot = {
+            views: this.deckPresentationByView.size,
+            layers: 0,
+            groups: 0,
+            pages: 0,
+            reusablePages: 0,
+            contributions: 0,
+            usedVertices: 0,
+            capacityVertices: 0,
+            maxContributionsPerPage: 0
+        };
+        for (const {layers, arena} of this.deckPresentationByView.values()) {
+            result.layers += layers;
+            result.groups += arena.groups;
+            result.pages += arena.pages;
+            result.reusablePages += arena.reusablePages;
+            result.contributions += arena.contributions;
+            result.usedVertices += arena.usedVertices;
+            result.capacityVertices += arena.capacityVertices;
+            result.maxContributionsPerPage = Math.max(
+                result.maxContributionsPerPage,
+                arena.maxContributionsPerPage
+            );
+        }
+        return result;
     }
 
     debugSnapshot(): TileSubsetLayerRenderDebugSnapshot {

@@ -238,11 +238,12 @@ export class RightClickMenuService {
     private rebuildMenuItems(): void {
         const items: MenuItem[] = [];
         if (this.pickedFeatureRows.length) {
-            items.push(
-                ...this.pickedFeatureRows.map((row, index) =>
-                    this.pickedFeatureMenuItem(row, index)),
-                {separator: true}
-            );
+            if (this.pickedFeatureRows.length > 1) {
+                items.push(this.selectAllPickedFeaturesMenuItem());
+            }
+            items.push(...this.pickedFeatureRows.map((row, index) =>
+                this.pickedFeatureMenuItem(row, index)));
+            items.push({separator: true});
         }
         items.push(...this.sourceDataMenuItems());
         if (this.firstPersonViewContext) {
@@ -271,6 +272,18 @@ export class RightClickMenuService {
             label: row.feature.featureId,
             mapIdLabel: row.mapIdLabel,
             command: () => this.inspectionSelection.inspectFeatureIds([row.feature])
+        };
+    }
+
+    /** Builds the explicit multi-selection action for every bounded pick under the cursor. */
+    private selectAllPickedFeaturesMenuItem(): MenuItem {
+        return {
+            automationId: "inspect-all-picked-features",
+            label: "Select all",
+            icon: "pi pi-list-check",
+            title: `Select all ${this.pickedFeatureRows.length} features under the cursor`,
+            command: () => this.inspectionSelection.inspectFeatureIds(
+                this.pickedFeatureRows.map(row => row.feature))
         };
     }
 

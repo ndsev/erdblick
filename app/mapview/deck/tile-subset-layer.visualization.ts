@@ -56,10 +56,25 @@ import {
     type DeckSubsetPickProps as DeckPickProps,
     type SubsetPickResolver as PickResolver
 } from "./deck-subset-picking";
+import {
+    interactionColor,
+    type DeckInteractionEffect,
+    type DeckRgba
+} from "./deck-interaction-effect";
+import {DeckInteractionOutlineService} from
+    "./deck-interaction-outline.service";
+import {
+    DeckLocalPixelOffsetExtension,
+    DeckVariableOffsetPathLayer,
+    DeckVariablePathOffsetExtension,
+    packVariablePathOffsetVectors,
+    quantizeVariablePathOffsetScaleThreshold
+} from "./deck-variable-path-offset.extension";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
     renderBufferArena?: DeckRenderBufferArena;
+    interactionOutlineService?: DeckInteractionOutlineService;
     sceneMode?: SceneMode;
     device?: Device | null;
 }
@@ -76,11 +91,20 @@ interface DeckPathData {
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
     featureAddressesByPath: Uint32Array;
+    glowColors?: Uint8Array;
+    glowRadii?: Float32Array;
+    /** Per-vertex local XY pixel vectors retained for copying/arena merges. */
+    offsetVectorsPx?: Float32Array;
+    /** Quantized metres-per-pixel adaptive scale threshold per path. */
+    offsetScaleThresholds?: Float32Array;
     attributes: {
         getPath: DeckBinaryAttribute<Float32Array>;
         instanceColors: DeckBinaryAttribute<Uint8Array>;
         instanceStrokeWidths: DeckBinaryAttribute<Float32Array>;
+        instanceOffsets: DeckBinaryAttribute<Float32Array>;
+        instanceVariableOffsets?: DeckBinaryAttribute<Uint32Array>;
         instanceDashArrays?: DeckBinaryAttribute<Float32Array>;
+        instancePickingColors?: DeckBinaryAttribute<Uint8Array>;
     };
 }
 
@@ -90,10 +114,13 @@ interface DeckPointData {
     depthTest: boolean;
     coordinateOrigin: [number, number, number];
     featureAddresses: Uint32Array;
+    glowColors?: Uint8Array;
+    glowRadii?: Float32Array;
     attributes: {
         getPosition: DeckBinaryAttribute<Float32Array>;
         getFillColor: DeckBinaryAttribute<Uint8Array>;
         getRadius: DeckBinaryAttribute<Float32Array>;
+        instancePickingColors?: DeckBinaryAttribute<Uint8Array>;
     };
 }
 
@@ -103,10 +130,13 @@ interface DeckSurfaceData {
     coordinateOrigin: [number, number, number];
     startIndices: Uint32Array;
     featureAddresses: Uint32Array;
+    glowColors?: Uint8Array;
+    glowRadii?: Float32Array;
     attributes: {
         getPolygon: DeckBinaryAttribute<Float32Array>;
         indices: DeckBinaryAttribute<Uint32Array>;
         fillColors: DeckBinaryAttribute<Uint8Array>;
+        pickingColors?: DeckBinaryAttribute<Uint8Array>;
     };
 }
 
@@ -120,6 +150,15 @@ interface DeckArrowMarker {
     color: [number, number, number, number];
     sizePx: number;
     angleDeg: number;
+    pixelOffset: [number, number];
+    /** Local XY displacement plus its adaptive metres-per-pixel threshold. */
+    localPixelOffset: [number, number, number];
+}
+
+interface DeckGlowMaterial {
+    key: string;
+    color: DeckRgba;
+    radius: number;
 }
 
 interface DebugBlockPath {
@@ -163,6 +202,31 @@ interface ArenaRegistration {
     sourceId: string;
 }
 
+/** One style-owned interaction material applied to exact locally retained picks. */
+export interface TileSubsetInteractionOverlay {
+    id: string;
+    targets: readonly TileFeatureId[];
+    effect: DeckInteractionEffect;
+    order: number;
+}
+
+interface InteractionSource {
+    paths: DeckPathData[];
+    arrows: DeckPathData[];
+    points: DeckPointData[];
+    surfaces: DeckSurfaceData[];
+    labels: DeckLabelData[];
+    gltf: InteractionGltfSource | null;
+    origin: [number, number, number];
+    modelMatrix: Matrix4 | null;
+}
+
+interface InteractionGltfSource {
+    key: string;
+    asset: DeckTileGltfAsset;
+    data: DeckGltfNodeStyleContribution["data"];
+}
+
 const MAX_PATHS = 1_000_000;
 const MAX_SURFACES = 1_000_000;
 const MAX_VERTICES = 20_000_000;
@@ -172,6 +236,10 @@ const FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 const NO_DEPTH_PARAMETERS = {
     depthTest: false,
     depthMask: false
+} as any;
+const MASK_NO_DEPTH_PARAMETERS = {
+    ...NO_DEPTH_PARAMETERS,
+    blend: false
 } as any;
 const ARROW_ICON_SIZE = 64;
 const ARROW_ICON_ATLAS =
@@ -201,9 +269,26 @@ const ARROW_ICON_MAPPING = {
 export class TileSubsetLayerVisualization {
     readonly visualizationId: string;
     private readonly layerKeys = new Set<string>();
+    private readonly interactionLayerKeys = new Set<string>();
+    private readonly interactionGltfSources = new Map<
+        string,
+        {key: string; sourceId: string}
+    >();
+    private readonly interactionOutlineSources = new Map<
+        string,
+        {groupId: string; sourceId: string}
+    >();
+    private readonly styleGlowOutlineSources = new Map<
+        string,
+        {groupId: string; sourceId: string}
+    >();
     private readonly arenaRegistrations = new Map<string, ArenaRegistration>();
     private readonly styleCacheKey: string;
     private pickResults: TileSubsetPickResult[] = [];
+    private readonly interactionTargetKeys = new Set<string>();
+    private readonly interactionScopesByTarget = new Map<string, Set<string>>();
+    private interactionSource: InteractionSource | null = null;
+    private interactionOverlays: readonly TileSubsetInteractionOverlay[] = [];
     private renderedSignature = "";
     private requestedSignature = "";
     private disposed = false;
@@ -261,6 +346,34 @@ export class TileSubsetLayerVisualization {
 
     containsTile(tileId: number): boolean {
         return this.states.some(state => state.tileId === tileId);
+    }
+
+    /** Reports whether an exact feature/validity/relation/group pick is retained locally. */
+    hasLocalInteractionTarget(
+        target: TileFeatureId,
+        scope?: "feature" | "attribute" | "relation" | "group"
+    ): boolean {
+        if (!this.interactionSource) {
+            return false;
+        }
+        const key = this.interactionTargetKey(target);
+        return scope
+            ? this.interactionScopesByTarget.get(key)?.has(scope) ?? false
+            : this.interactionTargetKeys.has(key);
+    }
+
+    /** Replaces this block's view-owned local interaction overlay definitions. */
+    setInteractionOverlays(
+        overlays: readonly TileSubsetInteractionOverlay[]
+    ): void {
+        const kind = this.owner.identity.presentationKind;
+        // Hover/selection subsets are already authored interaction
+        // visualizations. Feeding them back through the generic mask would
+        // double their material and compound translucent geometry.
+        this.interactionOverlays = kind === "hover" || kind === "selection"
+            ? []
+            : overlays;
+        this.refreshInteractionOverlays();
     }
 
     hasSameStates(
@@ -407,6 +520,8 @@ export class TileSubsetLayerVisualization {
                 return false;
             }
             this.pickResults = result.pickResults ?? [];
+            this.rebuildInteractionTargetIndex();
+            this.refreshInteractionOverlays();
             this.renderedSignature = signature;
             this.requestedSignature = "";
             this.installRenderStats(
@@ -518,12 +633,33 @@ export class TileSubsetLayerVisualization {
         this.disposed = true;
         this.renderService.cancel(this.visualizationId);
         const registry = sceneHandle ? this.registry(sceneHandle) : null;
+        const outlineService = sceneHandle
+            ? this.outlineService(sceneHandle)
+            : null;
         if (registry) {
             for (const key of this.layerKeys) {
                 registry.remove(key);
             }
+            for (const key of this.interactionLayerKeys) {
+                registry.remove(key);
+            }
+            for (const source of this.interactionGltfSources.values()) {
+                registry.removeShared(source.key, source.sourceId);
+            }
         }
         this.layerKeys.clear();
+        this.interactionLayerKeys.clear();
+        this.interactionGltfSources.clear();
+        if (outlineService) {
+            for (const source of this.interactionOutlineSources.values()) {
+                outlineService.removeMask(source.groupId, source.sourceId);
+            }
+            for (const source of this.styleGlowOutlineSources.values()) {
+                outlineService.removeMask(source.groupId, source.sourceId);
+            }
+        }
+        this.interactionOutlineSources.clear();
+        this.styleGlowOutlineSources.clear();
         this.removeArenaContributions();
         this.removeSharedGltfContributions(registry);
         this.releaseGltfAsset();
@@ -532,6 +668,10 @@ export class TileSubsetLayerVisualization {
             this.owner.releaseTileState(state);
         }
         this.pickResults = [];
+        this.interactionTargetKeys.clear();
+        this.interactionScopesByTarget.clear();
+        this.interactionSource = null;
+        this.interactionOverlays = [];
         this.sceneHandle = null;
     }
 
@@ -550,6 +690,11 @@ export class TileSubsetLayerVisualization {
         this.applyDebugBlockVisualization(registry, desired);
         const origin = this.coordinateOrigin(result.coordinateOrigin);
         if (!origin) {
+            this.interactionSource = null;
+            this.reconcileStyleGlowOutlines(
+                this.outlineService(sceneHandle),
+                new Set());
+            this.refreshInteractionOverlays();
             this.reconcile(registry, desired);
             this.reconcileArena(desiredArena);
             return true;
@@ -573,7 +718,8 @@ export class TileSubsetLayerVisualization {
         );
         const pickResolver: PickResolver = pickIndex => this.resolvePick(pickIndex);
 
-        for (const surface of this.surfaceData(result.surface, origin)) {
+        const surfaceBuckets = this.surfaceData(result.surface, origin);
+        for (const surface of surfaceBuckets) {
             const key = this.key("surface", surface.depthTest);
             if (!this.upsertArenaSurface(
                 sceneHandle,
@@ -597,10 +743,17 @@ export class TileSubsetLayerVisualization {
 
         const pathBuckets = [
             ...this.pathData(result.pathWorld, origin, false),
-            ...this.pathData(result.pathBillboard, origin, true)
+            ...this.pathData(result.pathBillboard, origin, true),
+            ...this.pathData(result.transitionPathWorld, origin, false),
+            ...this.pathData(result.transitionPathBillboard, origin, true)
         ];
         for (const path of pathBuckets) {
-            const key = this.key("path", path.depthTest, path.billboard);
+            const key = this.key(
+                path.attributes.instanceVariableOffsets
+                    ? "path-variable-offset"
+                    : "path",
+                path.depthTest,
+                path.billboard);
             if (!this.upsertArenaPath(
                 sceneHandle,
                 key,
@@ -647,20 +800,20 @@ export class TileSubsetLayerVisualization {
             }
         }
 
-        const labels = [...result.labelWorld, ...result.labelBillboard];
+        const labels = [...result.labelWorld, ...result.labelBillboard].map(
+            label => ({
+                ...label,
+                position: [
+                    label.position.x,
+                    label.position.y,
+                    label.position.z
+                ] as [number, number, number]
+            }));
         for (const billboard of [false, true]) {
             for (const depthTest of [true, false]) {
                 const data = labels
                     .filter(label => Boolean(label.billboard) === billboard &&
-                        (label.depthTest !== false) === depthTest)
-                    .map(label => ({
-                        ...label,
-                        position: [
-                            label.position.x,
-                            label.position.y,
-                            label.position.z
-                        ] as [number, number, number]
-                    }));
+                        (label.depthTest !== false) === depthTest);
                 if (!data.length) {
                     continue;
                 }
@@ -673,10 +826,10 @@ export class TileSubsetLayerVisualization {
                     getPosition: (datum: DeckLabelData) => datum.position,
                     getText: (datum: DeckLabelData) => datum.text,
                     getColor: (datum: DeckLabelData) => datum.fillColor,
-                    getOutlineColor: (datum: DeckLabelData) => datum.outlineColor,
-                    getOutlineWidth: (datum: DeckLabelData) => datum.outlineWidth,
                     getSize: (datum: DeckLabelData) => 14 * datum.scale,
                     sizeUnits: "pixels",
+                    outlineColor: data[0].outlineColor,
+                    outlineWidth: data[0].outlineWidth,
                     getPixelOffset: (datum: DeckLabelData) => datum.pixelOffset ?? [0, 0],
                     billboard,
                     modelMatrix,
@@ -708,11 +861,15 @@ export class TileSubsetLayerVisualization {
                 iconAtlas: ARROW_ICON_ATLAS,
                 iconMapping: ARROW_ICON_MAPPING,
                 getIcon: () => "arrowhead",
-                getPosition: marker => marker.position,
-                getSize: marker => marker.sizePx,
+                getPosition: (marker: DeckArrowMarker) => marker.position,
+                getSize: (marker: DeckArrowMarker) => marker.sizePx,
                 sizeUnits: "pixels",
-                getAngle: marker => marker.angleDeg,
-                getColor: marker => marker.color,
+                getAngle: (marker: DeckArrowMarker) => marker.angleDeg,
+                getPixelOffset: (marker: DeckArrowMarker) => marker.pixelOffset,
+                getLocalPixelOffset: (marker: DeckArrowMarker) =>
+                    marker.localPixelOffset,
+                getColor: (marker: DeckArrowMarker) => marker.color,
+                extensions: [new DeckLocalPixelOffsetExtension()],
                 billboard: arrow.billboard,
                 modelMatrix,
                 parameters: this.parameters(arrow.depthTest),
@@ -721,11 +878,11 @@ export class TileSubsetLayerVisualization {
                 tileKey: this.blockKey,
                 subsetPickResolver: pickResolver,
                 alphaCutoff: 0.05
-            }), 450 + this.owner.styleOrder);
+            } as any), 450 + this.owner.styleOrder);
             desired.add(key);
         }
 
-        this.applyGltf(
+        const interactionGltf = this.applyGltf(
             registry,
             result,
             origin,
@@ -734,6 +891,17 @@ export class TileSubsetLayerVisualization {
             interaction,
             preparedGltf
         );
+        this.interactionSource = {
+            paths: pathBuckets,
+            arrows: arrowBuckets,
+            points: pointBuckets,
+            surfaces: surfaceBuckets,
+            labels,
+            gltf: interactionGltf,
+            origin,
+            modelMatrix
+        };
+        this.refreshStyleGlows(sceneHandle);
         this.reconcile(registry, desired);
         this.reconcileArena(desiredArena);
         return true;
@@ -744,7 +912,8 @@ export class TileSubsetLayerVisualization {
         surface: DeckSurfaceData,
         pickResolver: PickResolver,
         modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps
+        interaction: DeckInteractionProps,
+        parameters: any = this.parameters(surface.depthTest)
     ): SolidPolygonLayer<DeckSurfaceData, DeckPickProps> {
         return new SolidPolygonLayer<DeckSurfaceData, DeckPickProps>({
             id: key,
@@ -757,7 +926,7 @@ export class TileSubsetLayerVisualization {
             _normalize: false,
             _full3d: true,
             modelMatrix,
-            parameters: this.parameters(surface.depthTest),
+            parameters,
             pickable: interaction.pickable,
             navigationAnchorEligible: interaction.drillPickEligible,
             markerAnchorEligible: interaction.drillPickEligible,
@@ -775,7 +944,12 @@ export class TileSubsetLayerVisualization {
         modelMatrix: Matrix4 | null,
         interaction: DeckInteractionProps
     ): PathLayer<DeckPathData, DeckPickProps> {
-        return new PathLayer<DeckPathData, DeckPickProps>({
+        const variableOffset = Boolean(
+            path.attributes.instanceVariableOffsets);
+        const LayerType = variableOffset
+            ? DeckVariableOffsetPathLayer
+            : PathLayer;
+        return new LayerType({
             id: key,
             data: path,
             coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
@@ -791,7 +965,12 @@ export class TileSubsetLayerVisualization {
             navigationAnchorEligible: interaction.drillPickEligible,
             markerAnchorEligible: interaction.drillPickEligible,
             drillPickEligible: interaction.drillPickEligible,
-            extensions: [new PathStyleExtension({dash: true})],
+            extensions: variableOffset
+                ? [
+                    new PathStyleExtension({dash: true}),
+                    new DeckVariablePathOffsetExtension()
+                ]
+                : [new PathStyleExtension({dash: true, offset: true})],
             tileKey: key,
             subsetPickResolver: pickResolver,
             featureAddressesByPath: path.featureAddressesByPath,
@@ -800,7 +979,7 @@ export class TileSubsetLayerVisualization {
                 startIndices: path.startIndices,
                 coordinateOrigin: path.coordinateOrigin
             }
-        });
+        }) as PathLayer<DeckPathData, DeckPickProps>;
     }
 
     private pointLayer(
@@ -890,13 +1069,21 @@ export class TileSubsetLayerVisualization {
         if (!arena) {
             return false;
         }
+        const pathKind = path.attributes.instanceVariableOffsets
+            ? "path-variable-offset"
+            : "path";
         const groupKey = this.arenaGroupKey(
-            "path",
+            pathKind,
             path.depthTest,
             path.billboard,
             path.coordinateOrigin
         );
-        const sourceId = `${this.visualizationId}/path/${path.billboard}/${path.depthTest}`;
+        const sourceId = [
+            this.visualizationId,
+            pathKind,
+            String(path.billboard),
+            String(path.depthTest)
+        ].join("/");
         arena.upsert({
             groupKey,
             sourceId,
@@ -1034,9 +1221,14 @@ export class TileSubsetLayerVisualization {
             return null;
         }
         const picks = this.arenaPickTable(contributions);
+        const variableOffset = Boolean(
+            contributions[0].data.attributes.instanceVariableOffsets);
         const positions: number[] = [];
         const colors: number[] = [];
         const widths: number[] = [];
+        const offsets: number[] = [];
+        const offsetVectors: number[] = [];
+        const offsetScaleThresholds: number[] = [];
         const dashes: number[] = [];
         const starts = [0];
         const addresses: number[] = [];
@@ -1049,6 +1241,20 @@ export class TileSubsetLayerVisualization {
             this.appendValues(positions, data.attributes.getPath.value);
             this.appendValues(colors, data.attributes.instanceColors.value);
             this.appendValues(widths, data.attributes.instanceStrokeWidths.value);
+            this.appendValues(offsets, data.attributes.instanceOffsets.value);
+            if (variableOffset) {
+                if (!data.offsetVectorsPx ||
+                    data.offsetVectorsPx.length < vertexCount * 2) {
+                    return null;
+                }
+                this.appendValues(offsetVectors, data.offsetVectorsPx);
+                for (let pathIndex = 0;
+                     pathIndex < data.length;
+                     ++pathIndex) {
+                    offsetScaleThresholds.push(
+                        data.offsetScaleThresholds?.[pathIndex] ?? 0);
+                }
+            }
             const contributionDashes =
                 data.attributes.instanceDashArrays?.value;
             if (hasDashes) {
@@ -1068,6 +1274,11 @@ export class TileSubsetLayerVisualization {
             }
         }
         const first = contributions[0].data;
+        const startIndices = new Uint32Array(starts);
+        const offsetValues = new Float32Array(offsets);
+        const offsetVectorValues = variableOffset
+            ? new Float32Array(offsetVectors)
+            : undefined;
         return {
             pickResolver: picks.resolve,
             data: {
@@ -1075,8 +1286,12 @@ export class TileSubsetLayerVisualization {
                 billboard: first.billboard,
                 depthTest: first.depthTest,
                 coordinateOrigin: first.coordinateOrigin,
-                startIndices: new Uint32Array(starts),
+                startIndices,
                 featureAddressesByPath: new Uint32Array(addresses),
+                offsetVectorsPx: offsetVectorValues,
+                offsetScaleThresholds: variableOffset
+                    ? new Float32Array(offsetScaleThresholds)
+                    : undefined,
                 attributes: {
                     getPath: {
                         value: new Float32Array(positions),
@@ -1090,6 +1305,19 @@ export class TileSubsetLayerVisualization {
                         value: new Float32Array(widths),
                         size: 1
                     },
+                    instanceOffsets: {
+                        value: offsetValues,
+                        size: 1
+                    },
+                    ...(offsetVectorValues
+                        ? {instanceVariableOffsets: {
+                            value: packVariablePathOffsetVectors(
+                                offsetVectorValues,
+                                startIndices,
+                                offsetScaleThresholds),
+                            size: 4
+                        }}
+                        : {}),
                     ...(hasDashes
                         ? {instanceDashArrays: {
                             value: new Float32Array(dashes),
@@ -1440,12 +1668,13 @@ export class TileSubsetLayerVisualization {
         pickResolver: PickResolver,
         interaction: DeckInteractionProps,
         prepared: PreparedGltf | null
-    ): void {
+    ): InteractionGltfSource | null {
         const sourceId = this.owner.ownerId;
         const state = this.primaryState;
         const gltfKey = `${state.mapTileKey}/gltf`;
         const pickKey = deckSubsetGltfPickProxyKey(state.mapTileKey, this.owner.ownerId);
         const raw = result.gltfNodes;
+        let interactionData: DeckGltfNodeStyleContribution["data"] | null = null;
         const flatTint = this.owner.highlightMode.value !==
             coreLib.HighlightMode.NO_HIGHLIGHT.value;
         const priority = this.owner.highlightMode.value ===
@@ -1478,6 +1707,7 @@ export class TileSubsetLayerVisualization {
                     renderPriority: priority
                 });
             }
+            interactionData = data;
             const contribution: SharedGltfContribution = {
                 asset: prepared.asset,
                 order: 375 + this.owner.styleOrder,
@@ -1485,44 +1715,12 @@ export class TileSubsetLayerVisualization {
                 styleOrder: this.owner.styleOrder,
                 data
             };
-            registry.upsertShared(
+            this.upsertSharedGltf(
+                registry,
                 gltfKey,
                 sourceId,
                 contribution,
-                (key, rawContributions) => {
-                    const contributions = [...rawContributions.entries()].map(
-                        ([id, value]) => ({
-                            sourceId: id,
-                            contribution: value as SharedGltfContribution
-                        })
-                    );
-                    if (!contributions.length) {
-                        return {layer: null, order: 0};
-                    }
-                    const first = contributions[0].contribution;
-                    const maxPriority = Math.max(...contributions.map(
-                        item => item.contribution.priority
-                    ));
-                    const order = Math.max(...contributions.map(
-                        item => item.contribution.order
-                    )) + (maxPriority >= 2 ? 1000 : 0);
-                    return {
-                        order,
-                        layer: new DeckGltfNodeLayer({
-                            id: key,
-                            contributions: contributions.map(item => ({
-                                sourceId: item.sourceId,
-                                priority: item.contribution.priority,
-                                styleOrder: item.contribution.styleOrder,
-                                data: item.contribution.data
-                            })),
-                            asset: first.asset,
-                            pickable: false,
-                            modelMatrix
-                        })
-                    };
-                }
-            );
+                modelMatrix);
             this.gltfSharedSourceActive = true;
         } else if (this.gltfSharedSourceActive) {
             registry.removeShared(gltfKey, sourceId);
@@ -1596,6 +1794,59 @@ export class TileSubsetLayerVisualization {
         } else {
             this.owner.releaseAttachment(state.tileId);
         }
+        return prepared && interactionData
+            ? {
+                key: gltfKey,
+                asset: prepared.asset,
+                data: interactionData
+            }
+            : null;
+    }
+
+    private upsertSharedGltf(
+        registry: DeckLayerRegistry,
+        key: string,
+        sourceId: string,
+        contribution: SharedGltfContribution,
+        modelMatrix: Matrix4 | null
+    ): void {
+        registry.upsertShared(
+            key,
+            sourceId,
+            contribution,
+            (sharedKey, rawContributions) => {
+                const contributions = [...rawContributions.entries()].map(
+                    ([id, value]) => ({
+                        sourceId: id,
+                        contribution: value as SharedGltfContribution
+                    })
+                );
+                if (!contributions.length) {
+                    return {layer: null, order: 0};
+                }
+                const first = contributions[0].contribution;
+                const maxPriority = Math.max(...contributions.map(
+                    item => item.contribution.priority
+                ));
+                const order = Math.max(...contributions.map(
+                    item => item.contribution.order
+                )) + (maxPriority >= 2 ? 1000 : 0);
+                return {
+                    order,
+                    layer: new DeckGltfNodeLayer({
+                        id: sharedKey,
+                        contributions: contributions.map(item => ({
+                            sourceId: item.sourceId,
+                            priority: item.contribution.priority,
+                            styleOrder: item.contribution.styleOrder,
+                            data: item.contribution.data
+                        })),
+                        asset: first.asset,
+                        pickable: false,
+                        modelMatrix
+                    })
+                };
+            });
     }
 
     private gltfPickProxyData(
@@ -1716,18 +1967,30 @@ export class TileSubsetLayerVisualization {
             raw.positions.length < vertexCount * 3 ||
             raw.colors.length < vertexCount * 4 ||
             raw.widths.length < vertexCount ||
-            raw.featureAddresses.length < pathCount) {
+            raw.lateralOffsetsPx.length < vertexCount ||
+            raw.featureAddresses.length < pathCount ||
+            raw.glowColors.length < pathCount * 4 ||
+            raw.glowRadii.length < pathCount) {
             return [];
         }
-        const groups = new Map<boolean, {
+        const groups = new Map<string, {
+            depthTest: boolean;
+            variableOffset: boolean;
             positions: number[];
             starts: number[];
             colors: number[];
             widths: number[];
+            offsets: number[];
+            offsetVectors?: number[];
+            offsetScaleThresholds?: number[];
             addresses: number[];
+            glowColors: number[];
+            glowRadii: number[];
             dashes?: number[];
         }>();
         const hasDashes = !!raw.dashArrays && raw.dashArrays.length >= vertexCount * 2;
+        const hasOffsetVectors =
+            (raw.lateralOffsetVectorsPx?.length ?? 0) >= vertexCount * 2;
         for (let pathIndex = 0; pathIndex < pathCount; ++pathIndex) {
             const start = raw.startIndices[pathIndex];
             const end = raw.startIndices[pathIndex + 1];
@@ -1735,45 +1998,102 @@ export class TileSubsetLayerVisualization {
                 return [];
             }
             const depthTest = !raw.depthTests?.length || raw.depthTests[pathIndex] !== 0;
-            const group = groups.get(depthTest) ?? {
+            const variableOffset = hasOffsetVectors;
+            const groupKey = `${Number(depthTest)}:${Number(variableOffset)}`;
+            const group = groups.get(groupKey) ?? {
+                depthTest,
+                variableOffset,
                 positions: [],
                 starts: [0],
                 colors: [],
                 widths: [],
+                offsets: [],
+                offsetVectors: variableOffset ? [] : undefined,
+                offsetScaleThresholds: variableOffset ? [] : undefined,
                 addresses: [],
+                glowColors: [],
+                glowRadii: [],
                 dashes: hasDashes ? [] : undefined
             };
             for (let vertex = start; vertex < end; ++vertex) {
                 group.positions.push(...raw.positions.subarray(vertex * 3, vertex * 3 + 3));
                 group.colors.push(...raw.colors.subarray(vertex * 4, vertex * 4 + 4));
                 group.widths.push(raw.widths[vertex]);
+                const width = raw.widths[vertex];
+                group.offsets.push(width > 0
+                    ? raw.lateralOffsetsPx[vertex] / width
+                    : 0);
+                if (group.offsetVectors) {
+                    group.offsetVectors.push(
+                        raw.lateralOffsetVectorsPx[vertex * 2],
+                        raw.lateralOffsetVectorsPx[vertex * 2 + 1]);
+                }
                 if (group.dashes && raw.dashArrays) {
                     group.dashes.push(...raw.dashArrays.subarray(vertex * 2, vertex * 2 + 2));
                 }
             }
             group.addresses.push(raw.featureAddresses[pathIndex]);
+            group.offsetScaleThresholds?.push(
+                quantizeVariablePathOffsetScaleThreshold(
+                    raw.lateralOffsetScaleThresholds?.[pathIndex] ?? 0));
+            group.glowColors.push(...raw.glowColors.subarray(
+                pathIndex * 4,
+                pathIndex * 4 + 4));
+            group.glowRadii.push(raw.glowRadii[pathIndex]);
             group.starts.push(group.positions.length / 3);
-            groups.set(depthTest, group);
+            groups.set(groupKey, group);
         }
-        return [...groups].map(([depthTest, group]) => ({
-            length: group.addresses.length,
-            billboard,
-            depthTest,
-            coordinateOrigin: origin,
-            startIndices: new Uint32Array(group.starts),
-            featureAddressesByPath: new Uint32Array(group.addresses),
-            attributes: {
-                getPath: {value: new Float32Array(group.positions), size: 3},
-                instanceColors: {value: new Uint8Array(group.colors), size: 4},
-                instanceStrokeWidths: {value: new Float32Array(group.widths), size: 1},
-                ...(group.dashes
-                    ? {instanceDashArrays: {
-                        value: new Float32Array(group.dashes),
-                        size: 2
-                    }}
-                    : {})
-            }
-        }));
+        return [...groups.values()].map(group => {
+            const startIndices = new Uint32Array(group.starts);
+            const offsetValues = new Float32Array(group.offsets);
+            const offsetVectors = group.offsetVectors
+                ? new Float32Array(group.offsetVectors)
+                : undefined;
+            return {
+                length: group.addresses.length,
+                billboard,
+                depthTest: group.depthTest,
+                coordinateOrigin: origin,
+                startIndices,
+                featureAddressesByPath: new Uint32Array(group.addresses),
+                glowColors: new Uint8Array(group.glowColors),
+                glowRadii: new Float32Array(group.glowRadii),
+                offsetVectorsPx: offsetVectors,
+                offsetScaleThresholds: group.offsetScaleThresholds
+                    ? new Float32Array(group.offsetScaleThresholds)
+                    : undefined,
+                attributes: {
+                    getPath: {
+                        value: new Float32Array(group.positions),
+                        size: 3
+                    },
+                    instanceColors: {
+                        value: new Uint8Array(group.colors),
+                        size: 4
+                    },
+                    instanceStrokeWidths: {
+                        value: new Float32Array(group.widths),
+                        size: 1
+                    },
+                    instanceOffsets: {value: offsetValues, size: 1},
+                    ...(offsetVectors
+                        ? {instanceVariableOffsets: {
+                            value: packVariablePathOffsetVectors(
+                                offsetVectors,
+                                startIndices,
+                                group.offsetScaleThresholds),
+                            size: 4
+                        }}
+                        : {}),
+                    ...(group.dashes
+                        ? {instanceDashArrays: {
+                            value: new Float32Array(group.dashes),
+                            size: 2
+                        }}
+                        : {})
+                }
+            };
+        });
     }
 
     private pointData(
@@ -1788,7 +2108,9 @@ export class TileSubsetLayerVisualization {
         if (pointCount > MAX_POINTS ||
             raw.colors.length < pointCount * 4 ||
             raw.radii.length < pointCount ||
-            raw.featureAddresses.length < pointCount) {
+            raw.featureAddresses.length < pointCount ||
+            raw.glowColors.length < pointCount * 4 ||
+            raw.glowRadii.length < pointCount) {
             return [];
         }
         const groups = new Map<boolean, {
@@ -1796,6 +2118,8 @@ export class TileSubsetLayerVisualization {
             colors: number[];
             radii: number[];
             addresses: number[];
+            glowColors: number[];
+            glowRadii: number[];
         }>();
         for (let index = 0; index < pointCount; ++index) {
             const depthTest = !raw.depthTests?.length || raw.depthTests[index] !== 0;
@@ -1803,12 +2127,18 @@ export class TileSubsetLayerVisualization {
                 positions: [],
                 colors: [],
                 radii: [],
-                addresses: []
+                addresses: [],
+                glowColors: [],
+                glowRadii: []
             };
             group.positions.push(...raw.positions.subarray(index * 3, index * 3 + 3));
             group.colors.push(...raw.colors.subarray(index * 4, index * 4 + 4));
             group.radii.push(raw.radii[index]);
             group.addresses.push(raw.featureAddresses[index]);
+            group.glowColors.push(...raw.glowColors.subarray(
+                index * 4,
+                index * 4 + 4));
+            group.glowRadii.push(raw.glowRadii[index]);
             groups.set(depthTest, group);
         }
         return [...groups].map(([depthTest, group]) => ({
@@ -1817,6 +2147,8 @@ export class TileSubsetLayerVisualization {
             depthTest,
             coordinateOrigin: origin,
             featureAddresses: new Uint32Array(group.addresses),
+            glowColors: new Uint8Array(group.glowColors),
+            glowRadii: new Float32Array(group.glowRadii),
             attributes: {
                 getPosition: {value: new Float32Array(group.positions), size: 3},
                 getFillColor: {value: new Uint8Array(group.colors), size: 4},
@@ -1839,6 +2171,8 @@ export class TileSubsetLayerVisualization {
             raw.positions.length < vertexCount * 3 ||
             raw.colors.length < vertexCount * 4 ||
             raw.featureAddresses.length < surfaceCount ||
+            raw.glowColors.length < surfaceCount * 4 ||
+            raw.glowRadii.length < surfaceCount ||
             !isValidSurfaceRingTopology(raw, vertexCount)) {
             return [];
         }
@@ -1849,6 +2183,8 @@ export class TileSubsetLayerVisualization {
             holeStarts: number[];
             colors: number[];
             addresses: number[];
+            glowColors: number[];
+            glowRadii: number[];
         }>();
         for (let surface = 0; surface < surfaceCount; ++surface) {
             const start = raw.startIndices[surface];
@@ -1863,7 +2199,9 @@ export class TileSubsetLayerVisualization {
                 holes: [],
                 holeStarts: [0],
                 colors: [],
-                addresses: []
+                addresses: [],
+                glowColors: [],
+                glowRadii: []
             };
             const groupStart = group.positions.length / 3;
             for (let vertex = start; vertex < end; ++vertex) {
@@ -1879,6 +2217,10 @@ export class TileSubsetLayerVisualization {
             }
             group.holeStarts.push(group.holes.length);
             group.addresses.push(raw.featureAddresses[surface]);
+            group.glowColors.push(...raw.glowColors.subarray(
+                surface * 4,
+                surface * 4 + 4));
+            group.glowRadii.push(raw.glowRadii[surface]);
             group.starts.push(group.positions.length / 3);
             groups.set(depthTest, group);
         }
@@ -1888,6 +2230,8 @@ export class TileSubsetLayerVisualization {
             coordinateOrigin: origin,
             startIndices: new Uint32Array(group.starts),
             featureAddresses: new Uint32Array(group.addresses),
+            glowColors: new Uint8Array(group.glowColors),
+            glowRadii: new Float32Array(group.glowRadii),
             attributes: {
                 getPolygon: {value: new Float32Array(group.positions), size: 3},
                 indices: {
@@ -1904,12 +2248,19 @@ export class TileSubsetLayerVisualization {
         }));
     }
 
-    private arrowMarkers(path: DeckPathData): DeckArrowMarker[] {
+    private arrowMarkers(
+        path: DeckPathData,
+        includeIndex: ((index: number) => boolean) | null = null
+    ): DeckArrowMarker[] {
         const result: DeckArrowMarker[] = [];
         const positions = path.attributes.getPath.value;
         const colors = path.attributes.instanceColors.value;
         const widths = path.attributes.instanceStrokeWidths.value;
+        const offsets = path.attributes.instanceOffsets.value;
         for (let index = 0; index < path.length; ++index) {
+            if (includeIndex && !includeIndex(index)) {
+                continue;
+            }
             const start = path.startIndices[index];
             const end = path.startIndices[index + 1];
             if (end - start < 3) {
@@ -1927,6 +2278,19 @@ export class TileSubsetLayerVisualization {
                 continue;
             }
             const colorOffset = tip * 4;
+            const directionLength = Math.hypot(directionX, directionY);
+            const lateralPixels = Number(offsets[tip] ?? offsets[start] ?? 0) *
+                Number(widths[tip] ?? 0);
+            const offsetVectors = path.offsetVectorsPx;
+            const explicitOffset = offsetVectors && offsetVectors.length >=
+                (tip + 1) * 2
+                ? [
+                    offsetVectors[tip * 2],
+                    offsetVectors[tip * 2 + 1]
+                ] as [number, number]
+                : null;
+            const offsetScaleThreshold =
+                path.offsetScaleThresholds?.[index] ?? 0;
             result.push({
                 featureAddress: path.featureAddressesByPath[index],
                 position: [
@@ -1943,10 +2307,1116 @@ export class TileSubsetLayerVisualization {
                 sizePx: Math.max(8, widths[tip] * 4),
                 angleDeg: this.normalizeDegrees(
                     -((Math.atan2(directionX, directionY) * 180) / Math.PI)
-                )
+                ),
+                // PathLayer applies the y-up right normal (dy, -dx).
+                // IconLayer negates the accessor's complete Y component, so
+                // getPixelOffset must supply (dy, dx) to land on that same
+                // displaced terminal point.
+                pixelOffset: explicitOffset
+                    ? [0, 0]
+                    : [
+                        directionY / directionLength * lateralPixels,
+                        directionX / directionLength * lateralPixels
+                    ],
+                localPixelOffset: explicitOffset
+                    ? [
+                        explicitOffset[0],
+                        explicitOffset[1],
+                        offsetScaleThreshold
+                    ]
+                    : [0, 0, 0]
             });
         }
         return result;
+    }
+
+    /** Installs persistent style-owned glows through the shared vector mask compositor. */
+    private refreshStyleGlows(sceneHandle: IRenderSceneHandle): void {
+        const source = this.interactionSource;
+        const service = this.outlineService(sceneHandle);
+        if (!source || !service || this.disposed) {
+            this.reconcileStyleGlowOutlines(service, new Set());
+            return;
+        }
+        const desired = new Set<string>();
+        const noPick: PickResolver = () => [];
+        const maskInteraction: DeckInteractionProps = {
+            pickable: true,
+            drillPickEligible: false
+        };
+        const order = 300 + this.owner.styleOrder;
+        const register = (
+            kind: "path" | "arrow" | "point" | "surface",
+            bucketIndex: number,
+            material: DeckGlowMaterial,
+            indices: ReadonlySet<number>,
+            data: DeckPathData | DeckPointData | DeckSurfaceData
+        ): void => {
+            const effect = this.glowEffect(material);
+            const groupId = this.styleGlowGroupId(material);
+            const sourceId = [
+                this.visualizationId,
+                kind,
+                bucketIndex,
+                material.key
+            ].join("/");
+            const token = `${groupId}\n${sourceId}`;
+            // A literal style glow is one union silhouette, not an
+            // interaction boundary between individual features. Reusing one
+            // identity removes dark seams where glowing paths overlap.
+            const identity = (_address: number) =>
+                service.identityColor(
+                    groupId,
+                    "style-glow-union",
+                    effect,
+                    order);
+            let mask: DeckPathData | DeckPointData | DeckSurfaceData |
+                DeckArrowMarker[] | null;
+            if (kind === "arrow") {
+                mask = this.arrowMarkers(
+                    data as DeckPathData,
+                    index => indices.has(index));
+            } else if (kind === "path") {
+                mask = this.interactionPathMaskData(
+                    data as DeckPathData,
+                    null,
+                    identity,
+                    index => indices.has(index),
+                    true);
+            } else if (kind === "point") {
+                mask = this.interactionPointMaskData(
+                    data as DeckPointData,
+                    null,
+                    identity,
+                    index => indices.has(index),
+                    true);
+            } else {
+                mask = this.interactionSurfaceMaskData(
+                    data as DeckSurfaceData,
+                    null,
+                    identity,
+                    index => indices.has(index),
+                    true);
+            }
+            if (!mask) {
+                return;
+            }
+            service.upsertMask(
+                groupId,
+                sourceId,
+                effect,
+                order,
+                source.origin,
+                layerId => kind === "path"
+                    ? this.pathLayer(
+                        layerId,
+                        mask as DeckPathData,
+                        noPick,
+                        source.modelMatrix,
+                        maskInteraction)
+                    : kind === "arrow"
+                        ? new IconLayer<DeckArrowMarker>({
+                            id: layerId,
+                            data: mask as DeckArrowMarker[],
+                            coordinateSystem:
+                                COORDINATE_SYSTEM.METER_OFFSETS,
+                            coordinateOrigin: source.origin,
+                            iconAtlas: ARROW_ICON_ATLAS,
+                            iconMapping: ARROW_ICON_MAPPING,
+                            getIcon: () => "arrowhead",
+                            getPosition: (marker: DeckArrowMarker) =>
+                                marker.position,
+                            getSize: (marker: DeckArrowMarker) => marker.sizePx,
+                            sizeUnits: "pixels",
+                            getAngle: (marker: DeckArrowMarker) =>
+                                marker.angleDeg,
+                            getPixelOffset: (marker: DeckArrowMarker) =>
+                                marker.pixelOffset,
+                            getLocalPixelOffset:
+                                (marker: DeckArrowMarker) =>
+                                    marker.localPixelOffset,
+                            getColor: () => [255, 255, 255, 255],
+                            extensions: [
+                                new DeckLocalPixelOffsetExtension()
+                            ],
+                            billboard: (data as DeckPathData).billboard,
+                            modelMatrix: source.modelMatrix,
+                            parameters: MASK_NO_DEPTH_PARAMETERS,
+                            pickable: true,
+                            alphaCutoff: 0.05
+                        } as any)
+                    : kind === "point"
+                        ? this.pointLayer(
+                            layerId,
+                            mask as DeckPointData,
+                            noPick,
+                            source.modelMatrix,
+                            maskInteraction)
+                        : this.surfaceLayer(
+                            layerId,
+                            mask as DeckSurfaceData,
+                            noPick,
+                            source.modelMatrix,
+                            maskInteraction,
+                            MASK_NO_DEPTH_PARAMETERS));
+            this.styleGlowOutlineSources.set(token, {groupId, sourceId});
+            desired.add(token);
+        };
+
+        source.paths.forEach((data, bucketIndex) => {
+            for (const {material, indices} of this.glowGroups(
+                data.glowColors,
+                data.glowRadii,
+                data.length)) {
+                register("path", bucketIndex, material, indices, data);
+            }
+        });
+        source.arrows.forEach((data, bucketIndex) => {
+            for (const {material, indices} of this.glowGroups(
+                data.glowColors,
+                data.glowRadii,
+                data.length)) {
+                register("arrow", bucketIndex, material, indices, data);
+            }
+        });
+        source.points.forEach((data, bucketIndex) => {
+            for (const {material, indices} of this.glowGroups(
+                data.glowColors,
+                data.glowRadii,
+                data.length)) {
+                register("point", bucketIndex, material, indices, data);
+            }
+        });
+        source.surfaces.forEach((data, bucketIndex) => {
+            for (const {material, indices} of this.glowGroups(
+                data.glowColors,
+                data.glowRadii,
+                data.length)) {
+                register("surface", bucketIndex, material, indices, data);
+            }
+        });
+        this.reconcileStyleGlowOutlines(service, desired);
+    }
+
+    private glowGroups(
+        colors: Uint8Array | undefined,
+        radii: Float32Array | undefined,
+        count: number
+    ): Array<{material: DeckGlowMaterial; indices: Set<number>}> {
+        if (!colors || !radii || colors.length < count * 4 ||
+            radii.length < count) {
+            return [];
+        }
+        const groups = new Map<
+            string,
+            {material: DeckGlowMaterial; indices: Set<number>}
+        >();
+        for (let index = 0; index < count; ++index) {
+            const color = Array.from(colors.subarray(
+                index * 4,
+                index * 4 + 4)) as DeckRgba;
+            const radius = Number(radii[index]);
+            if (color[3] <= 0 || !Number.isFinite(radius) || radius <= 0) {
+                continue;
+            }
+            const key = `${color.join(",")}:${radius.toPrecision(7)}`;
+            const group = groups.get(key) ?? {
+                material: {key, color, radius},
+                indices: new Set<number>()
+            };
+            group.indices.add(index);
+            groups.set(key, group);
+        }
+        return [...groups.values()];
+    }
+
+    private glowEffect(material: DeckGlowMaterial): DeckInteractionEffect {
+        return {
+            tintMix: 0,
+            opacity: 1,
+            edgeWidth: 0,
+            haloColor: material.color,
+            haloRadius: material.radius,
+            haloOpacity: 1,
+            // Style glow is always behind/outside authored geometry. The
+            // interior semantic-halo branch exists only for nested selected
+            // interaction objects and would otherwise muddy thin path fills.
+            interiorHalo: false,
+            stripeSpacing: 0,
+            stripeWidth: 0,
+            stripeOpacity: 0,
+            stripeAngle: 45,
+            stripeOffset: 0,
+            stripeSoftness: 1
+        };
+    }
+
+    private styleGlowGroupId(material: DeckGlowMaterial): string {
+        return [
+            this.owner.ownerId,
+            `view-${this.viewIndex}`,
+            "style-glow",
+            encodeURIComponent(material.key)
+        ].join("/");
+    }
+
+    private reconcileStyleGlowOutlines(
+        service: DeckInteractionOutlineService | null,
+        desired: ReadonlySet<string>
+    ): void {
+        if (!service) {
+            this.styleGlowOutlineSources.clear();
+            return;
+        }
+        for (const [token, source] of this.styleGlowOutlineSources) {
+            if (!desired.has(token)) {
+                service.removeMask(source.groupId, source.sourceId);
+                this.styleGlowOutlineSources.delete(token);
+            }
+        }
+    }
+
+    /** Rebuilds only the tiny interaction layers whose exact pick rows are active. */
+    private refreshInteractionOverlays(): void {
+        const sceneHandle = this.sceneHandle;
+        const source = this.interactionSource;
+        if (!sceneHandle || this.disposed) {
+            return;
+        }
+        const registry = this.registry(sceneHandle);
+        if (!registry) {
+            return;
+        }
+        if (!source) {
+            for (const key of this.interactionLayerKeys) {
+                registry.remove(key);
+            }
+            this.interactionLayerKeys.clear();
+            this.reconcileInteractionGltf(registry, new Set());
+            this.reconcileInteractionOutlines(
+                this.outlineService(sceneHandle),
+                new Set());
+            return;
+        }
+        const desired = new Set<string>();
+        const desiredGltf = new Set<string>();
+        const desiredOutlines = new Set<string>();
+        const outlineService = this.outlineService(sceneHandle);
+        const overlays: Array<{
+            id: string;
+            targets: Set<string> | null;
+            effect: DeckInteractionEffect;
+            order: number;
+        }> = this.interactionOverlays.map(overlay => ({
+            id: overlay.id,
+            targets: new Set(overlay.targets.map(target =>
+                this.interactionTargetKey(target))),
+            effect: overlay.effect,
+            order: overlay.order
+        }));
+
+        const noInteraction: DeckInteractionProps = {
+            pickable: false,
+            drillPickEligible: false
+        };
+        const noPick: PickResolver = () => [];
+        for (const overlay of overlays) {
+            if (overlay.targets?.size === 0) {
+                continue;
+            }
+            const groupId = outlineService
+                ? this.interactionOutlineGroupId(overlay.id)
+                : null;
+            for (let pathIndex = 0;
+                 pathIndex < source.paths.length;
+                 ++pathIndex) {
+                const path = source.paths[pathIndex];
+                if (outlineService && groupId) {
+                    const mask = this.interactionPathMaskData(
+                        path,
+                        overlay.targets,
+                        address => outlineService.identityColor(
+                            groupId,
+                            this.interactionMaskIdentity(address),
+                            overlay.effect,
+                            overlay.order + 1));
+                    if (!mask) {
+                        continue;
+                    }
+                    const sourceId = [
+                        this.visualizationId,
+                        `path-${pathIndex}`,
+                        path.billboard ? "billboard" : "world",
+                        path.depthTest ? "depth" : "overlay"
+                    ].join("/");
+                    const token = `${groupId}\n${sourceId}`;
+                    outlineService.upsertMask(
+                        groupId,
+                        sourceId,
+                        overlay.effect,
+                        overlay.order + 1,
+                        source.origin,
+                        layerId => this.pathLayer(
+                            layerId,
+                            mask,
+                            noPick,
+                            source.modelMatrix,
+                            {
+                                pickable: true,
+                                drillPickEligible: false
+                            }));
+                    this.interactionOutlineSources.set(token, {
+                        groupId,
+                        sourceId
+                    });
+                    desiredOutlines.add(token);
+                    continue;
+                }
+                const main = this.interactionPathData(
+                    path,
+                    overlay.targets,
+                    overlay.effect);
+                if (!main) {
+                    continue;
+                }
+                const key = this.interactionKey(
+                    overlay.id,
+                    `path-${pathIndex}`,
+                    path.billboard,
+                    path.depthTest);
+                registry.upsert(
+                    key,
+                    this.pathLayer(
+                        key,
+                        {...main, depthTest: false},
+                        noPick,
+                        source.modelMatrix,
+                        noInteraction),
+                    overlay.order + 11);
+                desired.add(key);
+            }
+
+            for (let pointIndex = 0;
+                 pointIndex < source.points.length;
+                 ++pointIndex) {
+                const point = source.points[pointIndex];
+                if (outlineService && groupId) {
+                    const mask = this.interactionPointMaskData(
+                        point,
+                        overlay.targets,
+                        address => outlineService.identityColor(
+                            groupId,
+                            this.interactionMaskIdentity(address),
+                            overlay.effect,
+                            overlay.order + 1));
+                    if (!mask) {
+                        continue;
+                    }
+                    const sourceId = [
+                        this.visualizationId,
+                        `point-${pointIndex}`,
+                        point.billboard ? "billboard" : "world",
+                        point.depthTest ? "depth" : "overlay"
+                    ].join("/");
+                    const token = `${groupId}\n${sourceId}`;
+                    outlineService.upsertMask(
+                        groupId,
+                        sourceId,
+                        overlay.effect,
+                        overlay.order + 1,
+                        source.origin,
+                        layerId => this.pointLayer(
+                            layerId,
+                            mask,
+                            noPick,
+                            source.modelMatrix,
+                            {
+                                pickable: true,
+                                drillPickEligible: false
+                            }));
+                    this.interactionOutlineSources.set(token, {
+                        groupId,
+                        sourceId
+                    });
+                    desiredOutlines.add(token);
+                    continue;
+                }
+                const main = this.interactionPointData(
+                    point,
+                    overlay.targets,
+                    overlay.effect);
+                if (!main) {
+                    continue;
+                }
+                const key = this.interactionKey(
+                    overlay.id,
+                    "point",
+                    point.billboard,
+                    point.depthTest);
+                registry.upsert(
+                    key,
+                    this.pointLayer(
+                        key,
+                        {...main, depthTest: false},
+                        noPick,
+                        source.modelMatrix,
+                        noInteraction),
+                    overlay.order + 21);
+                desired.add(key);
+            }
+
+            if (outlineService) {
+                if (!groupId) {
+                    continue;
+                }
+                for (let surfaceIndex = 0;
+                     surfaceIndex < source.surfaces.length;
+                     ++surfaceIndex) {
+                    const surface = source.surfaces[surfaceIndex];
+                    const mask = this.interactionSurfaceMaskData(
+                        surface,
+                        overlay.targets,
+                        address => outlineService.identityColor(
+                            groupId,
+                            this.interactionMaskIdentity(address),
+                            overlay.effect,
+                            overlay.order + 1));
+                    if (!mask) {
+                        continue;
+                    }
+                    const sourceId = [
+                        this.visualizationId,
+                        `surface-${surfaceIndex}`,
+                        surface.depthTest ? "depth" : "overlay"
+                    ].join("/");
+                    const token = `${groupId}\n${sourceId}`;
+                    outlineService.upsertMask(
+                        groupId,
+                        sourceId,
+                        overlay.effect,
+                        overlay.order + 1,
+                        source.origin,
+                        layerId => this.surfaceLayer(
+                            layerId,
+                            mask,
+                            noPick,
+                            source.modelMatrix,
+                            {
+                                pickable: true,
+                                drillPickEligible: false
+                            },
+                            MASK_NO_DEPTH_PARAMETERS));
+                    this.interactionOutlineSources.set(token, {
+                        groupId,
+                        sourceId
+                    });
+                    desiredOutlines.add(token);
+                }
+            }
+
+            // Arrowheads and labels are semantic decorations of the retained
+            // path/feature, not independent highlight geometry. Re-emitting
+            // them here makes the base and interaction copies compete and,
+            // for pixel-offset arrows, physically separates them when the
+            // effect adds width. Keep their authored appearance and highlight
+            // the owning path/point/surface instead.
+
+            if (source.gltf) {
+                const data = source.gltf.data
+                    .filter(datum => this.matchesInteractionAddress(
+                        datum.featureAddress,
+                        overlay.targets))
+                    .map(datum => ({
+                        ...datum,
+                        color: [
+                            ...(overlay.effect.tint ?? datum.color).slice(0, 3),
+                            Math.round(
+                                datum.color[3] * overlay.effect.opacity *
+                                (overlay.effect.tint?.[3] ?? 255) / 255)
+                        ] as [number, number, number, number],
+                        tintMix: overlay.effect.tint
+                            ? overlay.effect.tintMix
+                            : 0,
+                        depthTest: false,
+                        flatTint: true,
+                        renderPriority: overlay.order
+                    }));
+                if (data.length) {
+                    const sourceId = [
+                        this.owner.ownerId,
+                        "interaction",
+                        overlay.id
+                    ].join("/");
+                    const token = `${source.gltf.key}\n${sourceId}`;
+                    this.upsertSharedGltf(
+                        registry,
+                        source.gltf.key,
+                        sourceId,
+                        {
+                            asset: source.gltf.asset,
+                            order: overlay.order,
+                            priority: overlay.order,
+                            styleOrder: overlay.order,
+                            data
+                        },
+                        source.modelMatrix);
+                    this.interactionGltfSources.set(token, {
+                        key: source.gltf.key,
+                        sourceId
+                    });
+                    desiredGltf.add(token);
+                }
+            }
+        }
+
+        for (const key of this.interactionLayerKeys) {
+            if (!desired.has(key)) {
+                registry.remove(key);
+            }
+        }
+        this.interactionLayerKeys.clear();
+        for (const key of desired) {
+            this.interactionLayerKeys.add(key);
+        }
+        this.reconcileInteractionGltf(registry, desiredGltf);
+        this.reconcileInteractionOutlines(outlineService, desiredOutlines);
+    }
+
+    private reconcileInteractionGltf(
+        registry: DeckLayerRegistry,
+        desired: ReadonlySet<string>
+    ): void {
+        for (const [token, source] of this.interactionGltfSources) {
+            if (!desired.has(token)) {
+                registry.removeShared(source.key, source.sourceId);
+                this.interactionGltfSources.delete(token);
+            }
+        }
+    }
+
+    private reconcileInteractionOutlines(
+        service: DeckInteractionOutlineService | null,
+        desired: ReadonlySet<string>
+    ): void {
+        if (!service) {
+            this.interactionOutlineSources.clear();
+            return;
+        }
+        for (const [token, source] of this.interactionOutlineSources) {
+            if (!desired.has(token)) {
+                service.removeMask(source.groupId, source.sourceId);
+                this.interactionOutlineSources.delete(token);
+            }
+        }
+    }
+
+    private interactionPathData(
+        source: DeckPathData,
+        targets: ReadonlySet<string> | null,
+        effect: DeckInteractionEffect
+    ): DeckPathData | null {
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const widths: number[] = [];
+        const offsets: number[] = [];
+        const offsetVectors: number[] = [];
+        const offsetScaleThresholds: number[] = [];
+        const dashes: number[] = [];
+        const starts = [0];
+        const addresses: number[] = [];
+        const sourceDashes = source.attributes.instanceDashArrays?.value;
+        for (let pathIndex = 0; pathIndex < source.length; ++pathIndex) {
+            const address = source.featureAddressesByPath[pathIndex];
+            if (!this.matchesInteractionAddress(address, targets)) {
+                continue;
+            }
+            const start = source.startIndices[pathIndex];
+            const end = source.startIndices[pathIndex + 1];
+            for (let vertex = start; vertex < end; ++vertex) {
+                positions.push(...source.attributes.getPath.value.subarray(
+                    vertex * 3,
+                    vertex * 3 + 3));
+                colors.push(...interactionColor(
+                    source.attributes.instanceColors.value,
+                    vertex * 4,
+                    effect));
+                const sourceWidth =
+                    source.attributes.instanceStrokeWidths.value[vertex];
+                const targetWidth = sourceWidth + effect.edgeWidth;
+                widths.push(targetWidth);
+                // The GPU path offset is a line-width factor. Preserve the
+                // authored absolute pixel displacement when an interaction
+                // effect changes the line width.
+                offsets.push(targetWidth > 0
+                    ? source.attributes.instanceOffsets.value[vertex] *
+                        sourceWidth / targetWidth
+                    : 0);
+                if (source.offsetVectorsPx) {
+                    offsetVectors.push(
+                        source.offsetVectorsPx[vertex * 2],
+                        source.offsetVectorsPx[vertex * 2 + 1]);
+                }
+                if (sourceDashes) {
+                    dashes.push(...sourceDashes.subarray(
+                        vertex * 2,
+                        vertex * 2 + 2));
+                }
+            }
+            addresses.push(address);
+            offsetScaleThresholds.push(
+                source.offsetScaleThresholds?.[pathIndex] ?? 0);
+            starts.push(positions.length / 3);
+        }
+        if (!addresses.length) {
+            return null;
+        }
+        const startIndices = new Uint32Array(starts);
+        const offsetValues = new Float32Array(offsets);
+        const variableOffset = Boolean(
+            source.attributes.instanceVariableOffsets &&
+            source.offsetVectorsPx);
+        const offsetVectorValues = variableOffset
+            ? new Float32Array(offsetVectors)
+            : undefined;
+        return {
+            length: addresses.length,
+            billboard: source.billboard,
+            depthTest: false,
+            coordinateOrigin: source.coordinateOrigin,
+            startIndices,
+            featureAddressesByPath: new Uint32Array(addresses),
+            offsetVectorsPx: offsetVectorValues,
+            offsetScaleThresholds: variableOffset
+                ? new Float32Array(offsetScaleThresholds)
+                : undefined,
+            attributes: {
+                getPath: {value: new Float32Array(positions), size: 3},
+                instanceColors: {value: new Uint8Array(colors), size: 4},
+                instanceStrokeWidths: {
+                    value: new Float32Array(widths),
+                    size: 1
+                },
+                instanceOffsets: {
+                    value: offsetValues,
+                    size: 1
+                },
+                ...(offsetVectorValues
+                    ? {instanceVariableOffsets: {
+                            value: packVariablePathOffsetVectors(
+                                offsetVectorValues,
+                                startIndices,
+                                offsetScaleThresholds),
+                            size: 4
+                    }}
+                    : {}),
+                ...(sourceDashes
+                    ? {instanceDashArrays: {
+                        value: new Float32Array(dashes),
+                        size: 2
+                    }}
+                    : {})
+            }
+        };
+    }
+
+    private interactionPointData(
+        source: DeckPointData,
+        targets: ReadonlySet<string> | null,
+        effect: DeckInteractionEffect
+    ): DeckPointData | null {
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const radii: number[] = [];
+        const addresses: number[] = [];
+        for (let index = 0; index < source.length; ++index) {
+            const address = source.featureAddresses[index];
+            if (!this.matchesInteractionAddress(address, targets)) {
+                continue;
+            }
+            positions.push(...source.attributes.getPosition.value.subarray(
+                index * 3,
+                index * 3 + 3));
+            colors.push(...interactionColor(
+                source.attributes.getFillColor.value,
+                index * 4,
+                effect));
+            radii.push(
+                source.attributes.getRadius.value[index] +
+                effect.edgeWidth * 0.5);
+            addresses.push(address);
+        }
+        return addresses.length ? {
+            length: addresses.length,
+            billboard: source.billboard,
+            depthTest: false,
+            coordinateOrigin: source.coordinateOrigin,
+            featureAddresses: new Uint32Array(addresses),
+            attributes: {
+                getPosition: {value: new Float32Array(positions), size: 3},
+                getFillColor: {value: new Uint8Array(colors), size: 4},
+                getRadius: {value: new Float32Array(radii), size: 1}
+            }
+        } : null;
+    }
+
+    /** Copies selected authored paths into the common object-identity mask input. */
+    private interactionPathMaskData(
+        source: DeckPathData,
+        targets: ReadonlySet<string> | null,
+        identityColor: (
+            address: number
+        ) => [number, number, number, number],
+        includeIndex: ((index: number) => boolean) | null = null,
+        allowUnselectable = false
+    ): DeckPathData | null {
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const widths: number[] = [];
+        const offsets: number[] = [];
+        const offsetVectors: number[] = [];
+        const offsetScaleThresholds: number[] = [];
+        const dashes: number[] = [];
+        const pickingColors: number[] = [];
+        const starts = [0];
+        const addresses: number[] = [];
+        const sourceDashes = source.attributes.instanceDashArrays?.value;
+        for (let pathIndex = 0; pathIndex < source.length; ++pathIndex) {
+            const address = source.featureAddressesByPath[pathIndex];
+            if ((!allowUnselectable &&
+                 !this.matchesInteractionAddress(address, targets)) ||
+                (includeIndex && !includeIndex(pathIndex))) {
+                continue;
+            }
+            const objectColor = identityColor(address);
+            const start = source.startIndices[pathIndex];
+            const end = source.startIndices[pathIndex + 1];
+            for (let vertex = start; vertex < end; ++vertex) {
+                positions.push(...source.attributes.getPath.value.subarray(
+                    vertex * 3,
+                    vertex * 3 + 3));
+                colors.push(...source.attributes.instanceColors.value.subarray(
+                    vertex * 4,
+                    vertex * 4 + 4));
+                widths.push(
+                    source.attributes.instanceStrokeWidths.value[vertex]);
+                offsets.push(source.attributes.instanceOffsets.value[vertex]);
+                if (source.offsetVectorsPx) {
+                    offsetVectors.push(
+                        source.offsetVectorsPx[vertex * 2],
+                        source.offsetVectorsPx[vertex * 2 + 1]);
+                }
+                pickingColors.push(
+                    objectColor[0], objectColor[1], objectColor[2]);
+                if (sourceDashes) {
+                    dashes.push(...sourceDashes.subarray(
+                        vertex * 2,
+                        vertex * 2 + 2));
+                }
+            }
+            addresses.push(address);
+            offsetScaleThresholds.push(
+                source.offsetScaleThresholds?.[pathIndex] ?? 0);
+            starts.push(positions.length / 3);
+        }
+        if (!addresses.length) {
+            return null;
+        }
+        const startIndices = new Uint32Array(starts);
+        const offsetValues = new Float32Array(offsets);
+        const variableOffset = Boolean(
+            source.attributes.instanceVariableOffsets &&
+            source.offsetVectorsPx);
+        const offsetVectorValues = variableOffset
+            ? new Float32Array(offsetVectors)
+            : undefined;
+        return {
+            length: addresses.length,
+            billboard: source.billboard,
+            depthTest: false,
+            coordinateOrigin: source.coordinateOrigin,
+            startIndices,
+            featureAddressesByPath: new Uint32Array(addresses),
+            offsetVectorsPx: offsetVectorValues,
+            offsetScaleThresholds: variableOffset
+                ? new Float32Array(offsetScaleThresholds)
+                : undefined,
+            attributes: {
+                getPath: {value: new Float32Array(positions), size: 3},
+                instanceColors: {value: new Uint8Array(colors), size: 4},
+                instanceStrokeWidths: {
+                    value: new Float32Array(widths),
+                    size: 1
+                },
+                instanceOffsets: {
+                    value: offsetValues,
+                    size: 1
+                },
+                ...(offsetVectorValues
+                    ? {instanceVariableOffsets: {
+                            value: packVariablePathOffsetVectors(
+                                offsetVectorValues,
+                                startIndices,
+                                offsetScaleThresholds),
+                            size: 4
+                    }}
+                    : {}),
+                instancePickingColors: {
+                    value: new Uint8Array(pickingColors),
+                    size: 3
+                },
+                ...(sourceDashes
+                    ? {instanceDashArrays: {
+                        value: new Float32Array(dashes),
+                        size: 2
+                    }}
+                    : {})
+            }
+        };
+    }
+
+    /** Copies selected authored points into the same morphology mask as paths/surfaces. */
+    private interactionPointMaskData(
+        source: DeckPointData,
+        targets: ReadonlySet<string> | null,
+        identityColor: (
+            address: number
+        ) => [number, number, number, number],
+        includeIndex: ((index: number) => boolean) | null = null,
+        allowUnselectable = false
+    ): DeckPointData | null {
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const radii: number[] = [];
+        const pickingColors: number[] = [];
+        const addresses: number[] = [];
+        for (let index = 0; index < source.length; ++index) {
+            const address = source.featureAddresses[index];
+            if ((!allowUnselectable &&
+                 !this.matchesInteractionAddress(address, targets)) ||
+                (includeIndex && !includeIndex(index))) {
+                continue;
+            }
+            positions.push(...source.attributes.getPosition.value.subarray(
+                index * 3,
+                index * 3 + 3));
+            colors.push(...source.attributes.getFillColor.value.subarray(
+                index * 4,
+                index * 4 + 4));
+            radii.push(source.attributes.getRadius.value[index]);
+            const objectColor = identityColor(address);
+            pickingColors.push(
+                objectColor[0], objectColor[1], objectColor[2]);
+            addresses.push(address);
+        }
+        return addresses.length ? {
+            length: addresses.length,
+            billboard: source.billboard,
+            depthTest: false,
+            coordinateOrigin: source.coordinateOrigin,
+            featureAddresses: new Uint32Array(addresses),
+            attributes: {
+                getPosition: {value: new Float32Array(positions), size: 3},
+                getFillColor: {value: new Uint8Array(colors), size: 4},
+                getRadius: {value: new Float32Array(radii), size: 1},
+                instancePickingColors: {
+                    value: new Uint8Array(pickingColors),
+                    size: 3
+                }
+            }
+        } : null;
+    }
+
+    /**
+     * Copies only selected triangles into the hidden GPU interaction-mask input.
+     * Every vertex belonging to the same semantic feature receives the same
+     * service-owned identity, so triangle and render-block seams disappear in
+     * the subsequent screen-space boundary comparison.
+     */
+    private interactionSurfaceMaskData(
+        source: DeckSurfaceData,
+        targets: ReadonlySet<string> | null,
+        identityColor: (
+            address: number
+        ) => [number, number, number, number],
+        includeIndex: ((index: number) => boolean) | null = null,
+        allowUnselectable = false
+    ): DeckSurfaceData | null {
+        const sourcePositions = source.attributes.getPolygon.value;
+        const sourceColors = source.attributes.fillColors.value;
+        const sourceIndices = source.attributes.indices.value;
+        const positions: number[] = [];
+        const colors: number[] = [];
+        const pickingColors: number[] = [];
+        const indices: number[] = [];
+        const starts = [0];
+        const addresses: number[] = [];
+        let triangleOffset = 0;
+        for (let surfaceIndex = 0;
+             surfaceIndex < source.length;
+             ++surfaceIndex) {
+            const start = source.startIndices[surfaceIndex];
+            const end = source.startIndices[surfaceIndex + 1];
+            const address = source.featureAddresses[surfaceIndex];
+            const selected = (allowUnselectable ||
+                this.matchesInteractionAddress(address, targets)) &&
+                (!includeIndex || includeIndex(surfaceIndex));
+            const surfaceIndices: number[] = [];
+            while (triangleOffset + 2 < sourceIndices.length &&
+                   sourceIndices[triangleOffset] < end) {
+                const first = sourceIndices[triangleOffset++];
+                const second = sourceIndices[triangleOffset++];
+                const third = sourceIndices[triangleOffset++];
+                if (selected &&
+                    first >= start && first < end &&
+                    second >= start && second < end &&
+                    third >= start && third < end) {
+                    surfaceIndices.push(
+                        first - start,
+                        second - start,
+                        third - start);
+                }
+            }
+            if (!selected || surfaceIndices.length === 0) {
+                continue;
+            }
+            const vertexBase = positions.length / 3;
+            positions.push(...sourcePositions.subarray(start * 3, end * 3));
+            colors.push(...sourceColors.subarray(start * 4, end * 4));
+            const objectColor = identityColor(address);
+            for (let vertex = start; vertex < end; ++vertex) {
+                pickingColors.push(...objectColor);
+            }
+            indices.push(...surfaceIndices.map(index => vertexBase + index));
+            addresses.push(address);
+            starts.push(positions.length / 3);
+        }
+        return addresses.length ? {
+            length: addresses.length,
+            depthTest: false,
+            coordinateOrigin: source.coordinateOrigin,
+            startIndices: new Uint32Array(starts),
+            featureAddresses: new Uint32Array(addresses),
+            attributes: {
+                getPolygon: {value: new Float32Array(positions), size: 3},
+                indices: {value: new Uint32Array(indices), size: 1},
+                fillColors: {value: new Uint8Array(colors), size: 4},
+                pickingColors: {
+                    value: new Uint8Array(pickingColors),
+                    size: 4
+                }
+            }
+        } : null;
+    }
+
+    private interactionFeatureAddresses(): number[] {
+        const source = this.interactionSource;
+        if (!source) {
+            return [];
+        }
+        const result = new Set<number>();
+        for (const data of source.paths) {
+            data.featureAddressesByPath.forEach(value => result.add(value));
+        }
+        for (const data of source.arrows) {
+            data.featureAddressesByPath.forEach(value => result.add(value));
+        }
+        for (const data of source.points) {
+            data.featureAddresses.forEach(value => result.add(value));
+        }
+        for (const data of source.surfaces) {
+            data.featureAddresses.forEach(value => result.add(value));
+        }
+        for (const label of source.labels) {
+            result.add(label.featureAddress);
+        }
+        for (const datum of source.gltf?.data ?? []) {
+            result.add(datum.featureAddress);
+        }
+        result.delete(UNSELECTABLE);
+        return [...result];
+    }
+
+    private rebuildInteractionTargetIndex(): void {
+        this.interactionTargetKeys.clear();
+        this.interactionScopesByTarget.clear();
+        for (const address of this.interactionFeatureAddresses()) {
+            const scope = this.interactionScope(address);
+            for (const target of this.resolvePick(address)) {
+                const key = this.interactionTargetKey(target);
+                this.interactionTargetKeys.add(key);
+                let scopes = this.interactionScopesByTarget.get(key);
+                if (!scopes) {
+                    scopes = new Set();
+                    this.interactionScopesByTarget.set(key, scopes);
+                }
+                scopes.add(scope);
+            }
+        }
+    }
+
+    private interactionScope(
+        address: number
+    ): "feature" | "attribute" | "relation" | "group" {
+        const result = this.pickResults[address];
+        if (result?.memberFeatureIds?.length) {
+            return "group";
+        }
+        if (Number.isInteger(result?.attributeIndex)) {
+            return "attribute";
+        }
+        if (result?.relationSourceFeatureId &&
+            Number.isInteger(result.relationIndex)) {
+            return "relation";
+        }
+        return "feature";
+    }
+
+    private matchesInteractionAddress(
+        address: number,
+        targets: ReadonlySet<string> | null
+    ): boolean {
+        return address !== UNSELECTABLE && (
+            targets === null || this.resolvePick(address).some(feature =>
+                targets.has(this.interactionTargetKey(feature)))
+        );
+    }
+
+    private interactionTargetKey(target: TileFeatureId): string {
+        return `${target.mapTileKey}\n${target.featureId}`;
+    }
+
+    private interactionMaskIdentity(address: number): string {
+        const targets = this.resolvePick(address)
+            .map(target => this.interactionTargetKey(target))
+            .sort();
+        return targets.length
+            ? targets.join("\n")
+            : `${this.visualizationId}\n${address}`;
+    }
+
+    private interactionOutlineGroupId(overlayId: string): string {
+        return [
+            this.owner.ownerId,
+            `view-${this.viewIndex}`,
+            "interaction-surface",
+            encodeURIComponent(overlayId)
+        ].join("/");
+    }
+
+    private interactionKey(
+        overlayId: string,
+        kind: string,
+        billboard: boolean,
+        depthTest: boolean
+    ): string {
+        return [
+            this.visualizationId,
+            "interaction",
+            encodeURIComponent(overlayId),
+            kind,
+            billboard ? "billboard" : "world",
+            depthTest ? "source-depth" : "source-overlay"
+        ].join("/");
     }
 
     private key(kind: string, depthTest: boolean, billboard?: boolean): string {
@@ -1977,6 +3447,13 @@ export class TileSubsetLayerVisualization {
 
     private arena(sceneHandle: IRenderSceneHandle): DeckRenderBufferArena | null {
         return (sceneHandle.scene as DeckScene | undefined)?.renderBufferArena ?? null;
+    }
+
+    private outlineService(
+        sceneHandle: IRenderSceneHandle
+    ): DeckInteractionOutlineService | null {
+        return (sceneHandle.scene as DeckScene | undefined)
+            ?.interactionOutlineService ?? null;
     }
 
     private coordinateOrigin(raw: Float64Array): [number, number, number] | null {

@@ -268,9 +268,67 @@ There is no search-specific tile model or renderer. See
 
 ## Hover, selection, and relations
 
-Hover and selection are ordinary `StyledMapgetLayer` presentations with
-highlight modes. Selection relation rules send exact canonical roots and use
-mapget's one-hop stored relation traversal.
+The controller first resolves hover and selection against typed pick entries
+retained by regular/search `TileSubsetLayerVisualization`s. A view-owned
+interaction overlay feeds only matching paths, points, polygons, or mapget
+mesh triangles into hidden GPU mask layers and applies the active stylesheet's
+top-level `interaction-effects` material. `DeckInteractionOutlineService`
+renders stable semantic-feature IDs to a lazy offscreen texture, builds a
+full-resolution coverage field plus independently scaled semantic edge and
+halo fields, and derives adaptive edge, halo, and hatch output in one
+fullscreen shader. The edge scale depends only on `edge-width`; changing
+`halo.radius` therefore cannot alter the outer or nested outline. The shader
+emits only material deltas over the authored map, so translucent area fill is
+never drawn twice. Selection suppresses the same hover target (including a
+feature/attribute/validity parent-child pair) both before feature resolution
+and again during final view reconciliation. Hatch phase is anchored to the
+projected world origin of its interaction group, while spacing and width stay
+screen-pixel based, so ordinary viewport pans do not make the pattern swim.
+Visible
+thickness—not a primitive tag—decides whether a shape is solid-tinted or keeps
+an area-like interior. Equal IDs cross triangles and render-block boundaries,
+so internal seams disappear without CPU edge reconstruction. Feature identity
+is already local. GLTF attachments remain a separate flat-tint contribution.
+
+The same mask service also owns persistent, rule-level vector `glow`
+materials. `TileSubsetLayerRenderer` emits one literal RGBA/radius tuple per
+path, generated arrow, point, or surface row;
+`TileSubsetLayerVisualization` groups identical materials and registers one
+union, exterior-only halo below the authored geometry. The union removes
+overlap seams, while the exterior-only contract prevents a halo from replacing
+thin path or arrow fill. This keeps glow out of the render-buffer vertex layout
+and gives ordinary style rules the same screen-space shadow as interaction
+highlights. Labels, arbitrary icons, and GLTF nodes remain outside that path
+initially.
+
+Generated transition paths whose road-side stack distance changes through the
+junction use `DeckVariablePathOffsetExtension`. Its source buffer stores one
+local-map XY pixel vector per path vertex; the Deck adapter packs each
+segment's exact left/start/end/right neighbourhood into one instanced `uvec4`.
+Every word holds one signed 12-bit fixed-point XY pair and a logarithmically
+quantized metres-per-pixel scale threshold, retaining one attribute location
+under the WebGL attribute budget.
+`DeckVariableOffsetPathLayer` applies those vectors to the projected
+previous/current/next centerline positions before PathLayer computes its
+extrusion and join. Adjacent instances consequently present byte-identical
+neighbourhoods at their shared joint. One host/rule-wide threshold uniformly
+contracts the complete road-leg and bridge displacement before a fixed pixel
+inside offset can exceed the projected bend radius. This preserves stack
+ratios and converges smoothly toward the stable undisplaced geometry instead
+of modifying individual joints.
+The visible PathLayer and every mask pass instantiate the same extension, so
+glow and picking cannot inherit a wider or differently clipped silhouette.
+Arrow icons carry the exact terminal XY vector and the same quantized scale,
+then apply both through `DeckLocalPixelOffsetExtension` before their
+pixel/common-space projection. The extension transforms local directions
+directly, avoiding precision loss from subtracting projected positions.
+
+Only semantic objects absent from all active subsets use an exact-root
+highlight `StyledMapgetLayer`. Its `mode: hover|selection` output is already an
+interaction visualization and stays exactly as authored instead of entering
+the generic mask compositor again. Attribute-panel validities and recursive
+topology are the main fallback cases. Selection relation rules send exact
+canonical roots and use mapget's one-hop stored relation traversal.
 
 Generic `mergeTwoway` display uses permanent south-west tile ownership. A
 pair whose permanent owner is outside current requested coverage is omitted;

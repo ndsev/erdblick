@@ -16,6 +16,23 @@ export interface AppDialogResizeLimits {
     maxHeight: number;
 }
 
+/** Resolves a computed pixel or percentage length against its containing viewport axis. */
+export function resolveAppDialogCssLength(
+    value: string,
+    percentageBase: number,
+    fallback: number
+): number {
+    const match = /^(-?(?:\d+(?:\.\d+)?|\.\d+))(px|%)$/.exec(value.trim());
+    if (!match) {
+        return fallback;
+    }
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) {
+        return fallback;
+    }
+    return match[2] === "%" ? percentageBase * amount / 100 : amount;
+}
+
 /** Clamps one number to an ordered inclusive range. */
 function clamp(value: number, minimum: number, maximum: number): number {
     return Math.min(Math.max(value, minimum), maximum);

@@ -17,6 +17,22 @@ options:
     default: black
     description: selection color which can be set through the attribute panel
 
+# One screen-space material for every vector primitive. The compositor treats
+# thin silhouettes as solid highlights and wide silhouettes as bordered areas.
+interaction-effects:
+  hover:
+    tint: yellow
+    tint-mix: 1
+    edge-width: 1
+    halo: {color: black, radius: 5, opacity: 0.22}
+    stripe: {spacing: 24, width: 12, opacity: 0.02, angle: 45, offset: 0, softness: 0.9}
+  selection:
+    tint: {option: selectableFeatureHighlightColor}
+    tint-mix: 1
+    edge-width: 2
+    halo: {color: black, radius: 6, opacity: 0.28}
+    stripe: {spacing: 24, width: 12, opacity: 0.05, angle: 45, offset: 0, softness: 0.9}
+
 rules:
   # Normal styles
   - geometry: ["mesh", "polygon"]
@@ -47,46 +63,14 @@ rules:
     width: 15.0
     offset: [0, 0, -0.01]
 
-  # Hover/Selection styles
-  - geometry: ["mesh", "polygon"]
-    color: green
-    opacity: 0.8
-    mode: hover
-    offset: [0, 0, -0.03]
-  - geometry: ["line"]
-    color: green
-    opacity: 0.8
-    width: 4.0
-    mode: hover
-    offset: [0, 0, -0.01]
+  # Semantic hover style: routine feature interaction uses interaction-effects.
   - scope: attribute
     attribute-validity-geom: required
     geometry: ["line"]
     color: green
     opacity: 0.8
     width: 4.0
+    glow: {color: black, radius: 5, opacity: 0.28}
     mode: hover
     offset: [0, 0, -0.01]
     offset-increment: [0, 0, -0.01]
-  - geometry: ["point"]
-    color: green
-    opacity: 0.8
-    width: 10.0
-    mode: hover
-  - geometry: ["mesh", "polygon"]
-    color-expression: selectableFeatureHighlightColor
-    opacity: 0.8
-    mode: selection
-    offset: [0, 0, -0.03]
-  - geometry: ["line"]
-    color-expression: selectableFeatureHighlightColor
-    opacity: 0.8
-    width: 10.0
-    mode: selection
-    offset: [0, 0, -0.01]
-  - geometry: ["point"]
-    point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
-    color-expression: selectableFeatureHighlightColor
-    opacity: 0.8
-    width: 20.0
-    mode: selection

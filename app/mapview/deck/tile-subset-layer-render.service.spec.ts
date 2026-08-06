@@ -64,6 +64,47 @@ describe("TileSubsetLayerRenderService block presentation", () => {
         expect(service.currentFrameTimeMs()).toBe(33);
     });
 
+    it("aggregates live Deck and buffer-arena diagnostics across views", () => {
+        const service = new TileSubsetLayerRenderService();
+        service.recordDeckPresentationDiagnostics(0, 12, {
+            groups: 2,
+            pages: 3,
+            reusablePages: 1,
+            contributions: 9,
+            usedVertices: 30,
+            capacityVertices: 48,
+            maxContributionsPerPage: 4
+        });
+        service.recordDeckPresentationDiagnostics(1, 5, {
+            groups: 1,
+            pages: 1,
+            reusablePages: 0,
+            contributions: 2,
+            usedVertices: 10,
+            capacityVertices: 16,
+            maxContributionsPerPage: 2
+        });
+
+        expect(service.currentDeckPresentationDiagnostics()).toEqual({
+            views: 2,
+            layers: 17,
+            groups: 3,
+            pages: 4,
+            reusablePages: 1,
+            contributions: 11,
+            usedVertices: 40,
+            capacityVertices: 64,
+            maxContributionsPerPage: 4
+        });
+
+        service.clearDeckPresentationDiagnostics(0);
+        expect(service.currentDeckPresentationDiagnostics()).toMatchObject({
+            views: 1,
+            layers: 5,
+            contributions: 2
+        });
+    });
+
     it("exposes live block policy without allocating workers", () => {
         const workerCount = new BehaviorSubject(0);
         const debugBlocks = new BehaviorSubject(false);

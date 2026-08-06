@@ -1,5 +1,6 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
+import {BehaviorSubject} from "rxjs";
 
 import type {
     AppStateService,
@@ -7,15 +8,21 @@ import type {
     TileFeatureId
 } from "../shared/appstate.service";
 import type {InfoMessageService} from "../shared/info.service";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {InspectionSelectionService} from "./inspection-selection.service";
 
 const feature = (featureId: string, mapTileKey: string): TileFeatureId => ({featureId, mapTileKey});
 
-function createHarness(limit: number, initialPanels: InspectionPanelModel<TileFeatureId>[] = []) {
+function createHarness(
+    limit: number,
+    initialPanels: InspectionPanelModel<TileFeatureId>[] = [],
+    loadFeatures = vi.fn(async () => [] as FeatureWrapper[])
+) {
     let panels = [...initialPanels];
     let nextPanelId = 1 + Math.max(-1, ...panels.map(panel => panel.id));
     const stateService = {
         inspectionsLimit: limit,
+        selectionState: new BehaviorSubject(initialPanels),
         get selection() {
             return panels;
         },
@@ -67,13 +74,19 @@ function createHarness(limit: number, initialPanels: InspectionPanelModel<TileFe
     const infoMessageService = {showWarning: vi.fn()} as unknown as InfoMessageService;
     const service = new InspectionSelectionService(
         stateService,
-        {} as never,
+        {loadFeatures} as never,
         {} as never,
         {registerShortcut: vi.fn()} as never,
         infoMessageService,
         {run: (callback: () => unknown) => callback()} as never
     );
-    return {service, stateService, infoMessageService, panels: () => panels};
+    return {
+        service,
+        stateService,
+        infoMessageService,
+        loadFeatures,
+        panels: () => panels
+    };
 }
 
 describe("InspectionSelectionService multi-inspection", () => {
@@ -152,5 +165,40 @@ describe("InspectionSelectionService multi-inspection", () => {
         expect(result).toEqual({foundFeatureCount: 2, inspectedFeatureCount: 2});
         expect(panels().map(panel => panel.locked)).toEqual([true, true]);
         expect(stateService.setInspectionPanelLockedState).toHaveBeenCalledTimes(2);
+    });
+
+    it("retains a validity hover after resolving its selected host feature", async () => {
+        const selected = feature("Road.7", "Map/Layer/42");
+        const validity = feature(
+            "Road.7:attribute#2:validity#1",
+            selected.mapTileKey
+        );
+        const resolved: FeatureWrapper = Object.create(
+            FeatureWrapper.prototype
+        );
+        Object.defineProperties(resolved, {
+            // Inspection feature loads preserve the requested decoration even
+            // though model lookup resolves it through the host feature.
+            featureId: {value: validity.featureId},
+            featureTile: {value: {mapTileKey: selected.mapTileKey}}
+        });
+        const loadFeatures = vi.fn(
+            async (): Promise<FeatureWrapper[]> => [resolved]
+        );
+        const panel: InspectionPanelModel<TileFeatureId> = {
+            id: 0,
+            features: [selected],
+            locked: true,
+            focused: true,
+            size: [30, 20],
+            color: "#fff",
+            undocked: false
+        };
+        const {service} = createHarness(2, [panel], loadFeatures);
+        service.selectionIdsTopic.next([panel]);
+
+        await service.setHoveredFeatures([validity]);
+
+        expect(service.hoverIdsTopic.getValue()).toEqual([validity]);
     });
 });

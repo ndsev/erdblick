@@ -1,11 +1,13 @@
 import {
     AfterViewInit,
+    ChangeDetectorRef,
     Component,
     ElementRef,
     EventEmitter,
     Input,
     OnChanges,
     OnDestroy,
+    NgZone,
     Output,
     SimpleChanges,
     ViewChild,
@@ -74,6 +76,7 @@ import {
     normalizeHexColor,
     SearchStyleCategoryStopDraft,
     SearchStyleColorDraft,
+    SearchStyleFieldValueKind,
     serializableCategoryStops,
     serializableGradientStops
 } from "./search-style-color.util";
@@ -376,7 +379,7 @@ interface FeatureSearchStyleRuleDraft {
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results </span>
-                        <p-badge [value]="results.length"/>
+                        <p-badge [value]="resultCount"/>
                     </p-tab>
                     <p-tab value="style">
                         <span>Visualization </span>
@@ -831,11 +834,11 @@ interface FeatureSearchStyleRuleDraft {
                                     <span>Attribute candidates</span>
                                     <span>{{ session?.schemaAnalysis?.attributeScopeCandidateCount ?? 0 }}</span>
                                     <span>Elapsed</span>
-                                    <span>{{ session?.timeElapsed ?? '0ms' }}</span>
+                                    <span>{{ searchTimeElapsed }}</span>
                                     <span>Features</span>
-                                    <span>{{ session?.totalFeatureCount ?? 0 }}</span>
+                                    <span>{{ searchTotalFeatureCount }}</span>
                                     <span>Matched</span>
-                                    <span>{{ session?.searchResults?.length ?? 0 }}</span>
+                                    <span>{{ resultCount }}</span>
                                 </div>
                             </section>
 
@@ -978,6 +981,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     progressTooltip = "";
     canStopSearch: boolean = false;
     results: FeatureSearchResultEntry[] = [];
+    resultCount = 0;
+    searchTimeElapsed = "0ms";
+    searchTotalFeatureCount = 0;
     resultsTree: TreeNode[] = [];
     grouping: FeatureSearchGroupingOption[] = [
         {name: 'Maps', value: 1},
@@ -1075,6 +1081,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private mapLayerTreeExpandedKeys = new Set<string>();
     private mapLayerTreeExpansionInitialized = false;
     private selectedMapLayersSignature = "";
+    private selectedSearchMapLayersCacheSignature = "";
+    private selectedSearchMapLayersCache: FeatureSearchMapLayerRef[] = [];
     private initializedMapLayerSelectionSessionId = "";
     private featureSearchFeatureTypeOptionsSignature = "";
     private selectedFeatureTypesSignature = "";
@@ -1083,6 +1091,12 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private searchViewOptionsSignature = "";
     private selectedViewIndicesSignature = "";
     private pendingBookmarkedCloseSessionId: string | null = null;
+    private featureSearchHeaderActionsSignature = "";
+    private featureSearchHeaderActionsCache: AppSurfaceHeaderAction[] = [];
+    private sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    private progressDisplayRefreshQueued = false;
+    private pendingProgressDisplaySession?: FeatureSearchSession;
+    private destroyed = false;
     private resizeObserver?: ResizeObserver;
     private treeScrollHeightRaf?: number;
     protected readonly measurePreferredFeatureSearchHeightEm = () => this.measurePreferredBodyHeightEm();
@@ -1106,7 +1120,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
-                private confirmPopupService: AppConfirmPopupService) {
+                private confirmPopupService: AppConfirmPopupService,
+                private readonly changeDetector: ChangeDetectorRef,
+                private readonly ngZone: NgZone) {
         this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
         this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
@@ -1121,14 +1137,10 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             if (!updatedSession || updatedSession.id !== this.searchId) {
                 return;
             }
-            this.syncFromSession(updatedSession);
+            this.scheduleSessionSync();
         }));
         this.subscriptions.add(this.searchService.sessionsChanged.subscribe(() => {
-            const session = this.searchService.getSession(this.searchId);
-            if (!session) {
-                return;
-            }
-            this.syncFromSession(session);
+            this.scheduleSessionSync();
         }));
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
@@ -1342,6 +1354,37 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             `Result chunk ingress: ${this.resultTileIngressDone} / ${tileTotal} chunks`,
             `Result tree: ${this.resultTreeIngressDone} / ${this.resultTreeIngressTotal} entries`
         ].join("\n");
+    }
+
+    /**
+     * Publishes all template-visible progress fields after the current Angular check.
+     *
+     * Search ingress and result-tree assembly can both request a refresh during one
+     * turn. Coalescing here keeps the meter, label, and tooltip on one session
+     * snapshot and prevents a late child lifecycle hook from changing one of these
+     * bindings between Angular's check and check-no-changes passes.
+     */
+    private scheduleProgressDisplayRefresh(session: FeatureSearchSession): void {
+        this.pendingProgressDisplaySession = session;
+        if (this.progressDisplayRefreshQueued) {
+            return;
+        }
+        this.progressDisplayRefreshQueued = true;
+        queueMicrotask(() => {
+            this.progressDisplayRefreshQueued = false;
+            const pendingSession = this.pendingProgressDisplaySession;
+            this.pendingProgressDisplaySession = undefined;
+            if (this.destroyed || !pendingSession || pendingSession !== this.session) {
+                return;
+            }
+            this.ngZone.run(() => {
+                if (this.destroyed || pendingSession !== this.session) {
+                    return;
+                }
+                this.refreshProgressDisplay(pendingSession);
+                this.changeDetector.markForCheck();
+            });
+        });
     }
 
     /** Tracks how far the PrimeNG result tree has consumed the streamed result array. */
@@ -1911,7 +1954,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return {mode: "solid", color: normalizeHexColor(color.solidColor)};
         }
         if (color.mode === "categories") {
-            const valueKind = this.styleFieldOption(color.field)?.valueKind;
+            const valueKind = this.styleFieldOption(color.field)?.valueKind
+                ?? color.categoryValueKind;
             return {
                 mode: "categories",
                 field: color.field,
@@ -1998,10 +2042,14 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         const fallbackColor = normalizeHexColor(color.fallbackColor, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
         if (color.mode === "categories") {
+            const categoryValueKind = this.categoryValueKindFromStops(
+                color.stops
+            );
             return {
                 ...draft,
                 mode: "categories",
                 field,
+                categoryValueKind,
                 solidColor: fallbackColor,
                 fallbackColor,
                 categoryStops: this.categoryStopsToDraft(color.stops)
@@ -2028,6 +2076,26 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 pending: valueText.trim().length === 0
             };
         });
+    }
+
+    /** Preserves typed categorical stop keys across editor load/save cycles. */
+    private categoryValueKindFromStops(
+        stops: Array<{value: unknown; color: string}>
+    ): SearchStyleFieldValueKind | undefined {
+        const types = new Set(stops.map(stop => typeof stop.value));
+        if (types.size !== 1) {
+            return undefined;
+        }
+        switch (types.values().next().value) {
+        case "number":
+            return "number";
+        case "boolean":
+            return "boolean";
+        case "string":
+            return "string";
+        default:
+            return undefined;
+        }
     }
 
     /**
@@ -2897,10 +2965,18 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Returns the selected search layer scope used by schema completion and field pickers. */
     protected selectedSearchMapLayers(): FeatureSearchMapLayerRef[] {
         const treeRefs = this.selectedMapLayerRefsFromTreeNodes(this.selectedMapLayerTreeNodes);
-        if (treeRefs.length > 0 || this.selectedMapLayersSignature === this.emptyMapLayerSignature()) {
-            return treeRefs;
+        const refs = treeRefs.length > 0 ||
+            this.selectedMapLayersSignature === this.emptyMapLayerSignature()
+            ? treeRefs
+            : this.session?.definition.selectedMapLayers ?? [];
+        const signature = refs
+            .map(ref => `${ref.mapId}\u0000${ref.layerId}`)
+            .join("\u0001");
+        if (signature !== this.selectedSearchMapLayersCacheSignature) {
+            this.selectedSearchMapLayersCacheSignature = signature;
+            this.selectedSearchMapLayersCache = refs.map(ref => ({...ref}));
         }
-        return this.session?.definition.selectedMapLayers ?? [];
+        return this.selectedSearchMapLayersCache;
     }
 
     /** Rebuilds the feature-type selector from the currently selected map/layer scope. */
@@ -3242,9 +3318,28 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.syncFromSession(session);
     }
 
+    /** Coalesces external session emissions behind the active Angular check. */
+    private scheduleSessionSync(): void {
+        if (this.sessionSyncTimer !== null) {
+            return;
+        }
+        this.sessionSyncTimer = setTimeout(() => {
+            this.sessionSyncTimer = null;
+            const session = this.searchService.getSession(this.searchId);
+            if (session) {
+                this.syncFromSession(session);
+            }
+        }, 0);
+    }
+
     /** Copies session state into the local view model without crossing streams between searches. */
     private syncFromSession(session: FeatureSearchSession): void {
         this.session = session;
+        // Search sessions are mutable service-owned objects. Snapshot scalar
+        // diagnostics only at our deferred synchronization boundary so a
+        // service timer cannot mutate a template binding mid Angular check.
+        this.searchTimeElapsed = session.timeElapsed;
+        this.searchTotalFeatureCount = session.totalFeatureCount;
         this.featureSearchDialogVisible = true;
         const wasQueryDirty = this.featureSearchQueryDirty;
         const previousQuery = this.lastSearchQuery;
@@ -3277,6 +3372,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 this.featureSearchQuery = session.definition.query;
             }
             this.results = [];
+            this.resultCount = 0;
             this.resultsTree = [];
             if (previousQuery !== session.definition.query
                 || previousScope !== session.definition.scope
@@ -3287,7 +3383,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.featureSearchQuery = session.definition.query;
         }
         this.updateFeatureSearchQueryDirty();
-        this.refreshProgressDisplay(session);
+        this.scheduleProgressDisplayRefresh(session);
         this.diagnostics = session.diagnostics;
         this.valueSummaries = session.valueSummaries;
         if (this.resultPanelIndex === "diagnostics" && session.complete) {
@@ -3348,7 +3444,14 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Stops feature search subscriptions when the component is destroyed. */
     ngOnDestroy() {
+        this.destroyed = true;
+        this.pendingProgressDisplaySession = undefined;
         this.subscriptions.unsubscribe();
+        this.cancelResultTreeAppend();
+        if (this.sessionSyncTimer !== null) {
+            clearTimeout(this.sessionSyncTimer);
+            this.sessionSyncTimer = null;
+        }
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
         if (this.treeScrollHeightRaf !== undefined) {
@@ -3596,7 +3699,21 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const enabled = this.searchEnabled();
         const autoUpdate = !!this.session?.definition.autoUpdate;
         const refreshLabel = this.searchQueryEdited() ? 'Rerun search' : 'Update area';
-        return [
+        const rerunQuery = this.searchQueryForRerun();
+        const signature = JSON.stringify([
+            this.session?.id ?? "",
+            bookmarked,
+            enabled,
+            autoUpdate,
+            refreshLabel,
+            !!rerunQuery,
+            this.canStopSearch
+        ]);
+        if (signature === this.featureSearchHeaderActionsSignature) {
+            return this.featureSearchHeaderActionsCache;
+        }
+        this.featureSearchHeaderActionsSignature = signature;
+        this.featureSearchHeaderActionsCache = [
             {
                 label: bookmarked ? 'Remove bookmark' : 'Bookmark search',
                 tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark search',
@@ -3631,7 +3748,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 label: refreshLabel,
                 tooltip: refreshLabel,
                 icon: 'pi pi-refresh',
-                disabled: !enabled || !this.searchQueryForRerun(),
+                disabled: !enabled || !rerunQuery,
                 command: () => this.refreshSearchAreaOrQuery()
             },
             {
@@ -3642,6 +3759,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 command: () => this.stopSearch()
             }
         ];
+        return this.featureSearchHeaderActionsCache;
     }
 
     protected toggleSearchBookmarked(): void {
@@ -3710,6 +3828,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private clearResultTreeBeforeClose(): void {
         this.cancelResultTreeAppend();
         this.results = [];
+        this.resultCount = 0;
+        this.searchTimeElapsed = "0ms";
+        this.searchTotalFeatureCount = 0;
         this.resultsTree = [];
         this.resultTreeGroupNodesByKey.clear();
         this.resultTreeInputLength = 0;
@@ -3900,6 +4021,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Clears local rendering state after the owning session disappears. */
     private resetLocalState(): void {
+        this.pendingProgressDisplaySession = undefined;
         this.diagnostics = [];
         this.valueSummaries = this.emptyValueSummariesState();
         this.canStopSearch = false;
@@ -3917,6 +4039,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.progressLabel = "Preparing search...";
         this.progressTooltip = "";
         this.results = [];
+        this.resultCount = 0;
+        this.searchTimeElapsed = "0ms";
+        this.searchTotalFeatureCount = 0;
         this.resultsTree = [];
         this.showFilter = false;
         this.resultsStatus = "Loading...";
@@ -3966,6 +4091,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.selectedViewIndices = [];
         this.mapLayerTreeOptionsSignature = "";
         this.selectedMapLayersSignature = "";
+        this.selectedSearchMapLayersCacheSignature = "";
+        this.selectedSearchMapLayersCache = [];
         this.initializedMapLayerSelectionSessionId = "";
         this.featureSearchFeatureTypeOptionsSignature = "";
         this.selectedFeatureTypesSignature = "";
@@ -3974,6 +4101,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.searchViewOptionsSignature = "";
         this.selectedViewIndicesSignature = "";
         this.pendingBookmarkedCloseSessionId = null;
+        this.featureSearchHeaderActionsSignature = "";
+        this.featureSearchHeaderActionsCache = [];
         this.closingSearchId = null;
     }
 
@@ -4181,7 +4310,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.results = session.searchResults;
         const groupingSignature = this.groupingValuesFromOptions(this.selectedGroupingOptions).join(',');
         this.resetStreamingResultTree(session.runId, groupingSignature);
-        this.appendStreamingResultsChunk();
+        this.scheduleResultTreeAppend();
     }
 
     /** Schedules another frame-budgeted streamed result-tree append pass. */
@@ -4189,10 +4318,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (this.resultTreeAppendRaf !== null) {
             return;
         }
-        this.resultTreeAppendRaf = requestAnimationFrame(() => {
-            this.resultTreeAppendRaf = null;
-            this.appendStreamingResultsChunk();
-        });
+        this.resultTreeAppendRaf = this.ngZone.runOutsideAngular(() =>
+            requestAnimationFrame(() => {
+                this.resultTreeAppendRaf = null;
+                this.appendStreamingResultsChunk();
+                this.ngZone.run(() => this.changeDetector.markForCheck());
+            })
+        );
     }
 
     /** Updates the empty-message and filter state after streamed result-tree changes. */
@@ -4218,7 +4350,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         const results = session.searchResults;
         if (results.length <= this.resultTreeInputLength) {
-            this.refreshProgressDisplay(session);
+            this.resultCount = results.length;
+            this.scheduleProgressDisplayRefresh(session);
             this.updateResultTreeStatus(session.complete);
             return;
         }
@@ -4241,7 +4374,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (appended > 0) {
             this.resultsTree = [...this.resultsTree];
         }
-        this.refreshProgressDisplay(session);
+        this.resultCount = results.length;
+        this.scheduleProgressDisplayRefresh(session);
         if (this.resultTreeInputLength < results.length) {
             this.scheduleResultTreeAppend();
         }
@@ -4264,14 +4398,15 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.results = results;
         if (needsFullRebuild) {
             this.resetStreamingResultTree(session.runId, groupingSignature);
-            this.appendStreamingResultsChunk();
-            return;
         }
-
-        if (results.length > this.resultTreeInputLength && this.resultTreeAppendRaf === null) {
-            this.appendStreamingResultsChunk();
+        if (results.length > this.resultTreeInputLength) {
+            // Session streams may emit synchronously from another component's
+            // Angular turn. Keep tree/progress mutations behind the existing
+            // RAF boundary so template bindings cannot change between the
+            // development-mode check and check-no-changes passes.
+            this.scheduleResultTreeAppend();
         }
-        this.refreshProgressDisplay(session);
+        this.scheduleProgressDisplayRefresh(session);
         this.updateResultTreeStatus(session.complete);
     }
 

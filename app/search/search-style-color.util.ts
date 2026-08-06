@@ -36,6 +36,8 @@ export interface SearchStyleColorDraft {
     mode: SearchStyleColorMode;
     field: string;
     customField?: boolean;
+    /** Scalar type learned from observed values when no schema field supplies it. */
+    categoryValueKind?: SearchStyleFieldValueKind;
     solidColor: string;
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
@@ -176,6 +178,7 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
         mode: draft.mode,
         field: draft.field,
         customField: !!draft.customField,
+        categoryValueKind: draft.categoryValueKind,
         solidColor: normalizeHexColor(draft.solidColor),
         gradientStops: draft.gradientStops.map(stop => ({
             id: stop.id,
@@ -491,6 +494,7 @@ export function autoInitializeSearchStyleColorDraft(
             return {
                 draft: cloneSearchStyleColorDraft({
                     ...draft,
+                    categoryValueKind: fieldOption.valueKind,
                     categoryStops: categoryStopsForEnumValues(enumValues, nextId),
                     gradientStops: []
                 }),
@@ -619,9 +623,10 @@ export function serializableCategoryStops(
     draft: SearchStyleColorDraft,
     valueKind?: SearchStyleFieldValueKind
 ): Array<{value: unknown; color: string}> {
+    const effectiveValueKind = valueKind ?? draft.categoryValueKind;
     return draft.categoryStops
         .map(stop => ({
-            value: serializableValue(stop.valueText, valueKind),
+            value: serializableValue(stop.valueText, effectiveValueKind),
             color: normalizeHexColor(stop.color, draft.fallbackColor || draft.solidColor)
         }));
 }

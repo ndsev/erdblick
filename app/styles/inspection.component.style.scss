@@ -650,6 +650,28 @@ inspection-tree {
     min-width: 0;
   }
 
+  .inspection-value-html-popover-content {
+    display: inline-block;
+    font-size: 0.9em;
+    line-height: 1.45;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 0.15rem;
+
+    :first-child {
+      margin-top: 0;
+    }
+
+    :last-child {
+      margin-bottom: 0;
+    }
+
+    a {
+      color: var(--p-primary-color);
+      text-decoration: underline;
+    }
+  }
+
   .inspection-value-bubble-popover-group {
     margin-right: 0.12rem;
     max-width: 100%;

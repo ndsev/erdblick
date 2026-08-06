@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <regex>
 #include <set>
@@ -25,6 +26,130 @@ constexpr size_t fidelityIndex(FeatureStyleRule::Fidelity fidelity) {
 
 /** Shared empty vector returned when no rule candidates apply. */
 const std::vector<uint32_t> kEmptyRuleIndices{};
+
+std::optional<size_t> interactionEffectIndex(
+    FeatureStyleRule::HighlightMode mode)
+{
+    if (mode == FeatureStyleRule::HoverHighlight) {
+        return 0U;
+    }
+    if (mode == FeatureStyleRule::SelectionHighlight) {
+        return 1U;
+    }
+    return std::nullopt;
+}
+
+std::optional<InteractionEffectColor> parseInteractionColor(
+    YAML::Node const& node)
+{
+    if (!node.IsDefined()) {
+        return std::nullopt;
+    }
+    if (node.IsScalar()) {
+        Color color(node.as<std::string>());
+        if (!color.isValid()) {
+            return std::nullopt;
+        }
+        return InteractionEffectColor{color.toFVec4(), std::nullopt};
+    }
+    if (node.IsMap() && node["option"].IsScalar()) {
+        auto const option = node["option"].as<std::string>();
+        if (!option.empty()) {
+            return InteractionEffectColor{std::nullopt, option};
+        }
+    }
+    return std::nullopt;
+}
+
+JsValue interactionColorToJs(
+    InteractionEffectColor const& color,
+    std::string const& literalField,
+    std::string const& optionField,
+    JsValue const& options)
+{
+    auto result = JsValue::Dict();
+    auto resolved = color.literal;
+    if (!resolved && color.optionId && options.has(*color.optionId)) {
+        auto const option = options[*color.optionId];
+        if (option.type() == JsValue::Type::String) {
+            Color parsed(option.toString());
+            if (parsed.isValid()) {
+                resolved = parsed.toFVec4();
+            }
+        }
+    }
+    if (resolved) {
+        auto const& value = *resolved;
+        auto byte = [](float component) {
+            return static_cast<uint8_t>(std::round(
+                std::clamp(component, 0.0f, 1.0f) * 255.0f));
+        };
+        result.set(literalField, JsValue::List({
+            JsValue(byte(value.r)),
+            JsValue(byte(value.g)),
+            JsValue(byte(value.b)),
+            JsValue(byte(value.a)),
+        }));
+    }
+    if (color.optionId) {
+        result.set(optionField, JsValue(*color.optionId));
+    }
+    return result;
+}
+}
+
+NativeJsValue InteractionEffect::toJsValue(NativeJsValue const& options_) const
+{
+    JsValue const options(options_);
+    auto result = JsValue::Dict({
+        {"tintMix", JsValue(tintMix)},
+        {"opacity", JsValue(opacity)},
+        {"edgeWidth", JsValue(edgeWidth)},
+        {"haloRadius", JsValue(haloRadius)},
+        {"haloOpacity", JsValue(haloOpacity)},
+        {"stripeSpacing", JsValue(stripeSpacing)},
+        {"stripeWidth", JsValue(stripeWidth)},
+        {"stripeOpacity", JsValue(stripeOpacity)},
+        {"stripeAngle", JsValue(stripeAngle)},
+        {"stripeOffset", JsValue(stripeOffset)},
+        {"stripeSoftness", JsValue(stripeSoftness)},
+    });
+    if (tint) {
+        auto color = interactionColorToJs(
+            *tint,
+            "tint",
+            "tintOption",
+            options);
+        if (color.has("tint")) result.set("tint", color["tint"]);
+        if (color.has("tintOption")) result.set("tintOption", color["tintOption"]);
+    }
+    if (haloColor) {
+        auto color = interactionColorToJs(
+            *haloColor,
+            "haloColor",
+            "haloColorOption",
+            options);
+        if (color.has("haloColor")) {
+            result.set("haloColor", color["haloColor"]);
+        }
+        if (color.has("haloColorOption")) {
+            result.set("haloColorOption", color["haloColorOption"]);
+        }
+    }
+    if (stripeColor) {
+        auto color = interactionColorToJs(
+            *stripeColor,
+            "stripeColor",
+            "stripeColorOption",
+            options);
+        if (color.has("stripeColor")) {
+            result.set("stripeColor", color["stripeColor"]);
+        }
+        if (color.has("stripeColorOption")) {
+            result.set("stripeColorOption", color["stripeColorOption"]);
+        }
+    }
+    return *result;
 }
 
 FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
@@ -149,6 +274,152 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
+    if (auto effects = styleYaml["interaction-effects"]) {
+        if (!effects.IsMap()) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "interaction-effect-skipped",
+                "interaction-effects must be a map keyed by hover and selection.",
+                locationForNode(effects));
+        }
+        else {
+            for (auto const& [modeName, modeIndex] : {
+                     std::pair<std::string_view, size_t>{"hover", 0U},
+                     std::pair<std::string_view, size_t>{"selection", 1U}})
+            {
+                auto effectYaml = effects[std::string(modeName)];
+                if (!effectYaml.IsDefined()) {
+                    continue;
+                }
+                auto fail = [&](std::string message, YAML::Node const& node) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "interaction-effect-skipped",
+                        std::move(message),
+                        locationForNode(node));
+                    issue.rulePath =
+                        "interaction-effects." + std::string(modeName);
+                    issue.property = "interaction-effects";
+                };
+                if (!effectYaml.IsMap()) {
+                    fail("Interaction effect must be a YAML map.", effectYaml);
+                    continue;
+                }
+                try {
+                    InteractionEffect effect;
+                    if (effectYaml["tint"].IsDefined()) {
+                        effect.tint = parseInteractionColor(effectYaml["tint"]);
+                        if (!effect.tint) {
+                            fail(
+                                "Interaction tint must be a literal color or {option: id}.",
+                                effectYaml["tint"]);
+                            continue;
+                        }
+                    }
+                    if (effectYaml["tint-mix"].IsDefined()) {
+                        effect.tintMix = effectYaml["tint-mix"].as<float>();
+                    }
+                    if (effectYaml["opacity"].IsDefined()) {
+                        effect.opacity = effectYaml["opacity"].as<float>();
+                    }
+                    if (effectYaml["edge-width"].IsDefined()) {
+                        effect.edgeWidth = effectYaml["edge-width"].as<float>();
+                    }
+                    if (auto halo = effectYaml["halo"]) {
+                        if (!halo.IsMap() || !halo["color"].IsDefined()) {
+                            fail(
+                                "Interaction halo must be a map with a color.",
+                                halo);
+                            continue;
+                        }
+                        effect.haloColor =
+                            parseInteractionColor(halo["color"]);
+                        if (!effect.haloColor) {
+                            fail(
+                                "Interaction halo color must be a literal color or {option: id}.",
+                                halo["color"]);
+                            continue;
+                        }
+                        if (halo["radius"].IsDefined()) {
+                            effect.haloRadius = halo["radius"].as<float>();
+                        }
+                        if (halo["opacity"].IsDefined()) {
+                            effect.haloOpacity = halo["opacity"].as<float>();
+                        }
+                    }
+                    if (auto stripe = effectYaml["stripe"]) {
+                        if (!stripe.IsMap()) {
+                            fail("Interaction stripe must be a YAML map.", stripe);
+                            continue;
+                        }
+                        if (stripe["color"].IsDefined()) {
+                            effect.stripeColor =
+                                parseInteractionColor(stripe["color"]);
+                            if (!effect.stripeColor) {
+                                fail(
+                                    "Interaction stripe color must be a literal color or {option: id}.",
+                                    stripe["color"]);
+                                continue;
+                            }
+                        }
+                        if (stripe["spacing"].IsDefined()) {
+                            effect.stripeSpacing = stripe["spacing"].as<float>();
+                        }
+                        if (stripe["width"].IsDefined()) {
+                            effect.stripeWidth = stripe["width"].as<float>();
+                        }
+                        if (stripe["opacity"].IsDefined()) {
+                            effect.stripeOpacity = stripe["opacity"].as<float>();
+                        }
+                        if (stripe["angle"].IsDefined()) {
+                            effect.stripeAngle = stripe["angle"].as<float>();
+                        }
+                        if (stripe["offset"].IsDefined()) {
+                            effect.stripeOffset = stripe["offset"].as<float>();
+                        }
+                        if (stripe["softness"].IsDefined()) {
+                            effect.stripeSoftness = stripe["softness"].as<float>();
+                        }
+                    }
+                    if (!std::isfinite(effect.tintMix) ||
+                        effect.tintMix < 0.0f || effect.tintMix > 1.0f ||
+                        !std::isfinite(effect.opacity) ||
+                        effect.opacity < 0.0f || effect.opacity > 1.0f ||
+                        !std::isfinite(effect.edgeWidth) ||
+                        effect.edgeWidth < 0.0f ||
+                        !std::isfinite(effect.haloRadius) ||
+                        effect.haloRadius < 0.0f ||
+                        !std::isfinite(effect.haloOpacity) ||
+                        effect.haloOpacity < 0.0f || effect.haloOpacity > 1.0f ||
+                        !std::isfinite(effect.stripeSpacing) ||
+                        effect.stripeSpacing < 0.0f ||
+                        !std::isfinite(effect.stripeWidth) ||
+                        effect.stripeWidth < 0.0f ||
+                        !std::isfinite(effect.stripeOpacity) ||
+                        effect.stripeOpacity < 0.0f || effect.stripeOpacity > 1.0f ||
+                        !std::isfinite(effect.stripeAngle) ||
+                        !std::isfinite(effect.stripeOffset) ||
+                        !std::isfinite(effect.stripeSoftness) ||
+                        effect.stripeSoftness < 0.0f)
+                    {
+                        fail(
+                            "Interaction effect numeric values are outside their supported ranges.",
+                            effectYaml);
+                        continue;
+                    }
+                    interactionEffects_[modeIndex] = std::move(effect);
+                }
+                catch (YAML::Exception const& exception) {
+                    fail(
+                        "Could not parse interaction effect: " + exception.msg,
+                        effectYaml);
+                }
+            }
+        }
+    }
+
     uint32_t ruleIndex = 0;
     uint32_t renderRuleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
@@ -255,6 +526,24 @@ uint32_t FeatureLayerStyle::supportedHighlightModesMask() const
 bool FeatureLayerStyle::supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const
 {
     return (highlightModeMask_ & (1u << highlightModeIndex(mode))) != 0;
+}
+
+bool FeatureLayerStyle::supportsInteractionEffect(
+    FeatureStyleRule::HighlightMode mode) const
+{
+    auto const index = interactionEffectIndex(mode);
+    return index && interactionEffects_[*index].has_value();
+}
+
+NativeJsValue FeatureLayerStyle::interactionEffect(
+    FeatureStyleRule::HighlightMode mode,
+    NativeJsValue const& options) const
+{
+    auto const index = interactionEffectIndex(mode);
+    if (!index || !interactionEffects_[*index]) {
+        return *JsValue::Undefined();
+    }
+    return interactionEffects_[*index]->toJsValue(options);
 }
 
 bool FeatureLayerStyle::hasExplicitLowFidelityRules() const

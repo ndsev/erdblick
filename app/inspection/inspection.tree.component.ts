@@ -6,9 +6,11 @@ import {
     ViewChild,
     input,
     OnDestroy,
+    SecurityContext,
     effect,
     output
 } from "@angular/core";
+import {DomSanitizer} from "@angular/platform-browser";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {TreeTable} from "primeng/treetable";
 import {toObservable} from "@angular/core/rxjs-interop";
@@ -25,6 +27,10 @@ import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
+import {
+    inspectionHtmlPresentation,
+    type InspectionHtmlPresentation
+} from "./inspection-html.presentation";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -201,7 +207,7 @@ export class FeatureFilterOptions {
                                                                         class="inspection-value-bubble"
                                                                         [ngClass]="valueBubbleClasses(child)"
                                                                         (click)="onValueBubbleClick($event, child)">
-                                                                    {{ child.label }}
+                                                                    {{ valueBubbleDisplayText(child) }}
                                                                 </button>
                                                                 <button type="button"
                                                                         class="inspection-value-bubble-copy"
@@ -219,7 +225,7 @@ export class FeatureFilterOptions {
                                                                 class="inspection-value-bubble"
                                                                 [ngClass]="valueBubbleClasses(bubble)"
                                                                 (click)="onValueBubbleClick($event, bubble)">
-                                                            {{ bubble.label }}
+                                                            {{ valueBubbleDisplayText(bubble) }}
                                                         </button>
                                                         <button type="button"
                                                                 class="inspection-value-bubble-copy"
@@ -420,6 +426,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private valueBubblePopoverHost?: HTMLElement;
     private valueBubblePopoverElement?: HTMLDivElement;
     private valueBubblePopoverFrame?: number;
+    private readonly inspectionHtmlCache = new Map<string, InspectionHtmlPresentation | null>();
     private readonly valueBubblePopoverGapPx = 8;
     private readonly valueBubblePopoverMarginPx = 4;
     private readonly valueBubblePopoverMaxWidthPx = 1024;
@@ -445,7 +452,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 private jumpService: JumpTargetService,
                 public stateService: AppStateService,
                 private messageService: InfoMessageService,
-                private featureSearchService: FeatureSearchService) {
+                private featureSearchService: FeatureSearchService,
+                private sanitizer: DomSanitizer) {
         effect(() => {
             const columns = this.columns();
             const savedHiddenColumns = this.stateService.getInspectionTreeHiddenColumns(this.panelId());
@@ -788,7 +796,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private valueBubbleTooltip(bubbles: any[]): string {
         const labels: string[] = [];
         for (const bubble of bubbles) {
-            const label = this.valueBubbleText(bubble);
+            const label = this.valueBubbleDisplayText(bubble);
             if (label) {
                 labels.push(label);
             }
@@ -796,11 +804,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return labels.join(" ");
     }
 
-    /** Returns the flattened visible text for one bubble. */
-    private valueBubbleText(bubble: any): string {
+    /** Returns flattened plain text for one bubble, including formatted HTML values. */
+    protected valueBubbleDisplayText(bubble: any): string {
         if (this.hasBubbleChildren(bubble)) {
             return bubble.children
-                .map((child: any) => this.valueBubbleText(child))
+                .map((child: any) => this.valueBubbleDisplayText(child))
+                .filter((label: string) => label.length > 0)
+                .join(" ");
+        }
+        const label = typeof bubble?.label === "string" ? bubble.label : "";
+        return this.formattedInspectionHtml(label)?.text || label;
+    }
+
+    /** Returns the original flattened bubble labels for lossless copy operations. */
+    private valueBubbleSourceText(bubble: any): string {
+        if (this.hasBubbleChildren(bubble)) {
+            return bubble.children
+                .map((child: any) => this.valueBubbleSourceText(child))
                 .filter((label: string) => label.length > 0)
                 .join(" ");
         }
@@ -809,10 +829,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Returns whether a value cell should use the structured bubble popover instead of a plain tooltip. */
     protected valueCellUsesBubblePopover(rowNode: any, rowData: any, colKey: string): boolean {
-        return colKey === "value" && this.shouldShowValueBubbles(rowNode, rowData);
+        return colKey === "value" && (
+            this.shouldShowValueBubbles(rowNode, rowData)
+            || this.formattedInspectionHtml(rowData?.["value"]) !== undefined
+        );
     }
 
-    /** Shows the structured bubble popover next to collapsed summary rows. */
+    /** Shows a structured bubble or formatted-value preview next to the hovered value cell. */
     protected onValueCellMouseEnter(event: MouseEvent, rowNode: any, rowData: any, colKey: string): void {
         if (!this.valueCellUsesBubblePopover(rowNode, rowData, colKey)) {
             return;
@@ -821,7 +844,14 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!cell) {
             return;
         }
-        this.showValueBubblePopover(cell, rowData["valueBubbles"]);
+        if (this.shouldShowValueBubbles(rowNode, rowData)) {
+            this.showValueBubblePopover(cell, rowData["valueBubbles"]);
+            return;
+        }
+        const formatted = this.formattedInspectionHtml(rowData["value"]);
+        if (formatted) {
+            this.showHtmlValuePopover(cell, formatted);
+        }
     }
 
     /** Hides the structured bubble popover when the pointer leaves a value cell. */
@@ -832,15 +862,43 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.hideValueBubblePopover();
     }
 
+    /** Caches sanitized HTML parsing because template predicates run repeatedly during change detection. */
+    private formattedInspectionHtml(value: unknown): InspectionHtmlPresentation | undefined {
+        if (typeof value !== "string" || !value.includes("<") || !value.includes(">")) {
+            return undefined;
+        }
+        if (this.inspectionHtmlCache.has(value)) {
+            return this.inspectionHtmlCache.get(value) ?? undefined;
+        }
+        const presentation = inspectionHtmlPresentation(
+            value,
+            html => this.sanitizer.sanitize(SecurityContext.HTML, html)
+        );
+        this.inspectionHtmlCache.set(value, presentation ?? null);
+        return presentation;
+    }
+
+    /** Builds a non-interactive formatted HTML preview in the shared body-level popover. */
+    private showHtmlValuePopover(cell: HTMLElement, presentation: InspectionHtmlPresentation): void {
+        const content = document.createElement("div");
+        content.className = "inspection-value-html-popover-content";
+        content.innerHTML = presentation.html;
+        this.showValuePopoverContent(cell, content);
+    }
 
     /** Builds the value-bubble popover in document.body so undocked dialogs cannot clip it. */
     private showValueBubblePopover(cell: HTMLElement, bubbles: any[]): void {
-        const container = this.ensureValueBubblePopoverElement();
         const content = document.createElement("div");
         content.className = "inspection-value-bubble-popover-content";
         for (const bubble of bubbles) {
             content.appendChild(this.createValueBubblePopoverNode(bubble));
         }
+        this.showValuePopoverContent(cell, content);
+    }
+
+    /** Installs and positions content in the singleton body-level value popover. */
+    private showValuePopoverContent(cell: HTMLElement, content: HTMLElement): void {
+        const container = this.ensureValueBubblePopoverElement();
         container.replaceChildren(content);
         container.style.visibility = "hidden";
         container.style.display = "block";
@@ -889,13 +947,19 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Converts one leaf bubble to a styled non-interactive popover item. */
     private createValueBubblePopoverLeaf(bubble: any): HTMLElement {
         const item = document.createElement("span");
+        const formatted = this.formattedInspectionHtml(bubble?.label);
+        if (formatted) {
+            item.classList.add("inspection-value-html-popover-content");
+            item.innerHTML = formatted.html;
+            return item;
+        }
         item.classList.add("inspection-value-bubble", "inspection-value-bubble-popover-item");
         for (const [className, enabled] of Object.entries(this.valueBubbleClasses(bubble))) {
             if (enabled) {
                 item.classList.add(className);
             }
         }
-        item.textContent = this.valueBubbleText(bubble);
+        item.textContent = this.valueBubbleDisplayText(bubble);
         return item;
     }
 
@@ -1056,7 +1120,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     protected copyValueBubble(event: MouseEvent, bubble: any): void {
         event.preventDefault();
         event.stopPropagation();
-        const value = this.valueBubbleText(bubble);
+        const value = this.valueBubbleSourceText(bubble);
         if (value) {
             this.copyToClipboard(value);
         }

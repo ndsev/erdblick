@@ -1,4 +1,4 @@
-import {Component, OnDestroy} from "@angular/core";
+import {Component, NgZone, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -13,6 +13,7 @@ import {
     packedTileIdFromWgs84,
     packedTileIdOptionName
 } from "./nds-coordinate.util";
+import {subscribeCoordinateFrames} from "./coordinate-frame-stream";
 
 interface PanelOption {
     name: string,
@@ -100,7 +101,8 @@ export class CoordinatesPanelComponent implements OnDestroy {
     constructor(public mapService: MapViewStateService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+                private ngZone: NgZone) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: packedTileIdOptionName(level)});
         }
@@ -136,14 +138,19 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.restoreSelectedOptions();
         }));
 
-        this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
+        this.subscriptions.push(subscribeCoordinateFrames(
+            this.coordinatesService.mouseMoveCoordinates,
+            this.ngZone,
+            coordinates => {
+            // Deck publishes outside Angular and may do so during renderer setup. Applying the
+            // latest sample at a frame boundary keeps check-no-changes passes stable.
             if (!this.markerPosition && coordinates) {
                 this.longitude = GeoMath.toDegrees(coordinates.longitude);
                 this.latitude = GeoMath.toDegrees(coordinates.latitude);
                 this.updateValues();
             }
             this.restoreSelectedOptions();
-        });
+        }));
     }
 
     /** Releases subscriptions to marker, coordinate, and option state streams. */
