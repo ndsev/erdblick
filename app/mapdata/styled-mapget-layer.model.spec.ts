@@ -1,4 +1,4 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {FilterTileState} from "./filter-tile-state.model";
 import {StyledMapgetLayer} from "./styled-mapget-layer.model";
 
@@ -29,5 +29,39 @@ describe("StyledMapgetLayer presentation refs", () => {
         layer.releaseTileState(state);
         expect(state.subsetBlob).toBeNull();
         expect(layer.retiredTileStates.size).toBe(0);
+    });
+
+    it("gives overlapping presentations independently releasable attachment refs", () => {
+        const first = {key: "first"};
+        const second = {key: "second"};
+        const retainTileAttachment = vi.fn()
+            .mockReturnValueOnce(first)
+            .mockReturnValueOnce(second);
+        const layer = Object.create(StyledMapgetLayer.prototype) as any;
+        layer.disposed = false;
+        layer.mapgetLayer = {
+            sourceId: "source",
+            mapId: "map",
+            layerId: "layer"
+        };
+        layer.tileStream = {retainTileAttachment};
+        const state = new FilterTileState(
+            "map",
+            "layer",
+            42,
+            "map/layer/42",
+            1
+        );
+
+        expect(layer.retainAttachment(state, "mesh.glb")).toBe(first);
+        expect(layer.retainAttachment(state, "mesh.glb")).toBe(second);
+        expect(retainTileAttachment).toHaveBeenCalledTimes(2);
+        expect(retainTileAttachment).toHaveBeenLastCalledWith({
+            sourceId: "source",
+            mapId: "map",
+            layerId: "layer",
+            tileId: 42,
+            name: "mesh.glb"
+        });
     });
 });

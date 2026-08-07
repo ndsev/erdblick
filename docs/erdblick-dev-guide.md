@@ -238,16 +238,27 @@ Workers:
 4. return exact `(channel ordinal, typed-entry ordinal)` pick refs;
 5. report attachment demand, issues, and timing.
 
-`TileSubsetLayerVisualization` owns the installed Deck contributions. It keeps
-the exact immutable subset bytes which produced those buffers until every
-contribution and pick reference is removed. A block remains alive while any
-constituent tile overlaps current demand. Primitive-level
-information such as relation endpoint role or nested render-rule index stays
-renderer-local.
+`TileSubsetLayerVisualization` coordinates atomic installation of two
+tile-scoped presenters. `TileSubsetVectorPresentation` owns arena and direct
+Deck contributions for surfaces, paths, points, labels, and arrows.
+`TileSubsetGltfPresentation` owns attachment transfer, parsed-asset retention,
+visible nodes, pick proxies, and GLTF interaction contributions. The
+visualization keeps the exact immutable subset bytes which produced those
+presentations until every contribution and pick reference is removed. A block
+remains alive while any constituent tile overlaps current demand.
+Primitive-level information such as relation endpoint role or nested
+render-rule index stays renderer-local.
 
 Large GLBs are requested only after renderer output reports demand. The
-visualization combines attachment bytes with subset GLTF-node/AABB entries and
-releases the attachment ref on teardown or replacement.
+GLTF presenter combines attachment bytes with subset GLTF-node/AABB entries.
+It owns one independently releasable `TileAttachmentRef` per presentation and
+releases both pending and installed state on replacement or teardown;
+`MapTileStreamService` still coalesces identical underlying requests.
+
+Deck creates its luma device asynchronously even when supplied an existing
+WebGL context. `DeckMapView` therefore publishes its immutable scene handle
+only after `onDeviceInitialized`; otherwise attachment-backed presentation
+would permanently observe a null device and never request its GLB.
 
 `FrameBudgetLoop<T>` is the shared main-thread time-slice utility. It services
 bounded work such as search-result ingestion without creating a global

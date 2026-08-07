@@ -25,22 +25,9 @@ import type {
     TileSubsetLayerRenderBuffers,
     TileSubsetPickResult
 } from "./tile-subset-layer-render.worker.protocol";
-import {
-    DeckGltfNodeLayer,
-    DeckGltfPickProxyLayer,
-    type DeckGltfNodeStyleContribution,
-    type DeckGltfPickProxyDatum,
-    type DeckGltfPickProxyStyleContribution,
-    type DeckTileGltfAsset,
-    type DeckTileGltfAttachmentSource,
-    releaseDeckTileGltfAsset,
-    retainDeckTileGltfAsset
-} from "./deck-gltf-node.layer";
 import type {StyleValidationReportService} from "../../styledata/style-validation-report.service";
 import {
-    deckSubsetGltfPickProxyKey,
     deckSubsetInteractionProps,
-    remapGltfPickContributions,
     type DeckSubsetInteractionProps as DeckInteractionProps,
     type SubsetPickResolver as PickResolver
 } from "./deck-subset-picking";
@@ -55,7 +42,6 @@ import {packVariablePathOffsetVectors} from
     "./deck-variable-path-offset.extension";
 import {
     compileTileSubsetArrowMarkers,
-    MAX_TILE_SUBSET_RENDER_VERTICES,
     type DeckArrowMarker,
     type DeckPathData,
     type DeckPointData,
@@ -70,6 +56,10 @@ import {
     type DeckLabelData,
     type TileSubsetVectorSource
 } from "./tile-subset-vector-presentation";
+import {
+    TileSubsetGltfPresentation,
+    type TileSubsetGltfSource
+} from "./tile-subset-gltf-presentation";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
@@ -94,27 +84,6 @@ interface DebugBlockLabel {
     text: string;
 }
 
-interface PreparedGltf {
-    source: DeckTileGltfAttachmentSource;
-    asset: DeckTileGltfAsset;
-    device: Device;
-}
-
-interface SharedGltfContribution {
-    asset: DeckTileGltfAsset;
-    order: number;
-    priority: number;
-    styleOrder: number;
-    data: DeckGltfNodeStyleContribution["data"];
-}
-
-interface SharedGltfPickContribution {
-    order: number;
-    coordinateOrigin: [number, number, number];
-    data: DeckGltfPickProxyStyleContribution["data"];
-    pickResolver: PickResolver;
-}
-
 /** One style-owned interaction material applied to exact locally retained picks. */
 export interface TileSubsetInteractionOverlay {
     id: string;
@@ -124,13 +93,7 @@ export interface TileSubsetInteractionOverlay {
 }
 
 interface InteractionSource extends TileSubsetVectorSource {
-    gltf: InteractionGltfSource | null;
-}
-
-interface InteractionGltfSource {
-    key: string;
-    asset: DeckTileGltfAsset;
-    data: DeckGltfNodeStyleContribution["data"];
+    gltf: TileSubsetGltfSource | null;
 }
 
 const UNSELECTABLE = 0xffffffff;
@@ -154,11 +117,8 @@ export class TileSubsetLayerVisualization {
     readonly visualizationId: string;
     private readonly layerKeys = new Set<string>();
     private readonly vectorPresentation: TileSubsetVectorPresentation;
+    private readonly gltfPresentation: TileSubsetGltfPresentation;
     private readonly interactionLayerKeys = new Set<string>();
-    private readonly interactionGltfSources = new Map<
-        string,
-        {key: string; sourceId: string}
-    >();
     private readonly interactionOutlineSources = new Map<
         string,
         {groupId: string; sourceId: string}
@@ -179,11 +139,6 @@ export class TileSubsetLayerVisualization {
     private sceneHandle: IRenderSceneHandle | null = null;
     private sceneRevision = 0;
     private fidelityValue: number;
-    private activeGltfSource: DeckTileGltfAttachmentSource | null = null;
-    private activeGltfAsset: DeckTileGltfAsset | null = null;
-    private activeGltfDevice: Device | null = null;
-    private gltfSharedSourceActive = false;
-    private gltfPickSharedSourceActive = false;
     private debugBlockVisualization = false;
     private readonly reportedRuntimeIssueIds = new Set<string>();
 
@@ -217,6 +172,12 @@ export class TileSubsetLayerVisualization {
             viewIndex,
             blockKey
         });
+        this.gltfPresentation = new TileSubsetGltfPresentation(
+            owner,
+            states[0],
+            blockKey,
+            states.length
+        );
         this.fidelityValue = fidelityValue;
         for (const state of states) {
             owner.retainTileState(state);
@@ -535,13 +496,9 @@ export class TileSubsetLayerVisualization {
             for (const key of this.interactionLayerKeys) {
                 registry.remove(key);
             }
-            for (const source of this.interactionGltfSources.values()) {
-                registry.removeShared(source.key, source.sourceId);
-            }
         }
         this.layerKeys.clear();
         this.interactionLayerKeys.clear();
-        this.interactionGltfSources.clear();
         if (outlineService) {
             for (const source of this.interactionOutlineSources.values()) {
                 outlineService.removeMask(source.groupId, source.sourceId);
@@ -553,10 +510,8 @@ export class TileSubsetLayerVisualization {
         this.interactionOutlineSources.clear();
         this.styleGlowOutlineSources.clear();
         this.vectorPresentation.destroy();
-        this.removeSharedGltfContributions(registry);
-        this.releaseGltfAsset();
+        this.gltfPresentation.destroy(registry);
         for (const state of this.states) {
-            this.owner.releaseAttachment(state.tileId);
             this.owner.releaseTileState(state);
         }
         this.pickResults = [];
@@ -582,6 +537,7 @@ export class TileSubsetLayerVisualization {
         const origin = this.coordinateOrigin(result.coordinateOrigin);
         if (!origin) {
             this.vectorPresentation.clear();
+            this.gltfPresentation.clear(registry);
             this.interactionSource = null;
             this.reconcileStyleGlowOutlines(
                 this.outlineService(sceneHandle),
@@ -590,14 +546,15 @@ export class TileSubsetLayerVisualization {
             this.reconcile(registry, desired);
             return true;
         }
-        const preparedGltf = await this.prepareGltf(sceneHandle, result);
+        const preparedGltf = await this.gltfPresentation.prepare(
+            result,
+            (sceneHandle.scene as DeckScene | undefined)?.device ?? null
+        );
         if (this.disposed ||
             signature !== this.requestedSignature ||
             this.sceneHandle !== sceneHandle ||
             this.sceneRevision !== sceneRevision) {
-            if (preparedGltf) {
-                releaseDeckTileGltfAsset(preparedGltf.source, preparedGltf.device);
-            }
+            this.gltfPresentation.discard(preparedGltf);
             return false;
         }
         const modelMatrix = this.modelMatrix(sceneHandle);
@@ -617,7 +574,7 @@ export class TileSubsetLayerVisualization {
             interaction,
             pickResolver
         });
-        const interactionGltf = this.applyGltf(
+        const interactionGltf = this.gltfPresentation.install(
             registry,
             result,
             origin,
@@ -760,309 +717,6 @@ export class TileSubsetLayerVisualization {
             hash = ((hash * 31) + identity.charCodeAt(index)) >>> 0;
         }
         return hash % 5;
-    }
-
-    private async prepareGltf(
-        sceneHandle: IRenderSceneHandle,
-        result: TileSubsetLayerRenderBuffers
-    ): Promise<PreparedGltf | null> {
-        const attachmentName = result.glbAttachmentName?.trim() ?? "";
-        const device = (sceneHandle.scene as DeckScene | undefined)?.device ?? null;
-        if (!attachmentName || !result.gltfNodes.nodeIndices.length || !device) {
-            return null;
-        }
-        if (this.states.length !== 1) {
-            throw new Error(
-                `GLB-backed subset block '${this.blockKey}' must remain a singleton.`
-            );
-        }
-        const state = this.primaryState;
-        const attachmentRef = this.owner.retainAttachment(state, attachmentName);
-        const tilePosition = coreLib.getTilePosition(state.tileId);
-        const source: DeckTileGltfAttachmentSource = {
-            cacheKey: `${state.mapTileKey}:${attachmentName}`,
-            attachmentName,
-            tilePosition: [
-                Number(tilePosition.x),
-                Number(tilePosition.y),
-                Number(tilePosition.z)
-            ],
-            readBytes: async () => (await attachmentRef.ready)?.bytes ?? null
-        };
-        let asset: DeckTileGltfAsset | null = null;
-        try {
-            asset = await retainDeckTileGltfAsset(source, device);
-        } catch (error) {
-            console.warn(
-                `Could not realize GLB attachment '${attachmentName}' for '${state.mapTileKey}'.`,
-                error
-            );
-        }
-        if (!asset) {
-            releaseDeckTileGltfAsset(source, device);
-            this.owner.releaseAttachment(state.tileId);
-            return null;
-        }
-        return {source, asset, device};
-    }
-
-    private applyGltf(
-        registry: DeckLayerRegistry,
-        result: TileSubsetLayerRenderBuffers,
-        origin: [number, number, number],
-        modelMatrix: Matrix4 | null,
-        pickResolver: PickResolver,
-        interaction: DeckInteractionProps,
-        prepared: PreparedGltf | null
-    ): InteractionGltfSource | null {
-        const sourceId = this.owner.ownerId;
-        const state = this.primaryState;
-        const gltfKey = `${state.mapTileKey}/gltf`;
-        const pickKey = deckSubsetGltfPickProxyKey(state.mapTileKey, this.owner.ownerId);
-        const raw = result.gltfNodes;
-        let interactionData: DeckGltfNodeStyleContribution["data"] | null = null;
-        const flatTint = this.owner.highlightMode.value !==
-            coreLib.HighlightMode.NO_HIGHLIGHT.value;
-        const priority = this.owner.highlightMode.value ===
-            coreLib.HighlightMode.SELECTION_HIGHLIGHT.value
-            ? 3
-            : this.owner.highlightMode.value ===
-                coreLib.HighlightMode.HOVER_HIGHLIGHT.value
-                ? 2
-                : 0;
-
-        if (prepared && raw.nodeIndices.length &&
-            raw.colors.length >= raw.nodeIndices.length * 4 &&
-            raw.featureAddresses.length >= raw.nodeIndices.length) {
-            const data: DeckGltfNodeStyleContribution["data"] = [];
-            for (let index = 0; index < raw.nodeIndices.length; ++index) {
-                const colorOffset = index * 4;
-                data.push({
-                    nodeIndex: raw.nodeIndices[index],
-                    featureAddress: raw.featureAddresses[index],
-                    color: [
-                        raw.colors[colorOffset],
-                        raw.colors[colorOffset + 1],
-                        raw.colors[colorOffset + 2],
-                        raw.colors[colorOffset + 3]
-                    ],
-                    depthTest: flatTint
-                        ? false
-                        : !raw.depthTests?.length || raw.depthTests[index] !== 0,
-                    flatTint,
-                    renderPriority: priority
-                });
-            }
-            interactionData = data;
-            const contribution: SharedGltfContribution = {
-                asset: prepared.asset,
-                order: 375 + this.owner.styleOrder,
-                priority,
-                styleOrder: this.owner.styleOrder,
-                data
-            };
-            this.upsertSharedGltf(
-                registry,
-                gltfKey,
-                sourceId,
-                contribution,
-                modelMatrix);
-            this.gltfSharedSourceActive = true;
-        } else if (this.gltfSharedSourceActive) {
-            registry.removeShared(gltfKey, sourceId);
-            this.gltfSharedSourceActive = false;
-        }
-
-        const proxyData = !flatTint
-            ? this.gltfPickProxyData(result)
-            : [];
-        if (proxyData.length) {
-            const contribution: SharedGltfPickContribution = {
-                order: 374 + this.owner.styleOrder,
-                coordinateOrigin: origin,
-                data: proxyData,
-                pickResolver
-            };
-            registry.upsertShared(
-                pickKey,
-                sourceId,
-                contribution,
-                (key, rawContributions) => {
-                    const contributions = [...rawContributions.entries()].map(
-                        ([id, value]) => ({
-                            sourceId: id,
-                            contribution: value as SharedGltfPickContribution
-                        })
-                    );
-                    if (!contributions.length) {
-                        return {layer: null, order: 0};
-                    }
-                    const first = contributions[0].contribution;
-                    const remapped = remapGltfPickContributions(
-                        contributions.map(item => ({
-                            sourceId: item.sourceId,
-                            data: item.contribution.data,
-                            pickResolver: item.contribution.pickResolver
-                        }))
-                    );
-                    return {
-                        order: Math.max(...contributions.map(
-                            item => item.contribution.order
-                        )),
-                        layer: new DeckGltfPickProxyLayer({
-                            id: key,
-                            contributions: remapped.contributions,
-                            coordinateOrigin: first.coordinateOrigin,
-                            pickable: interaction.pickable,
-                            navigationAnchorEligible:
-                                interaction.drillPickEligible,
-                            markerAnchorEligible:
-                                interaction.drillPickEligible,
-                            drillPickEligible:
-                                interaction.drillPickEligible,
-                            tileKey: state.mapTileKey,
-                            subsetPickResolver: remapped.pickResolver
-                        })
-                    };
-                }
-            );
-            this.gltfPickSharedSourceActive = true;
-        } else if (this.gltfPickSharedSourceActive) {
-            registry.removeShared(pickKey, sourceId);
-            this.gltfPickSharedSourceActive = false;
-        }
-
-        this.releaseGltfAsset();
-        if (prepared) {
-            this.activeGltfSource = prepared.source;
-            this.activeGltfAsset = prepared.asset;
-            this.activeGltfDevice = prepared.device;
-        } else {
-            this.owner.releaseAttachment(state.tileId);
-        }
-        return prepared && interactionData
-            ? {
-                key: gltfKey,
-                asset: prepared.asset,
-                data: interactionData
-            }
-            : null;
-    }
-
-    private upsertSharedGltf(
-        registry: DeckLayerRegistry,
-        key: string,
-        sourceId: string,
-        contribution: SharedGltfContribution,
-        modelMatrix: Matrix4 | null
-    ): void {
-        registry.upsertShared(
-            key,
-            sourceId,
-            contribution,
-            (sharedKey, rawContributions) => {
-                const contributions = [...rawContributions.entries()].map(
-                    ([id, value]) => ({
-                        sourceId: id,
-                        contribution: value as SharedGltfContribution
-                    })
-                );
-                if (!contributions.length) {
-                    return {layer: null, order: 0};
-                }
-                const first = contributions[0].contribution;
-                const maxPriority = Math.max(...contributions.map(
-                    item => item.contribution.priority
-                ));
-                const order = Math.max(...contributions.map(
-                    item => item.contribution.order
-                )) + (maxPriority >= 2 ? 1000 : 0);
-                return {
-                    order,
-                    layer: new DeckGltfNodeLayer({
-                        id: sharedKey,
-                        contributions: contributions.map(item => ({
-                            sourceId: item.sourceId,
-                            priority: item.contribution.priority,
-                            styleOrder: item.contribution.styleOrder,
-                            data: item.contribution.data
-                        })),
-                        asset: first.asset,
-                        pickable: false,
-                        modelMatrix
-                    })
-                };
-            });
-    }
-
-    private gltfPickProxyData(
-        result: TileSubsetLayerRenderBuffers
-    ): DeckGltfPickProxyDatum[] {
-        const raw = result.gltfPickProxies;
-        if (raw.startIndices.length < 2 || raw.startIndices[0] !== 0) {
-            return [];
-        }
-        const count = raw.startIndices.length - 1;
-        const vertexCount = raw.startIndices[count];
-        if (vertexCount < 3 ||
-            vertexCount > MAX_TILE_SUBSET_RENDER_VERTICES ||
-            raw.positions.length < vertexCount * 3 ||
-            raw.nodeIndices.length < count ||
-            raw.featureAddresses.length < count) {
-            return [];
-        }
-        const resultData: DeckGltfPickProxyDatum[] = [];
-        for (let index = 0; index < count; ++index) {
-            const start = raw.startIndices[index];
-            const end = raw.startIndices[index + 1];
-            const featureAddress = raw.featureAddresses[index];
-            if (end - start < 3 || end > vertexCount ||
-                featureAddress === UNSELECTABLE) {
-                continue;
-            }
-            resultData.push({
-                nodeIndex: raw.nodeIndices[index],
-                featureAddress,
-                positions: raw.positions.slice(start * 3, end * 3)
-            });
-        }
-        return resultData;
-    }
-
-    private removeSharedGltfContributions(
-        registry: DeckLayerRegistry | null
-    ): void {
-        if (!registry) {
-            this.gltfSharedSourceActive = false;
-            this.gltfPickSharedSourceActive = false;
-            return;
-        }
-        if (this.gltfSharedSourceActive) {
-            registry.removeShared(
-                `${this.primaryState.mapTileKey}/gltf`,
-                this.owner.ownerId
-            );
-            this.gltfSharedSourceActive = false;
-        }
-        if (this.gltfPickSharedSourceActive) {
-            registry.removeShared(
-                deckSubsetGltfPickProxyKey(this.primaryState.mapTileKey, this.owner.ownerId),
-                this.owner.ownerId
-            );
-            this.gltfPickSharedSourceActive = false;
-        }
-    }
-
-    private releaseGltfAsset(): void {
-        if (this.activeGltfSource && this.activeGltfDevice) {
-            releaseDeckTileGltfAsset(
-                this.activeGltfSource,
-                this.activeGltfDevice
-            );
-        }
-        this.activeGltfSource = null;
-        this.activeGltfAsset = null;
-        this.activeGltfDevice = null;
     }
 
     private resolvePick(pickIndex: number): TileFeatureId[] {
@@ -1356,7 +1010,7 @@ export class TileSubsetLayerVisualization {
                 registry.remove(key);
             }
             this.interactionLayerKeys.clear();
-            this.reconcileInteractionGltf(registry, new Set());
+            this.gltfPresentation.reconcileInteractions(registry, new Set());
             this.reconcileInteractionOutlines(
                 this.outlineService(sceneHandle),
                 new Set());
@@ -1586,48 +1240,15 @@ export class TileSubsetLayerVisualization {
             // the owning path/point/surface instead.
 
             if (source.gltf) {
-                const data = source.gltf.data
-                    .filter(datum => this.matchesInteractionAddress(
-                        datum.featureAddress,
-                        overlay.targets))
-                    .map(datum => ({
-                        ...datum,
-                        color: [
-                            ...(overlay.effect.tint ?? datum.color).slice(0, 3),
-                            Math.round(
-                                datum.color[3] * overlay.effect.opacity *
-                                (overlay.effect.tint?.[3] ?? 255) / 255)
-                        ] as [number, number, number, number],
-                        tintMix: overlay.effect.tint
-                            ? overlay.effect.tintMix
-                            : 0,
-                        depthTest: false,
-                        flatTint: true,
-                        renderPriority: overlay.order
-                    }));
-                if (data.length) {
-                    const sourceId = [
-                        this.owner.ownerId,
-                        "interaction",
-                        overlay.id
-                    ].join("/");
-                    const token = `${source.gltf.key}\n${sourceId}`;
-                    this.upsertSharedGltf(
-                        registry,
-                        source.gltf.key,
-                        sourceId,
-                        {
-                            asset: source.gltf.asset,
-                            order: overlay.order,
-                            priority: overlay.order,
-                            styleOrder: overlay.order,
-                            data
-                        },
-                        source.modelMatrix);
-                    this.interactionGltfSources.set(token, {
-                        key: source.gltf.key,
-                        sourceId
-                    });
+                const token = this.gltfPresentation.installInteraction(
+                    registry,
+                    source.gltf,
+                    overlay,
+                    featureAddress => this.matchesInteractionAddress(
+                        featureAddress,
+                        overlay.targets)
+                );
+                if (token) {
                     desiredGltf.add(token);
                 }
             }
@@ -1642,20 +1263,8 @@ export class TileSubsetLayerVisualization {
         for (const key of desired) {
             this.interactionLayerKeys.add(key);
         }
-        this.reconcileInteractionGltf(registry, desiredGltf);
+        this.gltfPresentation.reconcileInteractions(registry, desiredGltf);
         this.reconcileInteractionOutlines(outlineService, desiredOutlines);
-    }
-
-    private reconcileInteractionGltf(
-        registry: DeckLayerRegistry,
-        desired: ReadonlySet<string>
-    ): void {
-        for (const [token, source] of this.interactionGltfSources) {
-            if (!desired.has(token)) {
-                registry.removeShared(source.key, source.sourceId);
-                this.interactionGltfSources.delete(token);
-            }
-        }
     }
 
     private reconcileInteractionOutlines(

@@ -496,6 +496,10 @@ export abstract class DeckMapView implements IRenderView {
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
+        let resolveDeckDevice!: () => void;
+        const deckDeviceReady = new Promise<void>(resolve => {
+            resolveDeckDevice = resolve;
+        });
         const deckProps: DeckProps<DeckView> = {
             id: `deck-${this.canvasId}`,
             gl,
@@ -510,6 +514,7 @@ export abstract class DeckMapView implements IRenderView {
             layerFilter: this.deckLayerFilter,
             onDeviceInitialized: (device) => {
                 this.deckDevice = device;
+                resolveDeckDevice();
             },
             onResize: ({width, height}) => {
                 this.lastCanvasCssSize = this.normalizedCanvasCssSize(width, height);
@@ -551,6 +556,13 @@ export abstract class DeckMapView implements IRenderView {
         this.deck = new DeckGlDeck(deckProps);
         this.deckHoverPickingEnabled = true;
         this.layerRegistry.setDeck(this.deck);
+
+        // Deck creates its luma device asynchronously even when an existing
+        // WebGL context is supplied.  Do not publish a scene handle until the
+        // device exists: attachment-backed GLTF presentation needs it to
+        // parse/upload assets and an immutable handle containing `null` would
+        // otherwise strand those tiles as pick proxies only.
+        await deckDeviceReady;
 
         this.setupSubscriptions();
         this.cancelViewportUpdateScheduling();

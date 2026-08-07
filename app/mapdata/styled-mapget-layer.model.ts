@@ -72,10 +72,6 @@ export class StyledMapgetLayer {
     private readonly retiredTileStates = new Map<number, FilterTileState>();
     private readonly tileStatePresentationRefs =
         new Map<FilterTileState, number>();
-    private readonly attachmentRefs = new Map<number, {
-        name: string;
-        ref: TileAttachmentRef;
-    }>();
 
     constructor(
         readonly identity: StyledMapgetLayerIdentity,
@@ -160,7 +156,6 @@ export class StyledMapgetLayer {
             }
             this.tileStates.delete(tileId);
             this.events.next({type: "tile-removed", state});
-            this.releaseAttachment(tileId);
             if (this.filterRef.suspended &&
                 !this.tileStatePresentationRefs.has(state)) {
                 state.dispose();
@@ -251,23 +246,16 @@ export class StyledMapgetLayer {
         this.events.next({type: "generation", generation: this.generation});
     }
 
-    /** Retains one tile attachment as presentation state, replacing any prior name. */
+    /** Creates one independently releasable presentation ref for a tile attachment. */
     retainAttachment(state: FilterTileState, name: string): TileAttachmentRef {
         this.assertLive();
-        const existing = this.attachmentRefs.get(state.tileId);
-        if (existing?.name === name && existing.ref.state !== "released") {
-            return existing.ref;
-        }
-        existing?.ref.release();
-        const ref = this.tileStream.retainTileAttachment({
+        return this.tileStream.retainTileAttachment({
             sourceId: this.mapgetLayer.sourceId,
             mapId: this.mapgetLayer.mapId,
             layerId: this.mapgetLayer.layerId,
             tileId: state.tileId,
             name
         });
-        this.attachmentRefs.set(state.tileId, {name, ref});
-        return ref;
     }
 
     /**
@@ -296,16 +284,6 @@ export class StyledMapgetLayer {
         this.tileStatePresentationRefs.set(state, count - 1);
     }
 
-    /** Drops one tile's raw attachment demand immediately. */
-    releaseAttachment(tileId: number): void {
-        const existing = this.attachmentRefs.get(tileId);
-        if (!existing) {
-            return;
-        }
-        this.attachmentRefs.delete(tileId);
-        existing.ref.release();
-    }
-
     dispose(): void {
         if (this.disposed) {
             return;
@@ -314,7 +292,6 @@ export class StyledMapgetLayer {
         this.filterRef.release();
         for (const state of this.tileStates.values()) {
             this.events.next({type: "tile-removed", state});
-            this.releaseAttachment(state.tileId);
             state.dispose();
         }
         this.tileStates.clear();
