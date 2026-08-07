@@ -53,9 +53,19 @@ function fixture(blockTileCount = 1) {
         processedGltf: {},
         destroy: vi.fn()
     };
+    const assetRef: any = {
+        source: null,
+        ready: Promise.resolve(asset),
+        released: false,
+        release: vi.fn(() => {
+            assetRef.released = true;
+        })
+    };
     const assetStore = {
-        retain: vi.fn(),
-        release: vi.fn()
+        retain: vi.fn((source) => {
+            assetRef.source = source;
+            return assetRef;
+        })
     };
     const presentation = new TileSubsetGltfPresentation(
         owner as any,
@@ -70,6 +80,7 @@ function fixture(blockTileCount = 1) {
         state,
         result,
         asset,
+        assetRef,
         assetStore,
         presentation
     };
@@ -92,12 +103,10 @@ describe("TileSubsetGltfPresentation", () => {
             attachmentRef,
             owner,
             result,
-            asset,
-            assetStore,
+            assetRef,
             presentation
         } = fixture();
         const device = {};
-        assetStore.retain.mockResolvedValue(asset);
 
         const prepared = await presentation.prepare(result as any, device as any);
 
@@ -107,10 +116,7 @@ describe("TileSubsetGltfPresentation", () => {
         );
         expect(prepared?.attachmentRef).toBe(attachmentRef);
         presentation.discard(prepared);
-        expect(assetStore.release).toHaveBeenCalledWith(
-            prepared?.source,
-            device
-        );
+        expect(assetRef.release).toHaveBeenCalledOnce();
         expect(attachmentRef.release).toHaveBeenCalledOnce();
     });
 
@@ -127,13 +133,13 @@ describe("TileSubsetGltfPresentation", () => {
             attachmentRef,
             result,
             asset,
-            assetStore,
+            assetRef,
             presentation
         } = fixture();
         let finish!: (value: typeof asset) => void;
-        assetStore.retain.mockReturnValue(new Promise(resolve => {
+        assetRef.ready = new Promise(resolve => {
             finish = resolve;
-        }));
+        });
 
         const preparing = presentation.prepare(result as any, {} as any);
         presentation.destroy(null);
@@ -141,19 +147,17 @@ describe("TileSubsetGltfPresentation", () => {
         expect(attachmentRef.release).toHaveBeenCalledOnce();
         finish(asset);
         expect(await preparing).toBeNull();
-        expect(assetStore.release).toHaveBeenCalledOnce();
+        expect(assetRef.release).toHaveBeenCalledOnce();
     });
 
     it("publishes and tears down base nodes, proxies and the exact ref", async () => {
         const {
             attachmentRef,
             result,
-            asset,
-            assetStore,
+            assetRef,
             presentation
         } = fixture();
         const device = {};
-        assetStore.retain.mockResolvedValue(asset);
         const prepared = await presentation.prepare(result as any, device as any);
         const registry = {
             upsertShared: vi.fn(),
@@ -181,10 +185,7 @@ describe("TileSubsetGltfPresentation", () => {
         presentation.destroy(registry as any);
 
         expect(registry.removeShared).toHaveBeenCalledTimes(2);
-        expect(assetStore.release).toHaveBeenCalledWith(
-            prepared?.source,
-            device
-        );
+        expect(assetRef.release).toHaveBeenCalledOnce();
         expect(attachmentRef.release).toHaveBeenCalledOnce();
     });
 });

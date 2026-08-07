@@ -241,8 +241,11 @@ Workers:
 `TileSubsetLayerVisualization` coordinates atomic installation of two
 tile-scoped presenters. `TileSubsetVectorPresentation` owns arena and direct
 Deck contributions for surfaces, paths, points, labels, and arrows.
-`TileSubsetGltfPresentation` owns attachment transfer, parsed-asset retention,
-visible nodes, pick proxies, and GLTF interaction contributions. The
+`TileSubsetGltfPresentation` owns attachment transfer, a
+`DeckTileGltfAssetRef`, visible nodes, pick proxies, and GLTF interaction
+contributions. `DeckTileGltfAssetStore` coalesces parsing into an immutable
+CPU-side document without a luma-device key. `DeckGltfNodeLayer` alone creates
+and destroys the per-device scenegraph models and texture resources. The
 visualization keeps the exact immutable subset bytes which produced those
 presentations until every contribution and pick reference is removed. A block
 remains alive while any constituent tile overlaps current demand.
@@ -251,8 +254,9 @@ render-rule index stays renderer-local.
 
 Large GLBs are requested only after renderer output reports demand. The
 GLTF presenter combines attachment bytes with subset GLTF-node/AABB entries.
-It owns one independently releasable `TileAttachmentRef` per presentation and
-releases both pending and installed state on replacement or teardown;
+It owns independently releasable `TileAttachmentRef` and
+`DeckTileGltfAssetRef` values per presentation and releases both pending and
+installed state on replacement or teardown;
 `MapTileStreamService` still coalesces identical underlying requests.
 
 Deck creates its luma device asynchronously even when supplied an existing

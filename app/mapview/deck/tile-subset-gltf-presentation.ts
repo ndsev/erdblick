@@ -10,12 +10,14 @@ import {
     DeckGltfPickProxyLayer,
     type DeckGltfNodeStyleContribution,
     type DeckGltfPickProxyDatum,
-    type DeckGltfPickProxyStyleContribution,
-    type DeckTileGltfAsset,
-    type DeckTileGltfAttachmentSource,
-    releaseDeckTileGltfAsset,
-    retainDeckTileGltfAsset
+    type DeckGltfPickProxyStyleContribution
 } from "./deck-gltf-node.layer";
+import {
+    deckTileGltfAssetStore,
+    type DeckTileGltfAsset,
+    type DeckTileGltfAssetRef,
+    type DeckTileGltfAttachmentSource
+} from "./deck-tile-gltf-asset";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import type {DeckInteractionEffect} from "./deck-interaction-effect";
 import {
@@ -32,9 +34,8 @@ const UNSELECTABLE = 0xffffffff;
 
 /** A parsed attachment retained while it is still awaiting atomic installation. */
 export interface PreparedTileSubsetGltf {
-    source: DeckTileGltfAttachmentSource;
     asset: DeckTileGltfAsset;
-    device: Device;
+    assetRef: DeckTileGltfAssetRef;
     attachmentRef: TileAttachmentRef;
 }
 
@@ -63,20 +64,8 @@ interface SharedGltfPickContribution {
 
 /** Injectable parsed-asset boundary used to keep attachment ownership testable. */
 export interface TileSubsetGltfAssetStore {
-    retain(
-        source: DeckTileGltfAttachmentSource,
-        device: Device
-    ): Promise<DeckTileGltfAsset | null>;
-    release(
-        source: DeckTileGltfAttachmentSource,
-        device: Device | null | undefined
-    ): void;
+    retain(source: DeckTileGltfAttachmentSource): DeckTileGltfAssetRef;
 }
-
-const deckTileGltfAssetStore: TileSubsetGltfAssetStore = {
-    retain: retainDeckTileGltfAsset,
-    release: releaseDeckTileGltfAsset
-};
 
 /**
  * Exact tile-scoped owner for attachment transfer, parsed GLTF retention and
@@ -134,9 +123,10 @@ export class TileSubsetGltfPresentation {
             ],
             readBytes: async () => (await attachmentRef.ready)?.bytes ?? null
         };
+        const assetRef = this.assetStore.retain(source);
         let asset: DeckTileGltfAsset | null = null;
         try {
-            asset = await this.assetStore.retain(source, device);
+            asset = await assetRef.ready;
         } catch (error) {
             if (attachmentRef.state !== "released") {
                 console.warn(
@@ -149,16 +139,16 @@ export class TileSubsetGltfPresentation {
             this.pendingAttachmentRefs.delete(attachmentRef);
         }
         if (!asset) {
-            this.assetStore.release(source, device);
+            assetRef.release();
             attachmentRef.release();
             return null;
         }
         if (lifecycleVersion !== this.lifecycleVersion) {
-            this.assetStore.release(source, device);
+            assetRef.release();
             attachmentRef.release();
             return null;
         }
-        return {source, asset, device, attachmentRef};
+        return {asset, assetRef, attachmentRef};
     }
 
     /** Releases a prepared value rejected by the visualization's stale guard. */
@@ -166,7 +156,7 @@ export class TileSubsetGltfPresentation {
         if (!prepared) {
             return;
         }
-        this.assetStore.release(prepared.source, prepared.device);
+        prepared.assetRef.release();
         prepared.attachmentRef.release();
     }
 
@@ -421,10 +411,7 @@ export class TileSubsetGltfPresentation {
         if (!this.active) {
             return;
         }
-        this.assetStore.release(
-            this.active.source,
-            this.active.device
-        );
+        this.active.assetRef.release();
         this.active.attachmentRef.release();
         this.active = null;
     }

@@ -13,9 +13,11 @@ import type {Device, Texture} from "@luma.gl/core";
 import {createScenegraphsFromGLTF} from "@luma.gl/gltf";
 import {Geometry, GroupNode, Model, ModelNode} from "@luma.gl/engine";
 import {type ShaderModule, pbrMaterial} from "@luma.gl/shadertools";
-import {parse} from "@loaders.gl/core";
-import {GLTFLoader, postProcessGLTF, type GLTFPostprocessed, type GLTFWithBuffers} from "@loaders.gl/gltf";
 import {Matrix4} from "@math.gl/core";
+import type {
+    DeckTileGltfAsset,
+    DeckTileGltfProcessed
+} from "./deck-tile-gltf-asset";
 
 const GLTF_NODE_UNIFORM_BLOCK = `\
 uniform gltfNodeUniforms {
@@ -267,45 +269,8 @@ const gltfPickProxyUniforms = {
     }
 } as const satisfies ShaderModule<GltfPickProxyUniformProps>;
 
-type ParsedTileGltf = GLTFPostprocessed & {
-    nodes?: Array<{_node?: GroupNode}>;
-};
-
-type ParsedTileGltfNode = NonNullable<ParsedTileGltf["nodes"]>[number];
+type ParsedTileGltfNode = NonNullable<DeckTileGltfProcessed["nodes"]>[number];
 type ParseGLTFOptions = Parameters<typeof createScenegraphsFromGLTF>[2];
-
-type ParsedTileGltfSnapshot = {
-    name: string;
-    bytes: Uint8Array;
-    center: [number, number, number];
-};
-
-/** Attachment-backed input used by the per-device parsed GLTF cache. */
-export interface DeckTileGltfAttachmentSource {
-    readonly cacheKey: string;
-    readonly attachmentName: string;
-    readonly tilePosition: [number, number, number];
-    readBytes(): Promise<Uint8Array | null>;
-}
-
-/** Parsed and normalized tile GLTF attachment cached per deck device and tile version. */
-export interface DeckTileGltfAsset {
-    readonly cacheKey: string;
-    readonly attachmentName: string;
-    readonly tilePosition: [number, number, number];
-    readonly byteLength: number;
-    readonly sceneCount: number;
-    readonly modelNodeCount: number;
-    readonly nodeRootCount: number;
-    readonly processedGltf: ParsedTileGltf;
-    destroy(): void;
-}
-
-interface DeckTileGltfAssetCacheEntry {
-    refCount: number;
-    asset: DeckTileGltfAsset | null | undefined;
-    promise: Promise<DeckTileGltfAsset | null>;
-}
 
 /** One resolved GLTF-node style record emitted by wasm for a feature/node pair. */
 export interface DeckGltfNodeDatum {
@@ -371,22 +336,7 @@ export type DeckGltfPickProxyLayerProps = LayerProps & {
     drillPickEligible?: boolean;
 };
 
-const gltfAssetCacheByDevice = new WeakMap<Device, Map<string, DeckTileGltfAssetCacheEntry>>();
 const ZERO_PICKING_COLOR: [number, number, number] = [0, 0, 0];
-
-function gltfAssetCacheKey(source: DeckTileGltfAttachmentSource): string {
-    return source.cacheKey;
-}
-
-/** Returns the per-device GLTF asset cache shared by visible and picking layers. */
-function getDeviceCache(device: Device): Map<string, DeckTileGltfAssetCacheEntry> {
-    let cache = gltfAssetCacheByDevice.get(device);
-    if (!cache) {
-        cache = new Map<string, DeckTileGltfAssetCacheEntry>();
-        gltfAssetCacheByDevice.set(device, cache);
-    }
-    return cache;
-}
 
 function normalizeColor(color: [number, number, number, number]): [number, number, number, number] {
     return [
@@ -426,44 +376,6 @@ function buildModelOptions(layerId: string): ParseGLTFOptions {
             modules: [project32, picking, scenegraphUniforms, gltfNodeUniforms, pbrMaterial]
         },
         useTangents: false
-    };
-}
-
-async function readTileGltfSnapshot(
-    source: DeckTileGltfAttachmentSource
-): Promise<ParsedTileGltfSnapshot | null> {
-    const bytes = await source.readBytes();
-    return bytes ? {
-        name: source.attachmentName,
-        bytes,
-        center: source.tilePosition
-    } : null;
-}
-
-/** Parses one tile attachment into the immutable GLTF asset snapshot shared by all layer states. */
-async function buildTileGltfAsset(
-    device: Device,
-    source: DeckTileGltfAttachmentSource,
-    cacheKey: string
-): Promise<DeckTileGltfAsset | null> {
-    const snapshot = await readTileGltfSnapshot(source);
-    if (!snapshot) {
-        return null;
-    }
-
-    const attachmentBuffer = snapshot.bytes.slice().buffer as ArrayBuffer;
-    const parsed = await parse(attachmentBuffer, GLTFLoader) as GLTFWithBuffers;
-    const processed = postProcessGLTF(parsed) as ParsedTileGltf;
-    return {
-        cacheKey,
-        attachmentName: snapshot.name,
-        tilePosition: snapshot.center,
-        byteLength: snapshot.bytes.byteLength,
-        sceneCount: processed.scenes?.length ?? 0,
-        modelNodeCount: (processed.nodes ?? []).reduce((count, node) => count + (node.mesh ? 1 : 0), 0),
-        nodeRootCount: processed.nodes?.length ?? 0,
-        processedGltf: processed,
-        destroy() {}
     };
 }
 
@@ -713,7 +625,9 @@ function resolveBuckets(
 }
 
 /** Clones the processed glTF tree so each layer state owns fresh luma scenegraph nodes. */
-export function cloneProcessedGltfForScenegraph(processedGltf: ParsedTileGltf): ParsedTileGltf {
+export function cloneProcessedGltfForScenegraph(
+    processedGltf: DeckTileGltfProcessed
+): DeckTileGltfProcessed {
     const clonedNodes: any[] = [];
     const sourceScenes = processedGltf.scenes ?? [];
     const cloneNode = (node: any): any => {
@@ -890,58 +804,6 @@ function destroyLayerScenegraphState(state: LayerScenegraphState): void {
                 }
             }
         }
-    }
-}
-
-/** Retains the parsed GLTF asset for one tile on a specific deck device. */
-export async function retainDeckTileGltfAsset(
-    source: DeckTileGltfAttachmentSource,
-    device: Device
-): Promise<DeckTileGltfAsset | null> {
-    const cacheKey = gltfAssetCacheKey(source);
-    const cache = getDeviceCache(device);
-    const cachedEntry = cache.get(cacheKey);
-    if (cachedEntry) {
-        cachedEntry.refCount += 1;
-        return await cachedEntry.promise;
-    }
-
-    const entry: DeckTileGltfAssetCacheEntry = {
-        refCount: 1,
-        asset: undefined,
-        promise: buildTileGltfAsset(device, source, cacheKey).then((asset) => {
-            entry.asset = asset;
-            return asset;
-        })
-    };
-    cache.set(cacheKey, entry);
-    return await entry.promise;
-}
-
-/** Releases one retained GLTF asset reference and destroys it once the last user goes away. */
-export function releaseDeckTileGltfAsset(
-    source: DeckTileGltfAttachmentSource,
-    device: Device | null | undefined
-): void {
-    if (!device) {
-        return;
-    }
-    const cache = gltfAssetCacheByDevice.get(device);
-    if (!cache) {
-        return;
-    }
-    const cacheKey = gltfAssetCacheKey(source);
-    const entry = cache.get(cacheKey);
-    if (!entry) {
-        return;
-    }
-    entry.refCount -= 1;
-    if (entry.refCount > 0) {
-        return;
-    }
-    cache.delete(cacheKey);
-    if (entry.asset) {
-        entry.asset.destroy();
     }
 }
 
