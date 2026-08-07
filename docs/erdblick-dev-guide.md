@@ -238,15 +238,20 @@ Workers:
 4. return exact `(channel ordinal, typed-entry ordinal)` pick refs;
 5. report attachment demand, issues, and timing.
 
-`TileSubsetLayerVisualization` coordinates atomic installation of two
-tile-scoped presenters. `TileSubsetVectorPresentation` owns arena and direct
-Deck contributions for surfaces, paths, points, labels, and arrows.
+`TileSubsetLayerVisualization` is the block coordinator and atomically installs
+three tile-scoped presenters. `TileSubsetVectorPresentation` owns arena and
+direct Deck contributions for surfaces, paths, points, labels, and arrows.
 `TileSubsetGltfPresentation` owns attachment transfer, a
 `DeckTileGltfAssetRef`, visible nodes, pick proxies, and GLTF interaction
 contributions. `DeckTileGltfAssetStore` coalesces parsing into an immutable
 CPU-side document without a luma-device key. `DeckGltfNodeLayer` alone creates
 and destroys the per-device scenegraph models and texture resources. The
-visualization keeps the exact immutable subset bytes which produced those
+`TileSubsetInteractionPresentation` owns the local semantic-target index,
+style-glow masks, hover/selection masks, direct fallback layers, and transient
+GLTF interaction contributions. Pure buffer selection and mask construction
+live in `tile-subset-interaction-data.ts`; the coordinator retains picking
+resolution because it owns the exact worker pick table. The visualization
+keeps the exact immutable subset bytes which produced those
 presentations until every contribution and pick reference is removed. A block
 remains alive while any constituent tile overlaps current demand.
 Primitive-level information such as relation endpoint role or nested
@@ -284,7 +289,7 @@ There is no search-specific tile model or renderer. See
 ## Hover, selection, and relations
 
 The controller first resolves hover and selection against typed pick entries
-retained by regular/search `TileSubsetLayerVisualization`s. A view-owned
+retained by regular/search `TileSubsetInteractionPresentation`s. A view-owned
 interaction overlay feeds only matching paths, points, polygons, or mapget
 mesh triangles into hidden GPU mask layers and applies the active stylesheet's
 top-level `interaction-effects` material. `DeckInteractionOutlineService`
@@ -308,7 +313,7 @@ is already local. GLTF attachments remain a separate flat-tint contribution.
 The same mask service also owns persistent, rule-level vector `glow`
 materials. `TileSubsetLayerRenderer` emits one literal RGBA/radius tuple per
 path, generated arrow, point, or surface row;
-`TileSubsetLayerVisualization` groups identical materials and registers one
+`TileSubsetInteractionPresentation` groups identical materials and registers one
 union, exterior-only halo below the authored geometry. The union removes
 overlap seams, while the exterior-only contract prevents a halo from replacing
 thin path or arrow fill. This keeps glow out of the render-buffer vertex layout
