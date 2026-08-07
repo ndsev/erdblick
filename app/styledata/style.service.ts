@@ -27,6 +27,8 @@ import {
 } from "./style-validation.model";
 import {canonicalSearchStyleFilename} from "../search/search-style-sheet.converter";
 
+const STATIC_STYLE_URL_PREFIX = "/static-config/styles/";
+
 /** Original server-provided builtin style source kept for resets and comparisons. */
 interface BuiltinStyleBaseline {
     id: string,
@@ -212,7 +214,7 @@ export class StyleService {
         if (!normalized.url.startsWith("http")
             && !normalized.url.startsWith("bundle")
             && !normalized.url.startsWith("/")) {
-            normalized.url = `bundle/styles/${normalized.url}`;
+            normalized.url = `${STATIC_STYLE_URL_PREFIX}${normalized.url}`;
         }
         return normalized;
     }
@@ -446,6 +448,55 @@ export class StyleService {
         }
 
         return this.downloadYamlSource(content.source, canonicalSearchStyleFilename(styleId));
+    }
+
+    /** Returns whether this builtin style is backed by the writable source config mount. */
+    canSaveStyleToSource(styleId: string): boolean {
+        const style = this.styles.get(styleId);
+        return this.configService.snapshot.serverConfig?.styleEditingEnabled === true
+            && !!style
+            && !style.imported
+            && style.url.startsWith(STATIC_STYLE_URL_PREFIX);
+    }
+
+    /** Returns the server-advertised source styles directory for user-facing warnings. */
+    getStyleEditingDirectory(): string | null {
+        return this.configService.snapshot.serverConfig?.styleEditingDirectory ?? null;
+    }
+
+    /** Writes one applied builtin style back to its source YAML and adopts it as the new baseline. */
+    async saveStyleToSource(styleId: string): Promise<boolean> {
+        const style = this.styles.get(styleId);
+        if (!style || !this.canSaveStyleToSource(styleId)) {
+            return false;
+        }
+
+        try {
+            await firstValueFrom(this.httpClient.put(style.url, style.source, {responseType: "text"}));
+        } catch (error) {
+            console.error(`Failed to save style ${styleId} to ${style.url}.`, error);
+            return false;
+        }
+
+        const sourceHash = sipHash64Hex(style.source);
+        style.modified = false;
+        style.sourceRef = {
+            ...style.sourceRef,
+            sourceKind: style.additional ? "additional" : "base",
+            sourceHash
+        };
+        this.builtinStyleBaselines.set(style.url, {id: style.id, source: style.source});
+        this.styleHashes.set(style.url, {
+            id: style.id,
+            sha256: sourceHash,
+            isModified: false,
+            isUpdated: false
+        });
+        const persistedHashes = this.loadStyleHashes();
+        persistedHashes.set(style.url, sourceHash);
+        localStorage.setItem("styleHashes", JSON.stringify([...persistedHashes]));
+        this.saveModifiedBuiltinStyles();
+        return true;
     }
 
     /** Imports a YAML file, registers it as an imported style, and reapplies it. */

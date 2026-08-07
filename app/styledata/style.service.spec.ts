@@ -22,6 +22,7 @@ class AppStateServiceStub {
 
 class HttpClientStub {
     get = vi.fn();
+    put = vi.fn();
 }
 
 class InfoMessageServiceStub {
@@ -62,7 +63,7 @@ describe('StyleService', () => {
         const {service, httpClient, stateService} = createService(config);
 
         httpClient.get.mockImplementation((url: string, options: any) => {
-            if (url === 'bundle/styles/base.yaml') {
+            if (url === '/static-config/styles/base.yaml') {
                 return of('name: TestStyle');
             }
             throw new Error(`Unexpected URL ${url}`);
@@ -79,7 +80,7 @@ describe('StyleService', () => {
         await service.initializeStyles();
 
         expect(parseSpy).toHaveBeenCalled();
-        expect(service.styleUrls).toEqual([{id: 's1', url: 'bundle/styles/base.yaml'}]);
+        expect(service.styleUrls).toEqual([{id: 's1', url: '/static-config/styles/base.yaml'}]);
         expect(service.styles.size).toBe(1);
         const style = service.styles.get('TestStyle')!;
         expect(style.id).toBe('TestStyle');
@@ -87,6 +88,39 @@ describe('StyleService', () => {
         expect(style.visible).toBe(stateService.getStyleVisibility('TestStyle', true));
         expect(service.builtinStylesCount).toBe(1);
         expect(reapplySpy).toHaveBeenCalledWith(['TestStyle']);
+    });
+
+    it('persists source-backed styles and adopts the saved source as the new baseline', async () => {
+        const config = {
+            styles: [{url: 'base.yaml'}],
+            serverConfig: {
+                styleEditingEnabled: true,
+                styleEditingDirectory: '/workspace/config/styles'
+            }
+        };
+        const {service, httpClient} = createService(config);
+        httpClient.get.mockReturnValue(of('name: TestStyle\nrules: []'));
+        httpClient.put.mockReturnValue(of('Static file updated.'));
+        vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((source: string) => [{
+            name: () => source.match(/^name:\s*(.*)$/m)?.[1] ?? 'TestStyle',
+            defaultEnabled: () => true,
+            delete: vi.fn(),
+        } as any, []]);
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+
+        await service.initializeStyles();
+        service.setStyleSource('TestStyle', 'name: TestStyle\nrules:\n  - geometry: [line]');
+
+        expect(service.canSaveStyleToSource('TestStyle')).toBe(true);
+        expect(await service.saveStyleToSource('TestStyle')).toBe(true);
+        expect(httpClient.put).toHaveBeenCalledWith(
+            '/static-config/styles/base.yaml',
+            'name: TestStyle\nrules:\n  - geometry: [line]',
+            {responseType: 'text'});
+        expect(service.styles.get('TestStyle')?.modified).toBe(false);
+        expect(service.getBuiltinBaselineSource('TestStyle')).toBe(
+            'name: TestStyle\nrules:\n  - geometry: [line]');
+        expect(JSON.parse(localStorage.getItem('builtinStyleData') ?? '[]')).toEqual([]);
     });
 
     it('keeps root-relative configured style URLs unchanged', async () => {
@@ -127,7 +161,7 @@ describe('StyleService', () => {
         });
 
         httpClient.get.mockImplementation((url: string) => {
-            if (url === 'bundle/styles/base.yaml') {
+            if (url === '/static-config/styles/base.yaml') {
                 return of(baseSource);
             }
             if (url === '/custom-styles/shared.yaml') {
@@ -154,7 +188,7 @@ describe('StyleService', () => {
         expect(style.additional).toBe(true);
         expect(style.overridesBaseStyle).toEqual({
             id: 'SharedStyle',
-            url: 'bundle/styles/base.yaml',
+            url: '/static-config/styles/base.yaml',
             source: baseSource
         });
         expect(service.getOverriddenBaseStyleSource('SharedStyle')).toBe(baseSource);
@@ -175,7 +209,7 @@ describe('StyleService', () => {
         });
 
         httpClient.get.mockImplementation((url: string) => {
-            if (url === 'bundle/styles/base.yaml') {
+            if (url === '/static-config/styles/base.yaml') {
                 return of(baseSource);
             }
             if (url === additionalUrl) {
@@ -423,13 +457,13 @@ describe('StyleService', () => {
             url: '',
         } as any);
         service.importedStylesCount = 1;
-        service.styleUrls = [{id: 'ImportStyle', url: 'bundle/styles/import.yaml'} as any];
+        service.styleUrls = [{id: 'ImportStyle', url: '/static-config/styles/import.yaml'} as any];
         service.styleGroups.next(service.computeStyleGroups());
 
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
         const exportSpy = vi.spyOn(service, 'exportStyleYamlFile').mockReturnValue(true);
         const fetchSpy = vi.spyOn(service, 'fetchStylesYamlSources').mockResolvedValue(new Map<string, string>([
-            ['bundle/styles/import.yaml', 'name: BuiltinStyle'],
+            ['/static-config/styles/import.yaml', 'name: BuiltinStyle'],
         ]));
         const initSpy = vi.spyOn(service as any, 'initializeStyle').mockReturnValue('BuiltinStyle');
         const reapplySpy = vi.spyOn(service, 'reapplyStyle');
@@ -445,7 +479,7 @@ describe('StyleService', () => {
         expect(service.importedStylesCount).toBe(0);
         expect(removedIds).toContain('ImportStyle');
         expect(fetchSpy).toHaveBeenCalled();
-        expect(initSpy).toHaveBeenCalledWith('name: BuiltinStyle', 'bundle/styles/import.yaml', 'ImportStyle', false, false, false);
+        expect(initSpy).toHaveBeenCalledWith('name: BuiltinStyle', '/static-config/styles/import.yaml', 'ImportStyle', false, false, false);
         expect(reapplySpy).toHaveBeenCalledWith('BuiltinStyle');
     });
 
@@ -453,7 +487,7 @@ describe('StyleService', () => {
         const {service} = createService();
 
         const hashes = (service as any).styleHashes as Map<string, {id: string, sha256: string, isModified: boolean, isUpdated: boolean}>;
-        hashes.set('bundle/styles/s1.yaml', {
+        hashes.set('/static-config/styles/s1.yaml', {
             id: 's1',
             sha256: 'abc',
             isModified: false,
@@ -464,9 +498,9 @@ describe('StyleService', () => {
 
         const stored = localStorage.getItem('styleHashes');
         expect(stored).not.toBeNull();
-        expect(JSON.parse(stored!)).toEqual([['bundle/styles/s1.yaml', 'abc']]);
+        expect(JSON.parse(stored!)).toEqual([['/static-config/styles/s1.yaml', 'abc']]);
         expect(hashes.size).toBe(1);
-        expect(hashes.get('bundle/styles/s1.yaml')?.isUpdated).toBe(false);
+        expect(hashes.get('/static-config/styles/s1.yaml')?.isUpdated).toBe(false);
     });
 
     it('clears storage keys for imported and builtin styles', () => {
@@ -487,20 +521,20 @@ describe('StyleService', () => {
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
-            url: 'bundle/styles/style-one.yaml',
+            url: '/static-config/styles/style-one.yaml',
             visible: true,
         } as any);
 
         const fetchSpy = vi.spyOn(service, 'fetchStylesYamlSources').mockResolvedValue(
-            new Map<string, string>([['bundle/styles/style-one.yaml', 'name: ReloadedStyle']]),
+            new Map<string, string>([['/static-config/styles/style-one.yaml', 'name: ReloadedStyle']]),
         );
         const initSpy = vi.spyOn(service as any, 'initializeStyle').mockReturnValue('ReloadedStyle');
         const reapplySpy = vi.spyOn(service, 'reapplyStyle');
 
         await service.syncStyleYamlData('StyleOne');
 
-        expect(fetchSpy).toHaveBeenCalledWith([{id: 'StyleOne', url: 'bundle/styles/style-one.yaml'}]);
-        expect(initSpy).toHaveBeenCalledWith('name: ReloadedStyle', 'bundle/styles/style-one.yaml', 'StyleOne', false, false, false);
+        expect(fetchSpy).toHaveBeenCalledWith([{id: 'StyleOne', url: '/static-config/styles/style-one.yaml'}]);
+        expect(initSpy).toHaveBeenCalledWith('name: ReloadedStyle', '/static-config/styles/style-one.yaml', 'StyleOne', false, false, false);
         expect(reapplySpy).toHaveBeenCalledWith('ReloadedStyle');
     });
 
@@ -509,7 +543,7 @@ describe('StyleService', () => {
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
-            url: 'bundle/styles/style-one.yaml',
+            url: '/static-config/styles/style-one.yaml',
             visible: true,
             imported: false,
             modified: true,
@@ -518,7 +552,7 @@ describe('StyleService', () => {
         expect(localStorage.getItem('builtinStyleData')).not.toBeNull();
 
         vi.spyOn(service, 'fetchStylesYamlSources').mockResolvedValue(
-            new Map<string, string>([['bundle/styles/style-one.yaml', 'name: StyleOne']]),
+            new Map<string, string>([['/static-config/styles/style-one.yaml', 'name: StyleOne']]),
         );
         vi.spyOn(service as any, 'initializeStyle').mockImplementation((_: unknown, styleUrl: unknown) => {
             const url = styleUrl as string;
@@ -547,7 +581,7 @@ describe('StyleService', () => {
 
         service.styles.set('StyleA', {
             id: 'StyleA',
-            url: 'bundle/styles/a.yaml',
+            url: '/static-config/styles/a.yaml',
             source: 'name: StyleA',
             imported: false,
             modified: false,
@@ -555,7 +589,7 @@ describe('StyleService', () => {
         } as any);
         service.styles.set('StyleB', {
             id: 'StyleB',
-            url: 'bundle/styles/b.yaml',
+            url: '/static-config/styles/b.yaml',
             source: 'name: StyleB',
             imported: false,
             modified: false,
@@ -565,7 +599,7 @@ describe('StyleService', () => {
         localStorage.setItem('builtinStyleData', JSON.stringify([
             ['StyleB', {
                 id: 'StyleB',
-                url: 'bundle/styles/b.yaml',
+                url: '/static-config/styles/b.yaml',
                 source: 'name: StyleB\nlayers: []',
                 imported: false,
             }],
@@ -577,7 +611,7 @@ describe('StyleService', () => {
 
         expect(initSpy).toHaveBeenCalledWith(
             'name: StyleB\nlayers: []',
-            'bundle/styles/b.yaml',
+            '/static-config/styles/b.yaml',
             'StyleB',
             true,
             false,
@@ -590,7 +624,7 @@ describe('StyleService', () => {
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
-            url: 'bundle/styles/style-one.yaml',
+            url: '/static-config/styles/style-one.yaml',
             source: 'name: StyleOne',
             imported: false,
             modified: false,
@@ -613,13 +647,13 @@ describe('StyleService', () => {
         localStorage.setItem('builtinStyleData', JSON.stringify([
             ['BuiltinStyle', {
                 id: 'BuiltinStyle',
-                url: 'bundle/styles/base.yaml',
+                url: '/static-config/styles/base.yaml',
                 source: 'name: BuiltinStyle\nrules:\n  - color: "#ff00ff"',
                 imported: false,
             }],
         ]));
         httpClient.get.mockImplementation((url: string) => {
-            if (url === 'bundle/styles/base.yaml') {
+            if (url === '/static-config/styles/base.yaml') {
                 return of('name: BuiltinStyle\nrules:\n  - color: "#0000ff"');
             }
             throw new Error(`Unexpected URL ${url}`);
@@ -639,13 +673,13 @@ describe('StyleService', () => {
 
         expect(service.getBuiltinBaselineSource('BuiltinStyle')).toBe('name: BuiltinStyle\nrules:\n  - color: "#0000ff"');
         expect(service.styles.get('BuiltinStyle')?.source).toBe('name: BuiltinStyle\nrules:\n  - color: "#ff00ff"');
-        expect(service.styleHashes.get('bundle/styles/base.yaml')?.isModified).toBe(true);
+        expect(service.styleHashes.get('/static-config/styles/base.yaml')?.isModified).toBe(true);
     });
 
     it('synchronizes lifecycle modified flag when style source is edited', () => {
         const {service} = createService();
-        service.styleUrls = [{id: 'StyleOne', url: 'bundle/styles/style-one.yaml'} as any];
-        service.styleHashes.set('bundle/styles/style-one.yaml', {
+        service.styleUrls = [{id: 'StyleOne', url: '/static-config/styles/style-one.yaml'} as any];
+        service.styleHashes.set('/static-config/styles/style-one.yaml', {
             id: 'StyleOne',
             sha256: 'server',
             isModified: false,
@@ -653,7 +687,7 @@ describe('StyleService', () => {
         });
         service.styles.set('StyleOne', {
             id: 'StyleOne',
-            url: 'bundle/styles/style-one.yaml',
+            url: '/static-config/styles/style-one.yaml',
             source: 'name: StyleOne',
             imported: false,
             modified: false,
@@ -676,7 +710,7 @@ describe('StyleService', () => {
         const newStyleId = service.setStyleSource('StyleOne', 'name: StyleOne\nrules: []', true);
 
         expect(newStyleId).toBe('StyleOne');
-        expect(service.styleHashes.get('bundle/styles/style-one.yaml')?.isModified).toBe(true);
+        expect(service.styleHashes.get('/static-config/styles/style-one.yaml')?.isModified).toBe(true);
     });
 
     it('clears the retired visibility identity when an imported style is renamed', () => {
@@ -715,7 +749,7 @@ describe('StyleService', () => {
 
     it('resets one modified builtin style to cached baseline and clears override state', () => {
         const {service} = createService();
-        const builtinUrl = 'bundle/styles/style-one.yaml';
+        const builtinUrl = '/static-config/styles/style-one.yaml';
         service.styleUrls = [{id: 'StyleOne', url: builtinUrl} as any];
         service.styles.set('StyleOne', {
             id: 'StyleOne',

@@ -28,7 +28,7 @@
               {
                 "glob": "**/*",
                 "input": "config/styles",
-                "output": "/bundle/styles"
+                "output": "/static-config/styles"
               },
               {
                 "glob": "**/*",
@@ -38,12 +38,12 @@
               {
                 "glob": "**/*.json",
                 "input": "config",
-                "output": "/"
+                "output": "/static-config"
               },
               {
                 "glob": "**/*.js",
                 "input": "config",
-                "output": "/config"
+                "output": "/static-config"
               },
               {
                 "glob": "VERSION",
@@ -101,7 +101,7 @@
                 {
                   "glob": "**/*",
                   "input": "config/styles",
-                  "output": "/bundle/styles"
+                  "output": "/static-config/styles"
                 },
                 {
                   "glob": "**/*",
@@ -111,12 +111,12 @@
                 {
                   "glob": "**/*.json",
                   "input": "config",
-                  "output": "/"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "**/*.js",
                   "input": "config",
-                  "output": "/config"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "VERSION",
@@ -216,7 +216,7 @@
                 {
                   "glob": "**/*",
                   "input": "config/styles",
-                  "output": "/bundle/styles"
+                  "output": "/static-config/styles"
                 },
                 {
                   "glob": "**/*",
@@ -226,12 +226,12 @@
                 {
                   "glob": "**/*.json",
                   "input": "config",
-                  "output": "/"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "**/*.js",
                   "input": "config",
-                  "output": "/config"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "VERSION",
@@ -309,7 +309,7 @@
                 {
                   "glob": "**/*",
                   "input": "config/styles",
-                  "output": "/bundle/styles"
+                  "output": "/static-config/styles"
                 },
                 {
                   "glob": "**/*",
@@ -319,12 +319,12 @@
                 {
                   "glob": "**/*.json",
                   "input": "config",
-                  "output": "/"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "**/*.js",
                   "input": "config",
-                  "output": "/config"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "VERSION",

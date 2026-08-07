@@ -303,14 +303,18 @@ import {
             </p-tabs>
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
-                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()"
-                              label="Apply" icon="pi pi-check"
-                              [disabled]="!sourceWasModified"></p-button>
+                    <p-button
+                        [attr.data-testid]="canSaveCurrentStyleToSource() ? 'style-editor-save-source-button' : 'style-editor-apply-button'"
+                        (click)="saveOrApplyEditedStyle()"
+                        [label]="canSaveCurrentStyleToSource() ? 'Save to Source' : 'Apply'"
+                        [icon]="canSaveCurrentStyleToSource() ? 'pi pi-save' : 'pi pi-check'"
+                        [disabled]="canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified"
+                        [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
                     <div class="editor-shortcuts">
-                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to {{ canSaveCurrentStyleToSource() ? 'save to source' : 'apply changes' }}</div>
                         <div>Press <span style="color: grey">Esc</span> to quit</div>
                     </div>
                 </div>
@@ -327,7 +331,7 @@ import {
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="applyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
+                <p-button (click)="saveOrApplyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
@@ -686,27 +690,27 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Applies the current editor contents to the selected style. */
-    applyEditedStyle() {
+    applyEditedStyle(): string | undefined {
         const styleId = this.stateService.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
-            return;
+            return undefined;
         }
         if (!styleData) {
             this.messageService.showError(`Cannot apply an empty style definition.`);
-            return;
+            return undefined;
         }
         if (!this.styleService.styles.has(styleId)) {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
-            return;
+            return undefined;
         }
         const report = this.styleService.validateStyleSource(
             styleData,
             this.styleService.createEditorSourceRef(styleId, styleData));
         if (!report.valid) {
             this.showValidationFailure(report);
-            return;
+            return undefined;
         }
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
         // If there is no style ID returned, then setStyleSource failed.
@@ -716,7 +720,65 @@ export class StyleComponent implements OnDestroy {
             this.styleEditorOriginalSource = styleData;
             this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
             this.refreshUpdatedStylesDialogVisibility();
+            return newStyleId;
         }
+        return undefined;
+    }
+
+    /** Applies pending editor text and persists the resulting style through the writable source mount. */
+    async saveEditedStyleToSource(): Promise<void> {
+        let styleId = this.stateService.styleEditorTargetId ?? undefined;
+        if (this.sourceWasModified) {
+            const appliedStyleId = this.applyEditedStyle();
+            if (!appliedStyleId) {
+                return;
+            }
+            styleId = appliedStyleId;
+        }
+        if (!styleId || !this.styleService.canSaveStyleToSource(styleId)) {
+            this.messageService.showError("The selected style is not backed by an editable source file.");
+            return;
+        }
+        if (!await this.styleService.saveStyleToSource(styleId)) {
+            this.messageService.showError(`Could not save style ${styleId} to its source file.`);
+            return;
+        }
+
+        const source = this.styleService.styles.get(styleId)?.source;
+        if (source !== undefined) {
+            this.styleEditorOriginalSource = source.replace(/\n+$/, "");
+            this.editorService.updateSessionSource(this.styleEditorSessionId, `${source}\n\n\n\n\n`);
+        }
+        this.sourceWasModified = false;
+        this.refreshUpdatedStylesDialogVisibility();
+        this.messageService.showSuccess(`Saved ${styleId} to the mapviewer source configuration.`);
+    }
+
+    /** Applies editor changes locally or writes them to source when source editing is enabled. */
+    saveOrApplyEditedStyle(): void {
+        if (this.canSaveCurrentStyleToSource()) {
+            void this.saveEditedStyleToSource();
+        } else {
+            this.applyEditedStyle();
+        }
+    }
+
+    /** Returns whether the current style URL belongs to the writable source-style mount. */
+    canSaveCurrentStyleToSource(): boolean {
+        const styleId = this.stateService.styleEditorTargetId;
+        return !!styleId && this.styleService.canSaveStyleToSource(styleId);
+    }
+
+    /** Returns whether the editor or applied style differs from its source-file baseline. */
+    currentStyleHasSourceChanges(): boolean {
+        const styleId = this.stateService.styleEditorTargetId;
+        return this.sourceWasModified || (!!styleId && this.styleService.styles.get(styleId)?.modified === true);
+    }
+
+    /** Describes the filesystem destination used by the source-save action. */
+    styleSourceSaveTooltip(): string {
+        const directory = this.styleService.getStyleEditingDirectory();
+        return directory ? `Overwrite the YAML file below ${directory}` : "Overwrite the source YAML file";
     }
 
     /** Closes the editor or opens the discard-warning dialog when unsaved edits exist. */
@@ -825,7 +887,7 @@ export class StyleComponent implements OnDestroy {
         );
         this.styleEditorSaveSubscription.unsubscribe();
         this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
-            this.applyEditedStyle();
+            this.saveOrApplyEditedStyle();
         }) ?? new Subscription();
         this.sourceWasModified = false;
         this.styleEditorQuickAvailable = !!this.stateService.styleEditorTargetId;

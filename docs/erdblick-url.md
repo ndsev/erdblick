@@ -7,7 +7,7 @@ Erdblick encodes the full UI state inside the browser URL. That makes it easy to
 Erdblick combines several possible state sources during startup:
 
 1. Built-in application defaults.
-2. Bundled `config.json`.
+2. `/static-config/config.json`.
 3. Server-supplied `/config.erdblick.state`, if the backend provides it.
 4. User-owned browser `localStorage`.
 5. URL query parameters.

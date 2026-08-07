@@ -25,7 +25,7 @@ describe("AppConfigService", () => {
     it("falls back to static config.json when /config request fails", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({styles: [{url: "static.yaml"}]});
             }
             return throwError(() => new Error("network"));
@@ -50,7 +50,7 @@ describe("AppConfigService", () => {
             }
         };
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({styles: [{url: "static.yaml"}]});
             }
             return of(new HttpResponse({status: 200, body: serverBody}));
@@ -91,10 +91,37 @@ describe("AppConfigService", () => {
         expect(config.serverConfig.cacheReset).toBe(expected);
     });
 
+    it("exposes source-style editing metadata from the runtime config section", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({styles: [{url: "static.yaml"}]});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    datasourceConfigUnavailable: false,
+                    erdblickRuntime: {
+                        mode: "source",
+                        styleEditing: {
+                            enabled: true,
+                            directory: "/workspace/mapviewer/config/styles"
+                        }
+                    }
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.serverConfig.styleEditingEnabled).toBe(true);
+        expect(config.serverConfig.styleEditingDirectory).toBe("/workspace/mapviewer/config/styles");
+    });
+
     it("overrides static styles only when server styles are non-empty", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({styles: [{url: "static.yaml"}]});
             }
             return of(new HttpResponse({
@@ -113,7 +140,7 @@ describe("AppConfigService", () => {
     it("does not override static styles when server styles are empty", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({styles: [{url: "static.yaml"}]});
             }
             return of(new HttpResponse({
@@ -132,7 +159,7 @@ describe("AppConfigService", () => {
     it("appends static additional styles after static styles", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     styles: ["static.yaml"],
                     additionalStyles: [
@@ -162,7 +189,7 @@ describe("AppConfigService", () => {
     it("appends server additional styles to static base and static additional styles", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     styles: ["static.yaml"],
                     additionalStyles: ["static-extra.yaml"]
@@ -191,7 +218,7 @@ describe("AppConfigService", () => {
     it("uses non-empty server styles as the base replacement before appending server additional styles", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({styles: ["static.yaml"]});
             }
             return of(new HttpResponse({
@@ -217,7 +244,7 @@ describe("AppConfigService", () => {
     it("ignores empty additional style lists", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     styles: ["static.yaml"],
                     additionalStyles: []
@@ -240,7 +267,7 @@ describe("AppConfigService", () => {
     it("does not override static extension modules with empty server values", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     extensionModules: {
                         jumpTargets: "static_jump_targets",
@@ -270,7 +297,7 @@ describe("AppConfigService", () => {
     it("drops surveys with invalid linkHtml and keeps valid entries", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({});
             }
             return of(new HttpResponse({
@@ -322,7 +349,7 @@ describe("AppConfigService", () => {
         ];
         const replacementHarness = createService();
         replacementHarness.httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({externalViewers: staticViewers});
             }
             return of(new HttpResponse({
@@ -337,7 +364,7 @@ describe("AppConfigService", () => {
 
         const emptyHarness = createService();
         emptyHarness.httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({externalViewers: staticViewers});
             }
             return of(new HttpResponse({
@@ -353,7 +380,7 @@ describe("AppConfigService", () => {
         const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     externalViewers: [
                         {
@@ -401,7 +428,7 @@ describe("AppConfigService", () => {
     it("uses the built-in offline location provider by default", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({});
             }
             return throwError(() => new Error("network"));
@@ -425,7 +452,7 @@ describe("AppConfigService", () => {
     it("uses OSM as the built-in fallback background without requiring Blue Marble", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({});
             }
             return throwError(() => new Error("network"));
@@ -447,7 +474,7 @@ describe("AppConfigService", () => {
     it("falls back to the first configured background when Blue Marble is removed", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     backgroundLayers: [
                         {
@@ -474,7 +501,7 @@ describe("AppConfigService", () => {
     it("allows custom XYZ satellite layers to omit maxZoom while still reaching high levels", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     backgroundLayers: [
                         {
@@ -501,7 +528,7 @@ describe("AppConfigService", () => {
     it("accepts location provider adapters from static config.json", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     locationSearch: {
                         providers: [
@@ -571,7 +598,7 @@ describe("AppConfigService", () => {
     it("replaces location providers from non-empty server config", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     locationSearch: {
                         providers: [
@@ -651,7 +678,7 @@ describe("AppConfigService", () => {
     it("uses coordinates-enabled as a config-seeded local default", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({"coordinates-enabled": true});
             }
             return of(new HttpResponse({
@@ -675,7 +702,7 @@ describe("AppConfigService", () => {
     ])("loads and validates %s coordinate legal terms", async (_format, source, expectedText) => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({
                     "coordinates-enabled": true,
                     "coordinates-legal-terms": "/coordinates-legal-terms/terms.yaml"
@@ -702,7 +729,7 @@ describe("AppConfigService", () => {
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
-            if (url === "config.json") {
+            if (url === "/static-config/config.json") {
                 return of({"coordinates-legal-terms": "/coordinates-legal-terms/invalid.yaml"});
             }
             if (url === "/coordinates-legal-terms/invalid.yaml") {

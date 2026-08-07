@@ -112,7 +112,7 @@ export class JumpTargetService {
             return;
         }
 
-        const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
+        const jumpTargetsPath = `/static-config/${jumpTargetsConfig}.js`;
         this.loadJumpTargetsModule(jumpTargetsPath)
             .then((plugin) => plugin.default() as Array<SearchTarget>)
             .then((jumpTargets: Array<SearchTarget>) => {

@@ -359,6 +359,15 @@
   .style-editor-actions {
     flex-wrap: nowrap;
 
+    p-button {
+      flex: 0 0 auto;
+    }
+
+    .p-button,
+    .p-button-label {
+      white-space: nowrap;
+    }
+
     .editor-actions-left {
       flex: 1 1 auto;
       overflow: hidden;

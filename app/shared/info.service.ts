@@ -51,6 +51,20 @@ export class InfoMessageService {
         this.messageService.clear('backend-protocol');
     }
 
+    /** Shows the persistent warning that browser saves can overwrite source-tree style files. */
+    showSourceStyleEditingWarning(directory: string | null) {
+        this.messageService.clear("source-style-editing");
+        this.messageService.add({
+            key: "source-style-editing",
+            severity: "warn",
+            summary: "Source Style Editing Enabled",
+            detail: directory
+                ? `Saving a style will overwrite YAML files below ${directory}.`
+                : "Saving a style will overwrite mapviewer source files.",
+            sticky: true
+        });
+    }
+
     /** Emits a warning toast through PrimeNG's global message service. */
     showWarning(message: string) {
         this.messageService.add({ key: 'tc', severity: 'warn', summary: 'Warning', detail: message });

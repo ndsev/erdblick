@@ -168,6 +168,14 @@ export interface ServerConfigResponse {
     datasourceConfigUnavailableReason?: string | null;
     capabilities?: unknown;
     erdblick?: Partial<RawAppConfig>;
+    erdblickRuntime?: {
+        staticConfigUrl?: string;
+        mode?: string;
+        styleEditing?: {
+            enabled?: boolean;
+            directory?: string;
+        };
+    };
 }
 
 /** Server-config diagnostics exposed to runtime services. */
@@ -176,6 +184,8 @@ export interface AppServerConfigStatus {
     datasourceConfigUnavailable: boolean;
     datasourceConfigUnavailableReason: string | null;
     cacheReset: boolean;
+    styleEditingEnabled: boolean;
+    styleEditingDirectory: string | null;
 }
 
 /** Normalized application config consumed by the Angular services. */
@@ -354,7 +364,9 @@ const DEFAULT_SERVER_CONFIG_STATUS: AppServerConfigStatus = {
     available: false,
     datasourceConfigUnavailable: false,
     datasourceConfigUnavailableReason: null,
-    cacheReset: false
+    cacheReset: false,
+    styleEditingEnabled: false,
+    styleEditingDirectory: null
 };
 
 const DEFAULT_LOCATION_SEARCH_CONFIG: LocationSearchConfig = {
@@ -519,7 +531,7 @@ export class AppConfigService {
         return this.configSubject.asObservable();
     }
 
-    /** Loads `config.json` once and caches the normalized result for the rest of the session. */
+    /** Loads `/static-config/config.json` once and caches the normalized result for the rest of the session. */
     async load(): Promise<AppConfig> {
         if (this.loadPromise !== null) {
             return this.loadPromise;
@@ -558,10 +570,10 @@ export class AppConfigService {
     /** Loads the bundled static application configuration. */
     private async loadStaticConfig(): Promise<RawAppConfig> {
         try {
-            const rawConfig = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
-            return this.parseRawConfig(rawConfig, "config.json");
+            const rawConfig = await firstValueFrom(this.httpClient.get("/static-config/config.json", {responseType: "json"}));
+            return this.parseRawConfig(rawConfig, "/static-config/config.json");
         } catch (error) {
-            console.error("[AppConfigService] Failed to load config.json", error);
+            console.error("[AppConfigService] Failed to load /static-config/config.json", error);
             return {};
         }
     }
@@ -594,6 +606,14 @@ export class AppConfigService {
             serverConfig.cacheReset =
                 isPlainObject(payload.capabilities) &&
                 payload.capabilities["cacheReset"] === true;
+
+            const styleEditing = payload.erdblickRuntime?.styleEditing;
+            serverConfig.styleEditingEnabled = styleEditing?.enabled === true;
+            serverConfig.styleEditingDirectory = serverConfig.styleEditingEnabled
+                && typeof styleEditing?.directory === "string"
+                && styleEditing.directory.trim().length > 0
+                ? styleEditing.directory.trim()
+                : null;
 
             if (payload.erdblick && isPlainObject(payload.erdblick)) {
                 erdblickConfig = this.parseRawConfig(payload.erdblick, "/config.erdblick");

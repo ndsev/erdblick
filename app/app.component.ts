@@ -1,4 +1,4 @@
-import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
+import {AfterViewInit, Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapInfoService} from "./mapdata/map-info.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
@@ -60,6 +60,7 @@ declare let window: DebugWindow;
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
             <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>
             <p-toast position="top-center" key="backend-protocol" [baseZIndex]="9700"></p-toast>
+            <p-toast position="top-center" key="source-style-editing" [baseZIndex]="9800"></p-toast>
         }
         <legal-dialog></legal-dialog>
         <about-dialog></about-dialog>
@@ -74,7 +75,7 @@ declare let window: DebugWindow;
  * behaviors such as dialog stacking, drag-selection suppression, debug helpers,
  * and startup version loading.
  */
-export class AppComponent implements OnDestroy {
+export class AppComponent implements AfterViewInit, OnDestroy {
     protected readonly cacheResetDialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
@@ -114,6 +115,16 @@ export class AppComponent implements OnDestroy {
         this.loadDistributionVersions();
 
         this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
+    }
+
+    /** Presents the source-editing warning after the global toast host has subscribed. */
+    ngAfterViewInit() {
+        queueMicrotask(() => {
+            if (this.configService.snapshot.serverConfig.styleEditingEnabled) {
+                this.infoMessageService.showSourceStyleEditingWarning(
+                    this.configService.snapshot.serverConfig.styleEditingDirectory);
+            }
+        });
     }
 
     /** Removes global dialog listeners installed during startup. */
@@ -168,7 +179,7 @@ export class AppComponent implements OnDestroy {
             return;
         }
 
-        const distribVersionsPath = `/config/${distribVersions}.js`;
+        const distribVersionsPath = `/static-config/${distribVersions}.js`;
         import(/* @vite-ignore */ distribVersionsPath)
             .then((plugin) => plugin.default() as Array<Versions>)
             .then((versions: Array<Versions>) => {

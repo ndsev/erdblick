@@ -21,7 +21,7 @@ Some container images or products ship a prebuilt erdblick bundle in a directory
    ```bash
    mapget serve -w ~/Downloads/erdblick-dist
    ```
-4. Open the printed URL in your browser. The UI loads `config.json` from the bundle for style declarations and extension modules, then connects to the backend via the `/sources` and `/tiles` endpoints to discover data.
+4. Open the printed URL in your browser. The UI loads `/static-config/config.json` for style declarations and extension modules, then connects to the backend via the mapget catalog and interactive tile endpoints to discover data.
 
 ## Running from source
 
@@ -54,7 +54,7 @@ sources:
 
 Whenever the YAML file changes, mapget applies the new sources immediately; erdblick will pick them up as soon as `/sources` reflects the update. If your backend exposes a writable `/config` endpoint, you can adjust data sources from inside erdblick via the DataSource editor—see the dedicated guide for that workflow.
 
-At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `config.json`.
+At startup erdblick loads `/static-config/config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the static config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `/static-config/config.json`.
 
 The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, `coordinates-enabled`, `coordinates-legal-terms`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
 
@@ -62,10 +62,10 @@ The `state` key uses the same snapshot shape exported by Advanced Preferences, n
 
 ## Customizing `config/`
 
-The `config/` directory in the erdblick source tree controls UI-side metadata:
+The `config/` directory used to build or host erdblick controls UI-side metadata:
 
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
-  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `bundle/styles/` and this list defines the base style set.
+  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `/static-config/styles/` and this list defines the base style set.
   - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
@@ -82,22 +82,32 @@ The `config/` directory in the erdblick source tree controls UI-side metadata:
 
 The bundled overview layer is documented in `docs/erdblick-backgrounds.md`.
 
-Edit these files before running `build-ui.bash`, or replace them on disk after building by overlaying the `config/` directory in your deployment. For example, a Docker image might be started with:
+Standalone Angular builds copy these assets below `/static-config`. MapViewer instead publishes its own flat `config/` directory at that route, so style and extension-module files are not compiled into the frontend JavaScript.
+
+Packaged deployments can replace the runtime `static-config/` directory beside the `mapviewer` executable. For example, a Docker image can mount replacements at the corresponding packaged paths:
 
 ```bash
 docker run --rm -it -p 8089:8089 --name erdblick \
-  -v $HOME/custom-config.json:/srv/erdblick/config/config.json:ro \
-  -v $HOME/custom-styles:/srv/erdblick/config/styles:ro \
+  -v $HOME/custom-config.json:/srv/mapviewer/static-config/config.json:ro \
+  -v $HOME/custom-styles:/srv/mapviewer/static-config/styles:ro \
   erdblick:latest
 ```
 
-Adapt the target paths (`/srv/erdblick/...`) to match the layout used by your own packaging.
+Adapt the target paths to match the layout used by your own packaging.
 
-If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, background assets, or legal-term documents by itself.
+If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for defaults that should travel with the erdblick deployment. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, background assets, or legal-term documents by itself.
+
+### MapViewer source-style editing
+
+When a locally built `mapviewer` can still access the `config/` directory from which it was compiled, it serves that directory directly at `/static-config`. The server advertises this development mode in the `erdblickRuntime` field of `/config`, mounts `/static-config/styles` as writable, and prints a prominent startup warning. The erdblick frontend shows the same persistent warning and adds **Save to Source** to the style editor. That action overwrites the existing YAML file in `config/styles/`; it does not create arbitrary files or make other static-config assets writable.
+
+The generated `config/config.json` remains a normal build artifact. Re-run CMake when `config.json.in` substitutions change. Editing or saving an existing YAML style requires neither a CMake step nor an Angular rebuild; reload or resynchronize the style in erdblick to read an external edit.
+
+If the source directory is unavailable, MapViewer falls back to the filtered `static-config/` copy beside the executable. That mode is read-only and does not expose the source-save action.
 
 ## Serving styles and resources
 
-Style entries that do not start with `http`, `bundle`, or `/` are resolved under `bundle/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+Style entries that do not start with `http`, `bundle`, or `/` are resolved under `/static-config/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
 
 Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional style URLs are loaded exactly like other browser resources: every URL must already be reachable through the web server. Erdblick itself does not expand wildcards, scan directories, mount host paths, or resolve relative filesystem paths against a backend YAML file. If a host application such as MapViewer accepts relative or absolute filesystem paths in its own YAML config, that application resolves them and publishes browser-reachable URLs before erdblick reads `/config.erdblick`.
 
@@ -119,5 +129,5 @@ A few practical browser and platform choices can make erdblick feel noticeably s
 
 - Chromium-based browsers usually offer the highest WebGL throughput. Firefox and Safari work but may require higher tile limits to reach the same detail levels.
 - Enable GPU acceleration in the browser to keep deck.gl responsive.
-- Always serve the bundle through HTTP. Opening `index.html` directly from the filesystem fails because the UI fetches `config.json` via XHR.
-- In air-gapped deployments, host erdblick and the mapget backend on the same LAN and point `config.json` to internal URLs for extension modules so the UI avoids external lookups.
+- Always serve the bundle through HTTP. Opening `index.html` directly from the filesystem fails because the UI fetches `/static-config/config.json` via XHR.
+- In air-gapped deployments, host erdblick and the mapget backend on the same LAN and point `config.json` to internal URLs for external resources so the UI avoids external lookups.
