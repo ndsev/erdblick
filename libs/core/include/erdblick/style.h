@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <regex>
 #include <optional>
+#include <vector>
 
 namespace erdblick
 {
@@ -96,6 +97,31 @@ struct InteractionEffect
     [[nodiscard]] NativeJsValue toJsValue(NativeJsValue const& options) const;
 };
 
+/** One local Boolean option assignment contained in a style-level preset. */
+struct FeatureStylePresetValue
+{
+    /** Construct an empty preset-value placeholder. */
+    FeatureStylePresetValue() = default;
+    /** Parse one validated preset-value declaration from YAML. */
+    explicit FeatureStylePresetValue(YAML::Node const& yaml);
+
+    std::string optionId_;
+    bool value_ = false;
+};
+
+/** A named option combination owned by, and affine with, one feature-layer style. */
+struct FeatureStylePreset
+{
+    /** Construct an empty preset placeholder. */
+    FeatureStylePreset() = default;
+    /** Parse one validated preset declaration from YAML. */
+    explicit FeatureStylePreset(YAML::Node const& yaml);
+
+    std::string id_;
+    std::string name_;
+    std::vector<FeatureStylePresetValue> values_;
+};
+
 /**
  * Parsed feature-layer style sheet containing rules, options, and quick lookup caches.
  *
@@ -115,6 +141,8 @@ public:
     [[nodiscard]] const std::vector<FeatureStyleRule>& rules() const;
     /** Return the declared style options. */
     [[nodiscard]] const std::vector<FeatureStyleOption>& options() const;
+    /** Return the declared style-level presets. */
+    [[nodiscard]] const std::vector<FeatureStylePreset>& presets() const;
     /** Return the human-readable style name. */
     [[nodiscard]] std::string const& name() const;
     /** Return the declared stylesheet category; omitted category defaults to Base. */
@@ -188,6 +216,7 @@ private:
 
     std::vector<FeatureStyleRule> rules_;
     std::vector<FeatureStyleOption> options_;
+    std::vector<FeatureStylePreset> presets_;
     StyleValidationReport validationReport_;
     bool valid_ = false;
     bool enabled_ = true;

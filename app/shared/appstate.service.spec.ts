@@ -1032,20 +1032,99 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('stores preset selection by map and layer without serializing it into snapshots', () => {
+    it('stores qualified layer and map preset selections outside snapshots', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         service.numViews = 2;
 
-        service.setStylePresetSelection(0, 'Vendor/Map', 'Lane', 'lane-topology');
-        service.setStylePresetSelection(1, 'Vendor/Map', 'Lane', 'lane-boundary');
+        service.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', {
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-topology'
+        });
+        service.setLayerPresetSelection(1, 'Vendor/Map', 'Lane', {
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-boundary'
+        });
+        service.setMapPresetSelection(0, 'Vendor/Map', 'network-topology');
 
-        expect(service.getStylePresetSelection(0, 'Vendor/Map', 'Lane')).toBe('lane-topology');
-        expect(service.getStylePresetSelection(1, 'Vendor/Map', 'Lane')).toBe('lane-boundary');
+        expect(service.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-topology'
+        });
+        expect(service.getLayerPresetSelection(1, 'Vendor/Map', 'Lane')).toEqual({
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-boundary'
+        });
+        expect(service.getMapPresetSelection(0, 'Vendor/Map')).toBe('network-topology');
         expect(service.exportSnapshot()).not.toHaveProperty('stylePresetSelection');
+        expect(service.exportSnapshot()).not.toHaveProperty('mapPresetSelection');
 
-        service.setStylePresetSelection(0, 'Vendor/Map', 'Lane', null);
-        expect(service.getStylePresetSelection(0, 'Vendor/Map', 'Lane')).toBeNull();
+        service.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', null);
+        expect(service.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toBeNull();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps the normalized map-preset catalog in one non-URL config-default AppState', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        const errors = service.seedConfigDefaultState({
+            mapPresets: [
+                {id: 'invalid'},
+                {
+                    id: 'network',
+                    name: 'Network',
+                    layerPresets: [{
+                        layerId: 'Lane',
+                        styleId: 'Lanes',
+                        presetId: 'topology'
+                    }]
+                }
+            ]
+        }, 'map-preset-config');
+
+        expect(errors).toEqual([]);
+        expect(service.mapPresets).toEqual([{
+            id: 'network',
+            name: 'Network',
+            enabled: true,
+            layerPresets: [{
+                layerId: 'Lane',
+                styleId: 'Lanes',
+                presetId: 'topology'
+            }]
+        }]);
+        expect(service.mapPresetsState.isUrlState()).toBe(false);
+        expect(service.mapPresetsState.isSnapshotState()).toBe(false);
+        expect(service.mapPresetsState.isConfigDefaultState()).toBe(true);
+        expect(service.exportSnapshot()).not.toHaveProperty('mapPresets');
+
+        service.mapPresets = [{...service.mapPresets[0], enabled: false}];
+        const serialized = service.mapPresetsState.serialize(false);
+        expect(serialized).toEqual({
+            mapPresets: JSON.stringify([{...service.mapPresets[0], enabled: false}])
+        });
+        service.mapPresets = [];
+        service.mapPresetsState.deserialize(serialized!["mapPresets"]!);
+        expect(service.mapPresets[0].enabled).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates legacy unqualified layer-preset selections for unique owner migration', () => {
+        localStorage.setItem('stylePresetSelection', JSON.stringify([{
+            'Vendor/Map': {
+                Lane: 'legacy-lane-preset'
+            }
+        }]));
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.initializePersistence();
+
+        expect(service.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
+            styleId: '',
+            presetId: 'legacy-lane-preset'
+        });
 
         service.ngOnDestroy();
         routerStub.events.complete();

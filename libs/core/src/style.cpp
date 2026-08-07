@@ -424,6 +424,87 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
+    if (auto presets = styleYaml["presets"]) {
+        if (!presets.IsSequence()) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "preset-skipped",
+                "Style sheet presets must be a YAML sequence. Ignoring presets.",
+                locationForNode(presets));
+        } else if (presets.size() > 200) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "preset-skipped",
+                "Style sheet presets exceed the limit of 200 entries. Ignoring presets.",
+                locationForNode(presets));
+        } else {
+            std::set<std::string> knownOptionIds;
+            std::set<std::string> editableBooleanOptionIds;
+            for (auto const& option : options_) {
+                knownOptionIds.insert(option.id_);
+                if (option.type_ == FeatureStyleOptionType::Bool && !option.internal_) {
+                    editableBooleanOptionIds.insert(option.id_);
+                }
+            }
+
+            std::set<std::string> seenPresetIds;
+            std::set<std::string> seenPresetNames;
+            uint32_t presetIndex = 0;
+            for (auto const& preset : presets) {
+                auto const sourcePresetIndex = presetIndex++;
+                auto const presetPath = "presets[" + std::to_string(sourcePresetIndex) + "]";
+                if (!validateStylePresetYaml(
+                        preset,
+                        sourcePresetIndex,
+                        knownOptionIds,
+                        editableBooleanOptionIds,
+                        validationReport_)) {
+                    continue;
+                }
+
+                auto const presetId = preset["id"].Scalar();
+                auto const presetName = preset["name"].Scalar();
+                if (seenPresetIds.contains(presetId)) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "preset-skipped",
+                        "Duplicate style preset id '" + presetId + "' was ignored.",
+                        locationForNode(preset["id"]));
+                    issue.rulePath = presetPath;
+                    issue.property = "id";
+                    continue;
+                }
+                if (seenPresetNames.contains(presetName)) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "preset-skipped",
+                        "Duplicate style preset name '" + presetName + "' was ignored.",
+                        locationForNode(preset["name"]));
+                    issue.rulePath = presetPath;
+                    issue.property = "name";
+                    continue;
+                }
+                try {
+                    presets_.emplace_back(preset);
+                    seenPresetIds.insert(presetId);
+                    seenPresetNames.insert(presetName);
+                } catch (YAML::Exception const& e) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "preset-skipped",
+                        "Could not parse style preset: " + e.msg,
+                        locationFromMark(e.mark));
+                    issue.rulePath = presetPath;
+                }
+            }
+        }
+    }
+
     uint32_t ruleIndex = 0;
     uint32_t renderRuleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
@@ -504,6 +585,11 @@ const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const
 const std::vector<FeatureStyleOption>& FeatureLayerStyle::options() const
 {
     return options_;
+}
+
+const std::vector<FeatureStylePreset>& FeatureLayerStyle::presets() const
+{
+    return presets_;
 }
 
 bool FeatureLayerStyle::hasLayerAffinity(std::string const& layerName) const {
@@ -642,6 +728,22 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
     }
     if (auto node = yaml["internal"]) {
         internal_ = node.as<bool>();
+    }
+}
+
+FeatureStylePresetValue::FeatureStylePresetValue(YAML::Node const& yaml)
+    : optionId_(yaml["optionId"].as<std::string>()),
+      value_(yaml["value"].as<bool>())
+{
+}
+
+FeatureStylePreset::FeatureStylePreset(YAML::Node const& yaml)
+    : id_(yaml["id"].as<std::string>()),
+      name_(yaml["name"].as<std::string>())
+{
+    values_.reserve(yaml["values"].size());
+    for (auto const& value : yaml["values"]) {
+        values_.emplace_back(value);
     }
 }
 

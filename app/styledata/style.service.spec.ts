@@ -128,6 +128,39 @@ describe('StyleService', () => {
         expect(JSON.parse(localStorage.getItem('builtinStyleData') ?? '[]')).toEqual([]);
     });
 
+    it('keeps embedded layer presets with their owning style lifecycle', async () => {
+        const source = `
+name: TestStyle
+presets:
+  - id: focused
+    name: Focused
+    values: [{optionId: show, value: true}]
+rules: [{geometry: [point]}]
+`;
+        const {service, httpClient} = createService({styles: [{url: 'base.yaml'}]});
+        httpClient.get.mockReturnValue(of(source));
+        vi.spyOn(service as any, 'parseWasmStyle').mockReturnValue([{
+            name: () => 'TestStyle',
+            defaultEnabled: () => true,
+            delete: vi.fn(),
+        } as any, [{
+            id: 'show', label: 'Show', type: 'Bool', defaultValue: false,
+            description: '', internal: false
+        }], [{
+            id: 'focused',
+            name: 'Focused',
+            values: [{optionId: 'show', value: true}]
+        }]]);
+
+        await service.initializeStyles();
+
+        expect(service.styles.get('TestStyle')?.presets).toEqual([{
+            id: 'focused',
+            name: 'Focused',
+            values: [{optionId: 'show', value: true}]
+        }]);
+    });
+
     it('keeps root-relative configured style URLs unchanged', async () => {
         const config = {
             styles: [

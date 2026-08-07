@@ -15,6 +15,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <utility>
 
 namespace erdblick
 {
@@ -135,6 +136,14 @@ bool isStyleOptionIdentifier(std::string const& value)
     }
     return std::ranges::all_of(value.substr(1), [&](char ch) {
         return isAlnumOrUnderscore(static_cast<unsigned char>(ch));
+    });
+}
+
+/** Returns whether a scalar contains no visible characters. */
+bool isBlank(std::string const& value)
+{
+    return value.empty() || std::ranges::all_of(value, [](unsigned char ch) {
+        return std::isspace(ch) != 0;
     });
 }
 
@@ -1073,6 +1082,164 @@ bool validateStyleOptionYaml(
         return false;
     }
     return true;
+}
+
+bool validateStylePresetYaml(
+    YAML::Node const& presetYaml,
+    uint32_t presetIndex,
+    std::set<std::string> const& knownOptionIds,
+    std::set<std::string> const& editableBooleanOptionIds,
+    StyleValidationReport& report)
+{
+    auto const presetPath = "presets[" + std::to_string(presetIndex) + "]";
+    auto addIssue = [&](std::string message,
+                        YAML::Node const& node,
+                        std::string const& rulePath,
+                        std::string property = std::string()) {
+        auto& issue = report.addIssue(
+            "warning",
+            "schema",
+            "preset-skipped",
+            std::move(message),
+            locationForNode(node));
+        issue.rulePath = rulePath;
+        issue.property = std::move(property);
+    };
+
+    if (!presetYaml.IsMap()) {
+        addIssue("Style preset must be a YAML map.", presetYaml, presetPath);
+        return false;
+    }
+
+    bool valid = true;
+    auto validatePresetScalar = [&](std::string const& property) {
+        auto node = presetYaml[property];
+        if (!node || !node.IsScalar() || isBlank(node.Scalar())) {
+            addIssue(
+                "Style preset must define a non-empty scalar " + property + ".",
+                node ? node : presetYaml,
+                presetPath,
+                property);
+            valid = false;
+            return;
+        }
+        if (node.Scalar().size() > 200) {
+            addIssue(
+                "Style preset " + property + " exceeds 200 characters.",
+                node,
+                presetPath,
+                property);
+            valid = false;
+        }
+    };
+    validatePresetScalar("id");
+    validatePresetScalar("name");
+
+    static const std::set<std::string> presetProperties{"id", "name", "values"};
+    for (auto const& property : presetYaml) {
+        if (!property.first.IsScalar() || !presetProperties.contains(property.first.Scalar())) {
+            auto const propertyName = property.first.IsScalar() ? property.first.Scalar() : std::string();
+            addIssue(
+                propertyName.empty()
+                    ? "Style preset contains a non-scalar property name."
+                    : "Unknown style preset property '" + propertyName + "'.",
+                property.first,
+                presetPath,
+                propertyName);
+            valid = false;
+        }
+    }
+
+    auto values = presetYaml["values"];
+    if (!values || !values.IsSequence() || values.size() == 0 || values.size() > 500) {
+        addIssue(
+            "Style preset values must be a non-empty YAML sequence with at most 500 entries.",
+            values ? values : presetYaml,
+            presetPath,
+            "values");
+        return false;
+    }
+
+    std::set<std::string> referencedOptionIds;
+    static const std::set<std::string> valueProperties{"optionId", "value"};
+    for (uint32_t valueIndex = 0; valueIndex < values.size(); ++valueIndex) {
+        auto const value = values[valueIndex];
+        auto const valuePath = presetPath + ".values[" + std::to_string(valueIndex) + "]";
+        if (!value.IsMap()) {
+            addIssue("Style preset value must be a YAML map.", value, valuePath);
+            valid = false;
+            continue;
+        }
+        for (auto const& property : value) {
+            if (!property.first.IsScalar() || !valueProperties.contains(property.first.Scalar())) {
+                auto const propertyName = property.first.IsScalar() ? property.first.Scalar() : std::string();
+                addIssue(
+                    propertyName.empty()
+                        ? "Style preset value contains a non-scalar property name."
+                        : "Unknown style preset value property '" + propertyName + "'.",
+                    property.first,
+                    valuePath,
+                    propertyName);
+                valid = false;
+            }
+        }
+
+        auto optionIdNode = value["optionId"];
+        if (!optionIdNode || !optionIdNode.IsScalar() || isBlank(optionIdNode.Scalar())) {
+            addIssue(
+                "Style preset value must define a non-empty scalar optionId.",
+                optionIdNode ? optionIdNode : value,
+                valuePath,
+                "optionId");
+            valid = false;
+        } else {
+            auto const optionId = optionIdNode.Scalar();
+            if (optionId.size() > 200) {
+                addIssue("Style preset optionId exceeds 200 characters.", optionIdNode, valuePath, "optionId");
+                valid = false;
+            } else if (!referencedOptionIds.insert(optionId).second) {
+                addIssue(
+                    "Duplicate style preset option reference '" + optionId + "'.",
+                    optionIdNode,
+                    valuePath,
+                    "optionId");
+                valid = false;
+            } else if (!knownOptionIds.contains(optionId)) {
+                addIssue(
+                    "Unknown local style option '" + optionId + "'.",
+                    optionIdNode,
+                    valuePath,
+                    "optionId");
+                valid = false;
+            } else if (!editableBooleanOptionIds.contains(optionId)) {
+                addIssue(
+                    "Style option '" + optionId + "' is not an editable Boolean option.",
+                    optionIdNode,
+                    valuePath,
+                    "optionId");
+                valid = false;
+            }
+        }
+
+        auto valueNode = value["value"];
+        if (!valueNode || !valueNode.IsScalar()) {
+            addIssue(
+                "Style preset value must define a scalar Boolean value.",
+                valueNode ? valueNode : value,
+                valuePath,
+                "value");
+            valid = false;
+            continue;
+        }
+        try {
+            (void) valueNode.as<bool>();
+        } catch (YAML::Exception const&) {
+            addIssue("Style preset value must be Boolean.", valueNode, valuePath, "value");
+            valid = false;
+        }
+    }
+
+    return valid;
 }
 
 namespace {

@@ -7,7 +7,7 @@ import {
     filterMapTreeNodes,
     GroupTreeNode,
     isDataSourceCatalogEntryReady,
-    layerStylePresetNode,
+    layerPresetNode,
     layerStyleOptions,
     LayerInfoItem,
     MapLayerTree,
@@ -23,7 +23,7 @@ import type {
     FeatureStyleOptionWithStringType,
     StyleService
 } from "../styledata/style.service";
-import type {StyleOptionPresetService} from "../styledata/style-option-preset.service";
+import type {MapPresetService} from "../styledata/map-preset.service";
 
 function source(mapId: string, configIndex?: number, status?: string): MapInfoItem {
     return {
@@ -67,12 +67,14 @@ function styleOption(id: string, label: string): FeatureStyleOptionWithStringTyp
 }
 
 /** Creates the empty preset catalog used by map-tree tests unrelated to presets. */
-function emptyPresetService(): StyleOptionPresetService {
+function emptyPresetService(): MapPresetService {
     return {
+        presets: [],
         presets$: new BehaviorSubject([]),
+        isAvailable: () => true,
         presetsForLayer: () => [],
         matchesPresetValues: () => false
-    } as unknown as StyleOptionPresetService;
+    } as unknown as MapPresetService;
 }
 
 /** Builds a collapsed group/map/layer hierarchy with two layers and two road options. */
@@ -230,8 +232,10 @@ describe("style option groups", () => {
             numViewsState,
             mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
             styleOptionValues: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
-            getStylePresetSelection: vi.fn(() => null),
-            setStylePresetSelection: vi.fn(),
+            getLayerPresetSelection: vi.fn(() => null),
+            setLayerPresetSelection: vi.fn(),
+            getMapPresetSelection: vi.fn(() => null),
+            setMapPresetSelection: vi.fn(),
             prune: vi.fn()
         };
         const styleGroups = new BehaviorSubject([]);
@@ -247,6 +251,7 @@ describe("style option groups", () => {
             id,
             shortId,
             options,
+            presets: [],
             visible: true,
             featureLayerStyle: {hasLayerAffinity: () => true}
         }) as unknown as ErdblickStyle;
@@ -299,12 +304,12 @@ describe("style option groups", () => {
     });
 });
 
-describe("style option presets in the map tree", () => {
+describe("layer presets in the map tree", () => {
     /** Builds a two-view layer with one owned and one unowned Boolean option. */
     function presetTreeFixture() {
         const ready = new BehaviorSubject(true);
         const numViewsState = new BehaviorSubject(2);
-        const selections: Array<Record<string, Record<string, string>>> = [{}, {}];
+        const selections: Array<Record<string, Record<string, {styleId: string; presetId: string}>>> = [{}, {}];
         const stateService = {
             ready,
             numViewsState,
@@ -314,17 +319,17 @@ describe("style option presets in the map tree", () => {
             ]),
             styleOptionValues: vi.fn((_mapId, _layerId, _styleId, optionId) =>
                 optionId === "owned" ? [true, false] : [false, false]),
-            getStylePresetSelection: vi.fn((viewIndex: number, mapId: string, layerId: string) =>
+            getLayerPresetSelection: vi.fn((viewIndex: number, mapId: string, layerId: string) =>
                 selections[viewIndex][mapId]?.[layerId] ?? null),
-            setStylePresetSelection: vi.fn((
+            setLayerPresetSelection: vi.fn((
                 viewIndex: number,
                 mapId: string,
                 layerId: string,
-                presetId: string | null
+                ref: {styleId: string; presetId: string} | null
             ) => {
                 const mapSelections = {...(selections[viewIndex][mapId] ?? {})};
-                if (presetId) {
-                    mapSelections[layerId] = presetId;
+                if (ref) {
+                    mapSelections[layerId] = ref;
                     selections[viewIndex] = {...selections[viewIndex], [mapId]: mapSelections};
                 } else {
                     delete mapSelections[layerId];
@@ -333,6 +338,8 @@ describe("style option presets in the map tree", () => {
                         : {};
                 }
             }),
+            getMapPresetSelection: vi.fn(() => null),
+            setMapPresetSelection: vi.fn(),
             prune: vi.fn()
         };
         const styleGroups = new BehaviorSubject([]);
@@ -343,6 +350,11 @@ describe("style option presets in the map tree", () => {
                 styleOption("owned", "Controlled value"),
                 styleOption("unowned", "Free value")
             ],
+            presets: [{
+                id: "focused",
+                name: "Focused view",
+                values: [{optionId: "owned", value: true}]
+            }],
             visible: true,
             featureLayerStyle: {hasLayerAffinity: (layerId: string) => layerId === "Example"}
         } as unknown as ErdblickStyle;
@@ -353,13 +365,15 @@ describe("style option presets in the map tree", () => {
         const preset = {
             id: "focused",
             name: "Focused view",
-            enabled: true,
-            layerAffinity: "^Example$",
-            values: [{styleId: "Example/Style", optionId: "owned", value: true}]
+            styleId: "Example/Style",
+            ref: {styleId: "Example/Style", presetId: "focused"},
+            key: JSON.stringify(["Example/Style", "focused"]),
+            values: [{optionId: "owned", value: true}]
         };
-        const presets = new BehaviorSubject([preset]);
         const presetService = {
-            presets$: presets.asObservable(),
+            presets: [],
+            presets$: new BehaviorSubject([]),
+            isAvailable: () => true,
             presetsForLayer: vi.fn((layerId: string) => layerId === "Example" ? [preset] : []),
             matchesPresetValues: vi.fn((
                 candidate: typeof preset,
@@ -367,7 +381,7 @@ describe("style option presets in the map tree", () => {
                 viewIndex: number
             ) =>
                 candidate.values.every(value => options.find(option =>
-                    option.styleId === value.styleId && option.id === value.optionId
+                    option.styleId === candidate.styleId && option.id === value.optionId
                 )?.value[viewIndex] === value.value))
         };
         const map = source("Map");
@@ -376,7 +390,7 @@ describe("style option presets in the map tree", () => {
             [map],
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
-            presetService as unknown as StyleOptionPresetService,
+            presetService as unknown as MapPresetService,
             false);
         return {tree, stateService};
     }
@@ -384,36 +398,36 @@ describe("style option presets in the map tree", () => {
     it("places the preset row first and projects owned options independently per view", () => {
         const {tree} = presetTreeFixture();
         const layer = tree.getFeatureLayer("Map", "Example")!;
-        const presetNode = layerStylePresetNode(layer)!;
+        const presetNode = layerPresetNode(layer)!;
 
         expect(layer.children.map(child => child.id)).toEqual([
-            "style-option-preset",
+            "layer-preset",
             "owned",
             "unowned"
         ]);
         expect(presetNode.selectOptions.map(option => option.label)).toEqual([
             "Custom options",
-            "Focused view"
+            "Example/Style — Focused view"
         ]);
 
-        tree.setStylePresetSelection(0, "Map", "Example", "focused");
+        tree.setLayerPresetSelection(0, "Map", "Example", presetNode.presets[0].ref);
         const viewZeroLayer = filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0];
         const viewOneLayer = filterMapTreeNodes(tree.nodes, "", 1)[0].children?.[0];
 
         expect(viewZeroLayer?.children?.map(child => child.id)).toEqual([
-            "style-option-preset",
+            "layer-preset",
             "unowned"
         ]);
         expect(viewOneLayer?.children?.map(child => child.id)).toEqual([
-            "style-option-preset",
+            "layer-preset",
             "owned",
             "unowned"
         ]);
 
-        tree.setStylePresetExpanded(0, "Map", "Example", true);
+        tree.setLayerPresetExpanded(0, "Map", "Example", true);
         expect(filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0].children
             ?.map(child => child.id)).toEqual([
-            "style-option-preset",
+            "layer-preset",
             "owned",
             "unowned"
         ]);
@@ -421,14 +435,88 @@ describe("style option presets in the map tree", () => {
 
     it("finds preset names and temporarily projects a matching collapsed owned option", () => {
         const {tree} = presetTreeFixture();
-        tree.setStylePresetSelection(0, "Map", "Example", "focused");
+        const presetNode = layerPresetNode(tree.getFeatureLayer("Map", "Example")!)!;
+        tree.setLayerPresetSelection(0, "Map", "Example", presetNode.presets[0].ref);
 
         const presetResult = filterMapTreeNodes(tree.nodes, "focused view", 0);
         const ownedResult = filterMapTreeNodes(tree.nodes, "controlled value", 0);
 
         expect(presetResult[0].children?.[0].children?.map(child => child.id))
-            .toEqual(["style-option-preset"]);
+            .toEqual(["layer-preset"]);
         expect(ownedResult[0].children?.[0].children?.map(child => child.id))
             .toEqual(["owned"]);
+    });
+});
+
+describe("map presets in the map tree", () => {
+    it("offers a complete composition and projects its layer-preset rows", () => {
+        const ref = {styleId: "Example/Style", presetId: "focused"};
+        const resolvedPreset = {
+            id: "focused",
+            name: "Focused",
+            styleId: ref.styleId,
+            ref,
+            key: JSON.stringify([ref.styleId, ref.presetId]),
+            values: [{optionId: "owned", value: true}]
+        };
+        const mapPreset = {
+            id: "overview",
+            name: "Overview",
+            enabled: true,
+            layerPresets: [{layerId: "Example", styleId: ref.styleId, presetId: ref.presetId}]
+        };
+        const stateService = {
+            ready: new BehaviorSubject(true),
+            numViewsState: new BehaviorSubject(1),
+            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
+            styleOptionValues: vi.fn(() => [true]),
+            getLayerPresetSelection: vi.fn(() => ref),
+            setLayerPresetSelection: vi.fn(),
+            getMapPresetSelection: vi.fn(() => "overview"),
+            setMapPresetSelection: vi.fn(),
+            prune: vi.fn()
+        };
+        const style = {
+            id: ref.styleId,
+            shortId: "style",
+            options: [styleOption("owned", "Owned")],
+            presets: [{id: "focused", name: "Focused", values: resolvedPreset.values}],
+            visible: true,
+            featureLayerStyle: {hasLayerAffinity: (layerId: string) => layerId === "Example"}
+        } as unknown as ErdblickStyle;
+        const styleService = {
+            styles: new Map([[style.id, style]]),
+            styleGroups: new BehaviorSubject([])
+        };
+        const presetService = {
+            presets: [mapPreset],
+            presets$: new BehaviorSubject([mapPreset]),
+            isAvailable: () => true,
+            presetsForLayer: () => [resolvedPreset],
+            resolveLayerPreset: (_layerId: string, candidate: typeof ref) =>
+                candidate.styleId === ref.styleId && candidate.presetId === ref.presetId
+                    ? resolvedPreset
+                    : undefined,
+            matchesPresetValues: (_preset: typeof resolvedPreset, options: StyleOptionNode[], viewIndex: number) =>
+                options.find(option => option.id === "owned")?.value[viewIndex] === true
+        };
+        const map = source("Map");
+        map.layers = {Example: featureLayer("Example")};
+
+        const tree = new MapLayerTree(
+            [map],
+            stateService as unknown as AppStateService,
+            styleService as unknown as StyleService,
+            presetService as unknown as MapPresetService,
+            false);
+        const mapNode = tree.maps.get("Map")!;
+        const renderedMap = filterMapTreeNodes(tree.nodes, "", 0)[0];
+
+        expect(mapNode.mapPresetOptions).toEqual([
+            {label: "Custom options", value: ""},
+            {label: "Overview", value: "overview"}
+        ]);
+        expect(mapNode.selectedMapPresetIds).toEqual(["overview"]);
+        expect(renderedMap.children?.[0].children?.map(child => child.id)).toEqual(["layer-preset"]);
     });
 });

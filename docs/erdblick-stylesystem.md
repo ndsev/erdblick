@@ -50,6 +50,10 @@ view updates the same stylesheet source.
 
 ## Document shape
 
+At the top level, a style sheet contains rendering `rules`, optional `options`,
+and optional layer-affine `presets` that name useful combinations of the
+owning sheet's Boolean options.
+
 ```yaml
 name: Roads
 category: base
@@ -60,6 +64,12 @@ options:
     label: Show roads
     type: boolean
     default: true
+
+presets:
+  - id: roads-only
+    name: Roads only
+    values:
+      - {optionId: showRoads, value: true}
 
 rules:
   - type: Road
@@ -466,6 +476,25 @@ text. The style planner then projects one value for both scales.
 
 Per-layer overrides in the Maps & Layers panel map directly to these options. Behind the scenes, erdblick stores the values per `mapId/layerId/styleId` combination, which lets you run different variants across split views or specific layers without cloning the entire style file.
 Options from the same style are grouped and highlighted together on hover. Use the brush button on the first visible option in a group to open the owning style sheet.
+
+### Layer presets
+
+A style sheet can package a partial Boolean option combination for every layer matched by its existing `layer` affinity:
+
+```yaml
+presets:
+  - id: lane-topology
+    name: Lane Topology
+    values:
+      - {optionId: showCenterLines, value: true}
+      - {optionId: showDigitizationDir, value: true}
+```
+
+Preset IDs and names are unique within the style sheet. Every `optionId` must identify an editable Boolean option in that same sheet; `styleId`, a second layer affinity, cross-style values, and enable flags are not accepted. Invalid entries are skipped as style warnings while valid sibling presets and rendering rules remain usable.
+
+`FeatureLayerStyle` parses `options` and `presets` in the same native YAML pass and exposes both through the generated WASM bindings. This keeps source locations, validation reports, imports, edits, and style replacement on one parser lifecycle instead of reparsing preset metadata in TypeScript.
+
+The Maps panel shows eligible embedded presets in each layer's dropdown. Layer presets have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions.
 
 ## Point grouping and `$mergeCount`
 

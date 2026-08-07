@@ -98,6 +98,7 @@ export function compileFeatureSearchStyle(
         source,
         featureLayerStyle,
         options: [],
+        presets: [],
         shortId: "search",
         visible: true,
         url: "",

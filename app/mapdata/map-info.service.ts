@@ -23,7 +23,7 @@ import type {
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
 import {MapgetLayer} from "./mapget-layer.model";
-import {StyleOptionPresetService} from "../styledata/style-option-preset.service";
+import {MapPresetService} from "../styledata/map-preset.service";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
@@ -78,11 +78,11 @@ export class MapInfoService {
         private readonly httpClient: HttpClient,
         private readonly stateService: AppStateService,
         private readonly styleService: StyleService,
-        private readonly styleOptionPresetService: StyleOptionPresetService,
+        private readonly mapPresetService: MapPresetService,
         private readonly messageService: InfoMessageService
     ) {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
-            new MapLayerTree([], this.stateService, this.styleService, this.styleOptionPresetService)
+            new MapLayerTree([], this.stateService, this.styleService, this.mapPresetService)
         );
     }
 
@@ -377,13 +377,11 @@ export class MapInfoService {
             maps,
             this.stateService,
             this.styleService,
-            this.styleOptionPresetService,
+            this.mapPresetService,
             this.canPruneStateForCurrentCatalog()
         );
         this.maps.destroy();
         this.maps$.next(nextTree);
-        this.styleOptionPresetService.setKnownLayerIds(
-            [...nextTree.allFeatureLayers()].map(layer => layer.id));
         this.reapplySyncOptionsForAllViews();
     }
 
@@ -670,18 +668,17 @@ export class MapInfoService {
         this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers);
     }
 
-    /** Applies preset-owned changes while synchronizing its source layer even for equal values. */
-    applyStylePresetChanges(
+    /** Applies preset-owned changes while synchronizing every component source layer once. */
+    applyPresetChanges(
         optionNodes: StyleOptionNode[],
         viewIndex: number,
-        mapId: string,
-        layerId: string
+        sourceLayers: ReadonlyArray<{mapId: string; layerId: string}>
     ): void {
         const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
         this.applyStyleOptionTransaction(
             directNodes,
             viewIndex,
-            new Set([`${mapId}\u0000${layerId}`]));
+            new Set(sourceLayers.map(source => `${source.mapId}\u0000${source.layerId}`)));
     }
 
     /** Executes one option transaction across direct, layer-synced, and view-synced targets. */
@@ -710,7 +707,7 @@ export class MapInfoService {
         if (changes.length) {
             this.persistAndPublishStyleOptionChanges(changes);
         } else {
-            this.maps.reconcileStylePresetSelections();
+            this.maps.reconcilePresetSelections();
         }
         if (viewConfigChanged) {
             this.layerStateChanged.next("style-options");
@@ -733,7 +730,7 @@ export class MapInfoService {
             optionId: optionNode.id,
             values: optionNode.value
         })));
-        this.maps.reconcileStylePresetSelections();
+        this.maps.reconcilePresetSelections();
         this.publishStyleOptionChanges(changes);
     }
 

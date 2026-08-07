@@ -408,6 +408,7 @@ export class HoverDetailService implements OnDestroy {
             source,
             featureLayerStyle,
             options: [],
+            presets: [],
             shortId: "hover-details",
             visible: false,
             url: "",

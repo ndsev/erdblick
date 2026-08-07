@@ -11,10 +11,12 @@ import {filter, take} from "rxjs/operators";
 import {Subscription} from "rxjs";
 import {ErdblickStyle, FeatureStyleOptionWithStringType, StyleService} from "../styledata/style.service";
 import {
-    NO_STYLE_OPTION_PRESET_ID,
-    StyleOptionPresetDefinition,
-    StyleOptionPresetService
-} from "../styledata/style-option-preset.service";
+    MapPresetService,
+    NO_PRESET_ID,
+    ResolvedLayerPreset
+} from "../styledata/map-preset.service";
+import {LayerPresetRef} from "../styledata/layer-preset.model";
+import {MapPresetDefinition, MapPresetLayer} from "../styledata/map-preset.model";
 
 export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
 
@@ -138,35 +140,35 @@ export class StyleOptionNode {
 }
 
 /** Tree row that selects and expands eligible presets for one concrete feature layer. */
-export class StylePresetNode {
-    readonly id = "style-option-preset";
+export class LayerPresetNode {
+    readonly id = "layer-preset";
     readonly type = "Preset";
     readonly key: string;
     readonly mapId: string;
     readonly layerId: string;
-    readonly presets: StyleOptionPresetDefinition[];
+    readonly presets: ResolvedLayerPreset[];
     readonly selectOptions: Array<{label: string; value: string}>;
-    selectedPresetIds: string[] = [];
+    selectedPresetKeys: string[] = [];
     expandedPresetOptions: boolean[] = [];
 
     /** Creates the stable leading control row for one map/layer option list. */
     constructor(
         mapId: string,
         layerId: string,
-        presets: StyleOptionPresetDefinition[]
+        presets: ResolvedLayerPreset[]
     ) {
         this.mapId = mapId;
         this.layerId = layerId;
-        this.key = `${mapId}/${layerId}/style-option-preset`;
+        this.key = `${mapId}/${layerId}/layer-preset`;
         this.presets = presets;
         this.selectOptions = [
-            {label: "Custom options", value: NO_STYLE_OPTION_PRESET_ID},
-            ...presets.map(preset => ({label: preset.name, value: preset.id}))
+            {label: "Custom options", value: NO_PRESET_ID},
+            ...presets.map(preset => ({label: `${preset.styleId} — ${preset.name}`, value: preset.key}))
         ];
     }
 }
 
-export type LayerTreeChildNode = StylePresetNode | StyleOptionNode;
+export type LayerTreeChildNode = LayerPresetNode | StyleOptionNode;
 
 /** Narrows a layer child to an actual style option rather than its preset control row. */
 export function isStyleOptionNode(node: LayerTreeChildNode): node is StyleOptionNode {
@@ -174,8 +176,8 @@ export function isStyleOptionNode(node: LayerTreeChildNode): node is StyleOption
 }
 
 /** Narrows a layer child to its preset control row. */
-export function isStylePresetNode(node: LayerTreeChildNode): node is StylePresetNode {
-    return node instanceof StylePresetNode;
+export function isLayerPresetNode(node: LayerTreeChildNode): node is LayerPresetNode {
+    return node instanceof LayerPresetNode;
 }
 
 /** Returns only renderable style-option children from one feature-layer node. */
@@ -184,8 +186,8 @@ export function layerStyleOptions(layer: LayerTreeNode): StyleOptionNode[] {
 }
 
 /** Returns the leading preset row from one feature-layer node, if options are present. */
-export function layerStylePresetNode(layer: LayerTreeNode): StylePresetNode | undefined {
-    return layer.children.find(isStylePresetNode);
+export function layerPresetNode(layer: LayerTreeNode): LayerPresetNode | undefined {
+    return layer.children.find(isLayerPresetNode);
 }
 
 /** Tree node that represents one feature layer and the per-view controls attached to it. */
@@ -197,6 +199,7 @@ export class LayerTreeNode {
     key: string;
     viewConfig: LayerViewConfig[] = [];  // This is an array, because the values are stored per MapView.
     children: LayerTreeChildNode[] = [];
+    projectPresetOnly: boolean[] = [];
     expanded: boolean = true;
 
     /** Wraps raw layer metadata into the structure consumed by the map tree. */
@@ -219,6 +222,9 @@ export class MapTreeNode {
     layers: Map<string, LayerTreeNode> = new Map();
     expanded: boolean = true;
     visible: boolean[] = [];  // This is an array, because the values are stored per MapView.
+    mapPresets: MapPresetDefinition[] = [];
+    mapPresetOptions: Array<{label: string; value: string}> = [{label: "Custom options", value: NO_PRESET_ID}];
+    selectedMapPresetIds: string[] = [];
 
     /** Materializes layer child nodes once so the tree can be reconfigured without rebuilding metadata. */
     constructor(mapInfo: MapInfoItem) {
@@ -309,7 +315,7 @@ export class GroupTreeNode {
     }
 }
 
-type MapTreeSourceNode = GroupTreeNode | MapTreeNode | LayerTreeNode | StylePresetNode | StyleOptionNode;
+type MapTreeSourceNode = GroupTreeNode | MapTreeNode | LayerTreeNode | LayerPresetNode | StyleOptionNode;
 
 /**
  * Presentation-only tree node consumed by the map panel while a filter is active.
@@ -333,13 +339,16 @@ function mapTreeNodeChildren(
     query: string
 ): MapTreeSourceNode[] | undefined {
     if (node instanceof LayerTreeNode) {
-        const presetNode = layerStylePresetNode(node);
+        const presetNode = layerPresetNode(node);
         const options = layerStyleOptions(node);
         if (!presetNode) {
             return options;
         }
+        if (node.projectPresetOnly[viewIndex]) {
+            return [presetNode];
+        }
         const selectedPreset = presetNode.presets.find(
-            preset => preset.id === presetNode.selectedPresetIds[viewIndex]);
+            preset => preset.key === presetNode.selectedPresetKeys[viewIndex]);
         if (!selectedPreset || presetNode.expandedPresetOptions[viewIndex]) {
             return [presetNode, ...options];
         }
@@ -347,11 +356,20 @@ function mapTreeNodeChildren(
             presetNode,
             ...options.filter(option =>
                 !selectedPreset.values.some(value =>
-                    value.styleId === option.styleId && value.optionId === option.id)
+                    selectedPreset.styleId === option.styleId && value.optionId === option.id)
                 || (!!query && mapTreeNodeMatches(option, query)))
         ];
     }
-    if (node instanceof GroupTreeNode || node instanceof MapTreeNode) {
+    if (node instanceof MapTreeNode) {
+        const selectedPreset = node.mapPresets.find(
+            preset => preset.id === node.selectedMapPresetIds[viewIndex]);
+        if (selectedPreset) {
+            const componentLayers = new Set(selectedPreset.layerPresets.map(component => component.layerId));
+            return node.children.filter(layer => componentLayers.has(layer.id));
+        }
+        return [...node.children];
+    }
+    if (node instanceof GroupTreeNode) {
         return [...node.children];
     }
     return undefined;
@@ -363,11 +381,16 @@ function mapTreeNodeMatches(node: MapTreeSourceNode, query: string): boolean {
         return node.id.toLocaleLowerCase().includes(query)
             || node.info.label.toLocaleLowerCase().includes(query);
     }
-    if (node instanceof StylePresetNode) {
+    if (node instanceof LayerPresetNode) {
         return node.presets.some(preset =>
             preset.id.toLocaleLowerCase().includes(query)
             || preset.name.toLocaleLowerCase().includes(query)
-            || preset.layerAffinity?.toLocaleLowerCase().includes(query));
+            || preset.styleId.toLocaleLowerCase().includes(query));
+    }
+    if (node instanceof MapTreeNode && node.mapPresets.some(preset =>
+        preset.id.toLocaleLowerCase().includes(query)
+        || preset.name.toLocaleLowerCase().includes(query))) {
+        return true;
     }
     return node.id.toLocaleLowerCase().includes(query);
 }
@@ -454,6 +477,13 @@ export interface SyncViewsResult {
     viewConfigChanged: boolean;
 }
 
+/** One map-preset component resolved against a concrete map and active style catalog. */
+export interface ResolvedMapPresetComponent {
+    definition: MapPresetLayer;
+    layer: LayerTreeNode;
+    preset: ResolvedLayerPreset;
+}
+
 /**
  * Holds the map/layer/style tree shown in the maps panel.
  * The tree owns UI-only grouping and visibility state, while `AppStateService`
@@ -470,7 +500,7 @@ export class MapLayerTree {
         mapInfo: MapInfoItem[],
         private stateService: AppStateService,
         private styleService: StyleService,
-        private styleOptionPresetService: StyleOptionPresetService,
+        private mapPresetService: MapPresetService,
         private readonly pruneUnavailableState = true) {
         this.initializeMapGroups(mapInfo);
         this.subscriptions.add(
@@ -486,7 +516,7 @@ export class MapLayerTree {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
         }));
-        this.subscriptions.add(this.styleOptionPresetService.presets$.subscribe(_ => {
+        this.subscriptions.add(this.mapPresetService.presets$.subscribe(_ => {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
         }));
@@ -573,7 +603,7 @@ export class MapLayerTree {
     private initializeStyleOptions(styleSheets: ErdblickStyle[]) {
         for (const map of this.maps.values()) {
             for (const layer of map.allFeatureLayers()) {
-                const previousPresetNode = layerStylePresetNode(layer);
+                const previousPresetNode = layerPresetNode(layer);
                 const options: StyleOptionNode[] = [];
                 for (const style of styleSheets) {
                     if (style.visible && style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
@@ -593,16 +623,69 @@ export class MapLayerTree {
                     layer.children = [];
                     continue;
                 }
-                const presetNode = new StylePresetNode(
+                const presetNode = new LayerPresetNode(
                     layer.mapId,
                     layer.id,
-                    this.styleOptionPresetService.presetsForLayer(layer.id, options));
+                    this.mapPresetService.presetsForLayer(layer.id, options));
                 presetNode.expandedPresetOptions = previousPresetNode
                     ? [...previousPresetNode.expandedPresetOptions]
                     : [];
                 layer.children = [presetNode, ...options];
             }
+            map.mapPresets = this.mapPresetService.presets.filter(preset =>
+                this.mapPresetService.isAvailable(preset)
+                && this.resolveMapPresetComponents(map, preset) !== undefined);
+            map.mapPresetOptions = [
+                {label: "Custom options", value: NO_PRESET_ID},
+                ...map.mapPresets.map(preset => ({label: preset.name, value: preset.id}))
+            ];
         }
+    }
+
+    /** Resolves every component of a map preset or rejects the whole preset for this map. */
+    resolveMapPresetComponents(
+        map: MapTreeNode,
+        preset: MapPresetDefinition
+    ): ResolvedMapPresetComponent[] | undefined {
+        if (!isDataSourceCatalogEntryReady(map.info)) {
+            return undefined;
+        }
+        const result: ResolvedMapPresetComponent[] = [];
+        for (const definition of preset.layerPresets) {
+            const layer = map.onlyFeatureLayers.find(candidate => candidate.id === definition.layerId);
+            if (!layer) {
+                return undefined;
+            }
+            const resolvedPreset = this.mapPresetService.resolveLayerPreset(
+                layer.id,
+                {styleId: definition.styleId, presetId: definition.presetId},
+                layerStyleOptions(layer));
+            if (!resolvedPreset) {
+                return undefined;
+            }
+            result.push({definition, layer, preset: resolvedPreset});
+        }
+        return result;
+    }
+
+    /** Returns whether layer synchronization would force two component assignments to disagree. */
+    mapPresetHasSyncConflict(map: MapTreeNode, preset: MapPresetDefinition): boolean {
+        const components = this.resolveMapPresetComponents(map, preset);
+        if (!components) {
+            return true;
+        }
+        const assignments = new Map<string, boolean>();
+        for (const component of components) {
+            for (const value of component.preset.values) {
+                const key = `${component.preset.styleId}\u0000${value.optionId}`;
+                const previous = assignments.get(key);
+                if (previous !== undefined && previous !== value.value) {
+                    return true;
+                }
+                assignments.set(key, value.value);
+            }
+        }
+        return false;
     }
 
     /**
@@ -632,30 +715,42 @@ export class MapLayerTree {
                         option.info.defaultValue
                     );
                 }
-                const presetNode = layerStylePresetNode(featureLayer);
+                const presetNode = layerPresetNode(featureLayer);
                 if (presetNode) {
                     const viewCount = this.stateService.numViewsState.getValue();
-                    presetNode.selectedPresetIds = Array.from({length: viewCount}, (_, viewIndex) => {
-                        const selectedId = this.stateService.getStylePresetSelection(
+                    featureLayer.projectPresetOnly = Array.from({length: viewCount}, () => false);
+                    presetNode.selectedPresetKeys = Array.from({length: viewCount}, (_, viewIndex) => {
+                        const selectedRef = this.stateService.getLayerPresetSelection(
                             viewIndex,
                             featureLayer.mapId,
                             featureLayer.id);
-                        const selectedPreset = presetNode.presets.find(preset => preset.id === selectedId);
+                        const matchingPresets = selectedRef?.styleId
+                            ? presetNode.presets.filter(preset =>
+                                preset.styleId === selectedRef.styleId && preset.id === selectedRef.presetId)
+                            : presetNode.presets.filter(preset => preset.id === selectedRef?.presetId);
+                        const selectedPreset = matchingPresets.length === 1 ? matchingPresets[0] : undefined;
                         if (selectedPreset
-                            && this.styleOptionPresetService.matchesPresetValues(
+                            && this.mapPresetService.matchesPresetValues(
                                 selectedPreset,
                                 options,
                                 viewIndex)) {
-                            return selectedPreset.id;
+                            if (selectedRef?.styleId !== selectedPreset.styleId) {
+                                this.stateService.setLayerPresetSelection(
+                                    viewIndex,
+                                    featureLayer.mapId,
+                                    featureLayer.id,
+                                    selectedPreset.ref);
+                            }
+                            return selectedPreset.key;
                         }
-                        if (selectedId) {
-                            this.stateService.setStylePresetSelection(
+                        if (selectedRef) {
+                            this.stateService.setLayerPresetSelection(
                                 viewIndex,
                                 featureLayer.mapId,
                                 featureLayer.id,
                                 null);
                         }
-                        return NO_STYLE_OPTION_PRESET_ID;
+                        return NO_PRESET_ID;
                     });
                     presetNode.expandedPresetOptions = Array.from(
                         {length: viewCount},
@@ -664,6 +759,35 @@ export class MapLayerTree {
             }
             mapOrGroupItem.updateVisibilityFromChildren(this.stateService.numViewsState.getValue());
             defaultVisibility = false;
+        }
+
+        const viewCount = this.stateService.numViewsState.getValue();
+        for (const map of this.maps.values()) {
+            map.selectedMapPresetIds = Array.from({length: viewCount}, (_, viewIndex) => {
+                const selectedId = this.stateService.getMapPresetSelection(viewIndex, map.id);
+                const selectedPreset = map.mapPresets.find(preset => preset.id === selectedId);
+                const components = selectedPreset
+                    ? this.resolveMapPresetComponents(map, selectedPreset)
+                    : undefined;
+                const matches = components?.every(component => {
+                    const presetNode = layerPresetNode(component.layer);
+                    return presetNode?.selectedPresetKeys[viewIndex] === component.preset.key
+                        && this.mapPresetService.matchesPresetValues(
+                            component.preset,
+                            layerStyleOptions(component.layer),
+                            viewIndex);
+                }) === true;
+                if (selectedPreset && components && matches) {
+                    for (const component of components) {
+                        component.layer.projectPresetOnly[viewIndex] = true;
+                    }
+                    return selectedPreset.id;
+                }
+                if (selectedId) {
+                    this.stateService.setMapPresetSelection(viewIndex, map.id, null);
+                }
+                return NO_PRESET_ID;
+            });
         }
     }
 
@@ -878,67 +1002,107 @@ export class MapLayerTree {
         }
     }
 
-    /** Updates one local preset association and its collapsed expansion state. */
-    setStylePresetSelection(
+    /** Updates one qualified layer-preset association and its collapsed expansion state. */
+    setLayerPresetSelection(
         viewIndex: number,
         mapId: string,
         layerId: string,
-        presetId: string | null
+        ref: LayerPresetRef | null
     ): void {
         const layer = this.getFeatureLayer(mapId, layerId);
-        const presetNode = layer ? layerStylePresetNode(layer) : undefined;
+        const presetNode = layer ? layerPresetNode(layer) : undefined;
         if (!presetNode || viewIndex >= this.stateService.numViewsState.getValue()) {
             return;
         }
-        const normalizedId = presetId ?? NO_STYLE_OPTION_PRESET_ID;
-        if (presetNode.selectedPresetIds[viewIndex] !== normalizedId) {
+        const selectedPreset = ref ? presetNode.presets.find(preset =>
+            preset.styleId === ref.styleId && preset.id === ref.presetId) : undefined;
+        const normalizedKey = selectedPreset?.key ?? NO_PRESET_ID;
+        if (presetNode.selectedPresetKeys[viewIndex] !== normalizedKey) {
             presetNode.expandedPresetOptions[viewIndex] = false;
         }
-        presetNode.selectedPresetIds[viewIndex] = normalizedId;
-        this.stateService.setStylePresetSelection(
+        presetNode.selectedPresetKeys[viewIndex] = normalizedKey;
+        this.stateService.setLayerPresetSelection(
             viewIndex,
             mapId,
             layerId,
-            normalizedId || null);
+            selectedPreset?.ref ?? null);
     }
 
     /** Toggles whether options owned by the selected preset are projected into one view's tree. */
-    setStylePresetExpanded(
+    setLayerPresetExpanded(
         viewIndex: number,
         mapId: string,
         layerId: string,
         expanded: boolean
     ): void {
         const layer = this.getFeatureLayer(mapId, layerId);
-        const presetNode = layer ? layerStylePresetNode(layer) : undefined;
+        const presetNode = layer ? layerPresetNode(layer) : undefined;
         if (presetNode) {
             presetNode.expandedPresetOptions[viewIndex] = expanded;
         }
     }
 
-    /** Demotes remembered preset associations whose owned values or definitions no longer match. */
-    reconcileStylePresetSelections(): void {
+    /** Stores or clears one map-preset association after its component values are applied. */
+    setMapPresetSelection(viewIndex: number, mapId: string, presetId: string | null): void {
+        const map = this.maps.get(mapId);
+        if (!map || viewIndex >= this.stateService.numViewsState.getValue()) {
+            return;
+        }
+        const selected = presetId ? map.mapPresets.find(preset => preset.id === presetId) : undefined;
+        map.selectedMapPresetIds[viewIndex] = selected?.id ?? NO_PRESET_ID;
+        this.stateService.setMapPresetSelection(viewIndex, mapId, selected?.id ?? null);
+    }
+
+    /** Demotes layer and map associations whose definitions or owned values no longer match. */
+    reconcilePresetSelections(): void {
         const viewCount = this.stateService.numViewsState.getValue();
         for (const layer of this.allFeatureLayers()) {
-            const presetNode = layerStylePresetNode(layer);
+            const presetNode = layerPresetNode(layer);
             if (!presetNode) {
                 continue;
             }
             const options = layerStyleOptions(layer);
             for (let viewIndex = 0; viewIndex < viewCount; viewIndex++) {
-                const selectedId = presetNode.selectedPresetIds[viewIndex]
-                    || this.stateService.getStylePresetSelection(viewIndex, layer.mapId, layer.id);
-                const selectedPreset = presetNode.presets.find(preset => preset.id === selectedId);
+                const storedRef = this.stateService.getLayerPresetSelection(viewIndex, layer.mapId, layer.id);
+                const selectedPreset = presetNode.presets.find(preset =>
+                    preset.key === presetNode.selectedPresetKeys[viewIndex]
+                    || (preset.styleId === storedRef?.styleId && preset.id === storedRef?.presetId));
                 if (selectedPreset
-                    && this.styleOptionPresetService.matchesPresetValues(
+                    && this.mapPresetService.matchesPresetValues(
                         selectedPreset,
                         options,
                         viewIndex)) {
-                    presetNode.selectedPresetIds[viewIndex] = selectedPreset.id;
+                    presetNode.selectedPresetKeys[viewIndex] = selectedPreset.key;
                     continue;
                 }
-                if (selectedId) {
-                    this.setStylePresetSelection(viewIndex, layer.mapId, layer.id, null);
+                if (storedRef || presetNode.selectedPresetKeys[viewIndex]) {
+                    this.setLayerPresetSelection(viewIndex, layer.mapId, layer.id, null);
+                }
+            }
+        }
+
+        for (const map of this.maps.values()) {
+            for (const layer of map.onlyFeatureLayers) {
+                layer.projectPresetOnly = Array.from({length: viewCount}, () => false);
+            }
+            for (let viewIndex = 0; viewIndex < viewCount; viewIndex++) {
+                const selectedId = map.selectedMapPresetIds[viewIndex]
+                    || this.stateService.getMapPresetSelection(viewIndex, map.id);
+                const selected = map.mapPresets.find(preset => preset.id === selectedId);
+                const components = selected ? this.resolveMapPresetComponents(map, selected) : undefined;
+                const matches = components?.every(component =>
+                    layerPresetNode(component.layer)?.selectedPresetKeys[viewIndex] === component.preset.key
+                    && this.mapPresetService.matchesPresetValues(
+                        component.preset,
+                        layerStyleOptions(component.layer),
+                        viewIndex)) === true;
+                if (selected && components && matches) {
+                    map.selectedMapPresetIds[viewIndex] = selected.id;
+                    for (const component of components) {
+                        component.layer.projectPresetOnly[viewIndex] = true;
+                    }
+                } else if (selectedId) {
+                    this.setMapPresetSelection(viewIndex, map.id, null);
                 }
             }
         }
@@ -1036,7 +1200,7 @@ export class MapLayerTree {
                 targetOption.value[viewIndex] = sourceValue;
                 changedOptions.push(targetOption);
             }
-            this.copyStylePresetSelection(viewIndex, sourceLayer, candidateLayer);
+            this.copyLayerPresetSelection(viewIndex, sourceLayer, candidateLayer);
         }
 
         if (persistChanges && changedOptions.length) {
@@ -1114,15 +1278,27 @@ export class MapLayerTree {
                     }
                 }
             }
-            const presetNode = layerStylePresetNode(layer);
-            const selectedPresetId = presetNode?.selectedPresetIds[viewIndex]
-                ?? this.stateService.getStylePresetSelection(viewIndex, layer.mapId, layer.id);
+            const presetNode = layerPresetNode(layer);
+            const selectedPreset = presetNode?.presets.find(preset =>
+                preset.key === presetNode.selectedPresetKeys[viewIndex]);
+            const selectedRef = selectedPreset?.ref
+                ?? this.stateService.getLayerPresetSelection(viewIndex, layer.mapId, layer.id);
             for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
                 if (targetIndex !== viewIndex) {
                     this.applyEligiblePresetSelection(
                         targetIndex,
                         layer,
-                        selectedPresetId || NO_STYLE_OPTION_PRESET_ID);
+                        selectedRef);
+                }
+            }
+        }
+
+        for (const map of this.maps.values()) {
+            const selectedMapPresetId = map.selectedMapPresetIds[viewIndex]
+                || this.stateService.getMapPresetSelection(viewIndex, map.id);
+            for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
+                if (targetIndex !== viewIndex) {
+                    this.setMapPresetSelection(targetIndex, map.id, selectedMapPresetId || null);
                 }
             }
         }
@@ -1186,40 +1362,43 @@ export class MapLayerTree {
     }
 
     /** Copies one layer's preset association when the target owns the same matching definition. */
-    private copyStylePresetSelection(
+    private copyLayerPresetSelection(
         viewIndex: number,
         sourceLayer: LayerTreeNode,
         targetLayer: LayerTreeNode
     ): void {
-        const sourcePresetNode = layerStylePresetNode(sourceLayer);
-        const selectedPresetId = sourcePresetNode?.selectedPresetIds[viewIndex]
-            ?? this.stateService.getStylePresetSelection(viewIndex, sourceLayer.mapId, sourceLayer.id);
+        const sourcePresetNode = layerPresetNode(sourceLayer);
+        const selectedPreset = sourcePresetNode?.presets.find(preset =>
+            preset.key === sourcePresetNode.selectedPresetKeys[viewIndex]);
+        const selectedRef = selectedPreset?.ref
+            ?? this.stateService.getLayerPresetSelection(viewIndex, sourceLayer.mapId, sourceLayer.id);
         this.applyEligiblePresetSelection(
             viewIndex,
             targetLayer,
-            selectedPresetId || NO_STYLE_OPTION_PRESET_ID);
+            selectedRef);
     }
 
     /** Applies an association only when the target preset exists and all owned values match. */
     private applyEligiblePresetSelection(
         viewIndex: number,
         layer: LayerTreeNode,
-        presetId: string
+        ref: LayerPresetRef | null
     ): void {
-        if (!presetId) {
-            this.setStylePresetSelection(viewIndex, layer.mapId, layer.id, null);
+        if (!ref) {
+            this.setLayerPresetSelection(viewIndex, layer.mapId, layer.id, null);
             return;
         }
-        const presetNode = layerStylePresetNode(layer);
-        const preset = presetNode?.presets.find(candidate => candidate.id === presetId);
+        const presetNode = layerPresetNode(layer);
+        const preset = presetNode?.presets.find(candidate =>
+            candidate.styleId === ref.styleId && candidate.id === ref.presetId);
         if (preset
-            && this.styleOptionPresetService.matchesPresetValues(
+            && this.mapPresetService.matchesPresetValues(
                 preset,
                 layerStyleOptions(layer),
                 viewIndex)) {
-            this.setStylePresetSelection(viewIndex, layer.mapId, layer.id, preset.id);
+            this.setLayerPresetSelection(viewIndex, layer.mapId, layer.id, preset.ref);
             return;
         }
-        this.setStylePresetSelection(viewIndex, layer.mapId, layer.id, null);
+        this.setLayerPresetSelection(viewIndex, layer.mapId, layer.id, null);
     }
 }

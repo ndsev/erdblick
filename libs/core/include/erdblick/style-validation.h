@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,14 @@ private:
     YAML::Node const& optionYaml,
     uint32_t optionIndex,
     std::string const& source,
+    StyleValidationReport& report);
+
+/** Validate one embedded preset against the accepted local style options. */
+[[nodiscard]] bool validateStylePresetYaml(
+    YAML::Node const& presetYaml,
+    uint32_t presetIndex,
+    std::set<std::string> const& knownOptionIds,
+    std::set<std::string> const& editableBooleanOptionIds,
     StyleValidationReport& report);
 
 [[nodiscard]] bool validateStyleRuleYaml(

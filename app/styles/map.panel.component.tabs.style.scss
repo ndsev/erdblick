@@ -377,9 +377,19 @@
       grid-column: 2;
       grid-row: 1;
       justify-self: end;
-      width: 4em;
-      flex: 0 0 4em;
+      width: min(13em, 45vw);
+      flex: 0 1 13em;
       justify-content: flex-end;
+
+      .map-preset-select {
+        flex: 1 1 7em;
+        min-width: 5em;
+      }
+
+      .p-select-label {
+        font-size: 0.9em;
+        padding-block: 0.2em;
+      }
 
       button {
         width: 1.55em;
@@ -390,7 +400,7 @@
   }
 
   .map-tree-row {
-    grid-template-columns: minmax(0, 1fr) 4em;
+    grid-template-columns: minmax(0, 1fr) minmax(8em, 13em);
   }
 
   .map-layer-row {

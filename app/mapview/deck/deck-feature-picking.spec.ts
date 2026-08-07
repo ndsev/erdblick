@@ -167,7 +167,8 @@ describe("Deck rendered-feature picking", () => {
             props: {
                 drillPickEligible: true,
                 tileKey: "map/tile",
-                featureAddressesByPath: [9]
+                featureAddressesByPath: [9],
+                subsetPickResolver: subsetPickResolver("map/tile")
             }
         };
         const gltfLayer = {

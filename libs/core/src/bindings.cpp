@@ -647,10 +647,22 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("description", &FeatureStyleOption::description_)
         .field("internal", &FeatureStyleOption::internal_);
 
+    ////////// FeatureStylePreset
+    em::value_object<FeatureStylePresetValue>("FeatureStylePresetValue")
+        .field("optionId", &FeatureStylePresetValue::optionId_)
+        .field("value", &FeatureStylePresetValue::value_);
+    em::register_vector<FeatureStylePresetValue>("FeatureStylePresetValues");
+    em::value_object<FeatureStylePreset>("FeatureStylePreset")
+        .field("id", &FeatureStylePreset::id_)
+        .field("name", &FeatureStylePreset::name_)
+        .field("values", &FeatureStylePreset::values_);
+
     ////////// FeatureLayerStyle
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
+    em::register_vector<FeatureStylePreset>("FeatureStylePresets");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
+        .function("presets", &FeatureLayerStyle::presets, em::allow_raw_pointers())
         .function("isValid", &FeatureLayerStyle::isValid)
         .function("validationReport", &FeatureLayerStyle::validationReport)
         .function("name", &FeatureLayerStyle::name)

@@ -2037,3 +2037,77 @@ rules:
     REQUIRE(reportHasProperty(report, "id"));
     REQUIRE(report["issues"].size() == 2);
 }
+
+TEST_CASE("FeatureLayerStyleParsesOnlyLocalEditableBooleanPresets", "[erdblick.style]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: "LayerPresetValidation"
+version: 2
+layer: "RoadLayer"
+options:
+  - label: Labels
+    id: showLabels
+    type: bool
+    default: true
+  - label: Tint
+    id: tint
+    type: color
+    default: "#ffffff"
+  - label: Internal
+    id: internalFlag
+    type: bool
+    default: false
+    internal: true
+presets:
+  - id: compact
+    name: Compact
+    values:
+      - optionId: showLabels
+        value: false
+  - id: cross-style
+    name: Cross style
+    values:
+      - optionId: otherStyleOption
+        value: true
+  - id: color-value
+    name: Color value
+    values:
+      - optionId: tint
+        value: true
+  - id: internal-value
+    name: Internal value
+    values:
+      - optionId: internalFlag
+        value: true
+  - id: compact
+    name: Duplicate id
+    values:
+      - optionId: showLabels
+        value: true
+  - id: duplicate-name
+    name: Compact
+    values:
+      - optionId: showLabels
+        value: true
+rules:
+  - type: Way
+    geometry: [line]
+)yaml"));
+
+    REQUIRE(style.isValid());
+    REQUIRE(style.hasLayerAffinity("RoadLayer"));
+    REQUIRE_FALSE(style.hasLayerAffinity("LaneLayer"));
+    REQUIRE(style.presets().size() == 1);
+    REQUIRE(style.presets().front().id_ == "compact");
+    REQUIRE(style.presets().front().name_ == "Compact");
+    REQUIRE(style.presets().front().values_.size() == 1);
+    REQUIRE(style.presets().front().values_.front().optionId_ == "showLabels");
+    REQUIRE_FALSE(style.presets().front().values_.front().value_);
+
+    auto report = nlohmann::json(style.validationReport());
+    REQUIRE(report["valid"].get<bool>());
+    REQUIRE(report["issues"].size() == 5);
+    REQUIRE(std::ranges::all_of(report["issues"], [](auto const& issue) {
+        return issue["severity"] == "warning" && issue["impact"] == "preset-skipped";
+    }));
+}

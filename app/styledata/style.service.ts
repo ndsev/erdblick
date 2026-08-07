@@ -26,6 +26,7 @@ import {
     StyleValidationReport
 } from "./style-validation.model";
 import {canonicalSearchStyleFilename} from "../search/search-style-sheet.converter";
+import {LayerPresetDefinition} from "./layer-preset.model";
 
 const STATIC_STYLE_URL_PREFIX = "/static-config/styles/";
 
@@ -60,6 +61,25 @@ export type FeatureStyleOptionWithStringType = {
     internal: boolean
 };
 
+/** Minimal embind vector surface used while copying native preset metadata into TypeScript. */
+interface WasmVector<T> {
+    size(): number;
+    get(index: number): T | undefined;
+    delete(): void;
+}
+
+/** Native style-preset value shape exposed by the generated embind bindings. */
+interface WasmLayerPreset {
+    id: string;
+    name: string;
+    values: WasmVector<{optionId: string; value: boolean}>;
+}
+
+/** Feature-layer style surface after the native preset bindings have been generated. */
+type FeatureLayerStyleWithPresets = FeatureLayerStyle & {
+    presets(): WasmVector<WasmLayerPreset>;
+};
+
 export interface ErdblickStyle {
     id: string,
     modified: boolean,
@@ -69,6 +89,7 @@ export interface ErdblickStyle {
     source: string,
     featureLayerStyle: FeatureLayerStyle,
     options: Array<FeatureStyleOptionWithStringType>,
+    presets: LayerPresetDefinition[],
     shortId: string,
     key?: string,
     type?: string,
@@ -287,11 +308,12 @@ export class StyleService {
             return undefined;
         }
 
-        const [wasmStyle, options, report] = parsedStyleAndOptions;
+        const [wasmStyle, options, presets = [], report] = parsedStyleAndOptions;
         const styleId = wasmStyle.name();
         sourceRef.styleName = styleId;
-        if (report) {
-            this.styleValidationReportService.recordReport(report, sourceRef);
+        const normalizedReport = report ?? this.createSuccessReport(styleString, sourceRef, styleId);
+        if (normalizedReport.issues.length) {
+            this.styleValidationReportService.recordReport(normalizedReport, sourceRef);
         }
         const existingStyle = this.styles.get(styleId);
         const previousKnownStyle = knownStyleId ? this.styles.get(knownStyleId) : undefined;
@@ -327,6 +349,7 @@ export class StyleService {
             source: styleString,
             featureLayerStyle: wasmStyle,
             options: options,
+            presets,
             shortId: shortId4(styleId),
             key: `${this.styles.size}`,
             type: "Style",
@@ -772,7 +795,7 @@ export class StyleService {
             this.lastValidationReport = report;
             return report;
         }
-        const [style, , report] = parsed;
+        const [style, , , report] = parsed;
         style.delete?.();
         const normalized = report ?? this.createSuccessReport(styleString, sourceRef, style.name());
         this.styleValidationReportService.recordReport(normalized, sourceRef);
@@ -780,7 +803,7 @@ export class StyleService {
         return normalized;
     }
 
-    /** Parses one YAML style source through the WASM core and extracts its option metadata. */
+    /** Parses one YAML style source and copies native option and preset metadata from WASM. */
     parseWasmStyle(styleString: string, sourceRef?: StyleSourceRef) {
         const styleUint8Array = this.textEncoder.encode(styleString);
         const yamlStyleNameRegex = /^\s*name\s*:\s*(?:(["'])(.*?)\1|([^\r\n#]+))/m;
@@ -797,33 +820,63 @@ export class StyleService {
             result = uint8ArrayToWasmOrThrow(
                 (wasmBuffer: any) => {
                     const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
-                    if (featureLayerStyle) {
-                        const report = this.readWasmValidationReport(featureLayerStyle, fallbackSourceRef, styleString);
-                        if (!report.loadable || ((featureLayerStyle as any).isValid && !(featureLayerStyle as any).isValid())) {
-                            featureLayerStyle.delete?.();
-                            return [undefined, [], report];
-                        }
-                        // Transport FeatureStyleOptions from WASM array to JS.
-                        const options: FeatureStyleOptionWithStringType[] = [];
-                        const wasmOptions = featureLayerStyle.options();
-                        for (let i = 0; i < wasmOptions.size(); ++i) {
-                            const option = wasmOptions.get(i) as FeatureStyleOptionWithStringType;
-                            // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
-                            if (option.type === coreLib.FeatureStyleOptionType.Bool) {
-                                option.type = "Bool";
-                            }
-                            if (option.type === coreLib.FeatureStyleOptionType.Color) {
-                                option.type = "Color";
-                            }
-                            if (option.type === coreLib.FeatureStyleOptionType.String) {
-                                option.type = "String";
-                            }
-                            options.push(option);
-                        }
-                        wasmOptions.delete();
-                        return [featureLayerStyle, options, report];
+                    if (!featureLayerStyle) {
+                        return undefined;
                     }
-                    return undefined;
+                    const report = this.readWasmValidationReport(featureLayerStyle, fallbackSourceRef, styleString);
+                    if (!report.loadable || ((featureLayerStyle as any).isValid && !(featureLayerStyle as any).isValid())) {
+                        featureLayerStyle.delete?.();
+                        return [undefined, [], [], report];
+                    }
+                    // Transport FeatureStyleOptions from WASM array to JS.
+                    const options: FeatureStyleOptionWithStringType[] = [];
+                    const wasmOptions = featureLayerStyle.options();
+                    for (let i = 0; i < wasmOptions.size(); ++i) {
+                        const option = wasmOptions.get(i) as FeatureStyleOptionWithStringType;
+                        // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
+                        if (option.type === coreLib.FeatureStyleOptionType.Bool) {
+                            option.type = "Bool";
+                        }
+                        if (option.type === coreLib.FeatureStyleOptionType.Color) {
+                            option.type = "Color";
+                        }
+                        if (option.type === coreLib.FeatureStyleOptionType.String) {
+                            option.type = "String";
+                        }
+                        options.push(option);
+                    }
+                    wasmOptions.delete();
+
+                    // Copy native style presets before releasing their embind vector handles.
+                    const presets: LayerPresetDefinition[] = [];
+                    const wasmPresets = (featureLayerStyle as FeatureLayerStyleWithPresets).presets();
+                    try {
+                        for (let i = 0; i < wasmPresets.size(); ++i) {
+                            const wasmPreset = wasmPresets.get(i);
+                            if (!wasmPreset) {
+                                continue;
+                            }
+                            const values: LayerPresetDefinition["values"] = [];
+                            try {
+                                for (let valueIndex = 0; valueIndex < wasmPreset.values.size(); ++valueIndex) {
+                                    const value = wasmPreset.values.get(valueIndex);
+                                    if (value) {
+                                        values.push({optionId: String(value.optionId), value: value.value});
+                                    }
+                                }
+                            } finally {
+                                wasmPreset.values.delete();
+                            }
+                            presets.push({
+                                id: String(wasmPreset.id),
+                                name: String(wasmPreset.name),
+                                values
+                            });
+                        }
+                    } finally {
+                        wasmPresets.delete();
+                    }
+                    return [featureLayerStyle, options, presets, report];
                 },
                 styleUint8Array);
         } catch (error) {
@@ -853,15 +906,17 @@ export class StyleService {
         }
 
         if (result) {
-            const [featureLayerStyle, options, report] = result as [
+            const [featureLayerStyle, options, presets, report] = result as [
                 FeatureLayerStyle | undefined,
                 FeatureStyleOptionWithStringType[],
+                LayerPresetDefinition[],
                 StyleValidationReport | undefined
             ];
             if (featureLayerStyle) {
-                return [featureLayerStyle, options, report] as [
+                return [featureLayerStyle, options, presets, report] as [
                     FeatureLayerStyle,
                     FeatureStyleOptionWithStringType[],
+                    LayerPresetDefinition[],
                     StyleValidationReport
                 ];
             }

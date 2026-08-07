@@ -26,6 +26,11 @@ import {
     serializeFeatureSearchState
 } from "./feature-search-state";
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
+import type {LayerPresetRef} from "../styledata/layer-preset.model";
+import {
+    MAP_PRESET_APP_STATE_SCHEMA,
+    MapPresetDefinition
+} from "../styledata/map-preset.model";
 import {
     compressUrlCsvRuns,
     decodeLayerNamesV2,
@@ -282,8 +287,23 @@ export interface StyleOptionStateUpdate {
     values: Array<string | number | boolean>;
 }
 
-/** Preset selections for concrete map/layer pairs within one map view. */
-export type StylePresetSelections = Record<string, Record<string, string>>;
+/** Qualified layer-preset selections for concrete map/layer pairs within one map view. */
+export type LayerPresetSelections = Record<string, Record<string, LayerPresetRef>>;
+
+/** Map-preset selections for concrete maps within one map view. */
+export type MapPresetSelections = Record<string, string>;
+
+const LAYER_PRESET_REF_SCHEMA = z.object({
+    styleId: z.string(),
+    presetId: z.string().min(1)
+}).strict();
+
+// A stored unqualified id from the former global preset implementation is retained
+// with an empty style id so the map tree can migrate it only when resolution is unique.
+const STORED_LAYER_PRESET_REF_SCHEMA = z.union([
+    LAYER_PRESET_REF_SCHEMA,
+    z.string().min(1).transform(presetId => ({styleId: "", presetId}))
+]);
 
 /** Enumerates view properties that can be synchronized across split views. */
 export interface ViewSyncOptionDescriptor {
@@ -847,24 +867,27 @@ export class AppStateService implements OnDestroy {
 
     readonly stylesState = new StyleState(this.statePool);
 
-    readonly stylePresetSelectionState = this.createMapViewState<StylePresetSelections>({
+    readonly layerPresetSelectionState = this.createMapViewState<LayerPresetSelections>({
         name: "stylePresetSelection",
         defaultValue: {},
-        schema: z.record(z.string(), z.record(z.string(), z.string())),
+        schema: z.record(z.string(), z.record(z.string(), STORED_LAYER_PRESET_REF_SCHEMA)),
         snapshotPersist: false
     });
 
-    readonly stylePresetAvailabilityState = this.createState<Record<string, boolean>>({
-        name: "stylePresetAvailability",
+    readonly mapPresetSelectionState = this.createMapViewState<MapPresetSelections>({
+        name: "mapPresetSelection",
         defaultValue: {},
-        schema: z.record(z.string(), Boolish)
+        schema: z.record(z.string(), z.string()),
+        snapshotPersist: false
     });
 
-    readonly stylePresetOverrideSourceState = this.createState<string | null>({
-        name: "stylePresetOverrideSource",
-        defaultValue: null,
-        schema: z.string().nullable(),
-        snapshotPersist: false
+    readonly mapPresetsState = this.createState<MapPresetDefinition[]>({
+        name: "mapPresets",
+        defaultValue: [],
+        schema: MAP_PRESET_APP_STATE_SCHEMA,
+        toStorage: value => value,
+        snapshotPersist: false,
+        configDefault: true
     });
 
     readonly styleVisibilityState = this.createState<Record<string, boolean>>({
@@ -2319,13 +2342,9 @@ export class AppStateService implements OnDestroy {
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
-    get stylePresetAvailability() {return this.stylePresetAvailabilityState.getValue();}
-    set stylePresetAvailability(val: Record<string, boolean>) {
-        this.stylePresetAvailabilityState.next({...val});
-    };
-    get stylePresetOverrideSource() {return this.stylePresetOverrideSourceState.getValue();}
-    set stylePresetOverrideSource(val: string | null) {
-        this.stylePresetOverrideSourceState.next(val);
+    get mapPresets() {return this.mapPresetsState.getValue();}
+    set mapPresets(val: MapPresetDefinition[]) {
+        this.mapPresetsState.next(structuredClone(val));
     };
     get styleVisibility() {return this.styleVisibilityState.getValue();}
     set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
@@ -3551,23 +3570,24 @@ export class AppStateService implements OnDestroy {
         this.stylesState.next(nextStyles);
     }
 
-    /** Returns the locally selected preset ID for one map/layer/view, if any. */
-    getStylePresetSelection(viewIndex: number, mapId: string, layerId: string): string | null {
-        return this.stylePresetSelectionState.getValue(viewIndex)[mapId]?.[layerId] ?? null;
+    /** Returns the locally selected qualified layer preset for one map/layer/view. */
+    getLayerPresetSelection(viewIndex: number, mapId: string, layerId: string): LayerPresetRef | null {
+        const ref = this.layerPresetSelectionState.getValue(viewIndex)[mapId]?.[layerId];
+        return ref ? {...ref} : null;
     }
 
-    /** Stores or clears one map/layer/view preset association without changing option values. */
-    setStylePresetSelection(viewIndex: number, mapId: string, layerId: string, presetId: string | null): void {
-        const current = this.stylePresetSelectionState.getValue(viewIndex);
-        const currentPresetId = current[mapId]?.[layerId] ?? null;
-        if (currentPresetId === presetId) {
+    /** Stores or clears one map/layer/view layer-preset association without changing option values. */
+    setLayerPresetSelection(viewIndex: number, mapId: string, layerId: string, ref: LayerPresetRef | null): void {
+        const current = this.layerPresetSelectionState.getValue(viewIndex);
+        const currentRef = current[mapId]?.[layerId] ?? null;
+        if (currentRef?.styleId === ref?.styleId && currentRef?.presetId === ref?.presetId) {
             return;
         }
 
-        const next: StylePresetSelections = {...current};
+        const next: LayerPresetSelections = {...current};
         const mapSelections = {...(next[mapId] ?? {})};
-        if (presetId) {
-            mapSelections[layerId] = presetId;
+        if (ref) {
+            mapSelections[layerId] = {...ref};
             next[mapId] = mapSelections;
         } else {
             delete mapSelections[layerId];
@@ -3577,7 +3597,27 @@ export class AppStateService implements OnDestroy {
                 delete next[mapId];
             }
         }
-        this.stylePresetSelectionState.next(viewIndex, next);
+        this.layerPresetSelectionState.next(viewIndex, next);
+    }
+
+    /** Returns the selected map-level preset for one concrete map/view. */
+    getMapPresetSelection(viewIndex: number, mapId: string): string | null {
+        return this.mapPresetSelectionState.getValue(viewIndex)[mapId] ?? null;
+    }
+
+    /** Stores or clears a map-level preset association without changing option values. */
+    setMapPresetSelection(viewIndex: number, mapId: string, presetId: string | null): void {
+        const current = this.mapPresetSelectionState.getValue(viewIndex);
+        if ((current[mapId] ?? null) === presetId) {
+            return;
+        }
+        const next = {...current};
+        if (presetId) {
+            next[mapId] = presetId;
+        } else {
+            delete next[mapId];
+        }
+        this.mapPresetSelectionState.next(viewIndex, next);
     }
 
     /** Returns whether the style is visible in the persisted style tree. */

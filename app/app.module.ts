@@ -127,7 +127,7 @@ import {AppConfigService} from "./shared/app-config.service";
 import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
 import {CoordinatesLegalTermsDialogComponent} from "./coords/coordinates-legal-terms-dialog.component";
 import {CacheResetComponent} from "./auxiliaries/cache-reset.component";
-import {StyleOptionPresetService} from "./styledata/style-option-preset.service";
+import {MapPresetService} from "./styledata/map-preset.service";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -168,7 +168,7 @@ export const initializeServices = () => {
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
-    const styleOptionPresetService = inject(StyleOptionPresetService);
+    const mapPresetService = inject(MapPresetService);
     const tileStream = inject(MapTileStreamService);
     const inspectionSelection = inject(InspectionSelectionService);
     const coordService = inject(CoordinatesService);
@@ -190,8 +190,7 @@ export const initializeServices = () => {
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
         await styleService.initializeStyles();
-        updateGlobalSpinner('Loading style option presets');
-        await styleOptionPresetService.initialize();
+        mapPresetService.initialize();
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
         inspectionSelection.initialize();

@@ -111,32 +111,8 @@
       }
 
       .quick-preset-options-select,
-      .quick-preset-value-list,
       .quick-preset-actions {
         grid-column: 1 / -1;
-      }
-    }
-
-    .quick-preset-value-list {
-      display: grid;
-      gap: 0.35em;
-      max-height: 14em;
-      overflow: auto;
-    }
-
-    .quick-preset-value-row {
-      align-items: center;
-      display: flex;
-      gap: 0.75em;
-      justify-content: space-between;
-      min-width: 0;
-      padding: 0.25em 0.35em;
-
-      span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
     }
 
@@ -217,7 +193,6 @@
       grid-template-columns: minmax(0, 1fr);
 
       .quick-preset-options-select,
-      .quick-preset-value-list,
       .quick-preset-actions {
         grid-column: auto;
       }
