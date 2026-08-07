@@ -33,7 +33,7 @@ describe("Tile subset render-data compiler", () => {
         }, [11, 48, 0], false);
 
         expect(buckets).toHaveLength(1);
-        const variable = buckets[0];
+        const variable = buckets[0]!;
         expect([...variable.attributes.instanceOffsets.value]).toEqual([
             1, 1, 1, 1.5, 2
         ]);

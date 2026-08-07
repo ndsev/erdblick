@@ -1,10 +1,6 @@
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
-import {PathStyleExtension} from "@deck.gl/extensions";
 import {
-    IconLayer,
     PathLayer,
-    ScatterplotLayer,
-    SolidPolygonLayer,
     TextLayer
 } from "@deck.gl/layers";
 import {Matrix4} from "@math.gl/core";
@@ -26,7 +22,6 @@ import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
 import {StaleSubsetRenderError, TileSubsetLayerRenderService} from
     "./tile-subset-layer-render.service";
 import type {
-    TileSubsetLabelDatum,
     TileSubsetLayerRenderBuffers,
     TileSubsetPickResult
 } from "./tile-subset-layer-render.worker.protocol";
@@ -47,7 +42,6 @@ import {
     deckSubsetInteractionProps,
     remapGltfPickContributions,
     type DeckSubsetInteractionProps as DeckInteractionProps,
-    type DeckSubsetPickProps as DeckPickProps,
     type SubsetPickResolver as PickResolver
 } from "./deck-subset-picking";
 import {
@@ -57,23 +51,25 @@ import {
 } from "./deck-interaction-effect";
 import {DeckInteractionOutlineService} from
     "./deck-interaction-outline.service";
-import {
-    DeckLocalPixelOffsetExtension,
-    DeckVariableOffsetPathLayer,
-    DeckVariablePathOffsetExtension,
-    packVariablePathOffsetVectors
-} from "./deck-variable-path-offset.extension";
+import {packVariablePathOffsetVectors} from
+    "./deck-variable-path-offset.extension";
 import {
     compileTileSubsetArrowMarkers,
-    compileTileSubsetPathData,
-    compileTileSubsetPointData,
-    compileTileSubsetSurfaceData,
     MAX_TILE_SUBSET_RENDER_VERTICES,
     type DeckArrowMarker,
     type DeckPathData,
     type DeckPointData,
     type DeckSurfaceData
 } from "./tile-subset-render-data";
+import {
+    createTileSubsetArrowLayer,
+    createTileSubsetPathLayer,
+    createTileSubsetPointLayer,
+    createTileSubsetSurfaceLayer,
+    TileSubsetVectorPresentation,
+    type DeckLabelData,
+    type TileSubsetVectorSource
+} from "./tile-subset-vector-presentation";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
@@ -82,10 +78,6 @@ interface DeckScene {
     sceneMode?: SceneMode;
     device?: Device | null;
 }
-
-type DeckLabelData = Omit<TileSubsetLabelDatum, "position"> & {
-    position: [number, number, number];
-};
 
 interface DeckGlowMaterial {
     key: string;
@@ -123,17 +115,6 @@ interface SharedGltfPickContribution {
     pickResolver: PickResolver;
 }
 
-interface SharedPrimitiveContribution<T> {
-    data: T;
-    pickResolver: PickResolver;
-}
-
-interface ArenaRegistration {
-    arena: DeckRenderBufferArena;
-    groupKey: string;
-    sourceId: string;
-}
-
 /** One style-owned interaction material applied to exact locally retained picks. */
 export interface TileSubsetInteractionOverlay {
     id: string;
@@ -142,15 +123,8 @@ export interface TileSubsetInteractionOverlay {
     order: number;
 }
 
-interface InteractionSource {
-    paths: DeckPathData[];
-    arrows: DeckPathData[];
-    points: DeckPointData[];
-    surfaces: DeckSurfaceData[];
-    labels: DeckLabelData[];
+interface InteractionSource extends TileSubsetVectorSource {
     gltf: InteractionGltfSource | null;
-    origin: [number, number, number];
-    modelMatrix: Matrix4 | null;
 }
 
 interface InteractionGltfSource {
@@ -169,24 +143,6 @@ const MASK_NO_DEPTH_PARAMETERS = {
     ...NO_DEPTH_PARAMETERS,
     blend: false
 } as any;
-const ARROW_ICON_SIZE = 64;
-const ARROW_ICON_ATLAS =
-    "data:image/svg+xml;charset=utf-8," +
-    encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${ARROW_ICON_SIZE}" height="${ARROW_ICON_SIZE}" viewBox="0 0 ${ARROW_ICON_SIZE} ${ARROW_ICON_SIZE}"><polygon points="32,0 60,60 4,60" fill="white"/></svg>`
-    );
-const ARROW_ICON_MAPPING = {
-    arrowhead: {
-        x: 0,
-        y: 0,
-        width: ARROW_ICON_SIZE,
-        height: ARROW_ICON_SIZE,
-        anchorX: ARROW_ICON_SIZE / 2,
-        anchorY: 0,
-        mask: true
-    }
-};
-
 /**
  * One logical Deck visualization for one pre-render Morton block of directly
  * owned TileSubsetLayers.
@@ -197,6 +153,7 @@ const ARROW_ICON_MAPPING = {
 export class TileSubsetLayerVisualization {
     readonly visualizationId: string;
     private readonly layerKeys = new Set<string>();
+    private readonly vectorPresentation: TileSubsetVectorPresentation;
     private readonly interactionLayerKeys = new Set<string>();
     private readonly interactionGltfSources = new Map<
         string,
@@ -210,7 +167,6 @@ export class TileSubsetLayerVisualization {
         string,
         {groupId: string; sourceId: string}
     >();
-    private readonly arenaRegistrations = new Map<string, ArenaRegistration>();
     private readonly styleCacheKey: string;
     private pickResults: TileSubsetPickResult[] = [];
     private readonly interactionTargetKeys = new Set<string>();
@@ -253,6 +209,14 @@ export class TileSubsetLayerVisualization {
             sipHash64Hex(owner.style.source),
             owner.style.source.length
         ].join(":");
+        this.vectorPresentation = new TileSubsetVectorPresentation({
+            visualizationId: this.visualizationId,
+            ownerId: owner.ownerId,
+            presentationKind: owner.identity.presentationKind,
+            styleOrder: owner.styleOrder,
+            viewIndex,
+            blockKey
+        });
         this.fidelityValue = fidelityValue;
         for (const state of states) {
             owner.retainTileState(state);
@@ -588,7 +552,7 @@ export class TileSubsetLayerVisualization {
         }
         this.interactionOutlineSources.clear();
         this.styleGlowOutlineSources.clear();
-        this.removeArenaContributions();
+        this.vectorPresentation.destroy();
         this.removeSharedGltfContributions(registry);
         this.releaseGltfAsset();
         for (const state of this.states) {
@@ -614,17 +578,16 @@ export class TileSubsetLayerVisualization {
             return false;
         }
         const desired = new Set<string>();
-        const desiredArena = new Set<string>();
         this.applyDebugBlockVisualization(registry, desired);
         const origin = this.coordinateOrigin(result.coordinateOrigin);
         if (!origin) {
+            this.vectorPresentation.clear();
             this.interactionSource = null;
             this.reconcileStyleGlowOutlines(
                 this.outlineService(sceneHandle),
                 new Set());
             this.refreshInteractionOverlays();
             this.reconcile(registry, desired);
-            this.reconcileArena(desiredArena);
             return true;
         }
         const preparedGltf = await this.prepareGltf(sceneHandle, result);
@@ -645,182 +608,15 @@ export class TileSubsetLayerVisualization {
             (sceneHandle.scene as DeckScene | undefined)?.sceneMode
         );
         const pickResolver: PickResolver = pickIndex => this.resolvePick(pickIndex);
-
-        const surfaceBuckets = compileTileSubsetSurfaceData(
-            result.surface,
-            origin
-        );
-        for (const surface of surfaceBuckets) {
-            const key = this.key("surface", surface.depthTest);
-            if (!this.upsertArenaSurface(
-                sceneHandle,
-                key,
-                surface,
-                pickResolver,
-                modelMatrix,
-                interaction,
-                desiredArena
-            )) {
-                registry.upsert(key, this.surfaceLayer(
-                    key,
-                    surface,
-                    pickResolver,
-                    modelMatrix,
-                    interaction
-                ), 350 + this.owner.styleOrder);
-                desired.add(key);
-            }
-        }
-
-        const pathBuckets = [
-            ...compileTileSubsetPathData(result.pathWorld, origin, false),
-            ...compileTileSubsetPathData(result.pathBillboard, origin, true),
-            ...compileTileSubsetPathData(
-                result.transitionPathWorld,
-                origin,
-                false
-            ),
-            ...compileTileSubsetPathData(
-                result.transitionPathBillboard,
-                origin,
-                true
-            )
-        ];
-        for (const path of pathBuckets) {
-            const key = this.key(
-                path.attributes.instanceVariableOffsets
-                    ? "path-variable-offset"
-                    : "path",
-                path.depthTest,
-                path.billboard);
-            if (!this.upsertArenaPath(
-                sceneHandle,
-                key,
-                path,
-                pickResolver,
-                modelMatrix,
-                interaction,
-                desiredArena
-            )) {
-                registry.upsert(key, this.pathLayer(
-                    key,
-                    path,
-                    pickResolver,
-                    modelMatrix,
-                    interaction
-                ), 400 + this.owner.styleOrder);
-                desired.add(key);
-            }
-        }
-
-        const pointBuckets = [
-            ...compileTileSubsetPointData(result.pointWorld, origin, false),
-            ...compileTileSubsetPointData(result.pointBillboard, origin, true)
-        ];
-        for (const point of pointBuckets) {
-            const key = this.key("point", point.depthTest, point.billboard);
-            if (!this.upsertArenaPoint(
-                sceneHandle,
-                key,
-                point,
-                pickResolver,
-                modelMatrix,
-                interaction,
-                desiredArena
-            )) {
-                registry.upsert(key, this.pointLayer(
-                    key,
-                    point,
-                    pickResolver,
-                    modelMatrix,
-                    interaction
-                ), 425 + this.owner.styleOrder);
-                desired.add(key);
-            }
-        }
-
-        const labels = [...result.labelWorld, ...result.labelBillboard].map(
-            label => ({
-                ...label,
-                position: [
-                    label.position.x,
-                    label.position.y,
-                    label.position.z
-                ] as [number, number, number]
-            }));
-        for (const billboard of [false, true]) {
-            for (const depthTest of [true, false]) {
-                const data = labels
-                    .filter(label => Boolean(label.billboard) === billboard &&
-                        (label.depthTest !== false) === depthTest);
-                if (!data.length) {
-                    continue;
-                }
-                const key = this.key("label", depthTest, billboard);
-                registry.upsert(key, new TextLayer({
-                    id: key,
-                    data,
-                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-                    coordinateOrigin: origin,
-                    getPosition: (datum: DeckLabelData) => datum.position,
-                    getText: (datum: DeckLabelData) => datum.text,
-                    getColor: (datum: DeckLabelData) => datum.fillColor,
-                    getSize: (datum: DeckLabelData) => 14 * datum.scale,
-                    sizeUnits: "pixels",
-                    outlineColor: data[0].outlineColor,
-                    outlineWidth: data[0].outlineWidth,
-                    getPixelOffset: (datum: DeckLabelData) => datum.pixelOffset ?? [0, 0],
-                    billboard,
-                    modelMatrix,
-                    parameters: this.parameters(depthTest),
-                    pickable: interaction.pickable,
-                    drillPickEligible: interaction.drillPickEligible,
-                    tileKey: this.blockKey,
-                    subsetPickResolver: pickResolver
-                } as any), 475 + this.owner.styleOrder);
-                desired.add(key);
-            }
-        }
-
-        const arrowBuckets = [
-            ...compileTileSubsetPathData(result.arrowWorld, origin, false),
-            ...compileTileSubsetPathData(result.arrowBillboard, origin, true)
-        ];
-        for (const arrow of arrowBuckets) {
-            const markers = compileTileSubsetArrowMarkers(arrow);
-            if (!markers.length) {
-                continue;
-            }
-            const key = this.key("arrow", arrow.depthTest, arrow.billboard);
-            registry.upsert(key, new IconLayer<DeckArrowMarker, DeckPickProps>({
-                id: key,
-                data: markers,
-                coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-                coordinateOrigin: origin,
-                iconAtlas: ARROW_ICON_ATLAS,
-                iconMapping: ARROW_ICON_MAPPING,
-                getIcon: () => "arrowhead",
-                getPosition: (marker: DeckArrowMarker) => marker.position,
-                getSize: (marker: DeckArrowMarker) => marker.sizePx,
-                sizeUnits: "pixels",
-                getAngle: (marker: DeckArrowMarker) => marker.angleDeg,
-                getPixelOffset: (marker: DeckArrowMarker) => marker.pixelOffset,
-                getLocalPixelOffset: (marker: DeckArrowMarker) =>
-                    marker.localPixelOffset,
-                getColor: (marker: DeckArrowMarker) => marker.color,
-                extensions: [new DeckLocalPixelOffsetExtension()],
-                billboard: arrow.billboard,
-                modelMatrix,
-                parameters: this.parameters(arrow.depthTest),
-                pickable: interaction.pickable,
-                drillPickEligible: interaction.drillPickEligible,
-                tileKey: this.blockKey,
-                subsetPickResolver: pickResolver,
-                alphaCutoff: 0.05
-            } as any), 450 + this.owner.styleOrder);
-            desired.add(key);
-        }
-
+        const vectorSource = this.vectorPresentation.install({
+            registry,
+            arena: this.arena(sceneHandle),
+            result,
+            origin,
+            modelMatrix,
+            interaction,
+            pickResolver
+        });
         const interactionGltf = this.applyGltf(
             registry,
             result,
@@ -831,606 +627,12 @@ export class TileSubsetLayerVisualization {
             preparedGltf
         );
         this.interactionSource = {
-            paths: pathBuckets,
-            arrows: arrowBuckets,
-            points: pointBuckets,
-            surfaces: surfaceBuckets,
-            labels,
-            gltf: interactionGltf,
-            origin,
-            modelMatrix
+            ...vectorSource,
+            gltf: interactionGltf
         };
         this.refreshStyleGlows(sceneHandle);
         this.reconcile(registry, desired);
-        this.reconcileArena(desiredArena);
         return true;
-    }
-
-    private surfaceLayer(
-        key: string,
-        surface: DeckSurfaceData,
-        pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps,
-        parameters: any = this.parameters(surface.depthTest)
-    ): SolidPolygonLayer<DeckSurfaceData, DeckPickProps> {
-        return new SolidPolygonLayer<DeckSurfaceData, DeckPickProps>({
-            id: key,
-            data: surface,
-            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-            coordinateOrigin: surface.coordinateOrigin,
-            filled: true,
-            extruded: false,
-            wireframe: false,
-            _normalize: false,
-            _full3d: true,
-            modelMatrix,
-            parameters,
-            pickable: interaction.pickable,
-            navigationAnchorEligible: interaction.drillPickEligible,
-            markerAnchorEligible: interaction.drillPickEligible,
-            drillPickEligible: interaction.drillPickEligible,
-            tileKey: key,
-            subsetPickResolver: pickResolver,
-            featureAddresses: surface.featureAddresses,
-            surfaceNormals: surface.surfaceNormals
-        });
-    }
-
-    private pathLayer(
-        key: string,
-        path: DeckPathData,
-        pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps
-    ): PathLayer<DeckPathData, DeckPickProps> {
-        const variableOffset = Boolean(
-            path.attributes.instanceVariableOffsets);
-        const LayerType = variableOffset
-            ? DeckVariableOffsetPathLayer
-            : PathLayer;
-        return new LayerType({
-            id: key,
-            data: path,
-            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-            coordinateOrigin: path.coordinateOrigin,
-            _pathType: "open",
-            widthUnits: "pixels",
-            billboard: path.billboard,
-            modelMatrix,
-            parameters: this.parameters(path.depthTest),
-            capRounded: true,
-            jointRounded: true,
-            pickable: interaction.pickable,
-            navigationAnchorEligible: interaction.drillPickEligible,
-            markerAnchorEligible: interaction.drillPickEligible,
-            drillPickEligible: interaction.drillPickEligible,
-            extensions: variableOffset
-                ? [
-                    new PathStyleExtension({dash: true}),
-                    new DeckVariablePathOffsetExtension()
-                ]
-                : [new PathStyleExtension({dash: true, offset: true})],
-            tileKey: key,
-            subsetPickResolver: pickResolver,
-            featureAddressesByPath: path.featureAddressesByPath,
-            pathCenterline: {
-                positions: path.attributes.getPath.value,
-                startIndices: path.startIndices,
-                coordinateOrigin: path.coordinateOrigin
-            }
-        }) as PathLayer<DeckPathData, DeckPickProps>;
-    }
-
-    private pointLayer(
-        key: string,
-        point: DeckPointData,
-        pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps
-    ): ScatterplotLayer<DeckPointData, DeckPickProps> {
-        return new ScatterplotLayer<DeckPointData, DeckPickProps>({
-            id: key,
-            data: point,
-            coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
-            coordinateOrigin: point.coordinateOrigin,
-            filled: true,
-            stroked: false,
-            radiusUnits: "pixels",
-            billboard: point.billboard,
-            modelMatrix,
-            parameters: this.parameters(point.depthTest),
-            pickable: interaction.pickable,
-            navigationAnchorEligible: interaction.drillPickEligible,
-            markerAnchorEligible: interaction.drillPickEligible,
-            drillPickEligible: interaction.drillPickEligible,
-            tileKey: key,
-            subsetPickResolver: pickResolver,
-            featureAddresses: point.featureAddresses,
-            anchorPositions: point.attributes.getPosition.value
-        });
-    }
-
-    private upsertArenaSurface(
-        sceneHandle: IRenderSceneHandle,
-        _blockKey: string,
-        surface: DeckSurfaceData,
-        pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps,
-        desired: Set<string>
-    ): boolean {
-        const arena = this.arena(sceneHandle);
-        if (!arena) {
-            return false;
-        }
-        const groupKey = this.arenaGroupKey(
-            "surface",
-            surface.depthTest,
-            false,
-            surface.coordinateOrigin
-        );
-        const sourceId = `${this.visualizationId}/surface/${surface.depthTest}`;
-        arena.upsert({
-            groupKey,
-            sourceId,
-            vertexCount: surface.attributes.getPolygon.value.length / 3,
-            contribution: {data: surface, pickResolver} satisfies
-                SharedPrimitiveContribution<DeckSurfaceData>,
-            buildLayer: (key, contributions) => {
-                const merged = this.mergeSurfaceContributions(contributions);
-                return {
-                    layer: merged
-                        ? this.surfaceLayer(
-                            key,
-                            merged.data,
-                            merged.pickResolver,
-                            modelMatrix,
-                            interaction
-                        )
-                        : null,
-                    order: 350 + this.owner.styleOrder
-                };
-            }
-        });
-        this.trackArenaRegistration(arena, groupKey, sourceId, desired);
-        return true;
-    }
-
-    private upsertArenaPath(
-        sceneHandle: IRenderSceneHandle,
-        _blockKey: string,
-        path: DeckPathData,
-        pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps,
-        desired: Set<string>
-    ): boolean {
-        const arena = this.arena(sceneHandle);
-        if (!arena) {
-            return false;
-        }
-        const pathKind = path.attributes.instanceVariableOffsets
-            ? "path-variable-offset"
-            : "path";
-        const groupKey = this.arenaGroupKey(
-            pathKind,
-            path.depthTest,
-            path.billboard,
-            path.coordinateOrigin
-        );
-        const sourceId = [
-            this.visualizationId,
-            pathKind,
-            String(path.billboard),
-            String(path.depthTest)
-        ].join("/");
-        arena.upsert({
-            groupKey,
-            sourceId,
-            vertexCount: path.attributes.getPath.value.length / 3,
-            contribution: {data: path, pickResolver} satisfies
-                SharedPrimitiveContribution<DeckPathData>,
-            buildLayer: (key, contributions) => {
-                const merged = this.mergePathContributions(contributions);
-                return {
-                    layer: merged
-                        ? this.pathLayer(
-                            key,
-                            merged.data,
-                            merged.pickResolver,
-                            modelMatrix,
-                            interaction
-                        )
-                        : null,
-                    order: 400 + this.owner.styleOrder
-                };
-            }
-        });
-        this.trackArenaRegistration(arena, groupKey, sourceId, desired);
-        return true;
-    }
-
-    private upsertArenaPoint(
-        sceneHandle: IRenderSceneHandle,
-        _blockKey: string,
-        point: DeckPointData,
-        pickResolver: PickResolver,
-        modelMatrix: Matrix4 | null,
-        interaction: DeckInteractionProps,
-        desired: Set<string>
-    ): boolean {
-        const arena = this.arena(sceneHandle);
-        if (!arena) {
-            return false;
-        }
-        const groupKey = this.arenaGroupKey(
-            "point",
-            point.depthTest,
-            point.billboard,
-            point.coordinateOrigin
-        );
-        const sourceId = `${this.visualizationId}/point/${point.billboard}/${point.depthTest}`;
-        arena.upsert({
-            groupKey,
-            sourceId,
-            vertexCount: point.length,
-            contribution: {data: point, pickResolver} satisfies
-                SharedPrimitiveContribution<DeckPointData>,
-            buildLayer: (key, contributions) => {
-                const merged = this.mergePointContributions(contributions);
-                return {
-                    layer: merged
-                        ? this.pointLayer(
-                            key,
-                            merged.data,
-                            merged.pickResolver,
-                            modelMatrix,
-                            interaction
-                        )
-                        : null,
-                    order: 425 + this.owner.styleOrder
-                };
-            }
-        });
-        this.trackArenaRegistration(arena, groupKey, sourceId, desired);
-        return true;
-    }
-
-    private mergeSurfaceContributions(
-        raw: ReadonlyMap<string, unknown>
-    ): SharedPrimitiveContribution<DeckSurfaceData> | null {
-        const contributions = [...raw.values()] as Array<
-            SharedPrimitiveContribution<DeckSurfaceData>>;
-        if (!contributions.length) {
-            return null;
-        }
-        const picks = this.arenaPickTable(contributions);
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const indices: number[] = [];
-        const starts = [0];
-        const addresses: number[] = [];
-        const normals: number[] = [];
-        for (const contribution of contributions) {
-            const data = contribution.data;
-            const vertexBase = positions.length / 3;
-            this.appendValues(positions, data.attributes.getPolygon.value);
-            this.appendValues(colors, data.attributes.fillColors.value);
-            for (const index of data.attributes.indices.value) {
-                indices.push(index + vertexBase);
-            }
-            for (let index = 1; index < data.startIndices.length; ++index) {
-                starts.push(vertexBase + data.startIndices[index]);
-            }
-            for (const address of data.featureAddresses) {
-                addresses.push(picks.remap(contribution, address));
-            }
-            this.appendValues(normals, data.surfaceNormals);
-        }
-        const first = contributions[0].data;
-        return {
-            pickResolver: picks.resolve,
-            data: {
-                length: addresses.length,
-                depthTest: first.depthTest,
-                coordinateOrigin: first.coordinateOrigin,
-                startIndices: new Uint32Array(starts),
-                featureAddresses: new Uint32Array(addresses),
-                surfaceNormals: new Float32Array(normals),
-                attributes: {
-                    getPolygon: {
-                        value: new Float32Array(positions),
-                        size: 3
-                    },
-                    indices: {
-                        value: new Uint32Array(indices),
-                        size: 1
-                    },
-                    fillColors: {
-                        value: new Uint8Array(colors),
-                        size: 4
-                    }
-                }
-            }
-        };
-    }
-
-    private mergePathContributions(
-        raw: ReadonlyMap<string, unknown>
-    ): SharedPrimitiveContribution<DeckPathData> | null {
-        const contributions = [...raw.values()] as Array<
-            SharedPrimitiveContribution<DeckPathData>>;
-        if (!contributions.length) {
-            return null;
-        }
-        const picks = this.arenaPickTable(contributions);
-        const variableOffset = Boolean(
-            contributions[0].data.attributes.instanceVariableOffsets);
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const widths: number[] = [];
-        const offsets: number[] = [];
-        const offsetVectors: number[] = [];
-        const offsetScaleThresholds: number[] = [];
-        const dashes: number[] = [];
-        const starts = [0];
-        const addresses: number[] = [];
-        const hasDashes = contributions.some(contribution =>
-            !!contribution.data.attributes.instanceDashArrays);
-        for (const contribution of contributions) {
-            const data = contribution.data;
-            const vertexBase = positions.length / 3;
-            const vertexCount = data.attributes.getPath.value.length / 3;
-            this.appendValues(positions, data.attributes.getPath.value);
-            this.appendValues(colors, data.attributes.instanceColors.value);
-            this.appendValues(widths, data.attributes.instanceStrokeWidths.value);
-            this.appendValues(offsets, data.attributes.instanceOffsets.value);
-            if (variableOffset) {
-                if (!data.offsetVectorsPx ||
-                    data.offsetVectorsPx.length < vertexCount * 2) {
-                    return null;
-                }
-                this.appendValues(offsetVectors, data.offsetVectorsPx);
-                for (let pathIndex = 0;
-                     pathIndex < data.length;
-                     ++pathIndex) {
-                    offsetScaleThresholds.push(
-                        data.offsetScaleThresholds?.[pathIndex] ?? 0);
-                }
-            }
-            const contributionDashes =
-                data.attributes.instanceDashArrays?.value;
-            if (hasDashes) {
-                if (contributionDashes) {
-                    this.appendValues(dashes, contributionDashes);
-                } else {
-                    for (let index = 0; index < vertexCount; ++index) {
-                        dashes.push(1, 0);
-                    }
-                }
-            }
-            for (let index = 1; index < data.startIndices.length; ++index) {
-                starts.push(vertexBase + data.startIndices[index]);
-            }
-            for (const address of data.featureAddressesByPath) {
-                addresses.push(picks.remap(contribution, address));
-            }
-        }
-        const first = contributions[0].data;
-        const startIndices = new Uint32Array(starts);
-        const offsetValues = new Float32Array(offsets);
-        const offsetVectorValues = variableOffset
-            ? new Float32Array(offsetVectors)
-            : undefined;
-        return {
-            pickResolver: picks.resolve,
-            data: {
-                length: addresses.length,
-                billboard: first.billboard,
-                depthTest: first.depthTest,
-                coordinateOrigin: first.coordinateOrigin,
-                startIndices,
-                featureAddressesByPath: new Uint32Array(addresses),
-                offsetVectorsPx: offsetVectorValues,
-                offsetScaleThresholds: variableOffset
-                    ? new Float32Array(offsetScaleThresholds)
-                    : undefined,
-                attributes: {
-                    getPath: {
-                        value: new Float32Array(positions),
-                        size: 3
-                    },
-                    instanceColors: {
-                        value: new Uint8Array(colors),
-                        size: 4
-                    },
-                    instanceStrokeWidths: {
-                        value: new Float32Array(widths),
-                        size: 1
-                    },
-                    instanceOffsets: {
-                        value: offsetValues,
-                        size: 1
-                    },
-                    ...(offsetVectorValues
-                        ? {instanceVariableOffsets: {
-                            value: packVariablePathOffsetVectors(
-                                offsetVectorValues,
-                                startIndices,
-                                offsetScaleThresholds),
-                            size: 4
-                        }}
-                        : {}),
-                    ...(hasDashes
-                        ? {instanceDashArrays: {
-                            value: new Float32Array(dashes),
-                            size: 2
-                        }}
-                        : {})
-                }
-            }
-        };
-    }
-
-    private mergePointContributions(
-        raw: ReadonlyMap<string, unknown>
-    ): SharedPrimitiveContribution<DeckPointData> | null {
-        const contributions = [...raw.values()] as Array<
-            SharedPrimitiveContribution<DeckPointData>>;
-        if (!contributions.length) {
-            return null;
-        }
-        const picks = this.arenaPickTable(contributions);
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const radii: number[] = [];
-        const addresses: number[] = [];
-        for (const contribution of contributions) {
-            const data = contribution.data;
-            this.appendValues(positions, data.attributes.getPosition.value);
-            this.appendValues(colors, data.attributes.getFillColor.value);
-            this.appendValues(radii, data.attributes.getRadius.value);
-            for (const address of data.featureAddresses) {
-                addresses.push(picks.remap(contribution, address));
-            }
-        }
-        const first = contributions[0].data;
-        return {
-            pickResolver: picks.resolve,
-            data: {
-                length: addresses.length,
-                billboard: first.billboard,
-                depthTest: first.depthTest,
-                coordinateOrigin: first.coordinateOrigin,
-                featureAddresses: new Uint32Array(addresses),
-                attributes: {
-                    getPosition: {
-                        value: new Float32Array(positions),
-                        size: 3
-                    },
-                    getFillColor: {
-                        value: new Uint8Array(colors),
-                        size: 4
-                    },
-                    getRadius: {
-                        value: new Float32Array(radii),
-                        size: 1
-                    }
-                }
-            }
-        };
-    }
-
-    private arenaPickTable<T>(
-        contributions: Array<SharedPrimitiveContribution<T>>
-    ): {
-        remap: (
-            contribution: SharedPrimitiveContribution<T>,
-            localAddress: number
-        ) => number;
-        resolve: PickResolver;
-    } {
-        const entries: Array<{
-            resolver: PickResolver;
-            localAddress: number;
-        }> = [];
-        const byContribution = new Map<
-            SharedPrimitiveContribution<T>,
-            Map<number, number>>();
-        return {
-            remap: (contribution, localAddress) => {
-                if (localAddress === UNSELECTABLE) {
-                    return UNSELECTABLE;
-                }
-                let addresses = byContribution.get(contribution);
-                if (!addresses) {
-                    addresses = new Map();
-                    byContribution.set(contribution, addresses);
-                }
-                const existing = addresses.get(localAddress);
-                if (existing !== undefined) {
-                    return existing;
-                }
-                const mapped = entries.length;
-                entries.push({
-                    resolver: contribution.pickResolver,
-                    localAddress
-                });
-                addresses.set(localAddress, mapped);
-                return mapped;
-            },
-            resolve: mappedAddress => {
-                const entry = entries[mappedAddress];
-                return entry
-                    ? entry.resolver(entry.localAddress)
-                    : [];
-            }
-        };
-    }
-
-    private appendValues(
-        target: number[],
-        source: ArrayLike<number>
-    ): void {
-        for (let index = 0; index < source.length; ++index) {
-            target.push(Number(source[index]));
-        }
-    }
-
-    private arenaGroupKey(
-        kind: string,
-        depthTest: boolean,
-        billboard: boolean,
-        origin: [number, number, number]
-    ): string {
-        return [
-            "subset-arena",
-            encodeURIComponent(this.owner.ownerId),
-            `view-${this.viewIndex}`,
-            kind,
-            billboard ? "billboard" : "world",
-            depthTest ? "depth" : "overlay",
-            origin.map(value => value.toPrecision(15)).join(",")
-        ].join("/");
-    }
-
-    private trackArenaRegistration(
-        arena: DeckRenderBufferArena,
-        groupKey: string,
-        sourceId: string,
-        desired: Set<string>
-    ): void {
-        const key = `${groupKey}\n${sourceId}`;
-        const previous = this.arenaRegistrations.get(key);
-        if (previous && previous.arena !== arena) {
-            previous.arena.remove(previous.groupKey, previous.sourceId);
-        }
-        this.arenaRegistrations.set(key, {arena, groupKey, sourceId});
-        desired.add(key);
-    }
-
-    private reconcileArena(desired: ReadonlySet<string>): void {
-        for (const [key, registration] of [...this.arenaRegistrations]) {
-            if (desired.has(key)) {
-                continue;
-            }
-            registration.arena.remove(
-                registration.groupKey,
-                registration.sourceId
-            );
-            this.arenaRegistrations.delete(key);
-        }
-    }
-
-    private removeArenaContributions(): void {
-        for (const registration of this.arenaRegistrations.values()) {
-            registration.arena.remove(
-                registration.groupKey,
-                registration.sourceId
-            );
-        }
-        this.arenaRegistrations.clear();
     }
 
     /** Adds one labeled WGS84 rectangle for the actual rendered block. */
@@ -1989,51 +1191,32 @@ export class TileSubsetLayerVisualization {
                 order,
                 source.origin,
                 layerId => kind === "path"
-                    ? this.pathLayer(
+                    ? createTileSubsetPathLayer(
                         layerId,
                         mask as DeckPathData,
                         noPick,
                         source.modelMatrix,
                         maskInteraction)
                     : kind === "arrow"
-                        ? new IconLayer<DeckArrowMarker>({
-                            id: layerId,
-                            data: mask as DeckArrowMarker[],
-                            coordinateSystem:
-                                COORDINATE_SYSTEM.METER_OFFSETS,
-                            coordinateOrigin: source.origin,
-                            iconAtlas: ARROW_ICON_ATLAS,
-                            iconMapping: ARROW_ICON_MAPPING,
-                            getIcon: () => "arrowhead",
-                            getPosition: (marker: DeckArrowMarker) =>
-                                marker.position,
-                            getSize: (marker: DeckArrowMarker) => marker.sizePx,
-                            sizeUnits: "pixels",
-                            getAngle: (marker: DeckArrowMarker) =>
-                                marker.angleDeg,
-                            getPixelOffset: (marker: DeckArrowMarker) =>
-                                marker.pixelOffset,
-                            getLocalPixelOffset:
-                                (marker: DeckArrowMarker) =>
-                                    marker.localPixelOffset,
-                            getColor: () => [255, 255, 255, 255],
-                            extensions: [
-                                new DeckLocalPixelOffsetExtension()
-                            ],
-                            billboard: (data as DeckPathData).billboard,
-                            modelMatrix: source.modelMatrix,
-                            parameters: MASK_NO_DEPTH_PARAMETERS,
-                            pickable: true,
-                            alphaCutoff: 0.05
-                        } as any)
+                        ? createTileSubsetArrowLayer(
+                            layerId,
+                            data as DeckPathData,
+                            mask as DeckArrowMarker[],
+                            noPick,
+                            source.modelMatrix,
+                            maskInteraction,
+                            {
+                                parameters: MASK_NO_DEPTH_PARAMETERS,
+                                getColor: () => [255, 255, 255, 255]
+                            })
                     : kind === "point"
-                        ? this.pointLayer(
+                        ? createTileSubsetPointLayer(
                             layerId,
                             mask as DeckPointData,
                             noPick,
                             source.modelMatrix,
                             maskInteraction)
-                        : this.surfaceLayer(
+                        : createTileSubsetSurfaceLayer(
                             layerId,
                             mask as DeckSurfaceData,
                             noPick,
@@ -2237,7 +1420,7 @@ export class TileSubsetLayerVisualization {
                         overlay.effect,
                         overlay.order + 1,
                         source.origin,
-                        layerId => this.pathLayer(
+                        layerId => createTileSubsetPathLayer(
                             layerId,
                             mask,
                             noPick,
@@ -2267,7 +1450,7 @@ export class TileSubsetLayerVisualization {
                     path.depthTest);
                 registry.upsert(
                     key,
-                    this.pathLayer(
+                    createTileSubsetPathLayer(
                         key,
                         {...main, depthTest: false},
                         noPick,
@@ -2306,7 +1489,7 @@ export class TileSubsetLayerVisualization {
                         overlay.effect,
                         overlay.order + 1,
                         source.origin,
-                        layerId => this.pointLayer(
+                        layerId => createTileSubsetPointLayer(
                             layerId,
                             mask,
                             noPick,
@@ -2336,7 +1519,7 @@ export class TileSubsetLayerVisualization {
                     point.depthTest);
                 registry.upsert(
                     key,
-                    this.pointLayer(
+                    createTileSubsetPointLayer(
                         key,
                         {...main, depthTest: false},
                         noPick,
@@ -2377,7 +1560,7 @@ export class TileSubsetLayerVisualization {
                         overlay.effect,
                         overlay.order + 1,
                         source.origin,
-                        layerId => this.surfaceLayer(
+                        layerId => createTileSubsetSurfaceLayer(
                             layerId,
                             mask,
                             noPick,
