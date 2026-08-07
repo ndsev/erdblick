@@ -1148,6 +1148,33 @@ TEST_CASE("FeatureInspection keeps attributes in model layers with source data r
             .find("SourceData-RoadRulesLayer-9") != std::string::npos);
 }
 
+TEST_CASE("FeatureInspection attaches nested source references to their object", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    auto category = tile->newObject(2, true);
+    REQUIRE(category->addField("catId", tile->newValue(int64_t{17})).has_value());
+    REQUIRE(category->addField(
+        "_sourceData",
+        makeInspectionSourceDataRefs(*tile, "SourceData-Classic-poiCategoryTable", 32))
+        .has_value());
+    auto attr = feature->attributeLayers()->newLayer("Categories")
+        ->newAttribute("category");
+    REQUIRE(attr->addField("resolved", category).has_value());
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* resolved = findInspectionNodeByKey(*inspection, "resolved");
+    REQUIRE(resolved);
+    REQUIRE(resolved->contains("sourceDataReferences"));
+    REQUIRE(
+        resolved->at("sourceDataReferences").at(0)
+            .value("mapTileKey", std::string{})
+            .find("SourceData-Classic-poiCategoryTable") != std::string::npos);
+    REQUIRE_FALSE(findInspectionDirectChildByKey(*resolved, "_sourceData"));
+}
+
 TEST_CASE("FeatureInspection copies relation search paths", "[erdblick.inspection]")
 {
     auto tile = std::make_shared<mapget::TileFeatureLayer>(

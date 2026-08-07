@@ -1571,6 +1571,13 @@ void InspectionConverter::convertField(
         convertRelation(fieldName, path, relation, relationIndexFor(relation));
         return;
     }
+    if (value->addr().column()
+        == TileFeatureLayer::ColumnId::SourceDataReferenceCollections) {
+        convertSourceDataReferences(
+            tile_->resolve<SourceDataReferenceCollection>(*value),
+            *current_);
+        return;
+    }
 
     auto fieldScope = push(fieldName, path);
     bool isArray = false;
