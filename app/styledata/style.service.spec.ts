@@ -105,11 +105,11 @@ describe('StyleService', () => {
             ...args: unknown[]
         ) => {
             const source = String(args[0] ?? '');
-            return [[{
+            return [{
                 name: () => source.match(/^name:\s*(.*)$/m)?.[1] ?? 'TestStyle',
                 defaultEnabled: () => true,
                 delete: vi.fn(),
-            } as any], []];
+            } as any, []];
         });
         vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
 
