@@ -3,7 +3,8 @@ import {describe, expect, it, vi} from "vitest";
 import {
     DeckTileGltfAssetStore,
     type DeckTileGltfAsset,
-    type DeckTileGltfAttachmentSource
+    type DeckTileGltfAttachmentSource,
+    type DeckTileGltfProcessed
 } from "./deck-tile-gltf-asset";
 
 function fixture() {
@@ -21,7 +22,7 @@ function fixture() {
         sceneCount: 1,
         modelNodeCount: 1,
         nodeRootCount: 1,
-        processedGltf: {},
+        processedGltf: {} as DeckTileGltfProcessed,
         destroy: vi.fn()
     };
     return {source, asset};

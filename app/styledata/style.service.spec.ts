@@ -101,11 +101,16 @@ describe('StyleService', () => {
         const {service, httpClient} = createService(config);
         httpClient.get.mockReturnValue(of('name: TestStyle\nrules: []'));
         httpClient.put.mockReturnValue(of('Static file updated.'));
-        vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((source: string) => [{
-            name: () => source.match(/^name:\s*(.*)$/m)?.[1] ?? 'TestStyle',
-            defaultEnabled: () => true,
-            delete: vi.fn(),
-        } as any, []]);
+        vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((
+            ...args: unknown[]
+        ) => {
+            const source = String(args[0] ?? '');
+            return [[{
+                name: () => source.match(/^name:\s*(.*)$/m)?.[1] ?? 'TestStyle',
+                defaultEnabled: () => true,
+                delete: vi.fn(),
+            } as any], []];
+        });
         vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
 
         await service.initializeStyles();
