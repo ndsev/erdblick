@@ -2584,6 +2584,10 @@ void TileSubsetLayerRenderer::appendLabel(
             return;
         }
     }
+    auto fillColor = rule.labelColor();
+    fillColor.a *= rule.labelOpacity();
+    auto outlineColor = rule.labelOutlineColor();
+    outlineColor.a *= rule.labelOpacity();
     auto params = JsValue::Dict({
         {"featureAddress", JsValue(pick)},
         {"position", JsValue::Dict({
@@ -2592,17 +2596,19 @@ void TileSubsetLayerRenderer::appendLabel(
             {"z", JsValue(point.z)},
         })},
         {"text", JsValue(text)},
-        {"fillColor", rgbaBytes(rule.labelColor())},
-        {"outlineColor", rgbaBytes(rule.labelOutlineColor())},
+        {"fillColor", rgbaBytes(fillColor)},
+        {"outlineColor", rgbaBytes(outlineColor)},
         {"outlineWidth", JsValue(rule.labelOutlineWidth())},
         {"scale", JsValue(rule.labelScale())},
         {"billboard", JsValue(rule.billboard().value_or(true))},
         {"depthTest", JsValue(rule.depthTest())},
     });
     if (rule.showBackground()) {
+        auto backgroundColor = rule.labelBackgroundColor();
+        backgroundColor.a *= rule.labelOpacity();
         params.set(
             "backgroundColor",
-            rgbaBytes(rule.labelBackgroundColor()));
+            rgbaBytes(backgroundColor));
         params.set(
             "backgroundPadding",
             JsValue::List({

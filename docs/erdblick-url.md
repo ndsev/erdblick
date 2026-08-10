@@ -30,6 +30,8 @@ State written from server defaults is tracked as config-owned in browser storage
 
 The URL is pruned automatically so stale maps, styles, panels, and view entries do not accumulate across longer sessions.
 
+Saved search-style configurations and their generated YAML projections are browser-local storage, not URL state. Sharing a viewer URL therefore does not transfer entries from the **Search Styles** tab; export the generated YAML when it needs to move between browser profiles.
+
 ## URL Parameters Reference
 
 The table below lists all query parameters used by erdblick when encoding or restoring UI state.

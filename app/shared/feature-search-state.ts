@@ -6,6 +6,8 @@ export interface FeatureSearchRuleFilter {
     field: string;
     op: string;
     value?: unknown;
+    /** Whether `field` is a SIMFIL expression rather than a schema field path. */
+    customExpression?: boolean;
 }
 
 export interface FeatureSearchColorStop {
@@ -22,8 +24,8 @@ export type FeatureSearchGeometryKind = "any" | "point" | "line" | "surface" | "
 
 export type FeatureSearchColorMode =
     | {mode: "solid"; color: string}
-    | {mode: "gradient"; field: string; stops: FeatureSearchColorStop[]; fallbackColor?: string}
-    | {mode: "categories"; field: string; stops: FeatureSearchColorStop[]; fallbackColor?: string};
+    | {mode: "gradient"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string}
+    | {mode: "categories"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string};
 
 export interface FeatureSearchStyleRule {
     name?: string;
@@ -67,6 +69,10 @@ export interface FeatureSearchStateEntry {
     selectedTileLevels: number[];
     selectedViewIndices: number[];
     searchStyleRules: FeatureSearchStyleRule[];
+    /** Optional provenance only; applied configuration rules are always detached copies. */
+    searchStyleConfigurationId?: string;
+    /** Revision of the configuration when it was last applied to this search. */
+    searchStyleConfigurationRevision?: number;
     renderStrategy: FeatureSearchRenderStrategy;
 }
 
@@ -192,7 +198,8 @@ function normalizeRuleFilters(value: unknown): FeatureSearchRuleFilter[] {
         return [{
             field,
             op,
-            ...("value" in raw ? {value: raw["value"]} : {})
+            ...("value" in raw ? {value: raw["value"]} : {}),
+            ...(normalizeBoolean(raw["customExpression"], false) ? {customExpression: true} : {})
         }];
     });
 }
@@ -316,6 +323,7 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
             return {
                 mode,
                 field: normalizeString(color["field"]) ?? "",
+                ...(normalizeBoolean(color["customField"], false) ? {customField: true} : {}),
                 stops: normalizeColorStops(color["stops"]),
                 ...(normalizeString(color["fallbackColor"])
                     ? {fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR)}
@@ -400,7 +408,8 @@ export function normalizeFeatureSearchRenderStrategy(value: unknown): FeatureSea
     };
 }
 
-function normalizeStyleRule(value: unknown): FeatureSearchStyleRule | null {
+/** Normalizes one high-fidelity search style rule for persistence or rendering. */
+export function normalizeFeatureSearchStyleRule(value: unknown): FeatureSearchStyleRule | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return null;
     }
@@ -429,6 +438,17 @@ function normalizeStyleRule(value: unknown): FeatureSearchStyleRule | null {
     };
 }
 
+/** Normalizes and deep-copies a bounded list of high-fidelity search style rules. */
+export function normalizeFeatureSearchStyleRules(value: unknown): FeatureSearchStyleRule[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .slice(0, MAX_STYLE_RULES_PER_SEARCH)
+        .map(normalizeFeatureSearchStyleRule)
+        .filter((rule): rule is FeatureSearchStyleRule => !!rule);
+}
+
 export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchStateEntry | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return null;
@@ -440,12 +460,9 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
     }
     const id = normalizeString(raw["id"]) ?? createFeatureSearchId();
     const selectedMapLayers = normalizeSearchMapLayerRefs(raw["selectedMapLayers"]);
-    const styleRules = Array.isArray(raw["searchStyleRules"])
-        ? raw["searchStyleRules"]
-            .slice(0, MAX_STYLE_RULES_PER_SEARCH)
-            .map(normalizeStyleRule)
-            .filter((rule): rule is FeatureSearchStyleRule => !!rule)
-        : [];
+    const styleRules = normalizeFeatureSearchStyleRules(raw["searchStyleRules"]);
+    const searchStyleConfigurationId = normalizeString(raw["searchStyleConfigurationId"]);
+    const searchStyleConfigurationRevision = normalizePositiveNumber(raw["searchStyleConfigurationRevision"], 1);
     return {
         id,
         query,
@@ -462,6 +479,10 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         selectedTileLevels: normalizeFeatureSearchTileLevels(raw["selectedTileLevels"]),
         selectedViewIndices: normalizeSearchViewIndices(raw["selectedViewIndices"]),
         searchStyleRules: styleRules,
+        ...(searchStyleConfigurationId ? {searchStyleConfigurationId} : {}),
+        ...(searchStyleConfigurationId && searchStyleConfigurationRevision !== undefined
+            ? {searchStyleConfigurationRevision: Math.floor(searchStyleConfigurationRevision)}
+            : {}),
         renderStrategy: normalizeFeatureSearchRenderStrategy(raw["renderStrategy"])
     };
 }

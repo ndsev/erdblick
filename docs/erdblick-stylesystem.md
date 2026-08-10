@@ -30,9 +30,21 @@ sheet in the editor.
 
 YAML style sheets are persistent project-wide rules loaded from the bundle,
 deployment configuration, additional style locations, or browser-imported
-YAML. Search result styles belong to one feature-search session and are stored
-with its search state. Both use the same rendering primitives and SIMFIL
-expression model.
+YAML. Search result rules can belong to one feature-search session or be saved
+as reusable JSON configurations. Both use the same rendering primitives and
+SIMFIL expression model.
+
+The **Search Styles** tab reflects those saved configurations and maintains a
+separate canonical YAML projection for each one. Valid configurations produce
+native-parser-valid, exportable projections; invalid conversion or parser
+results remain visible as diagnostics and cannot be exported. Act 1 does not
+add them to the active renderer style map. They have `default: false` and intentionally omit map,
+layer, query, and explicit scope constraints. Optional per-rule `mapLayers`
+hints exist only in the JSON configuration and search runtime.
+
+Generated YAML is not edited in place. **Copy to editor** creates a uniquely
+named transient copy. Saving it registers a normal browser-imported style;
+the generated source and its JSON configuration stay unchanged.
 
 ## Document shape
 
@@ -176,7 +188,7 @@ Common primitive fields include:
 - `arrow` / `arrow-expression`;
 - outline color/width;
 - icon URL/expression;
-- label text/expression, font, color, outline, background, padding, origin,
+- label text/expression, font, color, `label-opacity`, outline, background, padding, origin,
   pixel offset, and height reference.
 
 Literal values are resolved without projection. Every expression-backed field

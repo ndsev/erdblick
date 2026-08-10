@@ -469,6 +469,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse option to have a label background color.
         labelColor_ = Color(yaml["label-color"].as<std::string>()).toFVec4();
     }
+    if (yaml["label-opacity"].IsDefined()) {
+        labelOpacity_ = yaml["label-opacity"].as<float>();
+    }
     if (yaml["label-outline-color"].IsDefined()) {
         // Parse option to have a label background color.
         labelOutlineColor_ = Color(yaml["label-outline-color"].as<std::string>()).toFVec4();
@@ -1136,6 +1139,11 @@ std::string const& FeatureStyleRule::labelFont() const
 glm::fvec4 const& FeatureStyleRule::labelColor() const
 {
     return labelColor_;
+}
+
+float FeatureStyleRule::labelOpacity() const
+{
+    return labelOpacity_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const

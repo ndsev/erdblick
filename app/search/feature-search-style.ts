@@ -45,7 +45,7 @@ export function compileFeatureSearchStyle(
     const sourceObject = {
         name: `Search/${definition.id}/${mapgetLayer.mapId}/${mapgetLayer.layerId}`,
         version: 2,
-        rules: [syntheticSearchRule(
+        rules: [buildFeatureSearchSyntheticRule(
             applicableRules,
             definition.concreteScope)]
     };
@@ -122,14 +122,16 @@ export function compileFeatureSearchStyle(
     };
 }
 
-function syntheticSearchRule(
+/** Builds the native rule tree shared by runtime compilation and canonical exports. */
+export function buildFeatureSearchSyntheticRule(
     rules: readonly FeatureSearchStyleRule[],
-    scope: "feature" | "attribute"
+    scope: "feature" | "attribute",
+    includeScope = true
 ): Record<string, unknown> {
-    const base: Record<string, unknown> = {
-        scope,
-        geometry: allGeometryTypes()
-    };
+    const base: Record<string, unknown> = {geometry: allGeometryTypes()};
+    if (includeScope) {
+        base["scope"] = scope;
+    }
     if (!rules.length) {
         // Keep the list channel complete while rendering no map contribution.
         base[scope === "attribute" ? "attribute-filter" : "filter"] = "false";
@@ -145,6 +147,7 @@ function searchRule(
     scope: "feature" | "attribute"
 ): Record<string, unknown> {
     const label = rule.geometry === "label";
+    const opacity = clamp(Number(rule.opacity ?? 1), 0, 1);
     const result: Record<string, unknown> = {
         geometry: geometryTypes(rule.geometry),
         width: label
@@ -153,7 +156,7 @@ function searchRule(
                 rule.geometry === "point"
                     ? rule.pointRadius ?? rule.width ?? 4
                     : rule.width ?? 4)),
-        opacity: label ? 0 : clamp(Number(rule.opacity ?? 1), 0, 1)
+        opacity: label ? 0 : opacity
     };
     const filter = conjunction(rule.filter);
     if (filter) {
@@ -163,11 +166,11 @@ function searchRule(
     if (label && rule.labelExpression?.trim()) {
         result["label-text-expression"] = rule.labelExpression.trim();
         result["label-color"] = labelColor(rule.color);
+        result["label-opacity"] = opacity;
         result["label-scale"] = Math.max(0.1, Number(rule.width ?? 22) / 14);
-        result["label-outline-color"] = "#ffffffdc";
+        result["label-outline-color"] = "#ffffff";
         result["label-outline-width"] = 2;
-        result["label-background-color"] =
-            rule.labelBackgroundColor ?? "#111827";
+        result["label-background-color"] = rule.labelBackgroundColor ?? "#111827";
         result["label-background-padding"] = [2, 2];
         result["billboard"] = true;
         result["depth-test"] = false;
@@ -203,6 +206,9 @@ function conjunction(filters: readonly FeatureSearchRuleFilter[]): string {
 /** Build SIMFIL without interpolating unescaped string/regex literals. */
 function filterExpression(filter: FeatureSearchRuleFilter): string {
     const field = filter.field.trim();
+    if (filter.customExpression) {
+        return field;
+    }
     const literal = simfilLiteral(filter.value);
     switch (filter.op) {
         case "=":

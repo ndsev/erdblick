@@ -1537,6 +1537,34 @@ rules:
         "lod"));
 }
 
+TEST_CASE("FeatureLayerStyle parses and validates label opacity", "[erdblick.style]")
+{
+    auto valid = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: LabelOpacity
+version: 2
+rules:
+  - geometry: point
+    label-text: label
+    label-opacity: 0.35
+)yaml"));
+    REQUIRE(valid.isValid());
+    REQUIRE(valid.rules().size() == 1);
+    REQUIRE(std::abs(valid.rules().front().labelOpacity() - 0.35f) < 1e-6f);
+
+    auto invalid = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: InvalidLabelOpacity
+version: 2
+rules:
+  - geometry: point
+    label-text: label
+    label-opacity: 2
+)yaml"));
+    REQUIRE_FALSE(invalid.isValid());
+    REQUIRE(reportHasProperty(
+        nlohmann::json(invalid.validationReport()),
+        "label-opacity"));
+}
+
 TEST_CASE("Bundled styles pass native style validation", "[erdblick.style]")
 {
     auto const stylesDirectory =

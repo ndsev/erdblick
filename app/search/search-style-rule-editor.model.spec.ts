@@ -1,0 +1,53 @@
+import {describe, expect, it} from "vitest";
+
+import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
+
+describe("SearchStyleRuleDraftCodec", () => {
+    it("round-trips high-fidelity geometry, point radius, applicability and expression intent", () => {
+        const codec = new SearchStyleRuleDraftCodec();
+        const rules = [{
+            geometry: "mesh" as const,
+            filter: [{
+                field: "speed * 2 > 10",
+                op: "=",
+                value: true,
+                customExpression: true
+            }],
+            color: {
+                mode: "categories" as const,
+                field: "kind ?? 'unknown'",
+                customField: true,
+                stops: [{value: "road", color: "#abcdef"}]
+            },
+            mapLayers: [{mapId: "source map", layerId: "source layer"}],
+            width: 3,
+            pointRadius: 11,
+            opacity: 0.35
+        }];
+
+        const roundTrip = codec.fromDrafts(codec.toDrafts(rules));
+
+        expect(roundTrip[0]).toMatchObject({
+            geometry: "mesh",
+            width: 3,
+            pointRadius: 11,
+            opacity: 0.35,
+            mapLayers: [{mapId: "source map", layerId: "source layer"}]
+        });
+        expect(roundTrip[0].filter[0].customExpression).toBe(true);
+        expect(roundTrip[0].color).toMatchObject({customField: true});
+    });
+
+    it("does not invent a point radius for a rule that never stored one", () => {
+        const codec = new SearchStyleRuleDraftCodec();
+        const roundTrip = codec.fromDrafts(codec.toDrafts([{
+            geometry: "line",
+            filter: [],
+            color: {mode: "solid", color: "#123456"},
+            width: 4,
+            opacity: 1
+        }]));
+
+        expect(roundTrip[0]).not.toHaveProperty("pointRadius");
+    });
+});

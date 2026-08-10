@@ -208,6 +208,8 @@ public:
     [[nodiscard]] std::string const& labelFont() const;
     /** Return the label fill color. */
     [[nodiscard]] glm::fvec4 const& labelColor() const;
+    /** Return the opacity multiplier applied to every label material color. */
+    [[nodiscard]] float labelOpacity() const;
     /** Return the label outline color. */
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     /** Return the label outline width. */
@@ -321,6 +323,7 @@ private:
     // Labels' rules
     std::string labelFont_ = "24px Helvetica";
     glm::fvec4 labelColor_{1., 1., 1., 1.};
+    float labelOpacity_ = 1.0f;
     glm::fvec4 labelOutlineColor_{.0, .0, .0, .1};
     float labelOutlineWidth_ = .1;
     bool showBackground_ = false;

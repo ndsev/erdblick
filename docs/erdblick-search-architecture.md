@@ -105,6 +105,42 @@ When multiple search predicates need to participate in presentation, the
 generator uses a synthetic `all-of` wrapper. This keeps one top-level channel
 while retaining the rule tree used by the ordinary renderer.
 
+## Reusable search styles
+
+Reusable search styles have two deliberately separate persisted forms:
+
+1. `searchStyleConfigurations` is a versioned, storage-only `AppState`. Each
+   configuration owns an ID, revision, name, timestamps, and normalized
+   high-fidelity rules. It never owns a query, search scope, selected search
+   layers, result views, or density/render-strategy controls.
+2. `searchGeneratedStyleData` is StyleService's separate collection of
+   canonical YAML projections. These sheets are parsed through
+   `FeatureLayerStyle` but are not inserted into the active `styles` map in
+   Act 1.
+
+Applying a configuration copies its normalized rules into the target search.
+The search stores optional ID/revision provenance for UI feedback, but the
+copied rules are not linked: any local edit clears that provenance and cannot
+mutate the source configuration. The JSON rules retain per-rule `mapLayers`
+hints for search-runtime applicability.
+
+`search-style-sheet.converter.ts` deterministically emits one version-2 sheet
+per configuration. It sets `default: false`, omits top-level `layer` and
+`scope`, includes every configured rule, and does not serialize `mapLayers`.
+Omitted scope intentionally uses the native feature default; attribute
+projection for generated-sheet rendering belongs to Act 2. Runtime search
+compilation remains scope-aware and continues to filter per-rule layer hints
+against the concrete search target.
+
+Canonical conversion rejects unsupported operators and non-scalar rule values
+instead of coercing them. Native-invalid projections retain a diagnostic entry
+but cannot be exported or copied as a canonical style.
+
+The Search Styles UI may export canonical YAML directly. Its copy-to-edit
+flow rewrites the copy to a unique style name and opens a transient editor
+session. Saving that session enters the existing imported-style lifecycle;
+there is no reverse YAML-to-configuration update path.
+
 ## Result identity
 
 Each search session owns a stable presentation instance ID. Definition,

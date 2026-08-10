@@ -24,18 +24,22 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 import {StyleValidationReportService} from "./style-validation-report.service";
 import {StyleValidationIssue, StyleValidationReport} from "./style-validation.model";
 import {StyleEditorRequestService} from "./style-editor-request.service";
+import {dump, load} from "js-yaml";
+import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
 
 
 @Component({
     selector: 'style-panel',
     template: `
         <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="stylesDialogVisible"
-                  [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
+                  [modal]="false" [style]="{ 'min-width': 'min(38em, calc(100vw - 1em))', 'width': 'min(72em, 92vw)' }"
+                  #styles [closeOnEscape]="false"
                   [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
                   (onShow)="onStylesDialogShow()">
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
+                    <p-tab value="search-styles">Search Styles</p-tab>
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -156,6 +160,9 @@ import {StyleEditorRequestService} from "./style-editor-request.service";
                             }
                         </div>
                     </p-tabpanel>
+                    <p-tabpanel value="search-styles">
+                        <search-styles (copyToEdit)="openGeneratedStyleCopy($event)"></search-styles>
+                    </p-tabpanel>
                     <p-tabpanel value="errors">
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
                             <div class="style-errors-tab">
@@ -243,8 +250,9 @@ import {StyleEditorRequestService} from "./style-editor-request.service";
             <editor [sessionId]="styleEditorSessionId"></editor>
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
-                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
-                              [disabled]="!sourceWasModified"></p-button>
+                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()"
+                              [label]="styleEditorImportDraft ? 'Import copy' : 'Apply'" icon="pi pi-check"
+                              [disabled]="!styleEditorImportDraft && !sourceWasModified"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
@@ -255,7 +263,8 @@ import {StyleEditorRequestService} from "./style-editor-request.service";
                 </div>
                 <div class="editor-actions-right">
                     <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
-                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId" label="Export" icon="pi pi-file-export">
+                              [disabled]="styleEditorImportDraft || sourceWasModified || !stateService.styleEditorTargetId"
+                              label="Export" icon="pi pi-file-export">
                     </p-button>
                     <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
@@ -362,6 +371,8 @@ export class StyleComponent implements OnDestroy {
     styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
     private styleEditorOriginalSource: string = '';
+    styleEditorImportDraft = false;
+    private styleEditorImportDraftId = '';
     stylesCollapsed: boolean = false;
     styleCompareDialogVisible: boolean = false;
     styleCompareLeftModified: boolean = false;
@@ -377,7 +388,7 @@ export class StyleComponent implements OnDestroy {
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly styleEditorRequestSubscription: Subscription;
-    stylesDialogTab: 'styles' | 'errors' = 'styles';
+    stylesDialogTab: 'styles' | 'search-styles' | 'errors' = 'styles';
     styleIssueFilter: string = '';
     styleErrorsOnly: boolean = false;
     styleValidationDialogVisible: boolean = false;
@@ -593,7 +604,9 @@ export class StyleComponent implements OnDestroy {
         if (sameEditorSession) {
             return true;
         }
-        if (this.styleEditorVisible && this.sourceWasModified && currentTargetId && currentTargetId !== styleId) {
+        if (this.styleEditorVisible
+            && (this.sourceWasModified || this.styleEditorImportDraft)
+            && currentTargetId !== styleId) {
             this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
             return false;
         }
@@ -609,12 +622,37 @@ export class StyleComponent implements OnDestroy {
     applyEditedStyle() {
         const styleId = this.stateService.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
-        if (!styleId) {
+        if (!styleId && !this.styleEditorImportDraft) {
             this.messageService.showError(`No cached style ID found!`);
             return;
         }
         if (!styleData) {
-            this.messageService.showError(`Cannot apply an empty style definition to style: ${styleId}!`);
+            this.messageService.showError(`Cannot apply an empty style definition.`);
+            return;
+        }
+        if (this.styleEditorImportDraft) {
+            const report = this.styleService.validateStyleSource(
+                styleData,
+                this.styleService.createEditorSourceRef(this.styleEditorImportDraftId, styleData));
+            if (!report.valid) {
+                this.showValidationFailure(report);
+                return;
+            }
+            const importedStyleId = this.styleService.importStyleYamlSource(styleData);
+            if (!importedStyleId) {
+                this.messageService.showError("The edited copy could not be imported as a normal style.");
+                return;
+            }
+            this.styleEditorImportDraft = false;
+            this.styleEditorImportDraftId = '';
+            this.stateService.styleEditorTargetId = importedStyleId;
+            this.sourceWasModified = false;
+            this.styleEditorOriginalSource = styleData;
+            this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
+            this.messageService.showSuccess(`Imported style “${importedStyleId}”.`);
+            return;
+        }
+        if (!styleId) {
             return;
         }
         if (!this.styleService.styles.has(styleId)) {
@@ -679,6 +717,8 @@ export class StyleComponent implements OnDestroy {
         this.warningDialogVisible = false;
         this.sourceWasModified = false;
         this.stateService.styleEditorTargetId = null;
+        this.styleEditorImportDraft = false;
+        this.styleEditorImportDraftId = '';
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
@@ -687,7 +727,11 @@ export class StyleComponent implements OnDestroy {
     /** Recreates the editor session when a persisted style-editor dialog is restored on startup/import. */
     private ensureStyleEditorSession(): void {
         const targetStyleId = this.stateService.styleEditorTargetId;
-        if (!targetStyleId || this.editorService.hasSession(this.styleEditorSessionId)) {
+        if (this.editorService.hasSession(this.styleEditorSessionId)) {
+            return;
+        }
+        if (!targetStyleId) {
+            this.styleEditorVisible = false;
             return;
         }
         if (!this.prepareStyleEditorSession(targetStyleId)) {
@@ -703,7 +747,31 @@ export class StyleComponent implements OnDestroy {
         if (source === undefined) {
             return false;
         }
+        this.styleEditorImportDraft = false;
+        this.styleEditorImportDraftId = '';
         this.stateService.styleEditorTargetId = styleId;
+        return this.prepareStyleEditorSource(source);
+    }
+
+    /** Opens generated YAML as a transient copy whose save action creates a normal imported style. */
+    openGeneratedStyleCopy(request: SearchGeneratedStyleEditRequest): void {
+        if (this.styleEditorVisible && (this.sourceWasModified || this.styleEditorImportDraft)) {
+            this.messageService.showWarning('Discard or import the current style copy before opening another style.');
+            return;
+        }
+        const source = this.generatedStyleCopySource(request);
+        if (!source) {
+            return;
+        }
+        this.styleEditorImportDraft = true;
+        this.styleEditorImportDraftId = this.styleNameFromSource(source) ?? `${request.styleId} Copy`;
+        this.stateService.styleEditorTargetId = null;
+        this.prepareStyleEditorSource(source);
+        this.styleEditorVisible = true;
+    }
+
+    /** Creates a fresh editor session and installs common dirty/save tracking. */
+    private prepareStyleEditorSource(source: string): boolean {
         this.styleEditorOriginalSource = source.replace(/\n+$/, '');
         this.editorService.createSession({
             id: this.styleEditorSessionId,
@@ -723,6 +791,38 @@ export class StyleComponent implements OnDestroy {
         }) ?? new Subscription();
         this.sourceWasModified = false;
         return true;
+    }
+
+    /** Rewrites a generated sheet to a unique imported-style name without touching its source configuration. */
+    private generatedStyleCopySource(request: SearchGeneratedStyleEditRequest): string | undefined {
+        try {
+            const document = load(request.source);
+            if (!document || typeof document !== 'object' || Array.isArray(document)) {
+                throw new Error('Generated YAML has no stylesheet object.');
+            }
+            const record = document as Record<string, unknown>;
+            const baseName = `${request.styleId} Copy`;
+            let name = baseName;
+            let suffix = 2;
+            while (this.styleService.hasStyleIdentity(name)) {
+                name = `${baseName} ${suffix++}`;
+            }
+            record['name'] = name;
+            return dump(record, {noRefs: true, lineWidth: 120, sortKeys: false});
+        } catch (error) {
+            this.messageService.showError(`Could not prepare the generated stylesheet copy: ${String(error)}`);
+            return undefined;
+        }
+    }
+
+    /** Reads a top-level YAML stylesheet name for transient editor diagnostics. */
+    private styleNameFromSource(source: string): string | undefined {
+        const document = load(source);
+        if (!document || typeof document !== 'object' || Array.isArray(document)) {
+            return undefined;
+        }
+        const name = (document as Record<string, unknown>)['name'];
+        return typeof name === 'string' && name.trim() ? name.trim() : undefined;
     }
 
     /** Opens the style-definition documentation in a new browser tab. */

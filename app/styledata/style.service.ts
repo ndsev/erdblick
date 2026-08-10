@@ -6,7 +6,7 @@ import {
     map,
     firstValueFrom,
     BehaviorSubject,
-    catchError, Subject
+    catchError, Subject, Subscription
 } from "rxjs";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {
@@ -25,6 +25,13 @@ import {
     StyleValidationIssue,
     StyleValidationReport
 } from "./style-validation.model";
+import {SearchStyleConfigurationStateV1} from "../shared/search-style-configuration-state";
+import {
+    canonicalSearchStyleFilename,
+    canonicalSearchStyleId,
+    convertSearchStyleConfigurationToYaml,
+    GeneratedSearchStyleSheet
+} from "../search/search-style-sheet.converter";
 
 /** Original server-provided builtin style source kept for resets and comparisons. */
 interface BuiltinStyleBaseline {
@@ -85,6 +92,21 @@ export interface ErdblickStyleGroup extends Record<string, any> {
     expanded: boolean
 }
 
+/** Parsed canonical YAML projection kept outside the active renderer style map in Act 1. */
+export interface SearchGeneratedStyleSheet extends GeneratedSearchStyleSheet {
+    sourceHash: string;
+    featureLayerStyle?: FeatureLayerStyle;
+    options: FeatureStyleOptionWithStringType[];
+    valid: boolean;
+    report?: StyleValidationReport;
+    generationError?: string;
+}
+
+interface PersistedSearchGeneratedStyleSheet extends GeneratedSearchStyleSheet {
+    sourceHash: string;
+    generationError?: string;
+}
+
 /**
  * Central style repository for builtin and imported YAML styles.
  *
@@ -108,7 +130,12 @@ export class StyleService {
     styleAddedForId: Subject<string> = new Subject<string>();
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
+    readonly searchGeneratedStyles = new Map<string, SearchGeneratedStyleSheet>();
+    readonly searchGeneratedStylesState = new BehaviorSubject<SearchGeneratedStyleSheet[]>([]);
     private readonly builtinStyleBaselines = new Map<string, BuiltinStyleBaseline>();
+    private readonly searchGeneratedStyleStorageKey = 'searchGeneratedStyleData';
+    private searchStyleConfigurationSubscription?: Subscription;
+    private searchGeneratedStorageWarningShown = false;
 
     constructor(private httpClient: HttpClient,
                 private stateService: AppStateService,
@@ -144,10 +171,66 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
+        this.initializeSearchGeneratedStyles();
 
         if (this.styles.size) {
             this.reapplyStyles([...this.styles.keys()]);
         }
+    }
+
+    /** Reconciles and observes canonical search-generated YAML without registering it for rendering. */
+    initializeSearchGeneratedStyles(): void {
+        const configurationState = this.stateService.searchStyleConfigurationsState;
+        if (!configurationState) {
+            return;
+        }
+        this.reconcileSearchGeneratedStyles(configurationState.getValue());
+        if (!this.searchStyleConfigurationSubscription) {
+            this.searchStyleConfigurationSubscription = configurationState.subscribe(state => {
+                this.reconcileSearchGeneratedStyles(state);
+            });
+        }
+    }
+
+    /** Returns one generated canonical sheet by its configuration id. */
+    getSearchGeneratedStyle(configurationId: string): SearchGeneratedStyleSheet | undefined {
+        return this.searchGeneratedStyles.get(configurationId);
+    }
+
+    /** Downloads one canonical generated search stylesheet. */
+    exportSearchGeneratedStyleYamlFile(configurationId: string): boolean {
+        const generated = this.searchGeneratedStyles.get(configurationId);
+        return generated?.valid
+            ? this.downloadYamlSource(generated.source, generated.filename)
+            : false;
+    }
+
+    /** Registers validated source text as a normal imported style. */
+    importStyleYamlSource(styleData: string): string | undefined {
+        const sourceRef = this.createStyleSourceRef(styleData, "", undefined, false, true, false);
+        const report = this.validateStyleSource(styleData, sourceRef);
+        const styleId = report.source.styleName;
+        if (!report.valid || !styleId) {
+            return undefined;
+        }
+        if (this.hasStyleIdentity(styleId)) {
+            this.infoMessageService.showError(`A style named ${styleId} already exists.`);
+            return undefined;
+        }
+        const importedStyleId = this.initializeStyle(styleData, "", undefined, false, true);
+        if (!importedStyleId) {
+            return undefined;
+        }
+        ++this.importedStylesCount;
+        this.saveImportedStyles();
+        this.reapplyStyle(importedStyleId);
+        return importedStyleId;
+    }
+
+    /** Returns whether an ordinary or generated collection already owns a stylesheet identity. */
+    hasStyleIdentity(styleId: string): boolean {
+        return this.styles.has(styleId)
+            || [...this.searchGeneratedStyles.values()].some(generated => generated.styleId === styleId);
     }
 
     /** Normalizes a configured style URL against the config path. */
@@ -383,37 +466,7 @@ export class StyleService {
             return false;
         }
 
-        try {
-            // Ensure content.source is a string or convert to string if needed
-            const blobContent = content.source;
-            // Create a blob from the content
-            const blob = new Blob([blobContent], { type: 'application/x-yaml;charset=utf-8' });
-            // Create a URL for the blob
-            const url = window.URL.createObjectURL(blob);
-            // Check if URL creation was successful
-            if (!url) {
-                console.error('Failed to create object URL for the blob.');
-                return false;
-            }
-            // Create a temporary anchor tag to trigger the download.
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${styleId}.yaml`;
-            // Trigger the download.
-            const event = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true,
-            });
-            a.dispatchEvent(event);
-
-            // Revoke the blob URL to free up resources.
-            window.URL.revokeObjectURL(url);
-        } catch (e) {
-            console.error('Error while exporting YAML file:', e);
-            return false;
-        }
-        return true;
+        return this.downloadYamlSource(content.source, `${styleId}.yaml`);
     }
 
     /** Imports a YAML file, registers it as an imported style, and reapplies it. */
@@ -644,6 +697,145 @@ export class StyleService {
     /** Clears persisted builtin-style modifications. */
     clearStorageForBuiltinStyles() {
         localStorage.removeItem('builtinStyleData');
+    }
+
+    /** Clears the separately persisted canonical search-style YAML cache. */
+    clearStorageForSearchGeneratedStyles(): void {
+        localStorage.removeItem(this.searchGeneratedStyleStorageKey);
+    }
+
+    /** Rebuilds the separate generated collection from the authoritative configuration AppState. */
+    private reconcileSearchGeneratedStyles(state: SearchStyleConfigurationStateV1): void {
+        const next = new Map<string, SearchGeneratedStyleSheet>();
+        for (const configuration of state.configurations) {
+            let generated: GeneratedSearchStyleSheet;
+            try {
+                generated = convertSearchStyleConfigurationToYaml(configuration);
+            } catch (error) {
+                const generationError = error instanceof Error ? error.message : String(error);
+                const sourceHash = sipHash64Hex(`conversion-error:${generationError}`);
+                const previous = this.searchGeneratedStyles.get(configuration.id);
+                if (previous) {
+                    this.styleValidationReportService.clearForSource({sourceHash: previous.sourceHash});
+                }
+                next.set(configuration.id, {
+                    configurationId: configuration.id,
+                    configurationRevision: configuration.revision,
+                    styleId: canonicalSearchStyleId(configuration),
+                    filename: canonicalSearchStyleFilename(configuration),
+                    source: "",
+                    sourceHash,
+                    options: [],
+                    valid: false,
+                    generationError
+                });
+                if (previous) {
+                    this.erroredStyleIds.delete(previous.styleId);
+                }
+                continue;
+            }
+            const sourceHash = sipHash64Hex(generated.source);
+            const previous = this.searchGeneratedStyles.get(configuration.id);
+            if (previous?.styleId !== generated.styleId) {
+                this.erroredStyleIds.delete(previous?.styleId ?? '');
+            }
+            this.erroredStyleIds.delete(generated.styleId);
+            if (previous
+                && previous.configurationRevision === configuration.revision
+                && previous.sourceHash === sourceHash) {
+                next.set(configuration.id, previous);
+                continue;
+            }
+            if (previous) {
+                this.styleValidationReportService.clearForSource({sourceHash: previous.sourceHash});
+            }
+            const sourceRef: StyleSourceRef = {
+                configId: configuration.id,
+                styleName: generated.styleId,
+                sourceKind: 'search-generated',
+                sourceHash
+            };
+            const parsed = this.parseWasmStyle(generated.source, sourceRef);
+            if (!parsed) {
+                next.set(configuration.id, {
+                    ...generated,
+                    sourceHash,
+                    options: [],
+                    valid: false,
+                    report: this.lastValidationReport
+                });
+                continue;
+            }
+            const [featureLayerStyle, options, report] = parsed;
+            this.styleValidationReportService.recordReport(report, sourceRef);
+            next.set(configuration.id, {
+                ...generated,
+                sourceHash,
+                featureLayerStyle,
+                options,
+                valid: report.valid,
+                report
+            });
+        }
+        for (const [configurationId, previous] of this.searchGeneratedStyles) {
+            if (next.get(configurationId) !== previous) {
+                previous.featureLayerStyle?.delete?.();
+                if (!next.has(configurationId)) {
+                    this.erroredStyleIds.delete(previous.styleId);
+                    this.styleValidationReportService.clearForSource({sourceHash: previous.sourceHash});
+                }
+            }
+        }
+        this.searchGeneratedStyles.clear();
+        for (const [configurationId, generated] of next) {
+            this.searchGeneratedStyles.set(configurationId, generated);
+        }
+        const values = [...this.searchGeneratedStyles.values()];
+        this.searchGeneratedStylesState.next(values);
+        const persisted: PersistedSearchGeneratedStyleSheet[] = values.map(generated => ({
+            configurationId: generated.configurationId,
+            configurationRevision: generated.configurationRevision,
+            styleId: generated.styleId,
+            filename: generated.filename,
+            source: generated.source,
+            sourceHash: generated.sourceHash,
+            ...(generated.generationError ? {generationError: generated.generationError} : {})
+        }));
+        try {
+            localStorage.setItem(this.searchGeneratedStyleStorageKey, JSON.stringify(persisted));
+            this.searchGeneratedStorageWarningShown = false;
+        } catch (error) {
+            console.error('Could not persist generated search styles.', error);
+            if (!this.searchGeneratedStorageWarningShown) {
+                this.searchGeneratedStorageWarningShown = true;
+                this.infoMessageService.showWarning(
+                    'Generated search styles exceed available browser storage; saved JSON configurations remain authoritative.');
+            }
+        }
+    }
+
+    /** Triggers a browser download for YAML source text. */
+    private downloadYamlSource(source: string, filename: string): boolean {
+        try {
+            const blob = new Blob([source], {type: 'application/x-yaml;charset=utf-8'});
+            const url = window.URL.createObjectURL(blob);
+            if (!url) {
+                return false;
+            }
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = filename;
+            anchor.dispatchEvent(new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            }));
+            window.URL.revokeObjectURL(url);
+            return true;
+        } catch (error) {
+            console.error('Error while exporting YAML file:', error);
+            return false;
+        }
     }
 
     /** Validates style source text and records the resulting report. */

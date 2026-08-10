@@ -53,6 +53,7 @@ const completionsList = [
     {label: 'relation-merge-twoway', type: 'property'},
     {label: 'relation-merge-twoway', type: 'property'},
     {label: 'label-color', type: 'property'},
+    {label: 'label-opacity', type: 'property'},
     {label: 'label-outline-color', type: 'property'},
     {label: 'label-font', type: 'property'},
     {label: 'label-background-color', type: 'property'},

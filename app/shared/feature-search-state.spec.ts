@@ -42,6 +42,30 @@ describe("FeatureSearchState", () => {
         expect(entry.selectedTileLevels).toEqual([13, 15]);
     });
 
+    it("preserves explicit search-style expression intent and optional configuration provenance", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleConfigurationId: "saved-style",
+            searchStyleConfigurationRevision: 7,
+            searchStyleRules: [{
+                geometry: "mesh",
+                filter: [{field: "speed > 10", op: "=", value: true, customExpression: true}],
+                color: {
+                    mode: "gradient",
+                    field: "speed * 2",
+                    customField: true,
+                    stops: [{value: 1, color: "#123456"}]
+                }
+            }]
+        }]);
+
+        expect(entry.searchStyleConfigurationId).toBe("saved-style");
+        expect(entry.searchStyleConfigurationRevision).toBe(7);
+        expect(entry.searchStyleRules[0].geometry).toBe("mesh");
+        expect(entry.searchStyleRules[0].filter[0].customExpression).toBe(true);
+        expect(entry.searchStyleRules[0].color).toMatchObject({customField: true});
+    });
+
     it("defaults selected views from visible selected map layers", () => {
         const selectedMapLayers = [
             {mapId: "Classic", layerId: "Road"},

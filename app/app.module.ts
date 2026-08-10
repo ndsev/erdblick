@@ -29,6 +29,7 @@ import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
 import {SearchStyleColorComponent} from "./search/search-style-color.component";
+import {SearchStyleRuleEditorComponent} from "./search/search-style-rule-editor.component";
 import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
 import {FeatureSearchExportDialogComponent} from "./search/feature-search-export.dialog.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
@@ -93,6 +94,7 @@ import {ErdblickViewUIComponent} from "./mapview/view.ui.component";
 import {SelectButtonModule} from 'primeng/selectbutton';
 import {ChipModule} from "primeng/chip";
 import {StyleComponent} from "./styledata/style.component";
+import {SearchStylesComponent} from "./styledata/search-styles.component";
 import {MapViewContainerComponent} from "./mapview/view.container.component";
 import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
@@ -205,6 +207,7 @@ export const initializeServices = () => {
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         SearchStyleColorComponent,
+        SearchStyleRuleEditorComponent,
         FeatureSearchDialogsComponent,
         FeatureSearchExportDialogComponent,
         DatasourcesComponent,
@@ -219,6 +222,7 @@ export const initializeServices = () => {
         MainBarComponent,
         ErdblickViewUIComponent,
         StyleComponent,
+        SearchStylesComponent,
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,

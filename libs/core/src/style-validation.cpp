@@ -1160,6 +1160,7 @@ bool validateStyleRuleYamlImpl(
     }
 
     markInvalid(validateNumericRange(ruleYaml, "opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(ruleYaml, "label-opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
     markInvalid(readScalar<double>(ruleYaml, "lateral-offset", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "type", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "relation-type", rulePath, report, sourceRuleIndex));

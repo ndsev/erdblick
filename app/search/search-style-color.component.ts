@@ -66,7 +66,7 @@ import {
                         *
                     </button>
 
-                    @if (viewDraft.customField) {
+                    @if (viewDraft.customField || fieldOptions.length === 0) {
                         <simfil-expression-input class="search-style-color-field-input"
                                                  [value]="viewDraft.field"
                                                  (valueChange)="setCustomField($event)"
@@ -132,12 +132,14 @@ import {
                               [disabled]="!canSortGradientStops"
                               (click)="sortGradientStops()">
                     </p-button>
-                    <p-button icon="pi pi-database"
-                              label="Update from data"
-                              severity="secondary"
-                              [outlined]="true"
-                              (click)="updateStopsFromData()">
-                    </p-button>
+                    @if (canUpdateFromData) {
+                        <p-button icon="pi pi-database"
+                                  label="Update from data"
+                                  severity="secondary"
+                                  [outlined]="true"
+                                  (click)="updateStopsFromData()">
+                        </p-button>
+                    }
                 </div>
                 <div class="search-style-color-stop-list">
                     @for (stop of viewDraft.gradientStops; track stop.id; let stopIndex = $index) {
@@ -172,12 +174,14 @@ import {
                               [outlined]="true"
                               (click)="addCategoryStop()">
                     </p-button>
-                    <p-button icon="pi pi-database"
-                              label="Update from data"
-                              severity="secondary"
-                              [outlined]="true"
-                              (click)="updateStopsFromData()">
-                    </p-button>
+                    @if (canUpdateFromData) {
+                        <p-button icon="pi pi-database"
+                                  label="Update from data"
+                                  severity="secondary"
+                                  [outlined]="true"
+                                  (click)="updateStopsFromData()">
+                        </p-button>
+                    }
                 </div>
                 <div class="search-style-color-stop-list">
                     @for (stop of viewDraft.categoryStops; track stop.id; let stopIndex = $index) {
@@ -232,6 +236,7 @@ export class SearchStyleColorComponent implements OnChanges {
     @Input() colorPickerOverlayOptions?: OverlayOptions;
     @Input() dataSummary?: SearchValueSummary;
     @Input() dataSummaryStatus: SearchValueSummariesState["status"] = "idle";
+    @Input() canUpdateFromData = true;
     @Output() draftChange = new EventEmitter<SearchStyleColorDraft>();
     @Output() updateFromDataRequested = new EventEmitter<void>();
 
@@ -351,6 +356,12 @@ export class SearchStyleColorComponent implements OnChanges {
             this.emitChange();
             return;
         }
+        if (this.fieldOptions.length === 0) {
+            this.viewDraft = {...this.viewDraft, customField: false};
+            this.updateColorWarning();
+            this.emitChange();
+            return;
+        }
         let nextField = this.viewDraft.field;
         if (!this.fieldExists(nextField)) {
             nextField = this.firstFieldForCurrentMode();
@@ -377,8 +388,10 @@ export class SearchStyleColorComponent implements OnChanges {
         this.viewDraft = {
             ...this.viewDraft,
             field: field ?? "",
-            customField: true,
-            categoryValueKind: undefined
+            customField: this.viewDraft.customField || this.fieldOptions.length > 0,
+            categoryValueKind: this.fieldOptions.length > 0
+                ? undefined
+                : this.viewDraft.categoryValueKind
         };
         this.updateColorWarning();
         this.emitChange();

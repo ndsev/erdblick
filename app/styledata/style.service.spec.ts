@@ -5,6 +5,10 @@ import {StyleService} from './style.service';
 
 class AppStateServiceStub {
     ready = new BehaviorSubject<boolean>(true);
+    searchStyleConfigurationsState = new BehaviorSubject<any>({
+        schemaVersion: 1,
+        configurations: []
+    });
     private visibility = new Map<string, boolean>();
 
     getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
@@ -13,6 +17,10 @@ class AppStateServiceStub {
 
     setStyleVisibility(styleId: string, visible: boolean): void {
         this.visibility.set(styleId, visible);
+    }
+
+    get searchStyleConfigurations() {
+        return this.searchStyleConfigurationsState.getValue();
     }
 }
 
@@ -258,6 +266,81 @@ describe('StyleService', () => {
 
         expect(initSpy).toHaveBeenCalled();
         expect(service.importedStylesCount).toBe(1);
+    });
+
+    it('keeps generated search YAML parsed and persisted outside the active renderer collection', () => {
+        const {service, stateService} = createService();
+        stateService.searchStyleConfigurationsState.next({
+            schemaVersion: 1,
+            configurations: [{
+                id: 'search_style_one',
+                revision: 1,
+                name: 'Search roads',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+                rules: [{
+                    geometry: 'line',
+                    filter: [],
+                    color: {mode: 'solid', color: '#123456'}
+                }]
+            }]
+        });
+        const generatedWasmStyle = {
+            name: () => 'Search Styles/Search roads/one',
+            defaultEnabled: () => false,
+            delete: vi.fn()
+        } as any;
+        vi.spyOn(service, 'parseWasmStyle').mockImplementation((source: string, sourceRef: any) => [
+            generatedWasmStyle,
+            [],
+            {
+                source: sourceRef,
+                valid: true,
+                loadable: true,
+                loadedRuleCount: 1,
+                skippedRuleCount: 0,
+                failedWholeStyleSheet: false,
+                issues: []
+            }
+        ] as any);
+
+        service.initializeSearchGeneratedStyles();
+
+        expect(service.styles.size).toBe(0);
+        expect(service.searchGeneratedStyles.get('search_style_one')).toMatchObject({
+            configurationRevision: 1,
+            valid: true
+        });
+        expect(localStorage.getItem('searchGeneratedStyleData')).toContain('search_style_one');
+    });
+
+    it('does not export a generated entry when canonical conversion is lossy', () => {
+        const {service, stateService} = createService();
+        stateService.searchStyleConfigurationsState.next({
+            schemaVersion: 1,
+            configurations: [{
+                id: 'search_style_invalid',
+                revision: 1,
+                name: 'Invalid rule',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+                rules: [{
+                    geometry: 'line',
+                    filter: [{field: 'speed', op: 'approximately', value: 30}],
+                    color: {mode: 'solid', color: '#123456'}
+                }]
+            }]
+        });
+        const parseSpy = vi.spyOn(service as any, 'parseWasmStyle');
+
+        service.initializeSearchGeneratedStyles();
+
+        expect(parseSpy).not.toHaveBeenCalled();
+        expect(service.searchGeneratedStyles.get('search_style_invalid')).toMatchObject({
+            valid: false,
+            generationError: expect.stringContaining('unsupported operator')
+        });
+        expect(service.exportSearchGeneratedStyleYamlFile('search_style_invalid')).toBe(false);
     });
 
     it('imports a YAML file as an imported style and re-applies it', async () => {

@@ -25,6 +25,13 @@ import {
     normalizeFeatureSearchState,
     serializeFeatureSearchState
 } from "./feature-search-state";
+import {
+    DEFAULT_SEARCH_STYLE_CONFIGURATION_STATE,
+    normalizeSearchStyleConfigurationState,
+    SearchStyleConfigurationStateSchema,
+    SearchStyleConfigurationStateV1,
+    serializeSearchStyleConfigurationState
+} from "./search-style-configuration-state";
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
 import {
     compressUrlCsvRuns,
@@ -882,6 +889,16 @@ export class AppStateService implements OnDestroy {
         toStorage: (value: FeatureSearchStateEntry[]) => serializeFeatureSearchState(value),
         fromStorage: (payload: any): FeatureSearchStateEntry[] => normalizeFeatureSearchState(payload),
         snapshotPersist: false
+    });
+
+    readonly searchStyleConfigurationsState = this.createState<SearchStyleConfigurationStateV1>({
+        name: 'searchStyleConfigurations',
+        defaultValue: DEFAULT_SEARCH_STYLE_CONFIGURATION_STATE,
+        schema: SearchStyleConfigurationStateSchema,
+        toStorage: (value: SearchStyleConfigurationStateV1) => serializeSearchStyleConfigurationState(value),
+        fromStorage: (payload: unknown): SearchStyleConfigurationStateV1 => normalizeSearchStyleConfigurationState(payload),
+        snapshotPersist: false,
+        configDefault: false
     });
 
     readonly mapsOpenState = this.createState<boolean>({
@@ -2314,6 +2331,10 @@ export class AppStateService implements OnDestroy {
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get featureSearches() {return this.featureSearchState.getValue();}
     set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
+    get searchStyleConfigurations() {return this.searchStyleConfigurationsState.getValue();}
+    set searchStyleConfigurations(val: SearchStyleConfigurationStateV1) {
+        this.searchStyleConfigurationsState.next(normalizeSearchStyleConfigurationState(val));
+    }
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -3493,6 +3514,7 @@ export class AppStateService implements OnDestroy {
         }
         this.clearStyleOptionStorageEntries();
         localStorage.removeItem('searchHistory');
+        localStorage.removeItem('searchGeneratedStyleData');
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
         localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
         const {origin, pathname} = window.location;

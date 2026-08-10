@@ -7,7 +7,13 @@ export type StyleValidationImpact =
     | 'option-skipped'
     | 'runtime-sample-skipped';
 
-export type StyleSourceKind = 'base' | 'additional' | 'imported' | 'modified-builtin' | 'editor';
+export type StyleSourceKind =
+    | 'base'
+    | 'additional'
+    | 'imported'
+    | 'modified-builtin'
+    | 'editor'
+    | 'search-generated';
 
 export interface StyleSourceRef {
     configId?: string;
