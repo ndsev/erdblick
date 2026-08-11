@@ -400,11 +400,12 @@ export class HoverDetailService implements OnDestroy {
                 `Internal hover-detail style is invalid: ${JSON.stringify(report ?? {})}`
             );
         }
-        this.syntheticStyle = {
+        const syntheticStyle: ErdblickStyle = {
             id: "internal:hover-details",
             modified: false,
             imported: false,
             additional: true,
+            category: "base",
             source,
             featureLayerStyle,
             options: [],
@@ -414,7 +415,8 @@ export class HoverDetailService implements OnDestroy {
             url: "",
             sourceRef: {styleName: "Internal/Hover Details", sourceKind: "editor"}
         };
-        return this.syntheticStyle;
+        this.syntheticStyle = syntheticStyle;
+        return syntheticStyle;
     }
 
     /** Formats projected scalar values without turning absent values into misleading text. */
