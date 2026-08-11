@@ -375,7 +375,7 @@ export abstract class DeckMapView implements IRenderView {
         const destinationOwnsInspectionHover = event.relatedTarget instanceof Element
             && event.relatedTarget.closest("inspection-container") !== null;
         if (!destinationOwnsInspectionHover) {
-            void this.inspectionSelection.setHoveredFeatures([]);
+            this.inspectionSelection.setHoveredFeatures([]);
         }
     };
     private desktopDrillPickingEnabled = true;
@@ -1699,7 +1699,7 @@ export abstract class DeckMapView implements IRenderView {
         this.setFeatureHoverState(false);
         this.setHoverNavigationPivot(null);
         this.hoveredFeatureIds.next(undefined);
-        void this.inspectionSelection.setHoveredFeatures([]);
+        this.inspectionSelection.setHoveredFeatures([]);
     }
 
     /** Updates hover coordinates, hover highlights, and the hover-popover source data. */
@@ -1715,7 +1715,7 @@ export abstract class DeckMapView implements IRenderView {
             this.cancelHoverPickScheduling();
             this.setFeatureHoverState(false);
             this.setHoverNavigationPivot(null);
-            void this.inspectionSelection.setHoveredFeatures([]);
+            this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
@@ -1807,7 +1807,8 @@ export abstract class DeckMapView implements IRenderView {
             : this.featureIdsFromPickingInfo(info);
         if (!featureIds.length) {
             this.setFeatureHoverState(false);
-            void this.inspectionSelection.setHoveredFeatures([]);
+            this.setHoverNavigationPivot(null);
+            this.inspectionSelection.setHoveredFeatures([]);
             this.hoveredFeatureIds.next(undefined);
             return;
         }
@@ -1816,11 +1817,10 @@ export abstract class DeckMapView implements IRenderView {
         if (navigationTarget) {
             this.setHoverNavigationPivot(navigationTarget);
         }
-        this.inspectionSelection.setHoveredFeatures(featureIds).then(() => {
-            this.hoveredFeatureIds.next({
-                featureIds,
-                position: {x: info.x, y: info.y}
-            });
+        this.inspectionSelection.setHoveredFeatures(featureIds);
+        this.hoveredFeatureIds.next({
+            featureIds,
+            position: {x: info.x, y: info.y}
         });
     }
 

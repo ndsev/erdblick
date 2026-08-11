@@ -167,24 +167,13 @@ describe("InspectionSelectionService multi-inspection", () => {
         expect(stateService.setInspectionPanelLockedState).toHaveBeenCalledTimes(2);
     });
 
-    it("retains a validity hover after resolving its selected host feature", async () => {
+    it("retains a validity hover without loading its selected host feature", () => {
         const selected = feature("Road.7", "Map/Layer/42");
         const validity = feature(
             "Road.7:attribute#2:validity#1",
             selected.mapTileKey
         );
-        const resolved: FeatureWrapper = Object.create(
-            FeatureWrapper.prototype
-        );
-        Object.defineProperties(resolved, {
-            // Inspection feature loads preserve the requested decoration even
-            // though model lookup resolves it through the host feature.
-            featureId: {value: validity.featureId},
-            featureTile: {value: {mapTileKey: selected.mapTileKey}}
-        });
-        const loadFeatures = vi.fn(
-            async (): Promise<FeatureWrapper[]> => [resolved]
-        );
+        const loadFeatures = vi.fn(async (): Promise<FeatureWrapper[]> => []);
         const panel: InspectionPanelModel<TileFeatureId> = {
             id: 0,
             features: [selected],
@@ -197,8 +186,16 @@ describe("InspectionSelectionService multi-inspection", () => {
         const {service} = createHarness(2, [panel], loadFeatures);
         service.selectionIdsTopic.next([panel]);
 
-        await service.setHoveredFeatures([validity]);
+        service.setHoveredFeatures([validity], true);
 
         expect(service.hoverIdsTopic.getValue()).toEqual([validity]);
+        expect(service.remoteHoverHighlightAllowed).toBe(true);
+        expect(loadFeatures).not.toHaveBeenCalled();
+
+        service.setHoveredFeatures([validity]);
+        expect(service.remoteHoverHighlightAllowed).toBe(false);
+
+        service.setHoveredFeatures([]);
+        expect(service.remoteHoverHighlightAllowed).toBe(false);
     });
 });

@@ -12,7 +12,7 @@ export interface FilterChannelDefinition {
     featureFields: string[];
     entryFields: string[];
     geometryTypes: number;
-    geometryName: string;
+    geometryName?: string;
     featureFilter?: string;
     entryFilter?: string;
     group?: {

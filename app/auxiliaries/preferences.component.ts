@@ -28,7 +28,8 @@ import {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
     clampRenderBlockVertexLimit,
     clampTileSubsetRenderWorkerCount,
-    clampLowFiTileThreshold
+    clampLowFiTileThreshold,
+    type HoverLabelFieldConfig
 } from "../shared/appstate.service";
 import {
     getTileSubsetLayerRenderAutoWorkerCount
@@ -37,6 +38,10 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {environment} from "../environments/environment";
 import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
+import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
+import type {
+    FeatureSearchStyleFieldCandidate
+} from "../mapdata/map-runtime.model";
 
 @Component({
     selector: 'preferences',
@@ -223,72 +228,73 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
 
                     <p-tabpanel value="hover-labels">
                         <div class="hover-label-preferences" data-testid="hover-label-preferences">
+                            <div class="button-container">
+                                <label for="hover-labels-enabled">Show hover labels</label>
+                                <p-toggleswitch inputId="hover-labels-enabled"
+                                                data-testid="hover-labels-enabled"
+                                                [(ngModel)]="stateService.hoverLabelsEnabled">
+                                </p-toggleswitch>
+                            </div>
+                            <p-divider></p-divider>
                             <section class="hover-label-options" aria-labelledby="hover-label-options-title">
-                                <h3 id="hover-label-options-title">Display options</h3>
-                                <div class="button-container">
-                                    <label for="hover-label-feature-id">Feature ID</label>
-                                    <p-toggleswitch inputId="hover-label-feature-id"
-                                                    data-testid="hover-label-feature-id"
-                                                    [(ngModel)]="stateService.hoverLabelFeatureId"/>
+                                <h3 id="hover-label-options-title">Feature fields</h3>
+                                <div class="hover-label-field-list">
+                                    @for (field of hoverLabelFields; track $index) {
+                                        <div class="hover-label-field-row">
+                                            <button type="button"
+                                                    class="search-style-expression-toggle"
+                                                    [class.search-style-expression-toggle-active]="field.customExpression"
+                                                    [attr.aria-pressed]="field.customExpression"
+                                                    title="Custom expression"
+                                                    (click)="toggleHoverLabelExpressionMode($index)">
+                                                *
+                                            </button>
+                                            @if (field.customExpression) {
+                                                <simfil-expression-input
+                                                    class="hover-label-expression"
+                                                    [value]="field.expression"
+                                                    (valueChange)="setHoverLabelExpression($index, $event)"
+                                                    [singleLine]="true"
+                                                    [completionOwnerId]="'hover-label-field-' + $index"
+                                                    completionScope="feature"
+                                                    [completionZIndex]="30050"
+                                                    placeholder="SIMFIL expression">
+                                                </simfil-expression-input>
+                                            } @else {
+                                                <p-select class="hover-label-expression"
+                                                          [options]="hoverLabelFieldOptions"
+                                                          [ngModel]="field.expression"
+                                                          (ngModelChange)="setHoverLabelExpression($index, $event)"
+                                                          optionLabel="label"
+                                                          optionValue="value"
+                                                          [filter]="true"
+                                                          [virtualScroll]="true"
+                                                          [virtualScrollItemSize]="36"
+                                                          scrollHeight="20rem"
+                                                          appendTo="body"
+                                                          placeholder="Select field">
+                                                </p-select>
+                                            }
+                                            <p-button icon="pi pi-times"
+                                                      size="small"
+                                                      severity="danger"
+                                                      [outlined]="true"
+                                                      pTooltip="Remove field"
+                                                      tooltipPosition="bottom"
+                                                      (click)="removeHoverLabelField($index)">
+                                            </p-button>
+                                        </div>
+                                    }
                                 </div>
-                                <div class="button-container">
-                                    <label for="hover-label-search-match">Search match</label>
-                                    <p-toggleswitch inputId="hover-label-search-match"
-                                                    data-testid="hover-label-search-match"
-                                                    [(ngModel)]="stateService.hoverLabelSearchMatch"/>
-                                </div>
-                                <div class="button-container">
-                                    <label for="hover-label-validity">Validity</label>
-                                    <p-toggleswitch inputId="hover-label-validity"
-                                                    data-testid="hover-label-validity"
-                                                    [(ngModel)]="stateService.hoverLabelValidity"/>
-                                </div>
-                                <div class="button-container">
-                                    <label for="hover-label-direction">Direction</label>
-                                    <p-toggleswitch inputId="hover-label-direction"
-                                                    data-testid="hover-label-direction"
-                                                    [(ngModel)]="stateService.hoverLabelDirection"/>
-                                </div>
-                                <div class="hover-label-preview-notice">
-                                    Feature ID controls the live map popover. The remaining options are preview-only.
-                                </div>
-                            </section>
-                            <section class="hover-label-preview-section" aria-labelledby="hover-label-preview-title">
-                                <h3 id="hover-label-preview-title">Preview</h3>
-                                <div class="hover-label-preview-frame">
-                                    <div class="hover-label-surface hover-label-preview-card"
-                                         data-testid="hover-label-preview">
-                                        @if (stateService.hoverLabelFeatureId) {
-                                            <div class="hover-label-preview-row">
-                                                <span>Feature ID</span>
-                                                <strong>feature-42</strong>
-                                            </div>
-                                        }
-                                        @if (stateService.hoverLabelSearchMatch) {
-                                            <div class="hover-label-preview-row">
-                                                <span>Search match</span>
-                                                <strong>category: example</strong>
-                                            </div>
-                                        }
-                                        @if (stateService.hoverLabelValidity) {
-                                            <div class="hover-label-preview-row">
-                                                <span>Validity</span>
-                                                <strong>2026-01-01 – 2026-12-31</strong>
-                                            </div>
-                                        }
-                                        @if (stateService.hoverLabelDirection) {
-                                            <div class="hover-label-preview-row">
-                                                <span>Direction</span>
-                                                <strong>Forward</strong>
-                                            </div>
-                                        }
-                                        @if (!stateService.hoverLabelFeatureId
-                                            && !stateService.hoverLabelSearchMatch
-                                            && !stateService.hoverLabelValidity
-                                            && !stateService.hoverLabelDirection) {
-                                            <div class="hover-label-preview-empty">No label content selected</div>
-                                        }
-                                    </div>
+                                <p-button icon="pi pi-plus"
+                                          label="Add field"
+                                          size="small"
+                                          severity="secondary"
+                                          [outlined]="true"
+                                          (click)="addHoverLabelField()">
+                                </p-button>
+                                <div class="hover-label-notice">
+                                    Values are projected without geometry while their map layers are visible. Hovering never starts a request.
                                 </div>
                             </section>
                         </div>
@@ -539,6 +545,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     ];
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
+    hoverLabelFields: HoverLabelFieldConfig[] = [];
+    hoverLabelFieldOptions: Array<{label: string; value: string}> = [{
+        label: "Feature ID",
+        value: "id"
+    }];
     private mediaQueryList?: MediaQueryList;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly DARK_MODE_KEY = 'ui.darkMode';
@@ -556,6 +567,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public styleService: StyleService,
                 public stateService: AppStateService,
                 public coordinatesPolicy: CoordinatesPolicyService,
+                private searchSchema: FeatureSearchSchemaService,
                 private dialogStack: DialogStackService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
@@ -607,6 +619,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.sourceDataInspectionDefaultColumnsState.subscribe(columns => {
             this.sourceDataColumnSelection = [...columns];
+        }));
+        this.subscriptions.push(this.stateService.hoverLabelFieldsState.subscribe(fields => {
+            this.hoverLabelFields = fields.map(field => ({...field}));
         }));
         this.syncInspectionValuePresentationSelection();
     }
@@ -697,7 +712,73 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.renderWorkerCountChanged = false;
         this.renderBlockVertexLimitChanged = false;
         this.mapZoomStepChanged = false;
+        this.refreshHoverLabelFieldOptions();
         this.dialogStack.bringToFront(this.preferencesDialog);
+    }
+
+    /** Adds one schema-backed hover field without duplicating an existing picker value. */
+    addHoverLabelField(): void {
+        const selected = new Set(this.hoverLabelFields.map(field => field.expression));
+        const expression = this.hoverLabelFieldOptions.find(option =>
+            !selected.has(option.value))?.value ?? "";
+        this.stateService.hoverLabelFields = [
+            ...this.hoverLabelFields,
+            {expression, customExpression: false}
+        ];
+    }
+
+    /** Removes one ordered field from the map-hover overlay. */
+    removeHoverLabelField(index: number): void {
+        this.stateService.hoverLabelFields = this.hoverLabelFields.filter(
+            (_field, fieldIndex) => fieldIndex !== index);
+    }
+
+    /** Switches one field between the schema picker and free-form SIMFIL editor. */
+    toggleHoverLabelExpressionMode(index: number): void {
+        this.stateService.hoverLabelFields = this.hoverLabelFields.map(
+            (field, fieldIndex) => fieldIndex === index
+                ? {...field, customExpression: !field.customExpression}
+                : field);
+    }
+
+    /** Updates one hover-field expression while preserving row order and editor mode. */
+    setHoverLabelExpression(index: number, expression: string): void {
+        this.stateService.hoverLabelFields = this.hoverLabelFields.map(
+            (field, fieldIndex) => fieldIndex === index
+                ? {...field, expression: expression ?? ""}
+                : field);
+    }
+
+    /** Loads unique scalar feature fields from the shared schema worker. */
+    private refreshHoverLabelFieldOptions(): void {
+        this.searchSchema.requestSearchStyleFields("true", "feature")
+            .then(options => this.applyHoverLabelFieldOptions(options));
+    }
+
+    /** Merges per-layer schema candidates into the concise hover-field picker. */
+    private applyHoverLabelFieldOptions(
+        candidates: FeatureSearchStyleFieldCandidate[]
+    ): void {
+        const scalarKinds = new Set([
+            "number",
+            "integer",
+            "string",
+            "boolean",
+            "enum"
+        ]);
+        const paths = new Set(candidates
+            .filter(candidate => scalarKinds.has(candidate.valueKind))
+            .map(candidate => candidate.path));
+        this.hoverLabelFields.forEach(field => {
+            if (!field.customExpression && field.expression) {
+                paths.add(field.expression);
+            }
+        });
+        paths.delete("id");
+        this.hoverLabelFieldOptions = [
+            {label: "Feature ID", value: "id"},
+            ...[...paths].sort().map(path => ({label: path, value: path}))
+        ];
     }
 
     /** Commits the pending tile-load limit after validating the numeric input. */

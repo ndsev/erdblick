@@ -34,8 +34,6 @@ import {simfilHighlightStyle, simfilLanguage} from "./simfil-language";
                 [pending]="completion.pending"
                 [items]="completionItems"
                 [selectionIndex]="completion.selectionIndex"
-                [top]="completion.top"
-                [left]="completion.left"
                 [zIndex]="completionZIndex"
                 (popupMouseDown)="onCompletionPopupDown($event)"
                 (candidateSelected)="applyCompletion($event)"
@@ -70,6 +68,8 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     @Output() completionAccepted = new EventEmitter<CompletionCandidate>();
 
     @ViewChild("editorHost", {static: true}) private editorHost!: ElementRef<HTMLElement>;
+    @ViewChild(SearchCompletionPopupComponent, {static: true})
+    private completionPopup!: SearchCompletionPopupComponent;
 
     private static nextId = 1;
     private readonly generatedOwnerId = `simfil-expression:${SimfilExpressionInputComponent.nextId++}`;
@@ -89,8 +89,6 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     completionItems: CompletionCandidate[] = [];
     completion = {
-        top: 0,
-        left: 0,
         selectionIndex: 0,
         visible: false,
         pending: false
@@ -565,8 +563,10 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.cursorChange.emit(cursor);
         const coords = view.coordsAtPos(cursor);
         const fallbackRect = view.dom.getBoundingClientRect();
-        this.completion.top = coords?.bottom ?? fallbackRect.bottom;
-        this.completion.left = coords?.left ?? fallbackRect.left;
+        this.completionPopup.setPosition(
+            coords?.bottom ?? fallbackRect.bottom,
+            coords?.left ?? fallbackRect.left
+        );
     }
 
     /** Mirrors the single-line input state onto CodeMirror's root element. */

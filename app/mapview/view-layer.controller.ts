@@ -58,6 +58,8 @@ import type {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";
 import type {RuleFidelity} from "../../build/libs/core/erdblick-core";
+import type {HoverDetailService} from "../mapdata/hover-detail.service";
+import {NgZone} from "@angular/core";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -114,8 +116,10 @@ export class ViewLayerController {
         private readonly renderService: TileSubsetLayerRenderService,
         private readonly featureSearch: FeatureSearchService,
         private readonly inspection: InspectionSelectionService,
+        private readonly hoverDetails: HoverDetailService,
         private readonly diagnostics: ViewLayerDiagnosticsService,
-        private readonly styleValidationReports: StyleValidationReportService
+        private readonly styleValidationReports: StyleValidationReportService,
+        private readonly ngZone: NgZone
     ) {
         this.unregisterDiagnostics = diagnostics.register(
             viewIndex,
@@ -151,29 +155,32 @@ export class ViewLayerController {
                 this.scheduleBlockAssembly()
             ),
             this.renderService.policyChanged.subscribe(change =>
-                this.handleRenderPolicyChange(change)
+                this.ngZone.runOutsideAngular(() =>
+                    this.handleRenderPolicyChange(change))
             )
         );
         this.scheduleReconcile();
     }
 
     attachScene(sceneHandle: IRenderSceneHandle): void {
-        this.sceneHandle = sceneHandle;
-        for (const owned of this.styledLayers.values()) {
-            for (const visualization of owned.visualizations.values()) {
-                visualization.reattach(sceneHandle).catch(error =>
-                    console.error("Failed to reattach a subset visualization.", error)
-                );
+        this.ngZone.runOutsideAngular(() => {
+            this.sceneHandle = sceneHandle;
+            for (const owned of this.styledLayers.values()) {
+                for (const visualization of owned.visualizations.values()) {
+                    visualization.reattach(sceneHandle).catch(error =>
+                        console.error("Failed to reattach a subset visualization.", error)
+                    );
+                }
             }
-        }
-        for (const {owned} of this.retiringRegularLayers.values()) {
-            for (const visualization of owned.visualizations.values()) {
-                visualization.reattach(sceneHandle).catch(error =>
-                    console.error("Failed to reattach a retiring subset visualization.", error)
-                );
+            for (const {owned} of this.retiringRegularLayers.values()) {
+                for (const visualization of owned.visualizations.values()) {
+                    visualization.reattach(sceneHandle).catch(error =>
+                        console.error("Failed to reattach a retiring subset visualization.", error)
+                    );
+                }
             }
-        }
-        this.scheduleBlockAssembly();
+            this.scheduleBlockAssembly();
+        });
     }
 
     detachScene(): void {
@@ -325,6 +332,7 @@ export class ViewLayerController {
             this.destroyOwnedLayer(owned);
         }
         this.retiringRegularLayers.clear();
+        this.hoverDetails.clearView(this.viewIndex);
         this.renderService.clearDeckFrameTime(this.viewIndex);
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
         this.unregisterDiagnostics();
@@ -334,31 +342,33 @@ export class ViewLayerController {
     }
 
     private scheduleReconcile(fullReconcile = true): void {
-        if (this.disposed) {
-            return;
-        }
-        this.fullReconcileRequired ||= fullReconcile;
-        if (this.reconcileQueued) {
-            return;
-        }
-        this.reconcileQueued = true;
-        queueMicrotask(() => {
-            this.reconcileQueued = false;
+        this.ngZone.runOutsideAngular(() => {
             if (this.disposed) {
                 return;
             }
-            const full = this.fullReconcileRequired;
-            this.fullReconcileRequired = false;
-            const viewportSignature =
-                this.viewportPresentationSignature();
-            if (!full &&
-                viewportSignature ===
-                    this.lastViewportPresentationSignature) {
+            this.fullReconcileRequired ||= fullReconcile;
+            if (this.reconcileQueued) {
                 return;
             }
-            this.reconcile();
-            this.lastViewportPresentationSignature =
-                this.viewportPresentationSignature();
+            this.reconcileQueued = true;
+            queueMicrotask(() => {
+                this.reconcileQueued = false;
+                if (this.disposed) {
+                    return;
+                }
+                const full = this.fullReconcileRequired;
+                this.fullReconcileRequired = false;
+                const viewportSignature =
+                    this.viewportPresentationSignature();
+                if (!full &&
+                    viewportSignature ===
+                        this.lastViewportPresentationSignature) {
+                    return;
+                }
+                this.reconcile();
+                this.lastViewportPresentationSignature =
+                    this.viewportPresentationSignature();
+            });
         });
     }
 
@@ -409,6 +419,11 @@ export class ViewLayerController {
             plannedFidelity: RuleFidelity;
             replacementSlot: string;
         }>();
+        const hoverDetailCoverage: Array<{
+            mapgetLayer: MapgetLayer;
+            tileIds: number[];
+            priorityTileIds: number[];
+        }> = [];
         const orderedStyles = [...this.styleService.styles.values()]
             .filter(style => style.visible);
         for (const mapgetLayer of this.mapInfo.mapgetLayers()) {
@@ -431,6 +446,7 @@ export class ViewLayerController {
                     coreLib.RuleFidelity.HIGH.value
                     ? coreLib.RuleFidelity.HIGH
                     : coreLib.RuleFidelity.LOW;
+            const hoverDetailTileIds = new Set(visibleTileIds);
             for (let styleOrder = 0; styleOrder < orderedStyles.length; ++styleOrder) {
                 const style = orderedStyles[styleOrder];
                 if (!style.featureLayerStyle.hasLayerAffinity(mapgetLayer.layerId)) {
@@ -448,6 +464,7 @@ export class ViewLayerController {
                     style.id
                 ) ?? {};
                 const tileIds = this.expandGroupCoverage(visibleTileIds, style, mapgetLayer);
+                tileIds.forEach(tileId => hoverDetailTileIds.add(tileId));
                 desired.set(key, {
                     mapgetLayer,
                     style,
@@ -462,8 +479,13 @@ export class ViewLayerController {
                     )
                 });
             }
+            hoverDetailCoverage.push({
+                mapgetLayer,
+                tileIds: [...hoverDetailTileIds],
+                priorityTileIds: [...visibleTileIds]
+            });
         }
-
+        this.hoverDetails.reconcileView(this.viewIndex, hoverDetailCoverage);
         // A fast fidelity reversal can reuse the still-present retiring owner
         // before the current successor is retired in the pass below.
         for (const [key, next] of desired) {
@@ -539,9 +561,7 @@ export class ViewLayerController {
                     }
                     owned = {
                         layer,
-                        subscription: layer.events.subscribe(event =>
-                            this.handleStyledLayerEvent(layer, event)
-                        ),
+                        subscription: this.subscribeToStyledLayer(layer),
                         visualizations: new Map(),
                         visualizationKeyByTileId: new Map(),
                         pendingBlockTiles: new Map(),
@@ -580,6 +600,14 @@ export class ViewLayerController {
         this.changed.next();
         this.occupancyChanged.next();
         this.diagnostics.notifyChanged();
+    }
+
+    /** Routes high-volume tile events through the non-Angular render pipeline. */
+    private subscribeToStyledLayer(layer: StyledMapgetLayer): Subscription {
+        return layer.events.subscribe(event =>
+            this.ngZone.runOutsideAngular(() =>
+                this.handleStyledLayerEvent(layer, event))
+        );
     }
 
     private handleStyledLayerEvent(
@@ -795,9 +823,7 @@ export class ViewLayerController {
             if (!owned) {
                 owned = {
                     layer,
-                    subscription: layer.events.subscribe(event =>
-                        this.handleStyledLayerEvent(layer, event)
-                    ),
+                    subscription: this.subscribeToStyledLayer(layer),
                     visualizations: new Map(),
                     visualizationKeyByTileId: new Map(),
                     pendingBlockTiles: new Map(),
@@ -995,6 +1021,13 @@ export class ViewLayerController {
                     )) {
                         continue;
                     }
+                    // Map and search-result hover stays entirely within the
+                    // already rendered local overlays. Inspection rows opt in
+                    // when an authored attribute/validity rule needs filtering.
+                    if (group.kind === "hover" &&
+                        !this.inspection.remoteHoverHighlightAllowed) {
+                        continue;
+                    }
                     const rawPlan = this.mapInfo.planStyleFilter(
                         style.featureLayerStyle,
                         mapgetLayer.mapId,
@@ -1086,9 +1119,7 @@ export class ViewLayerController {
                     );
                     owned = {
                         layer,
-                        subscription: layer.events.subscribe(event =>
-                            this.handleStyledLayerEvent(layer, event)
-                        ),
+                        subscription: this.subscribeToStyledLayer(layer),
                         visualizations: new Map(),
                         visualizationKeyByTileId: new Map(),
                         pendingBlockTiles: new Map(),
@@ -1251,37 +1282,39 @@ export class ViewLayerController {
     }
 
     private scheduleBlockAssembly(): void {
-        if (this.disposed || this.blockAssemblyTimer !== null) {
-            return;
-        }
-        const hasPending = [...this.styledLayers.values()].some(
-            owned => owned.pendingBlockTiles.size > 0
-        );
-        if (!hasPending) {
-            return;
-        }
-        this.blockAssemblyTimer = setTimeout(() => {
-            this.blockAssemblyTimer = null;
-            let madeProgress = true;
-            while (madeProgress &&
-                this.renderService.availableWorkerSlots() > 0) {
-                madeProgress = false;
-                for (const owned of this.styledLayers.values()) {
-                    if (this.renderService.availableWorkerSlots() <= 0) {
-                        break;
+        this.ngZone.runOutsideAngular(() => {
+            if (this.disposed || this.blockAssemblyTimer !== null) {
+                return;
+            }
+            const hasPending = [...this.styledLayers.values()].some(
+                owned => owned.pendingBlockTiles.size > 0
+            );
+            if (!hasPending) {
+                return;
+            }
+            this.blockAssemblyTimer = setTimeout(() => {
+                this.blockAssemblyTimer = null;
+                let madeProgress = true;
+                while (madeProgress &&
+                    this.renderService.availableWorkerSlots() > 0) {
+                    madeProgress = false;
+                    for (const owned of this.styledLayers.values()) {
+                        if (this.renderService.availableWorkerSlots() <= 0) {
+                            break;
+                        }
+                        madeProgress =
+                            this.assembleOnePendingBlock(owned) || madeProgress;
                     }
-                    madeProgress =
-                        this.assembleOnePendingBlock(owned) || madeProgress;
                 }
-            }
-            if (this.sceneHandle &&
-                this.renderService.availableWorkerSlots() > 0 &&
-                [...this.styledLayers.values()].some(
-                    owned => owned.pendingBlockTiles.size > 0
-                )) {
-                this.scheduleBlockAssembly();
-            }
-        }, BLOCK_ASSEMBLY_CADENCE_MS);
+                if (this.sceneHandle &&
+                    this.renderService.availableWorkerSlots() > 0 &&
+                    [...this.styledLayers.values()].some(
+                        owned => owned.pendingBlockTiles.size > 0
+                    )) {
+                    this.scheduleBlockAssembly();
+                }
+            }, BLOCK_ASSEMBLY_CADENCE_MS);
+        });
     }
 
     private assembleOnePendingBlock(owned: OwnedStyledLayer): boolean {

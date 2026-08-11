@@ -219,4 +219,29 @@
   .p-popover-content {
     background: transparent;
   }
+
+  .hover-label-feature + .hover-label-feature {
+    margin-top: 0.35em;
+    padding-top: 0.35em;
+    border-top: 1px solid var(--p-content-border-color);
+  }
+
+  .hover-label-row {
+    display: grid;
+    grid-template-columns: minmax(5em, auto) minmax(0, 1fr);
+    gap: 0.65em;
+    max-width: min(32em, 60vw);
+
+    span {
+      overflow: hidden;
+      color: var(--p-text-muted-color);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    strong {
+      overflow-wrap: anywhere;
+      font-weight: 600;
+    }
+  }
 }

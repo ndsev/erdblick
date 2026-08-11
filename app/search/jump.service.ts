@@ -417,10 +417,10 @@ export class JumpTargetService {
                 featureId: featureId
             } as TileFeatureId]);
         } else {
-            await this.inspectionSelection.setHoveredFeatures([{
+            this.inspectionSelection.setHoveredFeatures([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
-            }]);
+            }], true);
         }
 
         // Center the camera on the feature if a view index was passed.

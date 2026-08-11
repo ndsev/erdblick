@@ -1432,7 +1432,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
             rowData["hoverId"] ||
             rowData["softHoverGroupId"]) {
-            this.mapService.setHoveredFeatures([]).then();
+            this.mapService.setHoveredFeatures([]);
         }
     }
 
@@ -1472,13 +1472,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             ? rowData["mapTileKey"]
             : undefined;
         if (!mapTileKey || !hoverId) {
-            this.mapService.setHoveredFeatures([]).then();
+            this.mapService.setHoveredFeatures([]);
             return;
         }
         this.mapService.setHoveredFeatures([{
             mapTileKey,
             featureId: hoverId
-        }]).then();
+        }], true);
     }
 
     /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */

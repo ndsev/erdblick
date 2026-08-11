@@ -23,7 +23,12 @@ import {
 } from "./filter-tile-state.model";
 import type {MapTileStreamFilterStatusPayload} from "./tilestream";
 
-export type PresentationKind = "regular" | "search" | "hover" | "selection";
+export type PresentationKind =
+    | "regular"
+    | "search"
+    | "hover"
+    | "selection"
+    | "hover-details";
 
 export interface StyledMapgetLayerIdentity {
     viewIndex: number;

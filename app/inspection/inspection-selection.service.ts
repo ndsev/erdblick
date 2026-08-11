@@ -19,7 +19,6 @@ import {Cartesian3} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {deepEquals} from "../shared/app-state";
 import {
-    stripFeatureInspectionTarget,
     tileFeatureInteractionTargetsEqual
 } from "../shared/tile-feature-id";
 
@@ -39,15 +38,14 @@ export interface MultiInspectionResult {
  */
 @Injectable({providedIn: "root"})
 export class InspectionSelectionService {
-    readonly hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
     readonly selectionIdsTopic =
         new BehaviorSubject<InspectionPanelModel<TileFeatureId>[]>([]);
+    /** Allows remote style filters only while an inspection-owned hover is active. */
+    remoteHoverHighlightAllowed = false;
 
     private selectionConversionRevision = 0;
-    private hoverConversionRevision = 0;
-    private lastHoverRequestSignature = "";
 
     constructor(
         private readonly stateService: AppStateService,
@@ -129,13 +127,7 @@ export class InspectionSelectionService {
                 this.selectionTopic.next(convertedSelections);
             });
         });
-        this.selectionTopic.subscribe(selectedPanels => {
-            const hoveredFeatures = this.hoverTopic.getValue();
-            if (hoveredFeatures.length) {
-                this.hoverTopic.next(hoveredFeatures.filter(hoveredFeature =>
-                    !selectedPanels.some(panel =>
-                        panel.features.some(feature => feature.equals(hoveredFeature)))));
-            }
+        this.selectionTopic.subscribe(() => {
             const selectedTargets = this.selectionIdsTopic.getValue()
                 .flatMap(panel => panel.features);
             const hoverIds = this.hoverIdsTopic.getValue().filter(feature =>
@@ -143,6 +135,9 @@ export class InspectionSelectionService {
                     tileFeatureInteractionTargetsEqual(feature, selected))
             );
             if (hoverIds.length !== this.hoverIdsTopic.getValue().length) {
+                if (!hoverIds.length) {
+                    this.remoteHoverHighlightAllowed = false;
+                }
                 this.hoverIdsTopic.next(hoverIds);
             }
         });
@@ -246,65 +241,22 @@ export class InspectionSelectionService {
         );
     }
 
-    /** Resolves hover ids, drops duplicates against selection, and publishes the resulting hover set. */
-    async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
+    /** Publishes hover ids without loading feature data; inspection hovers may opt into remote styles. */
+    setHoveredFeatures(
+        tileFeatureIds: (TileFeatureId | null)[],
+        allowRemoteHighlight = false
+    ): void {
         const requestedTargets = tileFeatureIds
             .filter((id): id is TileFeatureId => !!id);
-        const requestSignature = requestedTargets
-            .map((id) => `${id.mapTileKey}/${id.featureId}`)
-            .sort()
-            .join("|");
-        if (requestSignature === this.lastHoverRequestSignature) {
-            return;
-        }
-        this.lastHoverRequestSignature = requestSignature;
         const selectedTargets = this.stateService.selectionState.getValue()
             .flatMap(panel => panel.features);
-        this.hoverIdsTopic.next(
-            requestedTargets.filter(id =>
-                !selectedTargets.some(selected =>
-                    tileFeatureInteractionTargetsEqual(id, selected))
-            )
+        const hoverTargets = requestedTargets.filter(id =>
+            !selectedTargets.some(selected =>
+                tileFeatureInteractionTargetsEqual(id, selected))
         );
-        const revision = ++this.hoverConversionRevision;
-        const features = await this.tileStream.loadFeatures(tileFeatureIds);
-        if (revision !== this.hoverConversionRevision) {
-            return;
-        }
-        const selectedTargetsAfterLocate = this.selectionIdsTopic.getValue()
-            .flatMap(panel => panel.features);
-        const resolvedBaseTargets = new Set(features.map(feature => {
-            const key = feature.key();
-            return `${key.mapTileKey}\n${stripFeatureInspectionTarget(
-                key.featureId)}`;
-        }));
-        // Feature loading intentionally resolves inspection suffixes to their
-        // owning full feature. Keep the authored sub-target for rendering;
-        // replacing it with FeatureWrapper::key() would turn a validity hover
-        // into its selected parent feature and immediately suppress it.
-        const resolvedHoverTargets = requestedTargets.filter(target =>
-            resolvedBaseTargets.has(
-                `${target.mapTileKey}\n${stripFeatureInspectionTarget(
-                    target.featureId)}`
-            ) &&
-            !selectedTargetsAfterLocate.some(selected =>
-                tileFeatureInteractionTargetsEqual(target, selected))
-        );
-        this.hoverIdsTopic.next(resolvedHoverTargets);
-        if (!features.length) {
-            this.hoverTopic.next(features);
-            return;
-        }
-
-        const selectedFeatures = this.selectionTopic.getValue()
-            .flatMap(panel => panel.features);
-        const currentHover = this.hoverTopic.getValue();
-        const unselectedFeatures = features.filter(feature =>
-            !selectedFeatures.some(selected => selected.equals(feature)));
-        if (featureSetsEqual(currentHover, unselectedFeatures)) {
-            return;
-        }
-        this.hoverTopic.next(unselectedFeatures);
+        this.remoteHoverHighlightAllowed =
+            hoverTargets.length > 0 && allowRemoteHighlight;
+        this.hoverIdsTopic.next(hoverTargets);
     }
 
     /** Loads a feature and centers the target view on its reported center point. */

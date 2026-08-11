@@ -158,6 +158,18 @@ export interface TileFeatureId {
     mapTileKey: string;
 }
 
+/** One ordered SIMFIL field shown in the map feature-hover popover. */
+export interface HoverLabelFieldConfig {
+    expression: string;
+    customExpression: boolean;
+}
+
+/** Initial hover overlay preserves the previous feature-id-only behavior. */
+export const DEFAULT_HOVER_LABEL_FIELDS: HoverLabelFieldConfig[] = [{
+    expression: "id",
+    customExpression: false
+}];
+
 /** Selection payload used for source-data/meta-data rows that are not regular features. */
 export interface SelectedSourceData {
     mapTileKey: string;
@@ -1003,28 +1015,19 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
-    readonly hoverLabelFeatureIdState = this.createState<boolean>({
-        name: 'hoverLabelFeatureId',
+    readonly hoverLabelsEnabledState = this.createState<boolean>({
+        name: 'hoverLabelsEnabled',
         defaultValue: true,
         schema: Boolish
     });
 
-    readonly hoverLabelSearchMatchState = this.createState<boolean>({
-        name: 'hoverLabelSearchMatch',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly hoverLabelValidityState = this.createState<boolean>({
-        name: 'hoverLabelValidity',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly hoverLabelDirectionState = this.createState<boolean>({
-        name: 'hoverLabelDirection',
-        defaultValue: false,
-        schema: Boolish
+    readonly hoverLabelFieldsState = this.createState<HoverLabelFieldConfig[]>({
+        name: 'hoverLabelFields',
+        defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({...field})),
+        schema: z.array(z.object({
+            expression: z.string(),
+            customExpression: Boolish
+        }))
     });
 
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
@@ -2323,14 +2326,12 @@ export class AppStateService implements OnDestroy {
     set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
     get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
     set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
-    get hoverLabelFeatureId() {return this.hoverLabelFeatureIdState.getValue();}
-    set hoverLabelFeatureId(val: boolean) {this.hoverLabelFeatureIdState.next(!!val);}
-    get hoverLabelSearchMatch() {return this.hoverLabelSearchMatchState.getValue();}
-    set hoverLabelSearchMatch(val: boolean) {this.hoverLabelSearchMatchState.next(!!val);}
-    get hoverLabelValidity() {return this.hoverLabelValidityState.getValue();}
-    set hoverLabelValidity(val: boolean) {this.hoverLabelValidityState.next(!!val);}
-    get hoverLabelDirection() {return this.hoverLabelDirectionState.getValue();}
-    set hoverLabelDirection(val: boolean) {this.hoverLabelDirectionState.next(!!val);}
+    get hoverLabelsEnabled() {return this.hoverLabelsEnabledState.getValue();}
+    set hoverLabelsEnabled(val: boolean) {this.hoverLabelsEnabledState.next(!!val);}
+    get hoverLabelFields() {return this.hoverLabelFieldsState.getValue();}
+    set hoverLabelFields(val: HoverLabelFieldConfig[]) {
+        this.hoverLabelFieldsState.next(val.map(field => ({...field})));
+    }
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}

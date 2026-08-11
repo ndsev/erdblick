@@ -973,14 +973,15 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('provides non-URL hover-label defaults for the preview preferences', () => {
+    it('provides non-URL hover-label defaults', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
 
-        expect(service.hoverLabelFeatureId).toBe(true);
-        expect(service.hoverLabelSearchMatch).toBe(false);
-        expect(service.hoverLabelValidity).toBe(false);
-        expect(service.hoverLabelDirection).toBe(false);
+        expect(service.hoverLabelsEnabled).toBe(true);
+        expect(service.hoverLabelFields).toEqual([{
+            expression: "id",
+            customExpression: false
+        }]);
 
         const params = (service as any).serializeUrlV2();
         expect(JSON.stringify(params)).not.toContain('hoverLabel');

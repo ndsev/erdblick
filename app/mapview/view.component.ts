@@ -34,6 +34,7 @@ import {AppModeService} from "../shared/app-mode.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
 import {
+    type HoveredFeatureIds,
     IRenderView,
     MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
     RenderNavigationTarget
@@ -56,6 +57,10 @@ import {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";
 import {CacheResetService} from "../mapdata/cache-reset.service";
+import {
+    HoverDetailService,
+    type HoverFeatureDetails
+} from "../mapdata/hover-detail.service";
 
 interface PreparedContextMenuPosition {
     screenPos: {x: number; y: number};
@@ -63,6 +68,8 @@ interface PreparedContextMenuPosition {
     navigationTarget?: RenderNavigationTarget;
     featureIds: TileFeatureId[];
 }
+
+const HOVER_POPOVER_CURSOR_GAP_PX = 6;
 
 @Component({
     selector: 'map-view',
@@ -142,8 +149,15 @@ interface PreparedContextMenuPosition {
         <div #popoverAnchor class="popover-anchor"></div>
         <p-popover #popover styleClass="feature-hover-popover hover-label-surface">
             <ng-template pTemplate="content">
-                @for (content of featureIdsContent; track $index) {
-                    {{ content }}<br>
+                @for (feature of hoverDetailsContent; track feature.featureId) {
+                    <div class="hover-label-feature">
+                        @for (field of feature.fields; track $index) {
+                            <div class="hover-label-row">
+                                <span>{{ field.label }}</span>
+                                <strong>{{ field.value }}</strong>
+                            </div>
+                        }
+                    </div>
                 }
             </ng-template>
         </p-popover>
@@ -199,7 +213,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     @ViewChild('popover') featureIdsPopover!: Popover;
     @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
     @ViewChild('viewerContextMenu') viewerContextMenu?: ContextMenu;
-    featureIdsContent: string[] = [];
+    hoverDetailsContent: HoverFeatureDetails[] = [];
+    private lastHoverResult?: HoveredFeatureIds;
 
     /**
      * Constructs the host component for one deck-backed view, wiring in the shared
@@ -220,6 +235,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 private styleService: StyleService,
                 private subsetRenderService: TileSubsetLayerRenderService,
                 private cacheResetService: CacheResetService,
+                private hoverDetails: HoverDetailService,
                 private viewLayerDiagnostics: ViewLayerDiagnosticsService,
                 private styleValidationReports: StyleValidationReportService,
                 private cdr: ChangeDetectorRef,
@@ -242,17 +258,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
     ngOnInit() {
-        this.layerController = new ViewLayerController(
-            this.viewIndex(),
-            this.mapService,
-            this.mapViewState,
-            this.tileStream,
-            this.styleService,
-            this.subsetRenderService,
-            this.featureSearchService,
-            this.inspectionSelection,
-            this.viewLayerDiagnostics,
-            this.styleValidationReports
+        this.layerController = this.ngZone.runOutsideAngular(() =>
+            new ViewLayerController(
+                this.viewIndex(),
+                this.mapService,
+                this.mapViewState,
+                this.tileStream,
+                this.styleService,
+                this.subsetRenderService,
+                this.featureSearchService,
+                this.inspectionSelection,
+                this.hoverDetails,
+                this.viewLayerDiagnostics,
+                this.styleValidationReports,
+                this.ngZone
+            )
         );
         this.cacheResetSubscription =
             this.cacheResetService.completed$.subscribe(mapId => {
@@ -287,14 +307,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewerContextMenu?.hide();
             })
         );
-        this.subscriptions.push(
-            this.stateService.hoverLabelFeatureIdState.subscribe(enabled => {
-                if (!enabled) {
-                    this.featureIdsContent = [];
-                    this.featureIdsPopover?.hide();
-                }
-            })
-        );
+        this.subscriptions.push(this.hoverDetails.valuesChanged.subscribe(mapTileKey => {
+            if (!this.lastHoverResult ||
+                (mapTileKey && !this.lastHoverResult.featureIds.some(feature =>
+                    feature?.mapTileKey === mapTileKey))) {
+                return;
+            }
+            this.ngZone.run(() => this.refreshHoverPopover());
+        }));
         this.firstPersonViewRequestSubscription = this.menuService.firstPersonViewRequests.subscribe(request => {
             if (request.viewIndex !== this.viewIndex()) {
                 return;
@@ -375,6 +395,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
+        this.lastHoverResult = undefined;
+        this.hoverDetailsContent = [];
+        this.featureIdsPopover?.hide();
         this.firstPersonViewActiveSubscription?.unsubscribe();
         this.firstPersonViewActiveSubscription = undefined;
         if (this.mapView) {
@@ -429,6 +452,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.firstPersonViewActiveSubscription?.unsubscribe();
         this.firstPersonViewRequestSubscription?.unsubscribe();
         this.cacheResetSubscription?.unsubscribe();
+        this.subscriptions.splice(0).forEach(subscription =>
+            subscription.unsubscribe());
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }
@@ -470,55 +495,54 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.cdr.markForCheck();
             });
             this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
-                this.featureIdsContent = [];
-                if (!this.stateService.hoverLabelFeatureId ||
-                    !result || !result.featureIds.length) {
-                    this.featureIdsPopover.hide();
-                    return;
-                }
-                const featureIdsContent: string[] = [];
-                result.featureIds.forEach((featureId) => {
-                    if (!featureId) {
-                        return;
-                    }
-                    if (typeof featureId === "string") {
-                        if (featureId !== 'hover-highlight') {
-                            featureIdsContent.push(featureId);
-                        }
-                    } else {
-                        if (featureId.featureId) {
-                            featureIdsContent.push(featureId.featureId);
-                        }
-                    }
-                });
-                if (!featureIdsContent.length) {
-                    this.featureIdsContent = [];
-                    this.featureIdsPopover.hide();
-                    return;
-                }
-                this.featureIdsContent = featureIdsContent;
-                const canvasRect = mapView.getCanvasClientRect();
-                const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
-                const y = result.position.y + canvasRect.top;
-                const anchor = this.anchorRef.nativeElement;
-                anchor.style.position = 'fixed';
-                anchor.style.left = `${x - 16}px`;
-                anchor.style.top = `${y - 4}px`;
-                anchor.style.width = '1px';
-                anchor.style.height = '1px';
-                anchor.style.pointerEvents = 'none';
-
-                if (this.featureIdsPopover.overlayVisible) {
-                    this.featureIdsPopover.target = anchor;
-                    this.featureIdsPopover.align();
-                } else {
-                    this.featureIdsPopover.show(null, anchor);
-                }
-
+                this.lastHoverResult = result;
+                this.refreshHoverPopover();
             });
             this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
             this.cdr.markForCheck();
         });
+    }
+
+    /** Renders the latest picked feature values without initiating any data request. */
+    private refreshHoverPopover(): void {
+        const result = this.lastHoverResult;
+        const mapView = this.mapView;
+        if (!result || !result.featureIds.length || !mapView) {
+            this.hoverDetailsContent = [];
+            this.featureIdsPopover?.hide();
+            return;
+        }
+        const details = this.hoverDetails.detailsFor(
+            this.viewIndex(),
+            result.featureIds
+        );
+        if (!details.length) {
+            this.hoverDetailsContent = [];
+            this.featureIdsPopover?.hide();
+            return;
+        }
+        this.hoverDetailsContent = details;
+        const canvasRect = mapView.getCanvasClientRect();
+        const anchor = this.anchorRef.nativeElement;
+        anchor.style.position = "fixed";
+        const anchorTop = Math.max(
+            0,
+            result.position.y + canvasRect.top - HOVER_POPOVER_CURSOR_GAP_PX
+        );
+        anchor.style.left = `${result.position.x + canvasRect.left + HOVER_POPOVER_CURSOR_GAP_PX}px`;
+        anchor.style.top = `${anchorTop}px`;
+        anchor.style.width = "1px";
+        // A target extending to the viewport bottom makes PrimeNG use its
+        // native flipped placement, keeping the popover above the pointer.
+        anchor.style.height = `${Math.max(1, window.innerHeight - anchorTop)}px`;
+        anchor.style.pointerEvents = "none";
+        if (this.featureIdsPopover.overlayVisible) {
+            this.featureIdsPopover.target = anchor;
+            this.featureIdsPopover.align();
+        } else {
+            this.featureIdsPopover.show(null, anchor);
+        }
+        this.cdr.markForCheck();
     }
 
     /** Returns the DOM id used for this map view canvas. */
