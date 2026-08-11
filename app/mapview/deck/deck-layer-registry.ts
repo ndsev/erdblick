@@ -68,6 +68,7 @@ export class DeckLayerRegistry {
     private readonly cancelFn: CancelFn;
     private pendingFlushHandle: number | null = null;
     private dirty = false;
+    private flushSuspended = false;
 
     /** Creates a registry that batches `deck.setProps({layers})` calls behind a scheduler. */
     constructor(
@@ -84,6 +85,23 @@ export class DeckLayerRegistry {
     setDeck(deck: DeckLike | null): void {
         this.deck = deck;
         this.scheduleFlush();
+    }
+
+    /**
+     * Defers layer synthesis and Deck commits while retaining every mutation.
+     * Resuming schedules one coalesced flush of the final registry state.
+     */
+    setFlushSuspended(suspended: boolean): void {
+        if (this.flushSuspended === suspended) {
+            return;
+        }
+        this.flushSuspended = suspended;
+        if (suspended && this.pendingFlushHandle !== null) {
+            this.cancelFn(this.pendingFlushHandle);
+            this.pendingFlushHandle = null;
+        } else if (!suspended && this.dirty) {
+            this.scheduleFlush();
+        }
     }
 
     /** Inserts or replaces one keyed layer with an explicit ordering rank. */
@@ -177,7 +195,7 @@ export class DeckLayerRegistry {
     /** Commits the current ordered layer list to deck if the registry is dirty. */
     flush(): void {
         this.pendingFlushHandle = null;
-        if (!this.dirty || !this.deck) {
+        if (this.flushSuspended || !this.dirty || !this.deck) {
             return;
         }
 
@@ -222,7 +240,7 @@ export class DeckLayerRegistry {
 
     /** Schedules a single future flush if one is not already pending. */
     private scheduleFlush(): void {
-        if (this.pendingFlushHandle !== null) {
+        if (this.flushSuspended || this.pendingFlushHandle !== null) {
             return;
         }
         this.pendingFlushHandle = this.scheduleFn(() => this.flush());
@@ -237,5 +255,6 @@ export class DeckLayerRegistry {
         this.entries.clear();
         this.deck = null;
         this.dirty = false;
+        this.flushSuspended = false;
     }
 }

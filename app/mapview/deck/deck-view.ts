@@ -1,4 +1,10 @@
-import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
+import {
+    BehaviorSubject,
+    combineLatest,
+    distinctUntilChanged,
+    skip,
+    Subscription
+} from "rxjs";
 import {
     COORDINATE_SYSTEM,
     Deck as DeckGlDeck,
@@ -874,7 +880,9 @@ export abstract class DeckMapView implements IRenderView {
             scene: {
                 deck: this.deck,
                 layerRegistry: this.layerRegistry,
-                renderBufferArena: this.renderBufferArena,
+                renderBufferArena: this.stateService.renderBufferArenaEnabled
+                    ? this.renderBufferArena
+                    : undefined,
                 interactionOutlineService: this.interactionOutlineService,
                 sceneMode: this.sceneMode,
                 device: this.deckDevice
@@ -1318,6 +1326,20 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
+            this.stateService.renderBufferArenaEnabledState
+                .pipe(distinctUntilChanged(), skip(1))
+                .subscribe(() => {
+                    this.layerController.attachScene(this.getSceneHandle());
+                })
+        );
+
+        this.subscriptions.push(
+            this.stateService.deferPresentationDuringInteractionState
+                .pipe(distinctUntilChanged())
+                .subscribe(() => this.syncPresentationDeferral())
+        );
+
+        this.subscriptions.push(
             combineLatest([
                 this.stateService.markerState,
                 this.stateService.markedPositionState
@@ -1485,6 +1507,9 @@ export abstract class DeckMapView implements IRenderView {
         this.targetNavigationAdapter.handleInteractionState(interactionState);
         if (wasCameraInteracting && !this.isCameraInteracting) {
             this.flushPendingViewStatePush();
+            this.scheduleViewportUpdate();
+            this.scheduleTileGridOverlayUpdate();
+            this.scheduleSearchResultsOverlayUpdate();
         }
     }
 
@@ -1592,6 +1617,7 @@ export abstract class DeckMapView implements IRenderView {
             || interactionState.isZooming
             || interactionState.inTransition
         );
+        this.syncPresentationDeferral();
         this.hoverPickingSuspendedUntilMs = performance.now() + DeckMapView.HOVER_PICK_SUSPEND_AFTER_CAMERA_MS;
         this.suspendDeckHoverPicking();
         if (this.isCameraInteracting) {
@@ -1601,6 +1627,14 @@ export abstract class DeckMapView implements IRenderView {
                 this.setHoverNavigationPivot(null);
             }
         }
+    }
+
+    /** Keeps the installed layer array immutable during camera interaction when requested. */
+    private syncPresentationDeferral(): void {
+        this.layerRegistry.setFlushSuspended(
+            this.stateService.deferPresentationDuringInteraction &&
+            this.isCameraInteracting
+        );
     }
 
     /** Cancels any pending deferred hover-pick work. */
@@ -1934,10 +1968,13 @@ export abstract class DeckMapView implements IRenderView {
             this.suppressDeckViewStateEvent = wasSuppressingViewStateEvents;
         }
         if (updateViewport) {
-            this.scheduleViewportUpdate();
             this.updateBackgroundLayer();
-            this.scheduleTileGridOverlayUpdate();
-            this.scheduleSearchResultsOverlayUpdate();
+            if (!this.stateService.deferPresentationDuringInteraction ||
+                !this.isCameraInteracting) {
+                this.scheduleViewportUpdate();
+                this.scheduleTileGridOverlayUpdate();
+                this.scheduleSearchResultsOverlayUpdate();
+            }
         }
     }
 

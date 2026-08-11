@@ -683,6 +683,18 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly deferPresentationDuringInteractionState = this.createState<boolean>({
+        name: 'deferPresentationDuringInteraction',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly renderBufferArenaEnabledState = this.createState<boolean>({
+        name: 'renderBufferArenaEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
     readonly renderBlockVertexLimitState = this.createState<number>({
         name: 'renderBlockVertexLimit',
         defaultValue: DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
@@ -2224,6 +2236,18 @@ export class AppStateService implements OnDestroy {
     get debugRenderBlocks() {return this.debugRenderBlocksState.getValue();}
     set debugRenderBlocks(val: boolean) {
         this.debugRenderBlocksState.next(!!val);
+    }
+    get deferPresentationDuringInteraction() {
+        return this.deferPresentationDuringInteractionState.getValue();
+    }
+    set deferPresentationDuringInteraction(val: boolean) {
+        this.deferPresentationDuringInteractionState.next(!!val);
+    }
+    get renderBufferArenaEnabled() {
+        return this.renderBufferArenaEnabledState.getValue();
+    }
+    set renderBufferArenaEnabled(val: boolean) {
+        this.renderBufferArenaEnabledState.next(!!val);
     }
     get renderBlockVertexLimit() {
         return this.renderBlockVertexLimitState.getValue();

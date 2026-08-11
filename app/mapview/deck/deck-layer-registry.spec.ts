@@ -83,6 +83,35 @@ describe("DeckLayerRegistry", () => {
         registry.destroy();
     });
 
+    it("coalesces mutations while flushing is suspended", () => {
+        const deck = new DeckStub();
+        const scheduled: Array<() => void> = [];
+        const cancelled = new Set<number>();
+        const registry = new DeckLayerRegistry(
+            deck,
+            callback => {
+                scheduled.push(callback);
+                return scheduled.length - 1;
+            },
+            handle => cancelled.add(handle)
+        );
+
+        registry.upsert("before", {id: "before"});
+        registry.setFlushSuspended(true);
+        registry.remove("before");
+        registry.upsert("after", {id: "after"});
+
+        expect(cancelled).toEqual(new Set([0]));
+        expect(deck.commits).toHaveLength(0);
+        registry.flush();
+        expect(deck.commits).toHaveLength(0);
+
+        registry.setFlushSuspended(false);
+        expect(scheduled).toHaveLength(2);
+        scheduled[1]();
+        expect(deck.commits.at(-1)?.map(layer => layer.id)).toEqual(["after"]);
+    });
+
     it("merges shared layer contributions and drops the layer when the last contributor is removed", () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);

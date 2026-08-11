@@ -439,6 +439,24 @@ import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
                             <p-toggleswitch
                                 [(ngModel)]="stateService.debugRenderBlocks"></p-toggleswitch>
                         </div>
+                        <div class="button-container">
+                            <label>Stable Geometry While Navigating
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Keep the currently installed Deck layers unchanged while the camera moves, then apply accumulated tile and buffer updates when navigation ends."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-toggleswitch
+                                [(ngModel)]="stateService.deferPresentationDuringInteraction"></p-toggleswitch>
+                        </div>
+                        <div class="button-container">
+                            <label>Merge Render Blocks
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Merge immutable Morton render blocks into larger Deck buffer pages. Disable this to compare direct per-block layers against buffer-arena consolidation."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-toggleswitch
+                                [(ngModel)]="stateService.renderBufferArenaEnabled"></p-toggleswitch>
+                        </div>
                     </p-tabpanel>
 
                     <p-tabpanel value="storage">
