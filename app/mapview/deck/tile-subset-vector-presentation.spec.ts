@@ -6,6 +6,7 @@ import {DeckLayerRegistry} from "./deck-layer-registry";
 import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
 import {DeckVariablePathOffsetExtension} from
     "./deck-variable-path-offset.extension";
+import {DeckZIndexExtension} from "./deck-z-index.extension";
 import type {
     TileSubsetLayerRenderBuffers,
     TileSubsetPathBuffers,
@@ -36,6 +37,7 @@ function emptyPointBuffers(): TileSubsetPointBuffers {
         positions: new Float32Array(),
         colors: new Uint8Array(),
         radii: new Float32Array(),
+        zIndices: new Float64Array(),
         depthTests: new Uint8Array(),
         featureAddresses: new Uint32Array(),
         glowColors: new Uint8Array(),
@@ -50,6 +52,7 @@ function emptySurfaceBuffers(): TileSubsetSurfaceBuffers {
         holeIndices: new Uint32Array(),
         holeIndexStarts: new Uint32Array(),
         colors: new Uint8Array(),
+        zIndices: new Float64Array(),
         depthTests: new Uint8Array(),
         featureAddresses: new Uint32Array(),
         glowColors: new Uint8Array(),
@@ -66,6 +69,7 @@ function emptyPathBuffers(): TileSubsetPathBuffers {
         lateralOffsetsPx: new Float32Array(),
         lateralOffsetVectorsPx: new Float32Array(),
         lateralOffsetScaleThresholds: new Float32Array(),
+        zIndices: new Float64Array(),
         depthTests: new Uint8Array(),
         featureAddresses: new Uint32Array(),
         glowColors: new Uint8Array(),
@@ -93,6 +97,7 @@ function pathBuffers(
             ? new Float32Array([1, 2, 3, 4])
             : new Float32Array(),
         lateralOffsetScaleThresholds: new Float32Array([0.25]),
+        zIndices: new Float64Array([Number.NaN]),
         depthTests: new Uint8Array([1]),
         featureAddresses: new Uint32Array([featureAddress]),
         glowColors: new Uint8Array([0, 0, 0, 0]),
@@ -283,6 +288,43 @@ describe("tile-subset vector layer factories", () => {
         expect((layer.props as any).navigationAnchorEligible).toBe(true);
         expect((layer.props as any).markerAnchorEligible).toBe(true);
         expect((layer.props as any).anchorPositions).toBe(positions);
+    });
+
+    it("installs clip-space z-order only when compiled data requests it", () => {
+        const layer = createTileSubsetPathLayer(
+            "ordered-path",
+            {
+                length: 1,
+                billboard: false,
+                depthTest: true,
+                coordinateOrigin: [11, 48, 0],
+                startIndices: new Uint32Array([0, 2]),
+                featureAddressesByPath: new Uint32Array([0]),
+                zIndices: new Float64Array([7]),
+                attributes: {
+                    getPath: {value: new Float32Array(6), size: 3},
+                    instanceColors: {value: new Uint8Array(8), size: 4},
+                    instanceStrokeWidths: {
+                        value: new Float32Array([2, 2]),
+                        size: 1
+                    },
+                    instanceOffsets: {
+                        value: new Float32Array(2),
+                        size: 1
+                    },
+                    zIndexOffsets: {
+                        value: new Float32Array([0.001, 0.001]),
+                        size: 1
+                    }
+                }
+            },
+            vi.fn(),
+            null,
+            interaction
+        );
+
+        expect(layer.props.extensions?.at(-1)).toBeInstanceOf(
+            DeckZIndexExtension);
     });
 });
 

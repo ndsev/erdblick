@@ -1680,6 +1680,56 @@ offset-increment: [4.0, 5.0, 6.0]
     REQUIRE(rule.offsetIncrement() == glm::dvec3(4.0, 5.0, 6.0));
 }
 
+TEST_CASE("FeatureStyleRuleZIndexExpressionFallback", "[erdblick.style]")
+{
+    auto rule = FeatureStyleRule(YAML::Load(R"yaml(
+type: Road
+geometry: line
+z-index: 7
+z-index-expression: drawOrder
+)yaml"), 0);
+    auto issues = 0;
+    auto eval = BoundEvalFun{
+        [](std::string const&) { return simfil::Value(int64_t{42}); },
+        [&](auto const&, auto const&, auto const&, auto) { ++issues; }
+    };
+    REQUIRE(rule.zIndex(eval) == 42.0f);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(65535.0001);
+    };
+    REQUIRE(rule.zIndex(eval) == 65535.0001);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(simfil::ValueType::Undef);
+    };
+    REQUIRE(rule.zIndex(eval) == 7.0f);
+    REQUIRE(issues == 0);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(std::string{"front"});
+    };
+    REQUIRE(rule.zIndex(eval) == 7.0f);
+    REQUIRE(issues == 1);
+
+    auto expressionOnlyRule = FeatureStyleRule(YAML::Load(R"yaml(
+type: Road
+geometry: line
+z-index-expression: drawOrder
+)yaml"), 0);
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(simfil::ValueType::Undef);
+    };
+    REQUIRE_FALSE(expressionOnlyRule.zIndex(eval));
+    REQUIRE(issues == 1);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(std::string{"front"});
+    };
+    REQUIRE_FALSE(expressionOnlyRule.zIndex(eval));
+    REQUIRE(issues == 2);
+}
+
 TEST_CASE("FeatureStyleRuleLateralOffsetUnitAliases", "[erdblick.style]")
 {
     for (auto const& alias : {"pixel", "pixels", "px"}) {

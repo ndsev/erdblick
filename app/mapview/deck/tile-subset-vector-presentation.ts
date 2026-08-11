@@ -25,12 +25,17 @@ import {
     DeckVariablePathOffsetExtension,
     packVariablePathOffsetVectors
 } from "./deck-variable-path-offset.extension";
+import {
+    buildZIndexOffsets,
+    DeckZIndexExtension
+} from "./deck-z-index.extension";
 import type {
     TileSubsetLabelDatum,
     TileSubsetLayerRenderBuffers
 } from "./tile-subset-layer-render.worker.protocol";
 import {
     compileTileSubsetArrowMarkers,
+    expandObjectValues,
     compileTileSubsetPathData,
     compileTileSubsetPointData,
     compileTileSubsetSurfaceData,
@@ -65,6 +70,7 @@ const ARROW_ICON_MAPPING = {
 
 export type DeckLabelData = Omit<TileSubsetLabelDatum, "position"> & {
     position: [number, number, number];
+    zIndexOffset: number;
 };
 
 interface SharedPrimitiveContribution<T> {
@@ -137,6 +143,9 @@ export function createTileSubsetSurfaceLayer(
         _normalize: false,
         _full3d: true,
         modelMatrix,
+        extensions: surface.attributes.zIndexOffsets
+            ? [new DeckZIndexExtension()]
+            : [],
         parameters,
         pickable: interaction.pickable,
         navigationAnchorEligible: interaction.drillPickEligible,
@@ -178,12 +187,17 @@ export function createTileSubsetPathLayer(
         navigationAnchorEligible: interaction.drillPickEligible,
         markerAnchorEligible: interaction.drillPickEligible,
         drillPickEligible: interaction.drillPickEligible,
-        extensions: variableOffset
+        extensions: [
+            ...(variableOffset
             ? [
                 new PathStyleExtension({dash: true}),
                 new DeckVariablePathOffsetExtension()
             ]
-            : [new PathStyleExtension({dash: true, offset: true})],
+            : [new PathStyleExtension({dash: true, offset: true})]),
+            ...(path.attributes.zIndexOffsets
+                ? [new DeckZIndexExtension()]
+                : [])
+        ],
         tileKey: key,
         subsetPickResolver: pickResolver,
         featureAddressesByPath: path.featureAddressesByPath,
@@ -213,6 +227,9 @@ export function createTileSubsetPointLayer(
         radiusUnits: "pixels",
         billboard: point.billboard,
         modelMatrix,
+        extensions: point.attributes.zIndexOffsets
+            ? [new DeckZIndexExtension()]
+            : [],
         parameters: renderParameters(point.depthTest),
         pickable: interaction.pickable,
         navigationAnchorEligible: interaction.drillPickEligible,
@@ -252,7 +269,13 @@ export function createTileSubsetArrowLayer(
             marker.localPixelOffset,
         getColor: options.getColor ??
             ((marker: DeckArrowMarker) => marker.color),
-        extensions: [new DeckLocalPixelOffsetExtension()],
+        extensions: [
+            new DeckLocalPixelOffsetExtension(),
+            ...(arrow.attributes.zIndexOffsets
+                ? [new DeckZIndexExtension()]
+                : [])
+        ],
+        getZIndexOffset: (marker: DeckArrowMarker) => marker.zIndexOffset,
         billboard: arrow.billboard,
         modelMatrix,
         parameters: options.parameters ?? renderParameters(arrow.depthTest),
@@ -392,14 +415,20 @@ export class TileSubsetVectorPresentation {
             }
         }
 
-        const labels = [...result.labelWorld, ...result.labelBillboard].map(
-            label => ({
+        const rawLabels = [...result.labelWorld, ...result.labelBillboard];
+        const labelZIndexOffsets = buildZIndexOffsets(
+            rawLabels.map(label => label.zIndex ?? Number.NaN),
+            rawLabels.map(label => label.featureAddress)
+        );
+        const labels = rawLabels.map(
+            (label, index) => ({
                 ...label,
                 position: [
                     label.position.x,
                     label.position.y,
                     label.position.z
-                ] as [number, number, number]
+                ] as [number, number, number],
+                zIndexOffset: labelZIndexOffsets?.[index] ?? 0
             }));
         for (const billboard of [false, true]) {
             for (const depthTest of [true, false]) {
@@ -425,6 +454,11 @@ export class TileSubsetVectorPresentation {
                     outlineWidth: data[0].outlineWidth,
                     getPixelOffset: (datum: DeckLabelData) =>
                         datum.pixelOffset ?? [0, 0],
+                    getZIndexOffset: (datum: DeckLabelData) =>
+                        datum.zIndexOffset,
+                    extensions: labelZIndexOffsets
+                        ? [new DeckZIndexExtension()]
+                        : [],
                     billboard,
                     modelMatrix,
                     parameters: renderParameters(depthTest),
@@ -673,51 +707,102 @@ export class TileSubsetVectorPresentation {
             return null;
         }
         const picks = this.arenaPickTable(contributions);
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const indices: number[] = [];
-        const starts = [0];
-        const addresses: number[] = [];
-        const normals: number[] = [];
+        const hasZIndex = contributions.some(contribution =>
+            Boolean(contribution.data.zIndices));
+        let positionCount = 0;
+        let colorCount = 0;
+        let indexCount = 0;
+        let surfaceCount = 0;
+        for (const {data} of contributions) {
+            positionCount += data.attributes.getPolygon.value.length;
+            colorCount += data.attributes.fillColors.value.length;
+            indexCount += data.attributes.indices.value.length;
+            surfaceCount += data.length;
+        }
+        const positions = new Float32Array(positionCount);
+        const colors = new Uint8Array(colorCount);
+        const indices = new Uint32Array(indexCount);
+        const startIndices = new Uint32Array(surfaceCount + 1);
+        const addresses = new Uint32Array(surfaceCount);
+        const normals = new Float32Array(surfaceCount * 3);
+        const zIndices = hasZIndex
+            ? new Float64Array(surfaceCount)
+            : undefined;
+        let positionOffset = 0;
+        let colorOffset = 0;
+        let indexOffset = 0;
+        let surfaceOffset = 0;
         for (const contribution of contributions) {
             const data = contribution.data;
-            const vertexBase = positions.length / 3;
-            this.appendValues(positions, data.attributes.getPolygon.value);
-            this.appendValues(colors, data.attributes.fillColors.value);
+            const vertexBase = positionOffset / 3;
+            positions.set(data.attributes.getPolygon.value, positionOffset);
+            colors.set(data.attributes.fillColors.value, colorOffset);
+            if (zIndices) {
+                const values = data.zIndices;
+                if (values) {
+                    zIndices.set(values, surfaceOffset);
+                } else {
+                    zIndices.fill(
+                        Number.NaN,
+                        surfaceOffset,
+                        surfaceOffset + data.length
+                    );
+                }
+            }
             for (const index of data.attributes.indices.value) {
-                indices.push(index + vertexBase);
+                indices[indexOffset++] = index + vertexBase;
             }
             for (let index = 1; index < data.startIndices.length; ++index) {
-                starts.push(vertexBase + data.startIndices[index]);
+                startIndices[surfaceOffset + index] =
+                    vertexBase + data.startIndices[index];
             }
-            for (const address of data.featureAddresses) {
-                addresses.push(picks.remap(contribution, address));
+            for (let index = 0; index < data.featureAddresses.length; ++index) {
+                addresses[surfaceOffset + index] = picks.remap(
+                    contribution,
+                    data.featureAddresses[index]
+                );
             }
-            this.appendValues(normals, data.surfaceNormals);
+            normals.set(data.surfaceNormals, surfaceOffset * 3);
+            positionOffset += data.attributes.getPolygon.value.length;
+            colorOffset += data.attributes.fillColors.value.length;
+            surfaceOffset += data.length;
         }
         const first = contributions[0].data;
+        const objectZIndexOffsets = zIndices
+            ? buildZIndexOffsets(zIndices, addresses)
+            : undefined;
+        const zIndexOffsets = objectZIndexOffsets
+            ? expandObjectValues(objectZIndexOffsets, startIndices)
+            : undefined;
         return {
             pickResolver: picks.resolve,
             data: {
                 length: addresses.length,
                 depthTest: first.depthTest,
                 coordinateOrigin: first.coordinateOrigin,
-                startIndices: new Uint32Array(starts),
-                featureAddresses: new Uint32Array(addresses),
-                surfaceNormals: new Float32Array(normals),
+                startIndices,
+                featureAddresses: addresses,
+                surfaceNormals: normals,
+                zIndices,
                 attributes: {
                     getPolygon: {
-                        value: new Float32Array(positions),
+                        value: positions,
                         size: 3
                     },
                     indices: {
-                        value: new Uint32Array(indices),
+                        value: indices,
                         size: 1
                     },
                     fillColors: {
-                        value: new Uint8Array(colors),
+                        value: colors,
                         size: 4
-                    }
+                    },
+                    ...(zIndexOffsets
+                        ? {zIndexOffsets: {
+                            value: zIndexOffsets,
+                            size: 1
+                        }}
+                        : {})
                 }
             }
         };
@@ -734,61 +819,126 @@ export class TileSubsetVectorPresentation {
         const picks = this.arenaPickTable(contributions);
         const variableOffset = Boolean(
             contributions[0].data.attributes.instanceVariableOffsets);
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const widths: number[] = [];
-        const offsets: number[] = [];
-        const offsetVectors: number[] = [];
-        const offsetScaleThresholds: number[] = [];
-        const dashes: number[] = [];
-        const starts = [0];
-        const addresses: number[] = [];
         const hasDashes = contributions.some(contribution =>
             !!contribution.data.attributes.instanceDashArrays);
+        const hasZIndex = contributions.some(contribution =>
+            Boolean(contribution.data.zIndices));
+        let vertexCount = 0;
+        let pathCount = 0;
+        for (const {data} of contributions) {
+            const contributionVertexCount =
+                data.attributes.getPath.value.length / 3;
+            if (variableOffset && (!data.offsetVectorsPx ||
+                data.offsetVectorsPx.length < contributionVertexCount * 2)) {
+                return null;
+            }
+            vertexCount += contributionVertexCount;
+            pathCount += data.length;
+        }
+        const positions = new Float32Array(vertexCount * 3);
+        const colors = new Uint8Array(vertexCount * 4);
+        const widths = new Float32Array(vertexCount);
+        const offsets = new Float32Array(vertexCount);
+        const zIndices = hasZIndex
+            ? new Float64Array(pathCount)
+            : undefined;
+        const offsetVectors = variableOffset
+            ? new Float32Array(vertexCount * 2)
+            : undefined;
+        const offsetScaleThresholds = variableOffset
+            ? new Float32Array(pathCount)
+            : undefined;
+        const dashes = hasDashes
+            ? new Float32Array(vertexCount * 2)
+            : undefined;
+        const startIndices = new Uint32Array(pathCount + 1);
+        const addresses = new Uint32Array(pathCount);
+        let vertexOffset = 0;
+        let pathOffset = 0;
         for (const contribution of contributions) {
             const data = contribution.data;
-            const vertexBase = positions.length / 3;
-            const vertexCount = data.attributes.getPath.value.length / 3;
-            this.appendValues(positions, data.attributes.getPath.value);
-            this.appendValues(colors, data.attributes.instanceColors.value);
-            this.appendValues(widths, data.attributes.instanceStrokeWidths.value);
-            this.appendValues(offsets, data.attributes.instanceOffsets.value);
-            if (variableOffset) {
-                if (!data.offsetVectorsPx ||
-                    data.offsetVectorsPx.length < vertexCount * 2) {
-                    return null;
+            const contributionVertexCount =
+                data.attributes.getPath.value.length / 3;
+            positions.set(
+                data.attributes.getPath.value,
+                vertexOffset * 3
+            );
+            colors.set(
+                data.attributes.instanceColors.value,
+                vertexOffset * 4
+            );
+            widths.set(
+                data.attributes.instanceStrokeWidths.value,
+                vertexOffset
+            );
+            offsets.set(
+                data.attributes.instanceOffsets.value,
+                vertexOffset
+            );
+            if (zIndices) {
+                const values = data.zIndices;
+                if (values) {
+                    zIndices.set(values, pathOffset);
+                } else {
+                    zIndices.fill(
+                        Number.NaN,
+                        pathOffset,
+                        pathOffset + data.length
+                    );
                 }
-                this.appendValues(offsetVectors, data.offsetVectorsPx);
+            }
+            if (offsetVectors && offsetScaleThresholds) {
+                offsetVectors.set(
+                    data.offsetVectorsPx!.subarray(
+                        0,
+                        contributionVertexCount * 2
+                    ),
+                    vertexOffset * 2
+                );
                 for (let pathIndex = 0;
                      pathIndex < data.length;
                      ++pathIndex) {
-                    offsetScaleThresholds.push(
-                        data.offsetScaleThresholds?.[pathIndex] ?? 0);
+                    offsetScaleThresholds[pathOffset + pathIndex] =
+                        data.offsetScaleThresholds?.[pathIndex] ?? 0;
                 }
             }
             const contributionDashes =
                 data.attributes.instanceDashArrays?.value;
-            if (hasDashes) {
+            if (dashes) {
                 if (contributionDashes) {
-                    this.appendValues(dashes, contributionDashes);
+                    dashes.set(
+                        contributionDashes,
+                        vertexOffset * 2
+                    );
                 } else {
-                    for (let index = 0; index < vertexCount; ++index) {
-                        dashes.push(1, 0);
+                    for (let index = 0;
+                         index < contributionVertexCount;
+                         ++index) {
+                        dashes[(vertexOffset + index) * 2] = 1;
                     }
                 }
             }
             for (let index = 1; index < data.startIndices.length; ++index) {
-                starts.push(vertexBase + data.startIndices[index]);
+                startIndices[pathOffset + index] =
+                    vertexOffset + data.startIndices[index];
             }
-            for (const address of data.featureAddressesByPath) {
-                addresses.push(picks.remap(contribution, address));
+            for (let index = 0;
+                 index < data.featureAddressesByPath.length;
+                 ++index) {
+                addresses[pathOffset + index] = picks.remap(
+                    contribution,
+                    data.featureAddressesByPath[index]
+                );
             }
+            vertexOffset += contributionVertexCount;
+            pathOffset += data.length;
         }
         const first = contributions[0].data;
-        const startIndices = new Uint32Array(starts);
-        const offsetValues = new Float32Array(offsets);
-        const offsetVectorValues = variableOffset
-            ? new Float32Array(offsetVectors)
+        const objectZIndexOffsets = zIndices
+            ? buildZIndexOffsets(zIndices, addresses)
+            : undefined;
+        const zIndexOffsets = objectZIndexOffsets
+            ? expandObjectValues(objectZIndexOffsets, startIndices)
             : undefined;
         return {
             pickResolver: picks.resolve,
@@ -798,40 +948,45 @@ export class TileSubsetVectorPresentation {
                 depthTest: first.depthTest,
                 coordinateOrigin: first.coordinateOrigin,
                 startIndices,
-                featureAddressesByPath: new Uint32Array(addresses),
-                offsetVectorsPx: offsetVectorValues,
-                offsetScaleThresholds: variableOffset
-                    ? new Float32Array(offsetScaleThresholds)
-                    : undefined,
+                featureAddressesByPath: addresses,
+                offsetVectorsPx: offsetVectors,
+                offsetScaleThresholds,
+                zIndices,
                 attributes: {
                     getPath: {
-                        value: new Float32Array(positions),
+                        value: positions,
                         size: 3
                     },
                     instanceColors: {
-                        value: new Uint8Array(colors),
+                        value: colors,
                         size: 4
                     },
                     instanceStrokeWidths: {
-                        value: new Float32Array(widths),
+                        value: widths,
                         size: 1
                     },
                     instanceOffsets: {
-                        value: offsetValues,
+                        value: offsets,
                         size: 1
                     },
-                    ...(offsetVectorValues
+                    ...(zIndexOffsets
+                        ? {zIndexOffsets: {
+                            value: zIndexOffsets,
+                            size: 1
+                        }}
+                        : {}),
+                    ...(offsetVectors
                         ? {instanceVariableOffsets: {
                             value: packVariablePathOffsetVectors(
-                                offsetVectorValues,
+                                offsetVectors,
                                 startIndices,
                                 offsetScaleThresholds),
                             size: 4
                         }}
                         : {}),
-                    ...(hasDashes
+                    ...(dashes
                         ? {instanceDashArrays: {
-                            value: new Float32Array(dashes),
+                            value: dashes,
                             size: 2
                         }}
                         : {})
@@ -849,20 +1004,55 @@ export class TileSubsetVectorPresentation {
             return null;
         }
         const picks = this.arenaPickTable(contributions);
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const radii: number[] = [];
-        const addresses: number[] = [];
+        const hasZIndex = contributions.some(contribution =>
+            Boolean(contribution.data.zIndices));
+        const pointCount = contributions.reduce(
+            (sum, contribution) => sum + contribution.data.length,
+            0
+        );
+        const positions = new Float32Array(pointCount * 3);
+        const colors = new Uint8Array(pointCount * 4);
+        const radii = new Float32Array(pointCount);
+        const zIndices = hasZIndex
+            ? new Float64Array(pointCount)
+            : undefined;
+        const addresses = new Uint32Array(pointCount);
+        let pointOffset = 0;
         for (const contribution of contributions) {
             const data = contribution.data;
-            this.appendValues(positions, data.attributes.getPosition.value);
-            this.appendValues(colors, data.attributes.getFillColor.value);
-            this.appendValues(radii, data.attributes.getRadius.value);
-            for (const address of data.featureAddresses) {
-                addresses.push(picks.remap(contribution, address));
+            positions.set(
+                data.attributes.getPosition.value,
+                pointOffset * 3
+            );
+            colors.set(
+                data.attributes.getFillColor.value,
+                pointOffset * 4
+            );
+            radii.set(data.attributes.getRadius.value, pointOffset);
+            if (zIndices) {
+                const values = data.zIndices;
+                if (values) {
+                    zIndices.set(values, pointOffset);
+                } else {
+                    zIndices.fill(
+                        Number.NaN,
+                        pointOffset,
+                        pointOffset + data.length
+                    );
+                }
             }
+            for (let index = 0; index < data.featureAddresses.length; ++index) {
+                addresses[pointOffset + index] = picks.remap(
+                    contribution,
+                    data.featureAddresses[index]
+                );
+            }
+            pointOffset += data.length;
         }
         const first = contributions[0].data;
+        const zIndexOffsets = zIndices
+            ? buildZIndexOffsets(zIndices, addresses)
+            : undefined;
         return {
             pickResolver: picks.resolve,
             data: {
@@ -870,20 +1060,27 @@ export class TileSubsetVectorPresentation {
                 billboard: first.billboard,
                 depthTest: first.depthTest,
                 coordinateOrigin: first.coordinateOrigin,
-                featureAddresses: new Uint32Array(addresses),
+                featureAddresses: addresses,
+                zIndices,
                 attributes: {
                     getPosition: {
-                        value: new Float32Array(positions),
+                        value: positions,
                         size: 3
                     },
                     getFillColor: {
-                        value: new Uint8Array(colors),
+                        value: colors,
                         size: 4
                     },
                     getRadius: {
-                        value: new Float32Array(radii),
+                        value: radii,
                         size: 1
-                    }
+                    },
+                    ...(zIndexOffsets
+                        ? {zIndexOffsets: {
+                            value: zIndexOffsets,
+                            size: 1
+                        }}
+                        : {})
                 }
             }
         };
@@ -934,15 +1131,6 @@ export class TileSubsetVectorPresentation {
                     : [];
             }
         };
-    }
-
-    private appendValues(
-        target: number[],
-        source: ArrayLike<number>
-    ): void {
-        for (let index = 0; index < source.length; ++index) {
-            target.push(Number(source[index]));
-        }
     }
 
     private arenaGroupKey(

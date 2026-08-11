@@ -48,6 +48,8 @@ export interface TileSubsetPointBuffers {
     positions: Float32Array;
     colors: Uint8Array;
     radii: Float32Array;
+    /** One authored ordinal z-index per point; NaN means unspecified. */
+    zIndices: Float64Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
     glowColors: Uint8Array;
@@ -60,6 +62,8 @@ export interface TileSubsetSurfaceBuffers {
     holeIndices: Uint32Array;
     holeIndexStarts: Uint32Array;
     colors: Uint8Array;
+    /** One authored ordinal z-index per surface; NaN means unspecified. */
+    zIndices: Float64Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
     glowColors: Uint8Array;
@@ -80,6 +84,8 @@ export interface TileSubsetPathBuffers {
     lateralOffsetVectorsPx: Float32Array;
     /** One adaptive metres-per-pixel displacement threshold per path. */
     lateralOffsetScaleThresholds: Float32Array;
+    /** One authored ordinal z-index per path; NaN means unspecified. */
+    zIndices: Float64Array;
     depthTests: Uint8Array;
     featureAddresses: Uint32Array;
     glowColors: Uint8Array;
@@ -113,6 +119,8 @@ export interface TileSubsetLabelDatum {
     pixelOffset?: [number, number];
     billboard: boolean;
     depthTest?: boolean;
+    /** Raw authored ordinal z-index, omitted when the style does not set one. */
+    zIndex?: number;
 }
 
 /** Compact native runtime issue expanded into a full validation issue on the main thread. */

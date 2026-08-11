@@ -185,6 +185,7 @@ Common primitive fields include:
 - `opacity`;
 - `width` and optional `width-scale`;
 - `offset` and `offset-increment`;
+- `z-index` and optional `z-index-expression`;
 - `lateral-offset-unit`: `meter`, `meters`, `m`, `pixel`, `pixels`, or `px`;
 - literal screen-space `glow` material;
 - `flat`, `billboard`, and `depth-test`;
@@ -254,6 +255,41 @@ two large projected positions), so arrow anchors retain the terminal lateral
 offset at Web-Mercator float precision.
 Longitudinal and vertical components remain world-space and follow the
 respective leg slot.
+
+`z-index` separates coplanar vector geometry without moving it in world
+space. Higher values are drawn in front of lower values. An optional
+`z-index-expression` supplies the value per emitted feature, attribute, or
+relation. The literal `z-index` is its optional fallback when evaluation does
+not produce a finite number. If no literal is configured, an undefined
+expression leaves that geometry on Deck's stock depth path:
+
+```yaml
+z-index-expression: >
+  properties.effectiveRenderOrder
+```
+
+The renderer treats values as ordinal rather than as metres. It retains them as
+64-bit values until each compatible render-buffer arena rank-compresses them,
+and retains first-emitted order through bounded same-rank tie buckets. It sends
+only a tiny clip-space depth bias to the GPU. The shader applies the bias after
+projection as `bias * clip.w`, so its effect does not grow or shrink with camera
+distance. Shared arenas recompute the ranks after tile contributions are
+merged, which keeps overlapping features from adjacent render blocks in the
+same order. Values in unrelated primitive/depth/billboard buckets do not
+establish a global scene graph; the normal Deck layer order remains the outer
+ordering boundary.
+
+NDS.Classic sources expose `properties.effectiveRenderOrder` on every eligible
+BMD and Routing feature. Classicsource resolves predecessor inheritance from
+the sparse `DRAWING_ORDER`, then adds a bounded fractional tie-breaker for
+family and physical source-list order. Styles can therefore consume the value
+directly; the original flexible Attribute remains available for inspection.
+
+Omitting both fields leaves Deck's stock depth behavior untouched. Use the Z
+component of `offset` only for a real geometric displacement; do not use it to
+resolve z-fighting. The initial implementation covers points, paths, arrows,
+polygons, mapget meshes/AABBs, and labels. GLTF nodes retain their physical
+transform and do not consume `z-index` yet.
 
 `glow` adds a shadow or halo to emitted vector geometry without changing its
 authored color or width:

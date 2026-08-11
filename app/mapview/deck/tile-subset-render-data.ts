@@ -12,6 +12,7 @@ import {
     packVariablePathOffsetVectors,
     quantizeVariablePathOffsetScaleThreshold
 } from "./deck-variable-path-offset.extension";
+import {buildZIndexOffsets} from "./deck-z-index.extension";
 
 export interface DeckBinaryAttribute<T extends ArrayLike<number>> {
     value: T;
@@ -27,6 +28,8 @@ export interface DeckPathData {
     featureAddressesByPath: Uint32Array;
     glowColors?: Uint8Array;
     glowRadii?: Float32Array;
+    /** Per-path authored orders retained so arena merges can rank globally. */
+    zIndices?: Float64Array;
     /** Per-vertex local XY pixel vectors retained for copying/arena merges. */
     offsetVectorsPx?: Float32Array;
     /** Quantized metres-per-pixel adaptive scale threshold per path. */
@@ -36,6 +39,7 @@ export interface DeckPathData {
         instanceColors: DeckBinaryAttribute<Uint8Array>;
         instanceStrokeWidths: DeckBinaryAttribute<Float32Array>;
         instanceOffsets: DeckBinaryAttribute<Float32Array>;
+        zIndexOffsets?: DeckBinaryAttribute<Float32Array>;
         instanceVariableOffsets?: DeckBinaryAttribute<Uint32Array>;
         instanceDashArrays?: DeckBinaryAttribute<Float32Array>;
         instancePickingColors?: DeckBinaryAttribute<Uint8Array>;
@@ -50,10 +54,13 @@ export interface DeckPointData {
     featureAddresses: Uint32Array;
     glowColors?: Uint8Array;
     glowRadii?: Float32Array;
+    /** Per-point authored orders retained so arena merges can rank globally. */
+    zIndices?: Float64Array;
     attributes: {
         getPosition: DeckBinaryAttribute<Float32Array>;
         getFillColor: DeckBinaryAttribute<Uint8Array>;
         getRadius: DeckBinaryAttribute<Float32Array>;
+        zIndexOffsets?: DeckBinaryAttribute<Float32Array>;
         instancePickingColors?: DeckBinaryAttribute<Uint8Array>;
     };
 }
@@ -67,10 +74,13 @@ export interface DeckSurfaceData {
     surfaceNormals: Float32Array;
     glowColors?: Uint8Array;
     glowRadii?: Float32Array;
+    /** Per-surface authored orders retained so arena merges can rank globally. */
+    zIndices?: Float64Array;
     attributes: {
         getPolygon: DeckBinaryAttribute<Float32Array>;
         indices: DeckBinaryAttribute<Uint32Array>;
         fillColors: DeckBinaryAttribute<Uint8Array>;
+        zIndexOffsets?: DeckBinaryAttribute<Float32Array>;
         pickingColors?: DeckBinaryAttribute<Uint8Array>;
     };
 }
@@ -84,6 +94,8 @@ export interface DeckArrowMarker {
     pixelOffset: [number, number];
     /** Local XY displacement plus its adaptive metres-per-pixel threshold. */
     localPixelOffset: [number, number, number];
+    /** Clip-space depth bias inherited from the owning path. */
+    zIndexOffset: number;
 }
 
 const MAX_PATHS = 1_000_000;
@@ -129,6 +141,7 @@ export function compileTileSubsetPathData(
         offsetVectors?: number[];
         offsetScaleThresholds?: number[];
         addresses: number[];
+        zIndices: number[];
         glowColors: number[];
         glowRadii: number[];
         dashes?: number[];
@@ -158,6 +171,7 @@ export function compileTileSubsetPathData(
             offsetVectors: variableOffset ? [] : undefined,
             offsetScaleThresholds: variableOffset ? [] : undefined,
             addresses: [],
+            zIndices: [],
             glowColors: [],
             glowRadii: [],
             dashes: hasDashes ? [] : undefined
@@ -183,6 +197,7 @@ export function compileTileSubsetPathData(
             }
         }
         group.addresses.push(raw.featureAddresses[pathIndex]);
+        group.zIndices.push(raw.zIndices?.[pathIndex] ?? Number.NaN);
         group.offsetScaleThresholds?.push(
             quantizeVariablePathOffsetScaleThreshold(
                 raw.lateralOffsetScaleThresholds?.[pathIndex] ?? 0));
@@ -199,6 +214,13 @@ export function compileTileSubsetPathData(
         const offsetVectors = group.offsetVectors
             ? new Float32Array(group.offsetVectors)
             : undefined;
+        const objectZIndexOffsets = buildZIndexOffsets(
+            group.zIndices,
+            group.addresses
+        );
+        const zIndexOffsets = objectZIndexOffsets
+            ? expandObjectValues(objectZIndexOffsets, startIndices)
+            : undefined;
         return {
             length: group.addresses.length,
             billboard,
@@ -208,6 +230,9 @@ export function compileTileSubsetPathData(
             featureAddressesByPath: new Uint32Array(group.addresses),
             glowColors: new Uint8Array(group.glowColors),
             glowRadii: new Float32Array(group.glowRadii),
+            zIndices: objectZIndexOffsets
+                ? new Float64Array(group.zIndices)
+                : undefined,
             offsetVectorsPx: offsetVectors,
             offsetScaleThresholds: group.offsetScaleThresholds
                 ? new Float32Array(group.offsetScaleThresholds)
@@ -226,6 +251,9 @@ export function compileTileSubsetPathData(
                     size: 1
                 },
                 instanceOffsets: {value: offsetValues, size: 1},
+                ...(zIndexOffsets
+                    ? {zIndexOffsets: {value: zIndexOffsets, size: 1}}
+                    : {}),
                 ...(offsetVectors
                     ? {instanceVariableOffsets: {
                         value: packVariablePathOffsetVectors(
@@ -269,6 +297,7 @@ export function compileTileSubsetPointData(
         colors: number[];
         radii: number[];
         addresses: number[];
+        zIndices: number[];
         glowColors: number[];
         glowRadii: number[];
     }>();
@@ -280,6 +309,7 @@ export function compileTileSubsetPointData(
             colors: [],
             radii: [],
             addresses: [],
+            zIndices: [],
             glowColors: [],
             glowRadii: []
         };
@@ -289,31 +319,44 @@ export function compileTileSubsetPointData(
             ...raw.colors.subarray(index * 4, index * 4 + 4));
         group.radii.push(raw.radii[index]);
         group.addresses.push(raw.featureAddresses[index]);
+        group.zIndices.push(raw.zIndices?.[index] ?? Number.NaN);
         group.glowColors.push(
             ...raw.glowColors.subarray(index * 4, index * 4 + 4));
         group.glowRadii.push(raw.glowRadii[index]);
         groups.set(depthTest, group);
     }
-    return [...groups].map(([depthTest, group]) => ({
-        length: group.addresses.length,
-        billboard,
-        depthTest,
-        coordinateOrigin: origin,
-        featureAddresses: new Uint32Array(group.addresses),
-        glowColors: new Uint8Array(group.glowColors),
-        glowRadii: new Float32Array(group.glowRadii),
-        attributes: {
-            getPosition: {
-                value: new Float32Array(group.positions),
-                size: 3
-            },
-            getFillColor: {
-                value: new Uint8Array(group.colors),
-                size: 4
-            },
-            getRadius: {value: new Float32Array(group.radii), size: 1}
-        }
-    }));
+    return [...groups].map(([depthTest, group]) => {
+        const zIndexOffsets = buildZIndexOffsets(
+            group.zIndices,
+            group.addresses
+        );
+        return {
+            length: group.addresses.length,
+            billboard,
+            depthTest,
+            coordinateOrigin: origin,
+            featureAddresses: new Uint32Array(group.addresses),
+            glowColors: new Uint8Array(group.glowColors),
+            glowRadii: new Float32Array(group.glowRadii),
+            zIndices: zIndexOffsets
+                ? new Float64Array(group.zIndices)
+                : undefined,
+            attributes: {
+                getPosition: {
+                    value: new Float32Array(group.positions),
+                    size: 3
+                },
+                getFillColor: {
+                    value: new Uint8Array(group.colors),
+                    size: 4
+                },
+                getRadius: {value: new Float32Array(group.radii), size: 1},
+                ...(zIndexOffsets
+                    ? {zIndexOffsets: {value: zIndexOffsets, size: 1}}
+                    : {})
+            }
+        };
+    });
 }
 
 /** Validate, triangulate, and partition worker surface buffers by depth behavior. */
@@ -344,6 +387,7 @@ export function compileTileSubsetSurfaceData(
         holeStarts: number[];
         colors: number[];
         addresses: number[];
+        zIndices: number[];
         normals: number[];
         glowColors: number[];
         glowRadii: number[];
@@ -363,6 +407,7 @@ export function compileTileSubsetSurfaceData(
             holeStarts: [0],
             colors: [],
             addresses: [],
+            zIndices: [],
             normals: [],
             glowColors: [],
             glowRadii: []
@@ -388,6 +433,7 @@ export function compileTileSubsetSurfaceData(
         }
         group.holeStarts.push(group.holes.length);
         group.addresses.push(raw.featureAddresses[surface]);
+        group.zIndices.push(raw.zIndices?.[surface] ?? Number.NaN);
         group.glowColors.push(...raw.glowColors.subarray(
             surface * 4,
             surface * 4 + 4));
@@ -395,35 +441,51 @@ export function compileTileSubsetSurfaceData(
         group.starts.push(group.positions.length / 3);
         groups.set(depthTest, group);
     }
-    return [...groups].map(([depthTest, group]) => ({
-        length: group.addresses.length,
-        depthTest,
-        coordinateOrigin: origin,
-        startIndices: new Uint32Array(group.starts),
-        featureAddresses: new Uint32Array(group.addresses),
-        surfaceNormals: new Float32Array(group.normals),
-        glowColors: new Uint8Array(group.glowColors),
-        glowRadii: new Float32Array(group.glowRadii),
-        attributes: {
-            getPolygon: {
-                value: new Float32Array(group.positions),
-                size: 3
-            },
-            indices: {
-                value: triangulateSurfaceIndices({
-                    positions: group.positions,
-                    startIndices: group.starts,
-                    holeIndices: group.holes,
-                    holeIndexStarts: group.holeStarts
-                }),
-                size: 1
-            },
-            fillColors: {
-                value: new Uint8Array(group.colors),
-                size: 4
+    return [...groups].map(([depthTest, group]) => {
+        const startIndices = new Uint32Array(group.starts);
+        const objectZIndexOffsets = buildZIndexOffsets(
+            group.zIndices,
+            group.addresses
+        );
+        const zIndexOffsets = objectZIndexOffsets
+            ? expandObjectValues(objectZIndexOffsets, startIndices)
+            : undefined;
+        return {
+            length: group.addresses.length,
+            depthTest,
+            coordinateOrigin: origin,
+            startIndices,
+            featureAddresses: new Uint32Array(group.addresses),
+            surfaceNormals: new Float32Array(group.normals),
+            glowColors: new Uint8Array(group.glowColors),
+            glowRadii: new Float32Array(group.glowRadii),
+            zIndices: objectZIndexOffsets
+                ? new Float64Array(group.zIndices)
+                : undefined,
+            attributes: {
+                getPolygon: {
+                    value: new Float32Array(group.positions),
+                    size: 3
+                },
+                indices: {
+                    value: triangulateSurfaceIndices({
+                        positions: group.positions,
+                        startIndices: group.starts,
+                        holeIndices: group.holes,
+                        holeIndexStarts: group.holeStarts
+                    }),
+                    size: 1
+                },
+                fillColors: {
+                    value: new Uint8Array(group.colors),
+                    size: 4
+                },
+                ...(zIndexOffsets
+                    ? {zIndexOffsets: {value: zIndexOffsets, size: 1}}
+                    : {})
             }
-        }
-    }));
+        };
+    });
 }
 
 /** Derive IconLayer arrow markers from renderer-emitted triangle paths. */
@@ -502,8 +564,27 @@ export function compileTileSubsetArrowMarkers(
                     explicitOffset[1],
                     offsetScaleThreshold
                 ]
-                : [0, 0, 0]
+                : [0, 0, 0],
+            zIndexOffset:
+                path.attributes.zIndexOffsets?.value[tip] ?? 0
         });
+    }
+    return result;
+}
+
+/** Expands one per-object scalar across a tessellated binary vertex buffer. */
+export function expandObjectValues(
+    values: ArrayLike<number>,
+    startIndices: ArrayLike<number>
+): Float32Array {
+    const vertexCount = Number(startIndices[startIndices.length - 1] ?? 0);
+    const result = new Float32Array(vertexCount);
+    for (let object = 0; object + 1 < startIndices.length; ++object) {
+        result.fill(
+            Number(values[object] ?? 0),
+            Number(startIndices[object]),
+            Number(startIndices[object + 1])
+        );
     }
     return result;
 }

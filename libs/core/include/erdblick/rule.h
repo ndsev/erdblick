@@ -145,6 +145,8 @@ public:
     [[nodiscard]] float width(BoundEvalFun const& evalFun) const;
     /** Report whether emitted geometry should participate in depth testing. */
     [[nodiscard]] bool depthTest() const;
+    /** Resolve the optional ordinal draw order used to separate coplanar geometry. */
+    [[nodiscard]] std::optional<double> zIndex(BoundEvalFun const& evalFun) const;
     /** Return the billboard override, or `std::nullopt` to use renderer defaults. */
     [[nodiscard]] std::optional<bool> const& billboard() const;
     /** Report whether geometry should be flattened onto the 2D/ground plane. */
@@ -305,6 +307,8 @@ private:
     std::optional<WidthScale> widthScale_;
     std::optional<Glow> glow_;
     bool depthTest_ = true;
+    std::optional<double> zIndex_;
+    std::string zIndexExpression_;
     std::optional<bool> billboard_;
     bool flat_ = false;
     bool dashed_ = false;

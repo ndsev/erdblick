@@ -48,6 +48,7 @@ public:
         std::vector<float> positions;
         std::vector<uint8_t> colors;
         std::vector<float> radii;
+        std::vector<double> zIndices;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
         std::vector<uint8_t> glowColors;
@@ -60,6 +61,7 @@ public:
         std::vector<uint32_t> holeIndices;
         std::vector<uint32_t> holeIndexStarts;
         std::vector<uint8_t> colors;
+        std::vector<double> zIndices;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
         std::vector<uint8_t> glowColors;
@@ -84,6 +86,7 @@ public:
         // path's displacement instead of allowing an inside curve to fold.
         // Zero disables adaptive contraction.
         std::vector<float> lateralOffsetScaleThresholds;
+        std::vector<double> zIndices;
         std::vector<uint8_t> depthTests;
         std::vector<uint32_t> featureAddresses;
         std::vector<float> dashArrays;
@@ -273,23 +276,27 @@ private:
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
+        double zIndex,
         uint32_t pickIndex);
     void appendSurface(
         std::vector<mapget::Point> const& points,
         std::vector<uint32_t> const& ringStarts,
         FeatureStyleRule const& rule,
         glm::fvec4 const& color,
+        double zIndex,
         uint32_t pickIndex);
     void appendMesh(
         std::vector<mapget::Point> const& points,
         FeatureStyleRule const& rule,
         glm::fvec4 const& color,
+        double zIndex,
         uint32_t pickIndex);
     void appendPath(
         std::vector<mapget::Point> const& points,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
+        double zIndex,
         uint32_t pickIndex,
         std::span<float const> lateralOffsetsPx = {},
         std::span<glm::fvec2 const> lateralOffsetVectorsPx = {},
@@ -300,6 +307,7 @@ private:
         FeatureStyleRule const& rule,
         float width,
         glm::fvec4 const& color,
+        double zIndex,
         uint32_t pickIndex,
         glm::fvec2 lateralOffsetVectorPx = {},
         float lateralOffsetScaleThreshold = 0.0f);
@@ -308,6 +316,7 @@ private:
         mapget::Point const& size,
         FeatureStyleRule const& rule,
         glm::fvec4 const& color,
+        double zIndex,
         uint32_t pickIndex);
     void appendGltf(
         mapget::model_ptr<mapget::Geometry> const& geometry,
@@ -318,6 +327,7 @@ private:
         mapget::Point const& point,
         std::string const& text,
         FeatureStyleRule const& rule,
+        double zIndex,
         uint32_t pickIndex);
 
     [[nodiscard]] static JsValue geometryBuffersToJs(

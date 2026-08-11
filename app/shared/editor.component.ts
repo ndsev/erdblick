@@ -33,6 +33,8 @@ const completionsList = [
     {label: 'opacity', type: 'property'},
     {label: 'width', type: 'property'},
     {label: 'depth-test', type: 'property'},
+    {label: 'z-index', type: 'property'},
+    {label: 'z-index-expression', type: 'property'},
     {label: 'flat', type: 'property'},
     {label: 'outline-color', type: 'property'},
     {label: 'outline-width', type: 'property'},

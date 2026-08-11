@@ -299,6 +299,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["depth-test"].IsDefined()) {
         depthTest_ = yaml["depth-test"].as<bool>();
     }
+    if (yaml["z-index"].IsDefined()) {
+        zIndex_ = yaml["z-index"].as<double>();
+    }
+    if (yaml["z-index-expression"].IsDefined()) {
+        zIndexExpression_ = yaml["z-index-expression"].as<std::string>();
+    }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
         billboard_ = yaml["billboard"].as<bool>();
@@ -794,6 +800,7 @@ FeatureStyleRule::expressionUses() const
         append("width-scale.expression", widthScale_->expression);
     }
     append("arrow-expression", arrowExpression_);
+    append("z-index-expression", zIndexExpression_);
     append("icon-url-expression", iconUrlExpression_);
     append("label-text-expression", labelTextExpression_);
     return result;
@@ -995,6 +1002,41 @@ float FeatureStyleRule::width(BoundEvalFun const& evalFun) const
 bool FeatureStyleRule::depthTest() const
 {
     return depthTest_;
+}
+
+std::optional<double> FeatureStyleRule::zIndex(
+    BoundEvalFun const& evalFun) const
+{
+    if (zIndexExpression_.empty()) {
+        return zIndex_;
+    }
+
+    auto const value = evalFun.eval_(zIndexExpression_);
+    if (value.isa(simfil::ValueType::Undef) ||
+        value.isa(simfil::ValueType::Null))
+    {
+        return zIndex_;
+    }
+    std::optional<double> number;
+    if (value.isa(simfil::ValueType::Int)) {
+        number = static_cast<double>(
+            value.as<simfil::ValueType::Int>());
+    }
+    else if (value.isa(simfil::ValueType::Float)) {
+        number = value.as<simfil::ValueType::Float>();
+    }
+    if (number && std::isfinite(*number)) {
+        return *number;
+    }
+
+    if (evalFun.reportIssue_) {
+        evalFun.reportIssue_(
+            "z-index-expression",
+            zIndexExpression_,
+            "Expression must evaluate to a finite number; using the literal z-index fallback if configured.",
+            index_);
+    }
+    return zIndex_;
 }
 
 std::optional<bool> const& FeatureStyleRule::billboard() const

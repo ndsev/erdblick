@@ -117,6 +117,7 @@ rules:
             - [100, 4]
       - filter: toll
         label-text-expression: name
+        z-index-expression: drawOrder
   - scope: attribute
     type: Road
     geometry: line
@@ -153,7 +154,10 @@ rules:
     REQUIRE(feature.featureFilter_->find("speed > 20") != std::string::npos);
     REQUIRE(feature.featureFilter_->find("toll") != std::string::npos);
     REQUIRE(feature.entryFields_.empty());
-    REQUIRE(feature.featureFields_.size() == 5);
+    REQUIRE(feature.featureFields_.size() == 6);
+    REQUIRE(std::ranges::any_of(
+        feature.featureFields_,
+        [](auto const& field) { return field == "drawOrder"; }));
 
     auto const& attribute = plan.channels[1];
     REQUIRE(

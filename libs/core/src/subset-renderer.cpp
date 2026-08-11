@@ -361,6 +361,15 @@ bool distanceScalesAt(
         std::abs(unitsPerMeter) > 1e-12;
 }
 
+/** Preserve the distinction between an authored zero and no z-index at all. */
+double resolvedZIndex(
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun)
+{
+    return rule.zIndex(evalFun).value_or(
+        std::numeric_limits<double>::quiet_NaN());
+}
+
 JsValue pointBuffersToJs(
     TileSubsetLayerRenderer::PointBuffers const& buffers)
 {
@@ -368,6 +377,7 @@ JsValue pointBuffersToJs(
         {"positions", JsValue::Float32Array(buffers.positions)},
         {"colors", JsValue::Uint8Array(buffers.colors)},
         {"radii", JsValue::Float32Array(buffers.radii)},
+        {"zIndices", JsValue::Float64Array(buffers.zIndices)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
         {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
@@ -384,6 +394,7 @@ JsValue surfaceBuffersToJs(
         {"holeIndices", JsValue::Uint32Array(buffers.holeIndices)},
         {"holeIndexStarts", JsValue::Uint32Array(buffers.holeIndexStarts)},
         {"colors", JsValue::Uint8Array(buffers.colors)},
+        {"zIndices", JsValue::Float64Array(buffers.zIndices)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
         {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
@@ -405,6 +416,7 @@ JsValue pathBuffersToJs(
          JsValue::Float32Array(buffers.lateralOffsetVectorsPx)},
         {"lateralOffsetScaleThresholds",
          JsValue::Float32Array(buffers.lateralOffsetScaleThresholds)},
+        {"zIndices", JsValue::Float64Array(buffers.zIndices)},
         {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
         {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
         {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
@@ -489,7 +501,7 @@ TileSubsetLayerRenderer::~TileSubsetLayerRenderer() = default;
 
 uint32_t TileSubsetLayerRenderer::abiVersion() const
 {
-    return 4U;
+    return 5U;
 }
 
 void TileSubsetLayerRenderer::setCoordinateOrigin(
@@ -1062,7 +1074,12 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
     if (rendered && labelPosition && rule.hasLabel()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
-            appendLabel(*labelPosition, text, rule, pick);
+            appendLabel(
+                *labelPosition,
+                text,
+                rule,
+                resolvedZIndex(rule, evalFun),
+                pick);
         }
     }
     return rendered;
@@ -1093,6 +1110,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
     if (!color) {
         return false;
     }
+    auto const zIndex = resolvedZIndex(rule, evalFun);
 
     if (type == mapget::GeomType::GltfNodeIndex) {
         if (supportsOwnType) {
@@ -1107,6 +1125,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
                 geometry->gltfNodeAabbSize(),
                 rule,
                 *color,
+                zIndex,
                 pick);
         }
         return true;
@@ -1120,6 +1139,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
             geometry->aabbSize(),
             rule,
             *color,
+            zIndex,
             pick);
         return true;
     }
@@ -1150,6 +1170,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
                 rule,
                 evalFun,
                 *color,
+                zIndex,
                 pick);
         }
         break;
@@ -1160,13 +1181,20 @@ bool TileSubsetLayerRenderer::renderGeometry(
                 rule,
                 evalFun,
                 *color,
+                zIndex,
                 pick,
                 std::vector<float>(
                     projected.size(),
                     static_cast<float>(offset.x)));
         }
         else {
-            appendPath(projected, rule, evalFun, *color, pick);
+            appendPath(
+                projected,
+                rule,
+                evalFun,
+                *color,
+                zIndex,
+                pick);
         }
         break;
     case mapget::GeomType::Polygon:
@@ -1175,10 +1203,11 @@ bool TileSubsetLayerRenderer::renderGeometry(
             transformed.polygonRingStarts_,
             rule,
             *color,
+            zIndex,
             pick);
         break;
     case mapget::GeomType::Mesh:
-        appendMesh(projected, rule, *color, pick);
+        appendMesh(projected, rule, *color, zIndex, pick);
         break;
     case mapget::GeomType::AABB:
     case mapget::GeomType::GltfNodeIndex:
@@ -1192,6 +1221,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
                 projectWgsPoint(geometryCenter(transformed)),
                 text,
                 rule,
+                zIndex,
                 pick);
         }
     }
@@ -1228,6 +1258,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     if (!color || width <= 0.0f) {
         return false;
     }
+    auto const zIndex = resolvedZIndex(rule, evalFun);
 
     std::vector<mapget::Point> incomingWgs(
         source.points_.begin(),
@@ -1732,6 +1763,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
         rule,
         evalFun,
         *color,
+        zIndex,
         pick,
         lateralOffsetsPx,
         lateralOffsetVectorsPx,
@@ -1761,7 +1793,12 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     if (rule.hasLabel()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
-            appendLabel(path[path.size() / 2], text, rule, pick);
+            appendLabel(
+                path[path.size() / 2],
+                text,
+                rule,
+                zIndex,
+                pick);
         }
     }
     return true;
@@ -1789,6 +1826,7 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
     if (!color || width <= 0.0f) {
         return false;
     }
+    auto const zIndex = resolvedZIndex(rule, evalFun);
 
     auto pointKey = [](mapget::Point const& point) {
         return std::array<int64_t, 3>{
@@ -1864,6 +1902,7 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
         rule,
         evalFun,
         *color,
+        zIndex,
         pick,
         lateralOffsetsPx);
     for (auto const& key : occupiedSegments) {
@@ -1876,6 +1915,7 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
                 projectWgsPoint(geometryCenter(source)),
                 text,
                 rule,
+                zIndex,
                 pick);
         }
     }
@@ -1920,7 +1960,13 @@ void TileSubsetLayerRenderer::renderRelationLine(
         for (auto const& point : line.points_) {
             projected.push_back(projectWgsPoint(point));
         }
-        appendPath(projected, rule, evalFun, *color, pick);
+        appendPath(
+            projected,
+            rule,
+            evalFun,
+            *color,
+            resolvedZIndex(rule, evalFun),
+            pick);
     }
 
     auto marker = rule.relationLineEndMarkerStyle();
@@ -1965,6 +2011,7 @@ void TileSubsetLayerRenderer::renderRelationLine(
                     markerRule,
                     evalFun,
                     *markerColor,
+                    resolvedZIndex(markerRule, evalFun),
                     pick);
             }
         });
@@ -2133,6 +2180,7 @@ void TileSubsetLayerRenderer::appendPoint(
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
+    double zIndex,
     uint32_t pick)
 {
     auto& buffers = rule.billboard().value_or(false)
@@ -2157,6 +2205,7 @@ void TileSubsetLayerRenderer::appendPoint(
         std::max(
             0.0f,
             rule.width(evalFun) * 0.5f));
+    buffers.zIndices.push_back(zIndex);
     buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
     buffers.featureAddresses.push_back(pick);
     appendGlow(rule, buffers.glowColors, buffers.glowRadii);
@@ -2168,6 +2217,7 @@ void TileSubsetLayerRenderer::appendSurface(
     std::vector<uint32_t> const& ringStarts,
     FeatureStyleRule const& rule,
     glm::fvec4 const& color,
+    double zIndex,
     uint32_t pick)
 {
     if (points.size() < 3) {
@@ -2201,6 +2251,7 @@ void TileSubsetLayerRenderer::appendSurface(
     }
     buffers.holeIndexStarts.push_back(
         static_cast<uint32_t>(buffers.holeIndices.size()));
+    buffers.zIndices.push_back(zIndex);
     buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
     buffers.featureAddresses.push_back(pick);
     appendGlow(rule, buffers.glowColors, buffers.glowRadii);
@@ -2213,6 +2264,7 @@ void TileSubsetLayerRenderer::appendMesh(
     std::vector<mapget::Point> const& points,
     FeatureStyleRule const& rule,
     glm::fvec4 const& color,
+    double zIndex,
     uint32_t pick)
 {
     for (size_t index = 0; index + 2 < points.size(); index += 3) {
@@ -2221,6 +2273,7 @@ void TileSubsetLayerRenderer::appendMesh(
             {},
             rule,
             color,
+            zIndex,
             pick);
     }
 }
@@ -2230,6 +2283,7 @@ void TileSubsetLayerRenderer::appendPath(
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
+    double zIndex,
     uint32_t pick,
     std::span<float const> lateralOffsetsPx,
     std::span<glm::fvec2 const> lateralOffsetVectorsPx,
@@ -2289,6 +2343,7 @@ void TileSubsetLayerRenderer::appendPath(
         hasOffsetVectors
             ? std::max(0.0f, lateralOffsetScaleThreshold)
             : 0.0f);
+    buffers.zIndices.push_back(zIndex);
     appendGlow(rule, buffers.glowColors, buffers.glowRadii);
     buffers.startIndices.push_back(
         static_cast<uint32_t>(buffers.positions.size() / 3));
@@ -2320,6 +2375,7 @@ void TileSubsetLayerRenderer::appendPath(
             rule,
             width,
             color,
+            zIndex,
             pick,
             endpointOffsetVector(
                 points.size() - 2,
@@ -2339,6 +2395,7 @@ void TileSubsetLayerRenderer::appendPath(
             rule,
             width,
             color,
+            zIndex,
             pick,
             endpointOffsetVector(
                 0,
@@ -2357,6 +2414,7 @@ void TileSubsetLayerRenderer::appendArrowHead(
     FeatureStyleRule const& rule,
     float width,
     glm::fvec4 const& color,
+    double zIndex,
     uint32_t pick,
     glm::fvec2 lateralOffsetVectorPx,
     float lateralOffsetScaleThreshold)
@@ -2434,6 +2492,7 @@ void TileSubsetLayerRenderer::appendArrowHead(
     buffers.featureAddresses.push_back(pick);
     buffers.lateralOffsetScaleThresholds.push_back(
         std::max(0.0f, lateralOffsetScaleThreshold));
+    buffers.zIndices.push_back(zIndex);
     appendGlow(rule, buffers.glowColors, buffers.glowRadii);
     buffers.startIndices.push_back(
         static_cast<uint32_t>(buffers.positions.size() / 3));
@@ -2445,6 +2504,7 @@ void TileSubsetLayerRenderer::appendAabb(
     mapget::Point const& size,
     FeatureStyleRule const& rule,
     glm::fvec4 const& color,
+    double zIndex,
     uint32_t pick)
 {
     auto const x0 = origin.x;
@@ -2489,6 +2549,7 @@ void TileSubsetLayerRenderer::appendAabb(
             {},
             rule,
             color,
+            zIndex,
             pick);
     }
 }
@@ -2581,6 +2642,7 @@ void TileSubsetLayerRenderer::appendLabel(
     mapget::Point const& point,
     std::string const& text,
     FeatureStyleRule const& rule,
+    double zIndex,
     uint32_t pick)
 {
     if (relationEndpointLabelIdentity_) {
@@ -2608,6 +2670,9 @@ void TileSubsetLayerRenderer::appendLabel(
         {"billboard", JsValue(rule.billboard().value_or(true))},
         {"depthTest", JsValue(rule.depthTest())},
     });
+    if (std::isfinite(zIndex)) {
+        params.set("zIndex", JsValue(zIndex));
+    }
     if (rule.showBackground()) {
         auto backgroundColor = rule.labelBackgroundColor();
         backgroundColor.a *= rule.labelOpacity();

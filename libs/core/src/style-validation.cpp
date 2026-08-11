@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <ranges>
 #include <regex>
 #include <set>
@@ -1178,6 +1179,14 @@ bool validateStyleRuleYamlImpl(
 
     markInvalid(validateNumericRange(ruleYaml, "opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
     markInvalid(validateNumericRange(ruleYaml, "label-opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "z-index",
+        -static_cast<double>(std::numeric_limits<float>::max()),
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
     markInvalid(readScalar<double>(ruleYaml, "lateral-offset", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "type", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "relation-type", rulePath, report, sourceRuleIndex));
@@ -1206,6 +1215,7 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "z-index-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "label-text-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateColorScale(ruleYaml, rulePath, source, report, sourceRuleIndex));

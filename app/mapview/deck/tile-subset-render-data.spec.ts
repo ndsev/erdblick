@@ -22,6 +22,7 @@ describe("Tile subset render-data compiler", () => {
                 -5, 0
             ]),
             lateralOffsetScaleThresholds: new Float32Array([0.08, 0.16]),
+            zIndices: new Float64Array([10, 20]),
             startIndices: new Uint32Array([0, 2, 5]),
             featureAddresses: new Uint32Array([0, 1]),
             depthTests: new Uint8Array([1, 1]),
@@ -67,6 +68,11 @@ describe("Tile subset render-data compiler", () => {
         expect(offsetScaleThresholds[0]).toBeCloseTo(0.08, 2);
         expect(offsetScaleThresholds[1]).toBeCloseTo(0.16, 2);
         expect(packed[0] >>> 24).not.toEqual(packed[8] >>> 24);
+        const zIndexOffsets = variable.attributes.zIndexOffsets!.value;
+        expect([...zIndexOffsets.subarray(0, 2)])
+            .toEqual([zIndexOffsets[0], zIndexOffsets[0]]);
+        expect(zIndexOffsets[2]).toBeGreaterThan(zIndexOffsets[0]);
+        expect([...variable.zIndices!]).toEqual([10, 20]);
     });
 
     it("applies IconLayer's Y flip when aligning an arrow with its path", () => {
@@ -169,6 +175,7 @@ describe("Tile subset render-data compiler", () => {
                 40, 50, 60, 255
             ]),
             radii: new Float32Array([2, 3]),
+            zIndices: new Float64Array([Number.NaN, Number.NaN]),
             depthTests: new Uint8Array([1, 0]),
             featureAddresses: new Uint32Array([7, 9]),
             glowColors: new Uint8Array([
@@ -200,6 +207,7 @@ describe("Tile subset render-data compiler", () => {
             holeIndices: new Uint32Array(),
             holeIndexStarts: new Uint32Array([0, 0, 0]),
             colors: new Uint8Array(6 * 4),
+            zIndices: new Float64Array([Number.NaN, Number.NaN]),
             depthTests: new Uint8Array([1, 0]),
             featureAddresses: new Uint32Array([12, 13]),
             glowColors: new Uint8Array(2 * 4),

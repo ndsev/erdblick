@@ -77,7 +77,7 @@ TEST_CASE(
     auto featureId = subset->newFeatureId(
         "Road",
         {{"roadId", int64_t{7}}});
-    std::vector<std::string> featureFields{"roadClass"};
+    std::vector<std::string> featureFields{"roadClass", "drawOrder"};
     auto channel = subset->newChannel(
         "style-rule:0",
         mapget::Scope::Feature,
@@ -86,6 +86,7 @@ TEST_CASE(
         featureFields);
     std::vector<simfil::ModelNode::Ptr> featureValues{
         subset->newValue(int64_t{2}),
+        subset->newValue(int64_t{17}),
     };
     channel->newFeatureEntry(
         featureId,
@@ -100,6 +101,7 @@ rules:
     geometry: line
     geometry-name: centerline
     width: 4
+    z-index-expression: drawOrder
     glow: {color: "#102030", radius: 5, opacity: 0.5}
     color-scale:
       mode: categorical
@@ -128,11 +130,13 @@ rules:
     renderer.run();
 
     auto result = renderer.renderResult();
-    REQUIRE(renderer.abiVersion() == 4);
+    REQUIRE(renderer.abiVersion() == 5);
     REQUIRE(renderer.vertexCount() == 2);
     REQUIRE(result["pathWorld"]["positions"].size() == 6);
     REQUIRE(result["pathWorld"]["colors"] == "AP8A/wD/AP8=");
     REQUIRE(result["pathWorld"]["widths"][0] == 6.0);
+    REQUIRE(result["pathWorld"]["zIndices"] ==
+        nlohmann::json::array({17.0}));
     REQUIRE(result["pathWorld"]["glowColors"] == "ECAwgA==");
     REQUIRE(result["pathWorld"]["glowRadii"] ==
         nlohmann::json::array({5.0}));
