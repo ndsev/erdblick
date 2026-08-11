@@ -166,6 +166,7 @@ export interface ServerConfigResponse {
     readOnly?: boolean;
     datasourceConfigUnavailable?: boolean;
     datasourceConfigUnavailableReason?: string | null;
+    capabilities?: unknown;
     erdblick?: Partial<RawAppConfig>;
 }
 
@@ -174,6 +175,7 @@ export interface AppServerConfigStatus {
     available: boolean;
     datasourceConfigUnavailable: boolean;
     datasourceConfigUnavailableReason: string | null;
+    cacheReset: boolean;
 }
 
 /** Normalized application config consumed by the Angular services. */
@@ -351,7 +353,8 @@ const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
 const DEFAULT_SERVER_CONFIG_STATUS: AppServerConfigStatus = {
     available: false,
     datasourceConfigUnavailable: false,
-    datasourceConfigUnavailableReason: null
+    datasourceConfigUnavailableReason: null,
+    cacheReset: false
 };
 
 const DEFAULT_LOCATION_SEARCH_CONFIG: LocationSearchConfig = {
@@ -588,6 +591,9 @@ export class AppConfigService {
                 typeof payload.datasourceConfigUnavailableReason === "string"
                     ? payload.datasourceConfigUnavailableReason
                     : null;
+            serverConfig.cacheReset =
+                isPlainObject(payload.capabilities) &&
+                payload.capabilities["cacheReset"] === true;
 
             if (payload.erdblick && isPlainObject(payload.erdblick)) {
                 erdblickConfig = this.parseRawConfig(payload.erdblick, "/config.erdblick");

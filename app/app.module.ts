@@ -127,6 +127,7 @@ import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.c
 import {AppConfigService} from "./shared/app-config.service";
 import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
 import {CoordinatesLegalTermsDialogComponent} from "./coords/coordinates-legal-terms-dialog.component";
+import {CacheResetComponent} from "./auxiliaries/cache-reset.component";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -248,6 +249,7 @@ export const initializeServices = () => {
         BrowserAnimationsModule,
         AnimateOnScroll,
         AppRoutingModule,
+        CacheResetComponent,
         AppDialogComponent,
         AppPanelComponent,
         AppSurfaceHeaderComponent,

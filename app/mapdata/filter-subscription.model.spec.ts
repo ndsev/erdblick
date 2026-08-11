@@ -121,6 +121,36 @@ describe("FilterSubscriptionRef", () => {
         expect(owner.updateFilterSubscription).toHaveBeenCalledOnce();
     });
 
+    it("refreshes unchanged demand as a new generation and rejects the old delivery", () => {
+        const onTile = vi.fn();
+        const owner: FilterSubscriptionOwner = {
+            updateFilterSubscription: vi.fn(),
+            releaseFilterSubscription: vi.fn()
+        };
+        const ref = new FilterSubscriptionRef(
+            owner,
+            "styled",
+            definition(),
+            {tileIds: [1]},
+            {onTile}
+        );
+        const oldDelivery = delivery(1, ref.generation);
+
+        ref.refresh();
+
+        expect(ref.generation).toBe(2);
+        expect(ref.requestJson()).toMatchObject({
+            mapId: "Map",
+            layerId: "Layer",
+            tileIds: [1],
+            generation: 2
+        });
+        expect(owner.updateFilterSubscription).toHaveBeenCalledWith(ref, true);
+        expect(ref.accept(oldDelivery)).toBe(false);
+        expect(ref.accept(delivery(1, ref.generation))).toBe(true);
+        expect(onTile).toHaveBeenCalledOnce();
+    });
+
     it("rejects late deliveries outside the current coverage", () => {
         const onTile = vi.fn();
         const ref = new FilterSubscriptionRef(

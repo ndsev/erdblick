@@ -38,10 +38,23 @@ The main bar provides these top-level entries:
 
 - **Edit** – open the **Styles Configurator**, **Datasources**, or **Settings** dialog.
 - **View** – open or close split view and control **Sync Views** for position, movement, projection, and layers.
-- **Tools** – open **Performance Statistics**, **Export Diagnostics**, or **Logs**.
+- **Tools** – open **Cache Reset**, **Performance Statistics**, **Export Diagnostics**, or **Logs**.
 - **Help** – open the controls reference, external help, or the about dialog.
 
 On narrower screens, the main bar collapses into a more compact mobile layout. In that mode, the **Maps** action also appears in the menu bar itself.
+
+### Cache Reset
+
+When enabled for your authenticated session, **Tools -> Cache Reset** lists the
+ready primary maps visible to you. Use the cycle button beside one map to clear
+that map's server-side tile cache. The current browser tears down only that
+map's active presentation and requests its visible coverage again through the
+normal tile-loading path; the page, camera, visibility, styles, searches, and
+other maps stay in place.
+
+The entry remains visible when the server feature is unavailable, but its map
+buttons are disabled. A reset affects only the connected mapget process and
+does not clear caches inside a datasource or refresh other browser sessions.
 
 ## Maps, Layers, and Base Content
 

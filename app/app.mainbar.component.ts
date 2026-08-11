@@ -3,6 +3,7 @@ import {Subscription} from 'rxjs';
 import {MapInfoService} from './mapdata/map-info.service';
 import {
     ABOUT_DIALOG_LAYOUT_ID,
+    CACHE_RESET_DIALOG_LAYOUT_ID,
     DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
     KEYBOARD_DIALOG_LAYOUT_ID,
     LEGAL_INFO_DIALOG_LAYOUT_ID,
@@ -631,6 +632,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 name: 'Tools',
                 icon: 'build',
                 items: [
+                    {
+                        name: 'Cache Reset',
+                        icon: 'cycle',
+                        command: () => { this.stateService.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID); }
+                    },
                     {
                         name: 'Performance Statistics',
                         icon: 'insights',

@@ -37,6 +37,7 @@ describe("AppConfigService", () => {
         expect(config.serverConfig.available).toBe(false);
         expect(config.serverConfig.datasourceConfigUnavailable).toBe(false);
         expect(config.serverConfig.datasourceConfigUnavailableReason).toBeNull();
+        expect(config.serverConfig.cacheReset).toBe(false);
     });
 
     it("applies public erdblick config when datasource model is unavailable", async () => {
@@ -61,6 +62,33 @@ describe("AppConfigService", () => {
         expect(config.serverConfig.available).toBe(true);
         expect(config.serverConfig.datasourceConfigUnavailable).toBe(true);
         expect(config.serverConfig.datasourceConfigUnavailableReason).toBe("getConfigDisabled");
+        expect(config.serverConfig.cacheReset).toBe(false);
+    });
+
+    it.each([
+        [{cacheReset: true}, true],
+        [{cacheReset: false}, false],
+        [{cacheReset: "true"}, false],
+        ["invalid", false],
+        [undefined, false]
+    ])("normalizes the caller-specific cache-reset capability from %j", async (capabilities, expected) => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "config.json") {
+                return of({});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    datasourceConfigUnavailable: false,
+                    capabilities
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.serverConfig.cacheReset).toBe(expected);
     });
 
     it("overrides static styles only when server styles are non-empty", async () => {

@@ -180,6 +180,47 @@ export class ViewLayerController {
         this.sceneHandle = null;
     }
 
+    /**
+     * Tear down one map's active presentation and request a fresh transport
+     * generation without changing coverage, styles, visibility, or view state.
+     */
+    refreshMap(mapId: string): void {
+        if (this.disposed || !mapId) {
+            return;
+        }
+
+        for (const [slot, fallback] of
+             [...this.retiringRegularLayers])
+        {
+            if (fallback.owned.layer.identity.mapId !== mapId) {
+                continue;
+            }
+            this.retiringRegularLayers.delete(slot);
+            this.destroyOwnedLayer(fallback.owned);
+        }
+
+        let refreshed = false;
+        for (const owned of this.styledLayers.values()) {
+            if (owned.layer.identity.mapId !== mapId ||
+                owned.layer.identity.presentationKind === "search")
+            {
+                continue;
+            }
+            this.clearOwnedVisualizations(owned);
+            for (const tileId of owned.layer.tileStates.keys()) {
+                owned.layer.releaseAttachment(tileId);
+            }
+            owned.layer.refresh();
+            refreshed = true;
+        }
+
+        if (refreshed) {
+            this.changed.next();
+            this.occupancyChanged.next();
+            this.diagnostics.notifyChanged();
+        }
+    }
+
     /** Bridges view-local Deck screen-pass timing into global diagnostics. */
     recordDeckFrameTime(milliseconds: number): void {
         this.renderService.recordDeckFrameTime(
@@ -582,15 +623,20 @@ export class ViewLayerController {
 
     private destroyOwnedLayer(owned: OwnedStyledLayer): void {
         owned.subscription.unsubscribe();
+        this.clearOwnedVisualizations(owned);
+        if (owned.disposeLayer) {
+            owned.layer.dispose();
+        }
+    }
+
+    /** Releases every render and attachment resource while retaining the transport owner. */
+    private clearOwnedVisualizations(owned: OwnedStyledLayer): void {
         for (const visualization of owned.visualizations.values()) {
             visualization.destroy(this.sceneHandle);
         }
         owned.visualizations.clear();
         owned.visualizationKeyByTileId.clear();
         owned.pendingBlockTiles.clear();
-        if (owned.disposeLayer) {
-            owned.layer.dispose();
-        }
     }
 
     /** Keeps one fully rendered regular owner as the visual replacement fallback. */

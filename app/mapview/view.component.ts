@@ -55,6 +55,7 @@ import {
 import {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";
+import {CacheResetService} from "../mapdata/cache-reset.service";
 
 interface PreparedContextMenuPosition {
     screenPos: {x: number; y: number};
@@ -193,6 +194,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private layoutResizePrepareListener?: (event: Event) => void;
     private viewerSetupGeneration = 0;
     private layerController?: ViewLayerController;
+    private cacheResetSubscription?: Subscription;
 
     @ViewChild('popover') featureIdsPopover!: Popover;
     @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
@@ -217,6 +219,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public configService: AppConfigService,
                 private styleService: StyleService,
                 private subsetRenderService: TileSubsetLayerRenderService,
+                private cacheResetService: CacheResetService,
                 private viewLayerDiagnostics: ViewLayerDiagnosticsService,
                 private styleValidationReports: StyleValidationReportService,
                 private cdr: ChangeDetectorRef,
@@ -251,6 +254,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.viewLayerDiagnostics,
             this.styleValidationReports
         );
+        this.cacheResetSubscription =
+            this.cacheResetService.completed$.subscribe(mapId => {
+                this.layerController?.refreshMap(mapId);
+            });
         this.subscriptions.push(
             this.menuService.menuItems.subscribe(items => {
                 this.menuItems = [...items];
@@ -421,6 +428,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.hoverSubscription?.unsubscribe();
         this.firstPersonViewActiveSubscription?.unsubscribe();
         this.firstPersonViewRequestSubscription?.unsubscribe();
+        this.cacheResetSubscription?.unsubscribe();
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }

@@ -4,6 +4,7 @@ import {MapInfoService} from "./mapdata/map-info.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {
     AppStateService,
+    CACHE_RESET_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
@@ -34,6 +35,9 @@ declare let window: DebugWindow;
             <datasources></datasources>
             <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
+            @if (stateService.isDialogOpen(cacheResetDialogLayoutId)) {
+                <cache-reset-dialog></cache-reset-dialog>
+            }
             @if (stateService.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
@@ -71,6 +75,7 @@ declare let window: DebugWindow;
  * and startup version loading.
  */
 export class AppComponent implements OnDestroy {
+    protected readonly cacheResetDialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
