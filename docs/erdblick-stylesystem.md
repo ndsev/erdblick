@@ -13,8 +13,8 @@ you can toggle, edit, and reset style sheets without touching files on disk:
 
 1. Open the Styles dialog via **Edit -> Styles Configurator**.
 2. Activate or deactivate style sheets to control which rules run.
-3. Use the pencil button for live YAML editing, validation, completion,
-   import, and export.
+3. Use the pencil button for Quick rule editing or Advanced YAML editing,
+   validation, completion, and export.
 4. Reset browser-stored versions from Preferences when required.
 
 Built-in styles edited locally show a **Modified** tag whose comparison dialog
@@ -30,26 +30,29 @@ sheet in the editor.
 
 YAML style sheets are persistent project-wide rules loaded from the bundle,
 deployment configuration, additional style locations, or browser-imported
-YAML. Search result rules can belong to one feature-search session or be saved
-as reusable JSON configurations. Both use the same rendering primitives and
-SIMFIL expression model.
+YAML. A root `category` may be `base` or `search`; omission means `base`.
+Category is metadata independent of whether a style is built in, additional,
+modified, imported, or visible.
 
-The **Search Styles** tab reflects those saved configurations and maintains a
-separate canonical YAML projection for each one. Valid configurations produce
-native-parser-valid, exportable projections; invalid conversion or parser
-results remain visible as diagnostics and cannot be exported. Act 1 does not
-add them to the active renderer style map. They have `default: false` and intentionally omit map,
-layer, query, and explicit scope constraints. Optional per-rule `mapLayers`
-hints exist only in the JSON configuration and search runtime.
+Feature Search saves reusable high-fidelity rules as ordinary imported YAML
+with `category: search` and `default: false`. The source is added directly to
+the Styles tree, marked with a **Search** tag, persisted through the normal
+imported-style mechanism, and exported through the normal style action. Its
+canonical source contains flat, generally applicable rules and no query,
+scope, map ID, layer ID, or separate JSON-library identity.
 
-Generated YAML is not edited in place. **Copy to editor** creates a uniquely
-named transient copy. Saving it registers a normal browser-imported style;
-the generated source and its JSON configuration stay unchanged.
+The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
+search style. Quick exposes exactly the rule properties supported by the
+current controls and updates the authoritative Advanced YAML on every change.
+Unsupported properties and rules are preserved and listed below Quick; use
+Advanced for constructs that cannot be represented safely. Applying either
+view updates the same stylesheet source.
 
 ## Document shape
 
 ```yaml
 name: Roads
+category: base
 version: 2
 
 options:
@@ -67,8 +70,9 @@ rules:
     width: 2
 ```
 
-`version: 2` is required. The removed `aspect`, `stage`, and `lod` fields are
-validation errors. Use `scope`, semantic `geometry-name`, and explicit
+`version: 2` is required. `category` accepts only `base` or `search` and
+defaults to `base` when absent. The removed `aspect`, `stage`, and `lod` fields
+are validation errors. Use `scope`, semantic `geometry-name`, and explicit
 attribute filters.
 
 Options become typed SIMFIL bindings. They can participate in filters and

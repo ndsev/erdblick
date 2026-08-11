@@ -121,7 +121,7 @@ The **Results** tab is built for large streamed result sets.
 ## Result Visualization
 
 <!-- --8<-- [start:visualization] -->
-The **Visualization** tab controls how one search session is drawn on the map. Its high-fidelity rules can also be saved as reusable search-style configurations.
+The **Visualization** tab controls how one search session is drawn on the map. Its high-fidelity rules can also be saved as ordinary reusable YAML stylesheets.
 
 ### Result Density Map
 
@@ -155,24 +155,13 @@ Search style rules are evaluated only for the result layer of the current search
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
 
-Use **Save** beside the high-fidelity controls to store only the current rule list. The search query, scope, selected layers, result views, density controls, and other session state are deliberately not part of a saved search style. Select a saved entry from the adjacent **Saved styles** menu to apply a detached copy; later changes in the search do not modify the saved configuration.
+Use **Save** beside the high-fidelity controls to create a canonical stylesheet. Enter the exact stylesheet name you want; slashes create the same groups used by the normal Styles tree. Saving is create-only: an empty rule list or a name/URL collision is rejected without overwriting anything. The generated source has `category: search`, `version: 2`, `default: false`, and one flat top-level YAML rule per GUI rule.
 
-Saved configurations retain optional per-rule source-layer applicability. This is useful when applying a configuration back to a heterogeneous search, but it does not pin the reusable configuration to a required map or layer.
+Only high-fidelity style semantics are saved. The query, search scope, selected maps/layers, feature types, result views, density controls, and source-specific rule applicability remain outside the stylesheet. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
 
-### Search Styles in the Style Sheets Dialog
+The adjacent **Saved styles** menu lists loaded stylesheets whose category is `search`. Selecting one projects every compatible rule into the current GUI as a detached copy. Editing that copy does not change the stylesheet, and later stylesheet edits do not change the search. A partially compatible stylesheet remains selectable and reports every rule omitted from the copy. A stylesheet with no compatible rules is shown in red and disabled.
 
-Open **Edit -> Styles Configurator -> Search Styles** to create, rename, duplicate, delete, and reconfigure saved high-fidelity rule sets. This tab uses the same rule editor as Feature Search and works without a concrete feature/attribute scope; schema-backed pickers and completion are available only when a search provides that transient context.
-
-Each valid saved JSON configuration has exactly one deterministic canonical YAML projection. The generated sheet:
-
-- has style version 2 and `default: false`;
-- has no query, map ID, layer selector, or explicit scope;
-- includes all rules, regardless of their JSON `mapLayers` hints;
-- is parsed and stored separately from normal active styles.
-
-Unsupported legacy values or native parser errors are shown as an invalid generation status. Invalid projections cannot be exported or copied until the JSON rules are corrected and saved.
-
-In the current Act 1 implementation, generated sheets are not registered for regular map rendering. **Export YAML** downloads the canonical projection. **Copy to editor** opens a renamed, transient copy; importing that copy creates a normal imported style and never changes or creates a search-style configuration.
+Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on **Quick**, which reuses the rule controls, and also provides **Advanced** for authoritative YAML editing. Quick changes update Advanced immediately. Rules or properties outside the current controls are preserved; warnings below Quick identify preserved or read-only content. Apply the editor changes to update the imported stylesheet, or use the ordinary **Export** action to download it.
 
 Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->

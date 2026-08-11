@@ -23,6 +23,13 @@ enum class FeatureStyleOptionType
     String
 };
 
+/** User-facing stylesheet category used to distinguish ordinary and reusable search styles. */
+enum class StyleCategory
+{
+    Base,
+    Search
+};
+
 /**
  * One configurable option declared at the top level of a style sheet.
  *
@@ -110,6 +117,8 @@ public:
     [[nodiscard]] const std::vector<FeatureStyleOption>& options() const;
     /** Return the human-readable style name. */
     [[nodiscard]] std::string const& name() const;
+    /** Return the declared stylesheet category; omitted category defaults to Base. */
+    [[nodiscard]] StyleCategory category() const;
     /** Check whether the optional layer-affinity regex matches a layer name. */
     [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
     /** Report whether the style should start enabled in the UI. */
@@ -183,6 +192,7 @@ private:
     bool valid_ = false;
     bool enabled_ = true;
     std::string name_;
+    StyleCategory category_ = StyleCategory::Base;
     std::optional<std::regex> layerAffinity_;
     std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> ruleIndicesByModeAndFidelity_{};
     uint32_t highlightModeMask_ = 0;

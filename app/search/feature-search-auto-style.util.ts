@@ -79,6 +79,42 @@ export function searchAutoStyleFieldOptions(
     return result;
 }
 
+/**
+ * Checks that source-specific candidate paths can be guarded with portable
+ * attribute/feature semantics before they become persisted search rules.
+ */
+export function searchAutoStyleFieldOptionsArePortable(
+    options: readonly FeatureSearchAutoStyleOption[],
+    analysis: FeatureSearchAutoStyleAnalysis | undefined
+): boolean {
+    if (!options.length
+        || analysis?.status !== "ready"
+        || analysis.concreteScope !== "attribute") {
+        return false;
+    }
+    const scopes = analysis.attributeScopes;
+    const covers = (
+        option: FeatureSearchAutoStyleOption,
+        scope: FeatureSearchAttributeScopeCandidate
+    ) => optionContexts(option).some(context =>
+        context.mapId === scope.mapId && context.layerId === scope.layerId);
+
+    // Every resolved scope needs a selected field that actually exists in its
+    // source context; otherwise a generic solid rule is safer.
+    if (scopes.some(scope => !options.some(option =>
+        option.attrName === scope.attrName && covers(option, scope)))) {
+        return false;
+    }
+
+    // A rule may safely miss another source context only if its feature type
+    // guard proves that the rule cannot run there.
+    return options.every(option => scopes
+        .filter(scope => scope.attrName === option.attrName && !covers(option, scope))
+        .every(scope => !!option.featureType
+            && !!scope.featureType
+            && option.featureType !== scope.featureType));
+}
+
 /** Restricts default-style candidates to resolved attribute scopes, without guessing from leaf names. */
 export function defaultSearchStyleFieldOptionsForAnalysis(
     options: FeatureSearchAutoStyleOption[],
@@ -177,4 +213,13 @@ function searchAutoStyleFieldRank(
 
 function normalizedSemanticName(value: string): string {
     return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function optionContexts(option: FeatureSearchAutoStyleOption): FeatureSearchMapLayerRef[] {
+    if (option.mapLayers?.length) {
+        return option.mapLayers;
+    }
+    return option.mapId && option.layerId
+        ? [{mapId: option.mapId, layerId: option.layerId}]
+        : [];
 }

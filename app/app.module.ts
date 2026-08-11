@@ -94,7 +94,6 @@ import {ErdblickViewUIComponent} from "./mapview/view.ui.component";
 import {SelectButtonModule} from 'primeng/selectbutton';
 import {ChipModule} from "primeng/chip";
 import {StyleComponent} from "./styledata/style.component";
-import {SearchStylesComponent} from "./styledata/search-styles.component";
 import {MapViewContainerComponent} from "./mapview/view.container.component";
 import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
@@ -223,7 +222,6 @@ export const initializeServices = () => {
         MainBarComponent,
         ErdblickViewUIComponent,
         StyleComponent,
-        SearchStylesComponent,
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,

@@ -962,3 +962,56 @@ rules:
     REQUIRE(renderer.vertexCount() == 0);
     REQUIRE(renderer.runtimeStyleIssues().empty());
 }
+
+TEST_CASE(
+    "TileSubsetLayerRenderer silently skips a reserved search result channel",
+    "[erdblick.subset-renderer]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererSearchResultsPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererSearchResultsPool",
+        "TestMap",
+        info,
+        strings,
+        "roads",
+        1);
+
+    auto featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{11}}});
+    auto channel = subset->newChannel(
+        "search-results:session:TestMap/Road",
+        mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline");
+    channel->newFeatureEntry(
+        featureId,
+        lineGeometry(*subset, "centerline"),
+        {});
+
+    auto style = rendererStyle(R"yaml(
+name: SearchResultSkip
+category: search
+version: 2
+rules:
+  - geometry: line
+    color: "#ffffff"
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    renderer.run();
+
+    REQUIRE(renderer.vertexCount() == 0);
+    REQUIRE(renderer.runtimeStyleIssues().empty());
+}

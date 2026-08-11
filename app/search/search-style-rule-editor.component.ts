@@ -43,27 +43,32 @@ import {
                     </p-button>
                 </div>
             }
-            @if (drafts.length === 0) {
+            @if (drafts.length === 0 && readOnlyRuleIndices.length === 0) {
                 <div class="search-style-rule-editor-empty">No high-fidelity rules configured.</div>
             }
             <p-accordion class="feature-search-style-accordion"
                          [multiple]="true"
                          [(value)]="accordionValue">
-                @for (rule of drafts; track rule.id; let ruleIndex = $index) {
+                @for (item of displayItems(); track item.key; let ruleIndex = $index) {
+                  @if (item.rule; as rule) {
                     <p-accordion-panel class="feature-search-style-panel"
                                        [value]="panelValue(rule)"
                                        [attr.data-testid]="'feature-search-style-panel-' + rule.id">
                         <p-accordion-header>
                             <div class="feature-search-style-rule-header">
                                 <div class="feature-search-style-rule-title">
-                                    <input class="feature-search-style-rule-name"
-                                           type="text"
-                                           [ngModel]="rule.name"
-                                           [placeholder]="'Rule ' + (drafts.length - ruleIndex)"
-                                           [attr.aria-label]="'Rule name ' + (drafts.length - ruleIndex)"
-                                           (ngModelChange)="setStyleRuleName(rule, $event)"
-                                           (click)="$event.stopPropagation()"
-                                           (mousedown)="$event.stopPropagation()">
+                                    @if (showRuleNames) {
+                                        <input class="feature-search-style-rule-name"
+                                               type="text"
+                                               [ngModel]="rule.name"
+                                               [placeholder]="'Rule ' + (drafts.length - ruleIndex)"
+                                               [attr.aria-label]="'Rule name ' + (drafts.length - ruleIndex)"
+                                               (ngModelChange)="setStyleRuleName(rule, $event)"
+                                               (click)="$event.stopPropagation()"
+                                               (mousedown)="$event.stopPropagation()">
+                                    } @else {
+                                        <span class="feature-search-style-rule-label">Rule {{ item.sourceIndex + 1 }}</span>
+                                    }
                                     <div class="feature-search-style-rule-summary" aria-hidden="true">
                                         @for (chip of summaryChips(rule); track chip) {
                                             <span class="feature-search-style-summary-chip">{{ chip }}</span>
@@ -196,42 +201,6 @@ import {
                             </section>
 
                             <section class="feature-search-style-section">
-                                <div class="feature-search-style-section-rail">Applies</div>
-                                <div class="feature-search-style-section-body search-style-applicability">
-                                    <div class="search-style-applicability-help">
-                                        Search JSON only; canonical YAML remains portable.
-                                    </div>
-                                    @if (!rule.mapLayers?.length) {
-                                        <span class="search-style-applicability-all">All search targets</span>
-                                    } @else {
-                                        <div class="search-style-applicability-list">
-                                            @for (ref of rule.mapLayers; track ref.mapId + ':' + ref.layerId) {
-                                                <span class="search-style-applicability-chip"
-                                                      [class.unavailable]="applicabilityUnavailable(ref)"
-                                                      [title]="applicabilityUnavailable(ref) ? 'Not present in the current transient context' : ''">
-                                                    {{ ref.mapId }} / {{ ref.layerId }}
-                                                    <button type="button" aria-label="Remove applicability"
-                                                            (click)="removeApplicability(rule, ref)">×</button>
-                                                </span>
-                                            }
-                                        </div>
-                                    }
-                                    <div class="search-style-applicability-add">
-                                        <input pInputText type="text" placeholder="Map ID"
-                                               [ngModel]="applicabilityMapId(rule)"
-                                               (ngModelChange)="setApplicabilityMapId(rule, $event)">
-                                        <input pInputText type="text" placeholder="Layer ID"
-                                               [ngModel]="applicabilityLayerId(rule)"
-                                               (ngModelChange)="setApplicabilityLayerId(rule, $event)">
-                                        <p-button icon="pi pi-plus" label="Add target" size="small"
-                                                  severity="secondary" [outlined]="true"
-                                                  [disabled]="!canAddApplicability(rule)"
-                                                  (click)="addApplicability(rule)"/>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section class="feature-search-style-section">
                                 <div class="feature-search-style-section-rail">Geom</div>
                                 <div class="feature-search-style-section-body">
                                     <div class="feature-search-style-visualization-row">
@@ -338,6 +307,11 @@ import {
                             </section>
                         </p-accordion-content>
                     </p-accordion-panel>
+                  } @else {
+                    <div class="search-style-rule-editor-read-only-placeholder">
+                        Rule {{ item.sourceIndex + 1 }} is preserved and editable in Advanced only.
+                    </div>
+                  }
                 }
             </p-accordion>
         </div>
@@ -355,7 +329,11 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     @Input() dataSummaryStatus: SearchValueSummariesState["status"] = "idle";
     @Input() valueSummaryForExpression?: (expression: string) => SearchValueSummary | undefined;
     @Input() showAddButton = true;
+    @Input() showRuleNames = true;
     @Input() canRefreshValueSummaries = true;
+    /** Source indices let Quick retain the authoritative YAML rule ordering. */
+    @Input() sourceRuleIndices: Record<number, number> = {};
+    @Input() readOnlyRuleIndices: number[] = [];
     @Output() draftsChange = new EventEmitter<FeatureSearchStyleRuleDraft[]>();
     @Output() updateFromDataRequested = new EventEmitter<void>();
 
@@ -380,7 +358,36 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
         {label: "contains", value: "contains"}
     ];
     private readonly codec = new SearchStyleRuleDraftCodec();
-    private readonly applicabilityDrafts = new Map<number, {mapId: string; layerId: string}>();
+
+    /** Interleaves editable rows and Advanced-only placeholders in YAML order. */
+    protected displayItems(): Array<{
+        key: string;
+        sourceIndex: number;
+        rule?: FeatureSearchStyleRuleDraft;
+    }> {
+        if (!this.readOnlyRuleIndices.length && Object.keys(this.sourceRuleIndices).length === 0) {
+            return this.drafts.map((rule, sourceIndex) => ({
+                key: `rule:${rule.id}`,
+                sourceIndex,
+                rule
+            }));
+        }
+        const items: Array<{
+            key: string;
+            sourceIndex: number;
+            rule?: FeatureSearchStyleRuleDraft;
+        }> = this.drafts.map((rule, index) => ({
+            key: `rule:${rule.id}`,
+            sourceIndex: this.sourceRuleIndices[rule.id] ?? (this.drafts.length + index),
+            rule
+        }));
+        items.push(...this.readOnlyRuleIndices.map(sourceIndex => ({
+            key: `readonly:${sourceIndex}`,
+            sourceIndex,
+            rule: undefined
+        })));
+        return items.sort((left, right) => left.sourceIndex - right.sourceIndex);
+    }
 
     /** Refreshes schema hints and identity allocation when host inputs change. */
     ngOnChanges(changes: SimpleChanges): void {
@@ -394,11 +401,6 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
             this.codec.synchronizeIds(this.drafts);
             const panels = new Set(this.drafts.map(rule => this.panelValue(rule)));
             this.accordionValue = this.accordionValue.filter(value => panels.has(value));
-            for (const ruleId of this.applicabilityDrafts.keys()) {
-                if (!this.drafts.some(rule => rule.id === ruleId)) {
-                    this.applicabilityDrafts.delete(ruleId);
-                }
-            }
         }
     }
 
@@ -602,78 +604,9 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
         return this.valueSummaryForExpression?.(expression);
     }
 
-    /** Returns the transient map-id input for a new applicability reference. */
-    protected applicabilityMapId(rule: FeatureSearchStyleRuleDraft): string {
-        return this.applicabilityDraft(rule).mapId;
-    }
-
-    /** Returns the transient layer-id input for a new applicability reference. */
-    protected applicabilityLayerId(rule: FeatureSearchStyleRuleDraft): string {
-        return this.applicabilityDraft(rule).layerId;
-    }
-
-    /** Updates the transient map-id input without changing canonical rules. */
-    protected setApplicabilityMapId(rule: FeatureSearchStyleRuleDraft, mapId: string): void {
-        this.applicabilityDraft(rule).mapId = mapId ?? "";
-    }
-
-    /** Updates the transient layer-id input without changing canonical rules. */
-    protected setApplicabilityLayerId(rule: FeatureSearchStyleRuleDraft, layerId: string): void {
-        this.applicabilityDraft(rule).layerId = layerId ?? "";
-    }
-
-    /** Returns whether both free-form applicability identifiers are present. */
-    protected canAddApplicability(rule: FeatureSearchStyleRuleDraft): boolean {
-        const draft = this.applicabilityDraft(rule);
-        return !!draft.mapId.trim() && !!draft.layerId.trim();
-    }
-
-    /** Adds a deduplicated JSON-only map/layer applicability reference. */
-    protected addApplicability(rule: FeatureSearchStyleRuleDraft): void {
-        const draft = this.applicabilityDraft(rule);
-        const ref = {mapId: draft.mapId.trim(), layerId: draft.layerId.trim()};
-        if (!ref.mapId || !ref.layerId) {
-            return;
-        }
-        const refs = rule.mapLayers ?? [];
-        if (!refs.some(candidate => candidate.mapId === ref.mapId && candidate.layerId === ref.layerId)) {
-            rule.mapLayers = [...refs, ref];
-        }
-        this.applicabilityDrafts.set(rule.id, {mapId: "", layerId: ""});
-        this.markEdited(rule);
-    }
-
-    /** Removes one JSON-only map/layer applicability reference. */
-    protected removeApplicability(
-        rule: FeatureSearchStyleRuleDraft,
-        ref: FeatureSearchMapLayerRef
-    ): void {
-        const remaining = (rule.mapLayers ?? []).filter(candidate =>
-            candidate.mapId !== ref.mapId || candidate.layerId !== ref.layerId);
-        rule.mapLayers = remaining.length ? remaining : undefined;
-        this.markEdited(rule);
-    }
-
-    /** Flags references absent from a non-empty transient host context. */
-    protected applicabilityUnavailable(ref: FeatureSearchMapLayerRef): boolean {
-        return this.completionMapLayers.length > 0
-            && !this.completionMapLayers.some(candidate =>
-                candidate.mapId === ref.mapId && candidate.layerId === ref.layerId);
-    }
-
     /** Resolves transient schema metadata for one expression. */
     private fieldOption(field: string): SearchStyleFieldOption | undefined {
         return this.fieldOptions.find(option => option.value === field);
-    }
-
-    /** Lazily creates free-form applicability inputs for a rule. */
-    private applicabilityDraft(rule: FeatureSearchStyleRuleDraft): {mapId: string; layerId: string} {
-        let draft = this.applicabilityDrafts.get(rule.id);
-        if (!draft) {
-            draft = {mapId: "", layerId: ""};
-            this.applicabilityDrafts.set(rule.id, draft);
-        }
-        return draft;
     }
 
     /** Emits an immutable deep copy of all editor drafts. */

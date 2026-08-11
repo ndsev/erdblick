@@ -24,8 +24,16 @@ import {AppDialogComponent} from "../shared/app-dialog.component";
 import {StyleValidationReportService} from "./style-validation-report.service";
 import {StyleValidationIssue, StyleValidationReport} from "./style-validation.model";
 import {StyleEditorRequestService} from "./style-editor-request.service";
-import {dump, load} from "js-yaml";
-import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
+import {
+    QuickStyleProjection,
+    QuickStyleWarning,
+    projectStyleSourceToQuick,
+    updateStyleSourceFromQuick
+} from "../search/search-style-sheet.converter";
+import {
+    FeatureSearchStyleRuleDraft,
+    SearchStyleRuleDraftCodec
+} from "../search/search-style-rule-editor.model";
 
 
 @Component({
@@ -39,7 +47,6 @@ import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
-                    <p-tab value="search-styles">Search Styles</p-tab>
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -91,6 +98,10 @@ import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
                                                            [class.clickable-style-tag]="node.overridesBaseStyle"
                                                            severity="info" value="Additional" [rounded]="true"
                                                            (click)="openCompareFromAdditionalTag($event, node.id)"/>
+                                                }
+                                                @if (node.category === 'search') {
+                                                    <p-tag class="search-style-tag"
+                                                           severity="danger" value="Search" [rounded]="true"/>
                                                 }
                                                 @if (node.modified && !node.imported) {
                                                     <p-tag class="modified-style-tag"
@@ -159,9 +170,6 @@ import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
                                 </div>
                             }
                         </div>
-                    </p-tabpanel>
-                    <p-tabpanel value="search-styles">
-                        <search-styles (copyToEdit)="openGeneratedStyleCopy($event)"></search-styles>
                     </p-tabpanel>
                     <p-tabpanel value="errors">
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -247,12 +255,57 @@ import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
                   data-testid="style-editor-dialog" class="editor-dialog"
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
-            <editor [sessionId]="styleEditorSessionId"></editor>
+            <p-tabs [(value)]="styleEditorTab" class="style-editor-tabs" data-testid="style-editor-tabs">
+                <p-tablist>
+                    @if (styleEditorQuickAvailable) {
+                        <p-tab value="quick">Quick</p-tab>
+                    }
+                    <p-tab value="advanced">Advanced</p-tab>
+                </p-tablist>
+                <p-tabpanels>
+                    @if (styleEditorQuickAvailable) {
+                        <p-tabpanel value="quick" class="style-editor-quick-panel">
+                            <div class="style-editor-quick-content"
+                                 [class.read-only]="quickProjectionStale">
+                                @if (quickProjectionStale) {
+                                    <div class="style-editor-quick-stale">
+                                        Quick is read-only until Advanced contains valid YAML: {{ quickProjectionError }}
+                                    </div>
+                                }
+                                <search-style-rule-editor
+                                    [drafts]="quickRuleDrafts"
+                                    (draftsChange)="onQuickRuleDraftsChange($event)"
+                                    [fieldOptions]="[]"
+                                    [completionOwnerPrefix]="'style-editor-quick'"
+                                    [completionZIndex]="31050"
+                                    [showRuleNames]="false"
+                                    [sourceRuleIndices]="quickRuleSourceIndicesByDraftId"
+                                    [readOnlyRuleIndices]="quickReadOnlyRuleIndices"
+                                    [canRefreshValueSummaries]="false">
+                                </search-style-rule-editor>
+                                @if (quickWarnings.length) {
+                                    <div class="style-editor-quick-warnings">
+                                        <h3>Quick editing notes</h3>
+                                        <ul>
+                                            @for (warning of quickWarnings; track warning.path + ':' + warning.code) {
+                                                <li><code>{{ warning.path }}</code> — {{ warning.message }}</li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+                            </div>
+                        </p-tabpanel>
+                    }
+                    <p-tabpanel value="advanced" class="style-editor-advanced-panel">
+                        <editor [sessionId]="styleEditorSessionId"></editor>
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
                     <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()"
-                              [label]="styleEditorImportDraft ? 'Import copy' : 'Apply'" icon="pi pi-check"
-                              [disabled]="!styleEditorImportDraft && !sourceWasModified"></p-button>
+                              label="Apply" icon="pi pi-check"
+                              [disabled]="!sourceWasModified"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
@@ -263,7 +316,7 @@ import type {SearchGeneratedStyleEditRequest} from "./search-styles.component";
                 </div>
                 <div class="editor-actions-right">
                     <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
-                              [disabled]="styleEditorImportDraft || sourceWasModified || !stateService.styleEditorTargetId"
+                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId"
                               label="Export" icon="pi pi-file-export">
                     </p-button>
                     <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
@@ -371,8 +424,19 @@ export class StyleComponent implements OnDestroy {
     styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
     private styleEditorOriginalSource: string = '';
-    styleEditorImportDraft = false;
-    private styleEditorImportDraftId = '';
+    styleEditorTab: "quick" | "advanced" = "quick";
+    styleEditorQuickAvailable = false;
+    quickRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
+    quickWarnings: QuickStyleWarning[] = [];
+    quickReadOnlyRuleIndices: number[] = [];
+    quickProjectionStale = false;
+    quickProjectionError = "";
+    private quickProjection?: QuickStyleProjection;
+    private quickRuleSourceIndices = new Map<number, number>();
+    quickRuleSourceIndicesByDraftId: Record<number, number> = {};
+    private readonly quickRuleDraftCodec = new SearchStyleRuleDraftCodec();
+    private quickProjectionRefreshTimer?: ReturnType<typeof setTimeout>;
+    private updatingSourceFromQuick = false;
     stylesCollapsed: boolean = false;
     styleCompareDialogVisible: boolean = false;
     styleCompareLeftModified: boolean = false;
@@ -388,7 +452,7 @@ export class StyleComponent implements OnDestroy {
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly styleEditorRequestSubscription: Subscription;
-    stylesDialogTab: 'styles' | 'search-styles' | 'errors' = 'styles';
+    stylesDialogTab: 'styles' | 'errors' = 'styles';
     styleIssueFilter: string = '';
     styleErrorsOnly: boolean = false;
     styleValidationDialogVisible: boolean = false;
@@ -447,6 +511,9 @@ export class StyleComponent implements OnDestroy {
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.styleEditorRequestSubscription.unsubscribe();
+        if (this.quickProjectionRefreshTimer) {
+            clearTimeout(this.quickProjectionRefreshTimer);
+        }
         this.editorService.closeSession(this.styleEditorSessionId);
     }
 
@@ -605,7 +672,7 @@ export class StyleComponent implements OnDestroy {
             return true;
         }
         if (this.styleEditorVisible
-            && (this.sourceWasModified || this.styleEditorImportDraft)
+            && this.sourceWasModified
             && currentTargetId !== styleId) {
             this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
             return false;
@@ -622,37 +689,12 @@ export class StyleComponent implements OnDestroy {
     applyEditedStyle() {
         const styleId = this.stateService.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
-        if (!styleId && !this.styleEditorImportDraft) {
+        if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
             return;
         }
         if (!styleData) {
             this.messageService.showError(`Cannot apply an empty style definition.`);
-            return;
-        }
-        if (this.styleEditorImportDraft) {
-            const report = this.styleService.validateStyleSource(
-                styleData,
-                this.styleService.createEditorSourceRef(this.styleEditorImportDraftId, styleData));
-            if (!report.valid) {
-                this.showValidationFailure(report);
-                return;
-            }
-            const importedStyleId = this.styleService.importStyleYamlSource(styleData);
-            if (!importedStyleId) {
-                this.messageService.showError("The edited copy could not be imported as a normal style.");
-                return;
-            }
-            this.styleEditorImportDraft = false;
-            this.styleEditorImportDraftId = '';
-            this.stateService.styleEditorTargetId = importedStyleId;
-            this.sourceWasModified = false;
-            this.styleEditorOriginalSource = styleData;
-            this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
-            this.messageService.showSuccess(`Imported style “${importedStyleId}”.`);
-            return;
-        }
-        if (!styleId) {
             return;
         }
         if (!this.styleService.styles.has(styleId)) {
@@ -717,8 +759,13 @@ export class StyleComponent implements OnDestroy {
         this.warningDialogVisible = false;
         this.sourceWasModified = false;
         this.stateService.styleEditorTargetId = null;
-        this.styleEditorImportDraft = false;
-        this.styleEditorImportDraftId = '';
+        this.styleEditorQuickAvailable = false;
+        this.quickProjection = undefined;
+        this.quickRuleDrafts = [];
+        this.quickWarnings = [];
+        this.quickReadOnlyRuleIndices = [];
+        this.quickRuleSourceIndices.clear();
+        this.quickRuleSourceIndicesByDraftId = {};
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
@@ -747,27 +794,8 @@ export class StyleComponent implements OnDestroy {
         if (source === undefined) {
             return false;
         }
-        this.styleEditorImportDraft = false;
-        this.styleEditorImportDraftId = '';
         this.stateService.styleEditorTargetId = styleId;
         return this.prepareStyleEditorSource(source);
-    }
-
-    /** Opens generated YAML as a transient copy whose save action creates a normal imported style. */
-    openGeneratedStyleCopy(request: SearchGeneratedStyleEditRequest): void {
-        if (this.styleEditorVisible && (this.sourceWasModified || this.styleEditorImportDraft)) {
-            this.messageService.showWarning('Discard or import the current style copy before opening another style.');
-            return;
-        }
-        const source = this.generatedStyleCopySource(request);
-        if (!source) {
-            return;
-        }
-        this.styleEditorImportDraft = true;
-        this.styleEditorImportDraftId = this.styleNameFromSource(source) ?? `${request.styleId} Copy`;
-        this.stateService.styleEditorTargetId = null;
-        this.prepareStyleEditorSource(source);
-        this.styleEditorVisible = true;
     }
 
     /** Creates a fresh editor session and installs common dirty/save tracking. */
@@ -783,6 +811,16 @@ export class StyleComponent implements OnDestroy {
         this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
             editedStyleSource => {
                 this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
+                if (this.updatingSourceFromQuick) {
+                    return;
+                }
+                if (this.quickProjectionRefreshTimer) {
+                    clearTimeout(this.quickProjectionRefreshTimer);
+                }
+                this.quickProjectionRefreshTimer = setTimeout(() => {
+                    this.quickProjectionRefreshTimer = undefined;
+                    this.refreshQuickProjection(editedStyleSource);
+                }, 150);
             }
         );
         this.styleEditorSaveSubscription.unsubscribe();
@@ -790,39 +828,77 @@ export class StyleComponent implements OnDestroy {
             this.applyEditedStyle();
         }) ?? new Subscription();
         this.sourceWasModified = false;
+        this.styleEditorQuickAvailable = !!this.stateService.styleEditorTargetId;
+        this.styleEditorTab = this.styleEditorQuickAvailable ? "quick" : "advanced";
+        this.refreshQuickProjection(source);
         return true;
     }
 
-    /** Rewrites a generated sheet to a unique imported-style name without touching its source configuration. */
-    private generatedStyleCopySource(request: SearchGeneratedStyleEditRequest): string | undefined {
+    /** Reprojects the authoritative Advanced YAML without replacing the last good view on parse errors. */
+    private refreshQuickProjection(source: string): void {
+        if (!this.styleEditorQuickAvailable) {
+            return;
+        }
         try {
-            const document = load(request.source);
-            if (!document || typeof document !== 'object' || Array.isArray(document)) {
-                throw new Error('Generated YAML has no stylesheet object.');
-            }
-            const record = document as Record<string, unknown>;
-            const baseName = `${request.styleId} Copy`;
-            let name = baseName;
-            let suffix = 2;
-            while (this.styleService.hasStyleIdentity(name)) {
-                name = `${baseName} ${suffix++}`;
-            }
-            record['name'] = name;
-            return dump(record, {noRefs: true, lineWidth: 120, sortKeys: false});
+            const projection = projectStyleSourceToQuick(source.replace(/\n+$/, ""));
+            const drafts = this.quickRuleDraftCodec.toDrafts(
+                projection.editableRules.map(projected => projected.rule));
+            this.quickRuleSourceIndices.clear();
+            drafts.forEach((draft, index) => {
+                this.quickRuleSourceIndices.set(draft.id, projection.editableRules[index].sourceIndex);
+            });
+            this.quickRuleSourceIndicesByDraftId = Object.fromEntries(this.quickRuleSourceIndices);
+            this.quickProjection = projection;
+            this.quickRuleDrafts = drafts;
+            this.quickWarnings = projection.warnings;
+            this.quickReadOnlyRuleIndices = projection.readOnlyRuleIndices;
+            this.quickProjectionStale = false;
+            this.quickProjectionError = "";
         } catch (error) {
-            this.messageService.showError(`Could not prepare the generated stylesheet copy: ${String(error)}`);
-            return undefined;
+            this.quickProjectionStale = true;
+            this.quickProjectionError = error instanceof Error ? error.message : String(error);
         }
     }
 
-    /** Reads a top-level YAML stylesheet name for transient editor diagnostics. */
-    private styleNameFromSource(source: string): string | undefined {
-        const document = load(source);
-        if (!document || typeof document !== 'object' || Array.isArray(document)) {
-            return undefined;
+    /** Patches Quick edits into the YAML AST immediately while retaining unsupported document content. */
+    protected onQuickRuleDraftsChange(drafts: FeatureSearchStyleRuleDraft[]): void {
+        const projection = this.quickProjection;
+        if (!projection || this.quickProjectionStale) {
+            return;
         }
-        const name = (document as Record<string, unknown>)['name'];
-        return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+        const retainedDraftIds = new Set(drafts.map(draft => draft.id));
+        const deletedPartialRules = [...this.quickRuleSourceIndices]
+            .filter(([draftId]) => !retainedDraftIds.has(draftId))
+            .map(([, sourceIndex]) => projection.editableRules.find(rule => rule.sourceIndex === sourceIndex))
+            .filter(rule => rule?.support === "partial");
+        if (deletedPartialRules.length > 0) {
+            const indices = deletedPartialRules.map(rule => (rule!.sourceIndex + 1)).join(", ");
+            if (!window.confirm(
+                `Delete YAML rule${deletedPartialRules.length === 1 ? "" : "s"} ${indices}? `
+                + "Unsupported properties on the whole rule will also be removed."
+            )) {
+                this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+                return;
+            }
+        }
+        try {
+            const semanticRules = this.quickRuleDraftCodec.fromDrafts(drafts);
+            const updates = semanticRules.map((rule, index) => ({
+                sourceIndex: this.quickRuleSourceIndices.get(drafts[index].id),
+                rule
+            }));
+            const currentSource = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, "");
+            const updatedSource = updateStyleSourceFromQuick(currentSource, projection, updates);
+            this.updatingSourceFromQuick = true;
+            this.editorService.updateSessionSource(this.styleEditorSessionId, updatedSource);
+            this.updatingSourceFromQuick = false;
+            this.refreshQuickProjection(updatedSource);
+        } catch (error) {
+            this.updatingSourceFromQuick = false;
+            this.messageService.showError(
+                `Could not apply the Quick style change: ${error instanceof Error ? error.message : String(error)}`);
+            this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+        }
     }
 
     /** Opens the style-definition documentation in a new browser tab. */

@@ -12,8 +12,7 @@ export type StyleSourceKind =
     | 'additional'
     | 'imported'
     | 'modified-builtin'
-    | 'editor'
-    | 'search-generated';
+    | 'editor';
 
 export interface StyleSourceRef {
     configId?: string;

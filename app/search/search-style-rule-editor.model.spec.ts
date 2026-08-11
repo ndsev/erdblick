@@ -3,7 +3,7 @@ import {describe, expect, it} from "vitest";
 import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
 
 describe("SearchStyleRuleDraftCodec", () => {
-    it("round-trips high-fidelity geometry, point radius, applicability and expression intent", () => {
+    it("round-trips high-fidelity geometry, point radius and expression intent", () => {
         const codec = new SearchStyleRuleDraftCodec();
         const rules = [{
             geometry: "mesh" as const,
@@ -19,7 +19,6 @@ describe("SearchStyleRuleDraftCodec", () => {
                 customField: true,
                 stops: [{value: "road", color: "#abcdef"}]
             },
-            mapLayers: [{mapId: "source map", layerId: "source layer"}],
             width: 3,
             pointRadius: 11,
             opacity: 0.35
@@ -31,8 +30,7 @@ describe("SearchStyleRuleDraftCodec", () => {
             geometry: "mesh",
             width: 3,
             pointRadius: 11,
-            opacity: 0.35,
-            mapLayers: [{mapId: "source map", layerId: "source layer"}]
+            opacity: 0.35
         });
         expect(roundTrip[0].filter[0].customExpression).toBe(true);
         expect(roundTrip[0].color).toMatchObject({customField: true});

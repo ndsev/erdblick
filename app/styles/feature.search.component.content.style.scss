@@ -334,10 +334,9 @@ simfil-expression-input {
   }
 }
 
-// The high-fidelity rule editor is hosted both by Feature Search and by the
-// standalone Search Styles tab. Keep its selectors independent of either host.
-:is(.feature-search-tabs, .search-styles-tab) {
-  .feature-search-style-rules {
+// Reusable high-fidelity rule controls own their styling independently of the host.
+search-style-rule-editor {
+  & {
     --feature-search-style-control-height: 1.75em;
     --feature-search-style-control-font-size: 0.82rem;
     --feature-search-style-icon-size: var(--feature-search-style-control-height);
@@ -500,7 +499,7 @@ simfil-expression-input {
     overflow-y: auto;
   }
 
-  search-style-rule-editor {
+  & {
     display: flex;
     min-height: 0;
     overflow: hidden;
@@ -523,6 +522,15 @@ simfil-expression-input {
 
   .search-style-rule-editor-empty {
     color: var(--p-text-muted-color);
+    padding: 0.75em;
+  }
+
+  .search-style-rule-editor-read-only-placeholder {
+    border: 1px dashed var(--p-content-border-color);
+    border-radius: 6px;
+    color: var(--p-text-muted-color);
+    flex: 0 0 auto;
+    margin-bottom: 0.5em;
     padding: 0.75em;
   }
 
@@ -617,6 +625,11 @@ simfil-expression-input {
     padding: 0 0.35em;
   }
 
+  .feature-search-style-rule-label {
+    flex: 0 0 auto;
+    min-width: 5em;
+  }
+
   .feature-search-style-rule-name:focus {
     border-color: var(--p-primary-color);
     outline: none;
@@ -697,48 +710,6 @@ simfil-expression-input {
     gap: var(--feature-search-style-control-gap);
     min-width: 0;
     padding: 0.5em 0.55em;
-  }
-
-  .search-style-applicability-help,
-  .search-style-applicability-all {
-    color: var(--p-text-muted-color);
-    font-size: 0.82em;
-  }
-
-  .search-style-applicability-list,
-  .search-style-applicability-add {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--feature-search-style-control-gap);
-  }
-
-  .search-style-applicability-chip {
-    align-items: center;
-    background: color-mix(in srgb, var(--p-content-background) 88%, var(--p-primary-500));
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 999px;
-    display: inline-flex;
-    gap: 0.35em;
-    padding: 0.2em 0.5em;
-
-    &.unavailable {
-      border-color: var(--p-message-warn-color, #d69e2e);
-    }
-
-    button {
-      background: transparent;
-      border: 0;
-      color: inherit;
-      cursor: pointer;
-      font: inherit;
-      padding: 0;
-    }
-  }
-
-  .search-style-applicability-add input {
-    flex: 1 1 9em;
-    min-width: 7em;
   }
 
   .feature-search-style-filter-row,
@@ -1006,6 +977,18 @@ simfil-expression-input {
 }
 
 .feature-search-tabs {
+  .feature-search-style-rules {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .feature-search-style-rules > search-style-rule-editor {
+    flex: 1 1 auto;
+  }
+
   .feature-search-style-actions {
     align-items: center;
     display: flex;
@@ -1338,6 +1321,35 @@ simfil-expression-input {
       gap: 0.25em;
       font-size: 0.9em;
     }
+  }
+}
+
+.feature-search-saved-style-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  small {
+    color: var(--p-text-muted-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &.incompatible,
+  &.incompatible small {
+    color: var(--p-message-error-color, #dc2626);
+  }
+}
+
+.feature-search-style-application-message {
+  color: var(--p-text-muted-color);
+  flex: 0 0 auto;
+  font-size: 0.82em;
+  margin: 0.25em 0;
+
+  &.warning {
+    color: var(--p-message-warn-color, #d97706);
   }
 }
 

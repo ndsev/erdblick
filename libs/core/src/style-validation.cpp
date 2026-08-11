@@ -992,6 +992,23 @@ bool validateTopLevelStyleYaml(YAML::Node const& styleYaml, StyleValidationRepor
         return false;
     }
 
+    auto category = styleYaml["category"];
+    if (category.IsDefined()) {
+        if (!category.IsScalar() ||
+            (category.Scalar() != "base" && category.Scalar() != "search"))
+        {
+            auto& issue = report.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                "Style sheet category must be either 'base' or 'search'.",
+                locationForNode(category));
+            issue.property = "category";
+            report.markStylesheetFailed();
+            return false;
+        }
+    }
+
     auto rules = styleYaml["rules"];
     if (!rules || !rules.IsSequence()) {
         report.addIssue(

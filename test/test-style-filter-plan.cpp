@@ -59,6 +59,38 @@ rules:
 }
 
 TEST_CASE(
+    "Flat search styles retain one planner channel per top-level rule",
+    "[erdblick.style-plan]")
+{
+    auto parsed = style(R"yaml(
+name: Search/Flat
+category: search
+version: 2
+default: false
+rules:
+  - geometry: line
+    filter: speed > 20
+    color: "#ff0000"
+  - geometry: point
+    filter: isJunction
+    color: "#0000ff"
+)yaml");
+    REQUIRE(parsed.isValid());
+
+    auto plan = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::NoHighlight,
+        FeatureStyleRule::AnyFidelity);
+
+    REQUIRE(plan.valid);
+    REQUIRE(plan.issues.empty());
+    REQUIRE(plan.channels.size() == 2);
+    REQUIRE(plan.channels[0].channelId_ == "style-rule:0");
+    REQUIRE(plan.channels[1].channelId_ == "style-rule:1");
+}
+
+TEST_CASE(
     "Style filter planning preserves rule channels and expression contexts",
     "[erdblick.style-plan]")
 {

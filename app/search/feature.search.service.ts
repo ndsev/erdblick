@@ -2696,7 +2696,7 @@ export class FeatureSearchService {
         let diagnostics: Uint8Array | null;
         try {
             schema = subset.channelSchema(
-                presentation.compiled.channelOrdinal
+                presentation.compiled.resultChannelOrdinal
             ) as typeof schema;
             diagnostics = uint8ArrayFromWasm(
                 buffer => subset.copyDiagnostics(buffer)
@@ -2788,7 +2788,7 @@ export class FeatureSearchService {
         let entries: SearchResultTileEntry[];
         try {
             const rawEntries = subset.entryRange(
-                presentation.compiled.channelOrdinal,
+                presentation.compiled.resultChannelOrdinal,
                 task.offset,
                 limit,
                 task.includeExactPositions

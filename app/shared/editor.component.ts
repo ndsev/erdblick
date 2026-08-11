@@ -15,6 +15,9 @@ import {EditorRevealRequest, EditorService} from './editor.service';
 const completionsList = [
     {label: 'version', type: 'property'},
     {label: 'name', type: 'property'},
+    {label: 'category', type: 'property'},
+    {label: 'base', type: 'enum'},
+    {label: 'search', type: 'enum'},
     {label: 'rules', type: 'property'},
     {label: 'geometry', type: 'property'},
     {label: 'scope', type: 'property'},

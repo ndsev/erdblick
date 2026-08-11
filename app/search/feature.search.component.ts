@@ -77,7 +77,8 @@ import {SimfilExpressionInputComponent} from "./simfil-expression-input.componen
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
     preferredSearchAutoStyleField,
-    searchAutoStyleFieldOptions
+    searchAutoStyleFieldOptions,
+    searchAutoStyleFieldOptionsArePortable
 } from "./feature-search-auto-style.util";
 import type {FeatureSearchAutoStyleOption} from "./feature-search-auto-style.util";
 import {
@@ -85,8 +86,12 @@ import {
     FeatureSearchStyleRuleDraft,
     SearchStyleRuleDraftCodec
 } from "./search-style-rule-editor.model";
-import {SearchStyleConfigurationService} from "./search-style-configuration.service";
-import type {SearchStyleConfigurationV1} from "../shared/search-style-configuration-state";
+import {ErdblickStyle, StyleService} from "../styledata/style.service";
+import {
+    convertSearchStyleRulesToYaml,
+    projectStyleSourceForSearch,
+    SearchStyleApplicationProjection
+} from "./search-style-sheet.converter";
 
 interface FeatureSearchGroupingOption {
     name: string;
@@ -94,6 +99,14 @@ interface FeatureSearchGroupingOption {
 }
 
 type FeatureSearchStyleOption = FeatureSearchAutoStyleOption;
+
+interface FeatureSearchSavedStyleOption {
+    label: string;
+    value: string;
+    disabled: boolean;
+    summary: string;
+    projection?: SearchStyleApplicationProjection;
+}
 
 const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCount", "$validityIndex"]);
 
@@ -478,14 +491,23 @@ interface FeatureSearchResultTreeItem {
                                         <h3>High-fi Visualization</h3>
                                         <div class="feature-search-style-control-header-actions">
                                             <p-select class="feature-search-saved-style-select"
-                                                      [options]="searchStyleConfigurationOptions"
-                                                      [ngModel]="selectedSearchStyleConfigurationId"
-                                                      (ngModelChange)="applySearchStyleConfiguration($event)"
+                                                      [options]="searchStyleOptions"
+                                                      [ngModel]="selectedSearchStyleId"
+                                                      (ngModelChange)="applySearchStyle($event)"
                                                       optionLabel="label"
                                                       optionValue="value"
+                                                      optionDisabled="disabled"
                                                       placeholder="Saved styles"
                                                       [showClear]="true"
                                                       appendTo="body">
+                                                <ng-template pTemplate="item" let-option>
+                                                    <div class="feature-search-saved-style-option"
+                                                         [class.incompatible]="option.disabled"
+                                                         [title]="option.summary">
+                                                        <span>{{ option.label }}</span>
+                                                        <small>{{ option.summary }}</small>
+                                                    </div>
+                                                </ng-template>
                                             </p-select>
                                             <p-button class="feature-search-save-style-button"
                                                       icon="pi pi-save"
@@ -493,9 +515,9 @@ interface FeatureSearchResultTreeItem {
                                                       size="small"
                                                       severity="secondary"
                                                       [outlined]="true"
-                                                      pTooltip="Save high-fidelity rules as a reusable configuration"
+                                                      pTooltip="Save high-fidelity rules as an imported search stylesheet"
                                                       tooltipPosition="bottom"
-                                                      (click)="saveSearchStyleConfiguration()">
+                                                      (click)="saveSearchStyle()">
                                             </p-button>
                                             <p-button class="feature-search-add-rule-button"
                                                       icon="pi pi-plus"
@@ -530,6 +552,12 @@ interface FeatureSearchResultTreeItem {
                                     </div>
                                 </div>
                             </section>
+                            @if (searchStyleApplicationMessage) {
+                                <div class="feature-search-style-application-message"
+                                     [class.warning]="searchStyleApplicationWarning">
+                                    {{ searchStyleApplicationMessage }}
+                                </div>
+                            }
                             <search-style-rule-editor
                                 [drafts]="styleRuleDrafts"
                                 (draftsChange)="onSharedStyleRuleDraftsChange($event)"
@@ -777,9 +805,10 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private nextStyleColorStopId = 1;
     styleRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
     styleRuleAccordionValue: string[] = [];
-    searchStyleConfigurations: SearchStyleConfigurationV1[] = [];
-    searchStyleConfigurationOptions: Array<{label: string; value: string}> = [];
-    selectedSearchStyleConfigurationId: string | null = null;
+    searchStyleOptions: FeatureSearchSavedStyleOption[] = [];
+    selectedSearchStyleId: string | null = null;
+    searchStyleApplicationMessage = "";
+    searchStyleApplicationWarning = false;
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
     };
@@ -874,7 +903,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 public jumpService: JumpTargetService,
                 public mapService: MapInfoService,
                 private readonly searchSchema: FeatureSearchSchemaService,
-                private readonly searchStyleConfigurationsService: SearchStyleConfigurationService,
+                private readonly styleService: StyleService,
                 private readonly inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
@@ -883,22 +912,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 private readonly changeDetector: ChangeDetectorRef,
                 private readonly ngZone: NgZone) {
         this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
-        this.subscriptions.add(this.searchStyleConfigurationsService.configurations$.subscribe(configurations => {
-            this.searchStyleConfigurations = configurations;
-            this.searchStyleConfigurationOptions = configurations.map(configuration => ({
-                label: configuration.name,
-                value: configuration.id
-            }));
-            if (this.selectedSearchStyleConfigurationId
-                && !configurations.some(configuration => configuration.id === this.selectedSearchStyleConfigurationId)) {
-                this.selectedSearchStyleConfigurationId = null;
-            }
-            const selected = configurations.find(configuration =>
-                configuration.id === this.selectedSearchStyleConfigurationId);
-            if (selected && selected.revision !== this.session?.definition.searchStyleConfigurationRevision) {
-                this.selectedSearchStyleConfigurationId = null;
-            }
-        }));
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => this.refreshSearchStyleOptions()));
         this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
             if (this.sameGroupingOptions(this.selectedGroupingOptions, nextOptions)) {
@@ -1602,12 +1616,12 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return;
         }
         this.styleRulesStateSignature = signature;
-        this.selectedSearchStyleConfigurationId = null;
-        this.stateService.patchFeatureSearch(session.id, {
-            searchStyleRules,
-            searchStyleConfigurationId: undefined,
-            searchStyleConfigurationRevision: undefined
-        });
+        if (this.selectedSearchStyleId) {
+            this.searchStyleApplicationMessage = "The applied stylesheet was copied into this search; these rules are now customized.";
+            this.searchStyleApplicationWarning = false;
+        }
+        this.selectedSearchStyleId = null;
+        this.stateService.patchFeatureSearch(session.id, {searchStyleRules});
     }
 
     /** Accepts detached drafts emitted by the reusable rule editor. */
@@ -1616,43 +1630,113 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.onStyleRulesChanged();
     }
 
-    /** Applies a saved rule configuration to this search as an independent copy. */
-    protected applySearchStyleConfiguration(configurationId: string | null): void {
-        if (!configurationId || !this.session) {
-            this.selectedSearchStyleConfigurationId = null;
-            return;
+    /** Rebuilds dropdown compatibility from the current authoritative imported YAML sources. */
+    private refreshSearchStyleOptions(): void {
+        const scope = this.resolvedStyleSearchScope();
+        const searchStyles: ErdblickStyle[] = [...this.styleService.styles.values()]
+            .filter(style => style.category === "search")
+            .sort((left, right) => left.id.localeCompare(right.id));
+        this.searchStyleOptions = searchStyles.map(style => {
+            try {
+                const projection = projectStyleSourceForSearch(style.source, scope);
+                const disabled = projection.rules.length === 0;
+                const summary = disabled
+                    ? projection.omissions[0]?.message ?? "No compatible rules."
+                    : projection.omissions.length
+                        ? `${projection.rules.length} of ${projection.totalRuleCount} rules can be applied.`
+                        : `${projection.rules.length} compatible rule${projection.rules.length === 1 ? "" : "s"}.`;
+                return {label: style.id, value: style.id, disabled, summary, projection};
+            } catch (error) {
+                return {
+                    label: style.id,
+                    value: style.id,
+                    disabled: true,
+                    summary: error instanceof Error ? error.message : String(error)
+                };
+            }
+        });
+        if (this.selectedSearchStyleId
+            && !this.searchStyleOptions.some(option => option.value === this.selectedSearchStyleId && !option.disabled)) {
+            this.selectedSearchStyleId = null;
         }
-        if (!this.searchStyleConfigurationsService.applyToFeatureSearch(configurationId, this.session.id)) {
-            this.infoMessageService.showError("The selected search style configuration is no longer available.");
-            return;
-        }
-        this.selectedSearchStyleConfigurationId = configurationId;
     }
 
-    /** Saves or updates the current high-fidelity rules without query or scope state. */
-    protected saveSearchStyleConfiguration(): void {
-        const existing = this.selectedSearchStyleConfigurationId
-            ? this.searchStyleConfigurationsService.get(this.selectedSearchStyleConfigurationId)
-            : undefined;
-        const requestedName = window.prompt(
-            existing ? "Update search style configuration" : "Save search style configuration as",
-            existing?.name ?? "Search Style"
-        );
+    /** Resolves pending Auto scope conservatively to the same feature fallback used by search runtime setup. */
+    private resolvedStyleSearchScope(): "feature" | "attribute" {
+        if (this.session?.schemaAnalysis.status === "ready") {
+            return this.session.schemaAnalysis.concreteScope;
+        }
+        return this.featureSearchScope === "attribute" ? "attribute" : "feature";
+    }
+
+    /** Applies compatible rules from an authoritative imported search stylesheet as a detached copy. */
+    protected applySearchStyle(styleId: string | null): void {
+        if (!styleId || !this.session) {
+            this.selectedSearchStyleId = null;
+            this.searchStyleApplicationMessage = "";
+            return;
+        }
+        const style = this.styleService.styles.get(styleId);
+        if (!style || style.category !== "search") {
+            this.infoMessageService.showError("The selected search stylesheet is no longer available.");
+            this.refreshSearchStyleOptions();
+            return;
+        }
+        let projection: SearchStyleApplicationProjection;
+        try {
+            projection = this.searchStyleOptions.find(option => option.value === styleId)?.projection
+                ?? projectStyleSourceForSearch(style.source, this.resolvedStyleSearchScope());
+        } catch (error) {
+            this.infoMessageService.showError(error instanceof Error ? error.message : String(error));
+            this.refreshSearchStyleOptions();
+            return;
+        }
+        if (!projection.rules.length) {
+            this.infoMessageService.showError("This stylesheet has no rules compatible with the current search scope and rules GUI.");
+            this.refreshSearchStyleOptions();
+            return;
+        }
+        const detachedRules = structuredClone(projection.rules);
+        this.styleRuleDrafts = this.styleRuleDraftCodec.toDrafts(detachedRules);
+        this.styleRulesStateSignature = JSON.stringify(detachedRules);
+        this.stateService.patchFeatureSearch(this.session.id, {searchStyleRules: detachedRules});
+        this.selectedSearchStyleId = styleId;
+        this.searchStyleApplicationWarning = projection.omissions.length > 0;
+        this.searchStyleApplicationMessage = projection.omissions.length
+            ? `Applied ${projection.rules.length} of ${projection.totalRuleCount} rules. Omitted ${projection.omissions.map(item => item.message).join(" ")}`
+            : `Applied all ${projection.rules.length} rules from “${style.id}” as a detached copy.`;
+    }
+
+    /** Creates a canonical flat YAML stylesheet through the ordinary imported-style lifecycle. */
+    protected saveSearchStyle(): void {
+        const rules = this.serializeStyleRuleDrafts();
+        if (!rules.length) {
+            this.infoMessageService.showError("Add at least one high-fidelity rule before saving a search stylesheet.");
+            return;
+        }
+        const requestedName = window.prompt("Save search stylesheet as", "Search Style");
         if (requestedName === null) {
             return;
         }
-        const rules = this.serializeStyleRuleDrafts();
-        const saved = existing
-            ? this.searchStyleConfigurationsService.update(existing.id, rules, requestedName)
-            : this.searchStyleConfigurationsService.create(requestedName, rules);
-        if (!saved) {
+        const conflict = this.styleService.styleIdentityConflict(requestedName);
+        if (conflict) {
             this.infoMessageService.showError(
-                "The search style configuration could not be saved; the local library may be full or the configuration too large.");
+                `A style named or resolved by “${requestedName}” already exists. Edit that style or choose another name.`);
             return;
         }
-        this.searchStyleConfigurationsService.applyToFeatureSearch(saved.id, this.session?.id ?? "");
-        this.selectedSearchStyleConfigurationId = saved.id;
-        this.infoMessageService.showSuccess(`Saved search style configuration “${saved.name}”.`);
+        try {
+            const generated = convertSearchStyleRulesToYaml(requestedName, rules);
+            const importedStyleId = this.styleService.importStyleYamlSource(generated.source, false);
+            if (!importedStyleId) {
+                return;
+            }
+            this.selectedSearchStyleId = importedStyleId;
+            this.searchStyleApplicationWarning = false;
+            this.searchStyleApplicationMessage = `Saved “${importedStyleId}” as an imported search stylesheet. This search remains a detached copy.`;
+            this.infoMessageService.showSuccess(`Saved search stylesheet “${importedStyleId}”.`);
+        } catch (error) {
+            this.infoMessageService.showError(error instanceof Error ? error.message : String(error));
+        }
     }
 
     /** Returns the current search rendering controls with defaults for older persisted states. */
@@ -1846,6 +1930,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 }
                 : {...source.numericRange};
         }
+        if (target.featureType !== source.featureType) {
+            // A shared path across feature types cannot use one portable type
+            // guard; retain no misleading source-specific discriminator.
+            target.featureType = undefined;
+        }
         const mapLayers = target.mapLayers ?? [];
         if (!mapLayers.some(ref =>
             ref.mapId === source.mapId &&
@@ -2018,7 +2107,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Creates differentiated auto rules when possible, otherwise a generic rule matching the search color. */
     private createAutoStyleRules(session: FeatureSearchSession, existingIds: number[] = []): FeatureSearchStyleRuleDraft[] {
         const fieldOptions = this.autoStyleFieldOptions(session);
-        if (fieldOptions.length === 0) {
+        if (fieldOptions.length === 0
+            || !searchAutoStyleFieldOptionsArePortable(fieldOptions, session.schemaAnalysis)) {
             return [this.createSolidAutoStyleRule(existingIds[0] ?? this.nextStyleRuleId++, session)];
         }
         return fieldOptions.map((fieldOption, index) =>
@@ -2073,10 +2163,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const rule = this.createStyleRule(id, fieldOption);
         rule.name = this.autoStyleRuleName(fieldOption);
         rule.autoGenerated = true;
-        rule.mapLayers = fieldOption.mapLayers?.map(ref => ({...ref}))
-            ?? (fieldOption.mapId && fieldOption.layerId
-                ? [{mapId: fieldOption.mapId, layerId: fieldOption.layerId}]
-                : undefined);
         if (fieldOption.attrName) {
             rule.filters = [{
                 id: this.nextStyleConditionId++,
@@ -2085,23 +2171,25 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 operator: "=",
                 filterValue: fieldOption.attrName
             }];
+            if (fieldOption.featureType) {
+                rule.filters.push({
+                    id: this.nextStyleConditionId++,
+                    attributeField: `$feature.typeId == ${JSON.stringify(fieldOption.featureType)}`,
+                    customExpression: true,
+                    operator: "=",
+                    filterValue: true
+                });
+            }
         }
         return rule;
     }
 
-    /** Returns user-facing names that include the attribute context for generated attribute rules. */
+    /** Returns a portable user-facing name without embedding a source map or layer identity. */
     private autoStyleRuleName(fieldOption: FeatureSearchStyleOption): string {
         const context = fieldOption.attrName
             ? `${fieldOption.attrName}.${fieldOption.value}`
             : fieldOption.value;
-        const mapLayers = fieldOption.mapLayers
-            ?? (fieldOption.mapId && fieldOption.layerId
-                ? [{mapId: fieldOption.mapId, layerId: fieldOption.layerId}]
-                : []);
-        const source = mapLayers.length === 1
-            ? ` — ${mapLayers[0].mapId}/${mapLayers[0].layerId}`
-            : "";
-        return `Auto: ${context}${source}`;
+        return `Auto: ${context}`;
     }
 
     /** Selects all schema fields that should get an automatically generated style rule. */
@@ -2969,12 +3057,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Copies session state into the local view model without crossing streams between searches. */
     private syncFromSession(session: FeatureSearchSession): void {
         this.session = session;
-        const appliedConfiguration = this.searchStyleConfigurations.find(configuration =>
-            configuration.id === session.definition.searchStyleConfigurationId);
-        this.selectedSearchStyleConfigurationId = appliedConfiguration
-            && appliedConfiguration.revision === session.definition.searchStyleConfigurationRevision
-            ? appliedConfiguration.id
-            : null;
+        this.refreshSearchStyleOptions();
         // Search sessions are mutable service-owned objects. Snapshot scalar
         // diagnostics only at our deferred synchronization boundary so a
         // service timer cannot mutate a template binding mid Angular check.
@@ -3291,6 +3374,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     protected onFeatureSearchScopeChange(scope: FeatureSearchScope): void {
         this.featureSearchScope = scope;
+        this.refreshSearchStyleOptions();
         if (this.session) {
             this.updateDraftFeatureSearchScopeSummary(scope);
         }
@@ -3708,6 +3792,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.nextStyleColorStopId = 1;
         this.styleRuleDrafts = [];
         this.styleRuleAccordionValue = [];
+        this.selectedSearchStyleId = null;
+        this.searchStyleApplicationMessage = "";
+        this.searchStyleApplicationWarning = false;
         this.activeSearchGroupId = "";
         this.completedSearchGroupId = "";
         this.resultTreeInputLength = 0;

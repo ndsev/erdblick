@@ -1537,6 +1537,67 @@ rules:
         "lod"));
 }
 
+TEST_CASE("FeatureLayerStyle validates and defaults stylesheet category", "[erdblick.style]")
+{
+    auto baseByDefault = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: DefaultCategory
+version: 2
+rules:
+  - geometry: line
+    color: white
+)yaml"));
+    REQUIRE(baseByDefault.isValid());
+    REQUIRE(baseByDefault.category() == StyleCategory::Base);
+
+    auto explicitBase = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: ExplicitBaseCategory
+category: base
+version: 2
+rules:
+  - geometry: line
+    color: white
+)yaml"));
+    REQUIRE(explicitBase.isValid());
+    REQUIRE(explicitBase.category() == StyleCategory::Base);
+
+    auto search = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: SearchCategory
+category: search
+version: 2
+rules:
+  - geometry: line
+    color: white
+)yaml"));
+    REQUIRE(search.isValid());
+    REQUIRE(search.category() == StyleCategory::Search);
+
+    auto invalid = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: InvalidCategory
+category: generated
+version: 2
+rules:
+  - geometry: line
+    color: white
+)yaml"));
+    REQUIRE_FALSE(invalid.isValid());
+    REQUIRE(reportHasProperty(
+        nlohmann::json(invalid.validationReport()),
+        "category"));
+
+    auto nonScalar = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: NonScalarCategory
+category: [search]
+version: 2
+rules:
+  - geometry: line
+    color: white
+)yaml"));
+    REQUIRE_FALSE(nonScalar.isValid());
+    REQUIRE(reportHasProperty(
+        nlohmann::json(nonScalar.validationReport()),
+        "category"));
+}
+
 TEST_CASE("FeatureLayerStyle parses and validates label opacity", "[erdblick.style]")
 {
     auto valid = FeatureLayerStyle(SharedUint8Array(R"yaml(

@@ -633,6 +633,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("Color", FeatureStyleOptionType::Color)
         .value("String", FeatureStyleOptionType::String);
 
+    ////////// StyleCategory
+    em::enum_<StyleCategory>("StyleCategory")
+        .value("Base", StyleCategory::Base)
+        .value("Search", StyleCategory::Search);
+
     ////////// FeatureStyleOption
     em::value_object<FeatureStyleOption>("FeatureStyleOption")
         .field("label", &FeatureStyleOption::label_)
@@ -649,6 +654,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("isValid", &FeatureLayerStyle::isValid)
         .function("validationReport", &FeatureLayerStyle::validationReport)
         .function("name", &FeatureLayerStyle::name)
+        .function("category", &FeatureLayerStyle::category)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
         .function("hasExplicitLowFidelityRules", &FeatureLayerStyle::hasExplicitLowFidelityRules)

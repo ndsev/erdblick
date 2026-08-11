@@ -56,9 +56,9 @@ The user chooses feature, attribute, or auto scope.
 - Auto scope runs `LayerSchema::normalizeSearchQuery()` and is normalized to a
   concrete scope before the result channel is constructed.
 
-Search-generated channels set `rewrite: true` only when the user requested
-normalization. Every filter and projected field is schema-compiled regardless
-of that flag.
+Schema analysis normalizes the search query before runtime style compilation.
+Outgoing render and result channels therefore use `rewrite: false`; every
+filter and projected field is still schema-compiled by mapget.
 
 Attribute evaluation exposes:
 
@@ -72,16 +72,20 @@ otherwise both appear as index zero/count one.
 
 ## Synthetic stylesheet
 
-`feature-search-style.ts` translates one session into a normal stylesheet:
+`feature-search-style.ts` translates the session's GUI rules into flat
+top-level rules. The concrete search scope is applied only to this transient
+runtime source; it is not written into a reusable stylesheet. Labels,
+category/gradient expressions, and geometry choices use the same native style
+properties as bundled styles.
 
-- the visible query becomes the top-level rule filter;
-- the chosen scope becomes `scope`;
-- result label/category/gradient expressions become presentation fields;
-- selected geometry modes become semantic geometry selectors;
-- category or numeric coloring becomes one `color-scale`.
-
-The planner then applies the same one-top-level-rule/one-channel contract as
-bundled styles. Search does not bypass or duplicate planner semantics.
+The ordinary planner produces one render channel per top-level rule. Erdblick
+preserves those channel IDs and native predicates, intersects their feature
+types with the search selection, and combines the normalized backend query
+with each channel's entry predicate. It then appends one dedicated
+`search-results:<presentation>` channel containing the result-list fields.
+The subset renderer deliberately skips that reserved channel, while
+`FeatureSearchService` reads only its stored ordinal. Results therefore enter
+the list once even when several rendering rules match them.
 
 ### Color mapping
 
@@ -101,45 +105,31 @@ Numeric gradients use `mode: linear` and strictly increasing numeric keys.
 Stops are list pairs, not a YAML map, so boolean/numeric/string key types
 survive parsing. Typed categorical keys are distinct.
 
-When multiple search predicates need to participate in presentation, the
-generator uses a synthetic `all-of` wrapper. This keeps one top-level channel
-while retaining the rule tree used by the ordinary renderer.
+Multiple GUI rows remain multiple flat rules. `all-of` and `first-of` are
+reserved for styles that genuinely need native branch semantics; the search
+writer does not introduce them as a transport wrapper.
 
 ## Reusable search styles
 
-Reusable search styles have two deliberately separate persisted forms:
+A reusable search style has one authoritative representation: an ordinary
+imported YAML stylesheet with `category: search`. Its exact YAML `name` is the
+style identity and may contain slashes for existing tree grouping. There is no
+parallel configuration ID/revision store or generated YAML cache.
 
-1. `searchStyleConfigurations` is a versioned, storage-only `AppState`. Each
-   configuration owns an ID, revision, name, timestamps, and normalized
-   high-fidelity rules. It never owns a query, search scope, selected search
-   layers, result views, or density/render-strategy controls.
-2. `searchGeneratedStyleData` is StyleService's separate collection of
-   canonical YAML projections. These sheets are parsed through
-   `FeatureLayerStyle` but are not inserted into the active `styles` map in
-   Act 1.
+`search-style-sheet.converter.ts` emits deterministic version-2 source with
+`default: false` and flat rules. It deliberately excludes query, scope,
+map/layer identity, views, feature-type selection, density controls, UI row
+IDs, and automatic-rule metadata. The normal imported-style lifecycle parses,
+persists, lists, edits, renders, and exports that source. Imported persistence
+stores only a versioned list of raw YAML sources; no legacy search-style store
+is read.
 
-Applying a configuration copies its normalized rules into the target search.
-The search stores optional ID/revision provenance for UI feedback, but the
-copied rules are not linked: any local edit clears that provenance and cannot
-mutate the source configuration. The JSON rules retain per-rule `mapLayers`
-hints for search-runtime applicability.
-
-`search-style-sheet.converter.ts` deterministically emits one version-2 sheet
-per configuration. It sets `default: false`, omits top-level `layer` and
-`scope`, includes every configured rule, and does not serialize `mapLayers`.
-Omitted scope intentionally uses the native feature default; attribute
-projection for generated-sheet rendering belongs to Act 2. Runtime search
-compilation remains scope-aware and continues to filter per-rule layer hints
-against the concrete search target.
-
-Canonical conversion rejects unsupported operators and non-scalar rule values
-instead of coercing them. Native-invalid projections retain a diagnostic entry
-but cannot be exported or copied as a canonical style.
-
-The Search Styles UI may export canonical YAML directly. Its copy-to-edit
-flow rewrites the copy to a unique style name and opens a transient editor
-session. Saving that session enters the existing imported-style lifecycle;
-there is no reverse YAML-to-configuration update path.
+The reverse codec parses the authoritative YAML into the shared Quick rule
+GUI. AST-based Quick edits preserve comments, root metadata, unsupported keys,
+and untouched rules. Ambiguous branch/dynamic rules remain read-only and are
+reported as warnings. Feature Search uses the same projection permissively:
+compatible rules are deep-copied, incompatible rules are omitted with visible
+reasons, and the YAML source is never changed.
 
 ## Result identity
 

@@ -30,7 +30,7 @@ State written from server defaults is tracked as config-owned in browser storage
 
 The URL is pruned automatically so stale maps, styles, panels, and view entries do not accumulate across longer sessions.
 
-Saved search-style configurations and their generated YAML projections are browser-local storage, not URL state. Sharing a viewer URL therefore does not transfer entries from the **Search Styles** tab; export the generated YAML when it needs to move between browser profiles.
+Browser-imported stylesheet sources—including styles saved from Feature Search—are local to the browser profile and are not embedded in the URL. Sharing a viewer URL therefore does not transfer those YAML sources; export and import the style when it needs to move between profiles.
 
 ## URL Parameters Reference
 

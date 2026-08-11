@@ -42,7 +42,7 @@ describe("FeatureSearchState", () => {
         expect(entry.selectedTileLevels).toEqual([13, 15]);
     });
 
-    it("preserves explicit search-style expression intent and optional configuration provenance", () => {
+    it("preserves explicit search-style expression intent without library provenance", () => {
         const [entry] = normalizeFeatureSearchState([{
             query: "true",
             searchStyleConfigurationId: "saved-style",
@@ -59,8 +59,8 @@ describe("FeatureSearchState", () => {
             }]
         }]);
 
-        expect(entry.searchStyleConfigurationId).toBe("saved-style");
-        expect(entry.searchStyleConfigurationRevision).toBe(7);
+        expect(entry).not.toHaveProperty("searchStyleConfigurationId");
+        expect(entry).not.toHaveProperty("searchStyleConfigurationRevision");
         expect(entry.searchStyleRules[0].geometry).toBe("mesh");
         expect(entry.searchStyleRules[0].filter[0].customExpression).toBe(true);
         expect(entry.searchStyleRules[0].color).toMatchObject({customField: true});

@@ -181,6 +181,10 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
             name_ = name.Scalar();
     }
 
+    if (auto category = styleYaml["category"]; category && category.Scalar() == "search") {
+        category_ = StyleCategory::Search;
+    }
+
     if (auto enabled = styleYaml["default"]) {
         if (!enabled.IsScalar()) {
             validationReport_.addIssue(
@@ -516,6 +520,10 @@ bool FeatureLayerStyle::defaultEnabled() const
 
 std::string const& FeatureLayerStyle::name() const {
     return name_;
+}
+
+StyleCategory FeatureLayerStyle::category() const {
+    return category_;
 }
 
 uint32_t FeatureLayerStyle::supportedHighlightModesMask() const

@@ -548,6 +548,11 @@ TileSubsetLayerRenderer::bindingFor(
     binding.featureFields = channel->featureFields();
     binding.entryFields = channel->entryFields();
     if (!binding.rule) {
+        // Search presentations append one result-list channel that deliberately
+        // has no top-level render rule. It is consumed by TypeScript only.
+        if (channel->channelId().starts_with("search-results:")) {
+            return binding;
+        }
         auto const sourceIndex =
             channelRuleIndex(channel->channelId());
         auto const sourceRule =

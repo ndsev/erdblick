@@ -172,6 +172,7 @@ style-panel {
   }
 
   .additional-style-tag,
+  .search-style-tag,
   .modified-style-tag {
     margin-left: 0.5em;
   }
@@ -236,104 +237,5 @@ style-panel {
   .style-validation-location,
   .style-validation-path {
     color: silver;
-  }
-}
-
-search-styles {
-  display: block;
-  height: 100%;
-  min-height: 0;
-}
-
-.search-styles-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65em;
-  height: 100%;
-  min-height: 0;
-
-  .search-styles-toolbar,
-  .search-styles-name-row,
-  .search-styles-generated header,
-  .search-styles-generated-actions {
-    align-items: center;
-    display: flex;
-    flex: 0 0 auto;
-    flex-wrap: wrap;
-    gap: 0.45em;
-  }
-
-  .search-styles-select {
-    flex: 1 1 auto;
-    min-width: 12em;
-  }
-
-  .search-styles-name-row input {
-    flex: 1 1 auto;
-    min-width: 8em;
-  }
-
-  .search-styles-revision,
-  .search-styles-generated-status {
-    color: var(--p-text-muted-color);
-    white-space: nowrap;
-  }
-
-  .search-styles-generated-status.invalid {
-    color: var(--p-message-error-color, var(--p-button-danger-background));
-  }
-
-  .search-styles-rule-editor.feature-search-style-rules {
-    display: flex;
-    flex: 1 1 55%;
-    height: auto;
-    max-height: none;
-    min-height: 12em;
-    overflow: hidden;
-  }
-
-  .search-styles-rule-editor search-style-rule-editor {
-    display: flex;
-    flex: 1 1 auto;
-    min-height: 0;
-  }
-
-  .search-styles-generated {
-    display: flex;
-    flex: 1 1 45%;
-    flex-direction: column;
-    min-height: 8em;
-    overflow: hidden;
-  }
-
-  .search-styles-generated header {
-    justify-content: space-between;
-  }
-
-  .search-styles-generated h3 {
-    display: inline;
-    margin: 0 0.5em 0 0;
-  }
-
-  .search-styles-generated-help {
-    color: var(--p-text-muted-color);
-    font-size: 0.78rem;
-    margin: 0.25em 0 0;
-  }
-
-  .search-styles-yaml {
-    background: var(--p-content-hover-background);
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 4px;
-    flex: 1 1 auto;
-    font-size: 0.78rem;
-    margin: 0.4em 0 0;
-    overflow: auto;
-    padding: 0.6em;
-    white-space: pre;
-  }
-
-  .search-styles-empty {
-    margin: auto;
   }
 }

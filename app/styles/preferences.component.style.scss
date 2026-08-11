@@ -224,6 +224,90 @@
     width: 100%;
   }
 
+  .style-editor-tabs {
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    width: 100%;
+
+    > .p-tablist {
+      flex: 0 0 auto;
+    }
+
+    > .p-tabpanels {
+      display: flex;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      padding: 0.5em 0 0;
+    }
+
+    .p-tabpanel {
+      flex: 1 1 auto;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .p-tabpanel:not([hidden]) {
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  .style-editor-advanced-panel editor {
+    height: 100%;
+  }
+
+  .style-editor-quick-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.5em;
+    min-height: 0;
+    overflow: auto;
+
+    > search-style-rule-editor {
+      flex: 0 0 auto;
+      min-height: 12em;
+    }
+
+    &.read-only search-style-rule-editor {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+  }
+
+  .style-editor-quick-stale,
+  .style-editor-quick-warnings {
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 4px;
+    flex: 0 0 auto;
+    padding: 0.6em;
+  }
+
+  .style-editor-quick-stale {
+    color: var(--p-message-error-color, #dc2626);
+  }
+
+  .style-editor-quick-warnings {
+    color: var(--p-text-muted-color);
+  }
+
+  .style-editor-quick-warnings h3 {
+    color: var(--p-text-color);
+    font-size: 1em;
+    margin: 0 0 0.4em;
+  }
+
+  .style-editor-quick-warnings ul {
+    margin: 0;
+    padding-left: 1.25em;
+  }
+
   .cm-editor {
     flex: 1 1 auto;
     width: 100%;
