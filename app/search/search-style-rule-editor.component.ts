@@ -23,6 +23,7 @@ import {
 import {
     FeatureSearchStyleFilterDraft,
     FeatureSearchStyleRuleDraft,
+    searchStyleRuleDisplayItems,
     SearchStyleRuleDraftCodec
 } from "./search-style-rule-editor.model";
 
@@ -365,28 +366,11 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
         sourceIndex: number;
         rule?: FeatureSearchStyleRuleDraft;
     }> {
-        if (!this.readOnlyRuleIndices.length && Object.keys(this.sourceRuleIndices).length === 0) {
-            return this.drafts.map((rule, sourceIndex) => ({
-                key: `rule:${rule.id}`,
-                sourceIndex,
-                rule
-            }));
-        }
-        const items: Array<{
-            key: string;
-            sourceIndex: number;
-            rule?: FeatureSearchStyleRuleDraft;
-        }> = this.drafts.map((rule, index) => ({
-            key: `rule:${rule.id}`,
-            sourceIndex: this.sourceRuleIndices[rule.id] ?? (this.drafts.length + index),
-            rule
-        }));
-        items.push(...this.readOnlyRuleIndices.map(sourceIndex => ({
-            key: `readonly:${sourceIndex}`,
-            sourceIndex,
-            rule: undefined
-        })));
-        return items.sort((left, right) => left.sourceIndex - right.sourceIndex);
+        return searchStyleRuleDisplayItems(
+            this.drafts,
+            this.sourceRuleIndices,
+            this.readOnlyRuleIndices
+        );
     }
 
     /** Refreshes schema hints and identity allocation when host inputs change. */

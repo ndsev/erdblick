@@ -134,11 +134,13 @@ describe("feature search auto-style helpers", () => {
             concreteScope: "attribute",
             attributeScopes: [{
                 attrName: "WARNING_SIGN",
+                attrLayerName: "Routing",
                 featureType: "Link",
                 mapId: "Classic",
                 layerId: "Routing"
             }, {
                 attrName: "WARNING_SIGN",
+                attrLayerName: "RoadRules",
                 featureType: "Road",
                 mapId: "Live",
                 layerId: "Road"

@@ -37,7 +37,13 @@ describe("Tile subset render-data compiler", () => {
         expect([...variable.attributes.instanceOffsets.value]).toEqual([
             1, 1, 1, 1.5, 2
         ]);
-        const packed = variable.attributes.instanceVariableOffsets.value;
+        const packed = variable.attributes.instanceVariableOffsets?.value;
+        const glowColors = variable.glowColors;
+        const glowRadii = variable.glowRadii;
+        const offsetScaleThresholds = variable.offsetScaleThresholds;
+        if (!packed || !glowColors || !glowRadii || !offsetScaleThresholds) {
+            throw new Error("Expected variable path buffers");
+        }
         const unpack = (word: number): [number, number] => {
             const x = word & 0xfff;
             const y = (word >>> 12) & 0xfff;
@@ -53,13 +59,13 @@ describe("Tile subset render-data compiler", () => {
             [-3, 0], [-4, 0], [-5, 0], [-5, 0],
             [-4, 0], [-5, 0], [-5, 0], [-5, 0]
         ]);
-        expect([...variable.glowColors]).toEqual([
+        expect([...glowColors]).toEqual([
             1, 2, 3, 4,
             5, 6, 7, 8
         ]);
-        expect([...variable.glowRadii]).toEqual([5, 6]);
-        expect(variable.offsetScaleThresholds[0]).toBeCloseTo(0.08, 2);
-        expect(variable.offsetScaleThresholds[1]).toBeCloseTo(0.16, 2);
+        expect([...glowRadii]).toEqual([5, 6]);
+        expect(offsetScaleThresholds[0]).toBeCloseTo(0.08, 2);
+        expect(offsetScaleThresholds[1]).toBeCloseTo(0.16, 2);
         expect(packed[0] >>> 24).not.toEqual(packed[8] >>> 24);
     });
 

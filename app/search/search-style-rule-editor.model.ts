@@ -42,6 +42,37 @@ export interface FeatureSearchStyleRuleDraft {
     color: SearchStyleColorDraft;
 }
 
+export interface SearchStyleRuleDisplayItem {
+    key: string;
+    sourceIndex: number;
+    rule?: FeatureSearchStyleRuleDraft;
+}
+
+/** Interleaves editable rules and read-only placeholders in authoritative source order. */
+export function searchStyleRuleDisplayItems(
+    drafts: readonly FeatureSearchStyleRuleDraft[],
+    sourceRuleIndices: Readonly<Record<number, number>>,
+    readOnlyRuleIndices: readonly number[]
+): SearchStyleRuleDisplayItem[] {
+    if (!readOnlyRuleIndices.length && Object.keys(sourceRuleIndices).length === 0) {
+        return drafts.map((rule, sourceIndex) => ({
+            key: `rule:${rule.id}`,
+            sourceIndex,
+            rule
+        }));
+    }
+    const items: SearchStyleRuleDisplayItem[] = drafts.map((rule, index) => ({
+        key: `rule:${rule.id}`,
+        sourceIndex: sourceRuleIndices[rule.id] ?? (drafts.length + index),
+        rule
+    }));
+    items.push(...readOnlyRuleIndices.map(sourceIndex => ({
+        key: `readonly:${sourceIndex}`,
+        sourceIndex
+    })));
+    return items.sort((left, right) => left.sourceIndex - right.sourceIndex);
+}
+
 /** Stateful ID allocator and lossless adapter between canonical rules and reusable editor drafts. */
 export class SearchStyleRuleDraftCodec {
     private nextRuleId = 1;
