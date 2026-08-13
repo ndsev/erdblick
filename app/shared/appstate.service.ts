@@ -243,6 +243,8 @@ export interface InspectionComparisonOption {
 export interface CameraViewState {
     destination: { lon: number, lat: number, alt: number };
     orientation: { heading: number, pitch: number, roll: number };
+    /** Local map-centre offset in metres; omitted legacy values resolve to zero. */
+    position?: [x: number, y: number, z: number];
 }
 
 /** Persisted selected background-layer id plus per-view opacity. */
@@ -599,7 +601,8 @@ export class AppStateService implements OnDestroy {
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0}
+            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0},
+            position: [0, 0, 0]
         },
         schema: z.object({
             lon: z.coerce.number().optional(),
@@ -607,7 +610,10 @@ export class AppStateService implements OnDestroy {
             alt: z.coerce.number().optional(),
             h: z.coerce.number().optional(),
             p: z.coerce.number().optional(),
-            r: z.coerce.number().optional()
+            r: z.coerce.number().optional(),
+            px: z.coerce.number().optional(),
+            py: z.coerce.number().optional(),
+            pz: z.coerce.number().optional()
         }),
         toStorage: (value: any) => ({
             lon: roundCoordinateStateValue(value.destination.lon),
@@ -615,7 +621,10 @@ export class AppStateService implements OnDestroy {
             alt: roundCoordinateStateValue(value.destination.alt),
             h: roundCoordinateStateValue(value.orientation.heading),
             p: roundCoordinateStateValue(value.orientation.pitch),
-            r: roundCoordinateStateValue(value.orientation.roll)
+            r: roundCoordinateStateValue(value.orientation.roll),
+            px: roundCoordinateStateValue(value.position?.[0] ?? 0),
+            py: roundCoordinateStateValue(value.position?.[1] ?? 0),
+            pz: roundCoordinateStateValue(value.position?.[2] ?? 0)
         }),
         fromStorage: (payload: any, currentValue: CameraViewState) => ({
             destination: {
@@ -627,7 +636,13 @@ export class AppStateService implements OnDestroy {
                 heading: roundCoordinateStateValue(payload.h ?? currentValue.orientation.heading),
                 pitch: roundCoordinateStateValue(payload.p ?? currentValue.orientation.pitch),
                 roll: roundCoordinateStateValue(payload.r ?? currentValue.orientation.roll),
-            }
+            },
+            // Older URLs, local-storage entries, and snapshots have no map-centre offset.
+            position: [
+                roundCoordinateStateValue(payload.px ?? 0),
+                roundCoordinateStateValue(payload.py ?? 0),
+                roundCoordinateStateValue(payload.pz ?? 0)
+            ]
         }),
         urlFormEncode: true
     });
@@ -1142,7 +1157,9 @@ export class AppStateService implements OnDestroy {
         if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
             const camState = this.cameraViewDataState.getValue(this.focusedView);
             this.setView(this.focusedView,
-                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt));
+                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt),
+                camState.orientation,
+                camState.position);
         }
         if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
             this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
@@ -2409,8 +2426,13 @@ export class AppStateService implements OnDestroy {
         return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
 
-    /** Internal helper that writes camera destination and orientation without extra policy. */
-    private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+    /** Internal helper that writes a complete camera pose without extra synchronization policy. */
+    private _setView(
+        viewIndex: number,
+        destination: Cartographic,
+        orientation?: { heading: number, pitch: number, roll: number },
+        position: readonly [number, number, number] = [0, 0, 0]
+    ) {
         // Fall back to the current orientation if none was passed.
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
         const view: CameraViewState = {
@@ -2423,13 +2445,19 @@ export class AppStateService implements OnDestroy {
                 heading: roundCoordinateStateValue(orientation.heading),
                 pitch: roundCoordinateStateValue(orientation.pitch),
                 roll: roundCoordinateStateValue(orientation.roll),
-            }
+            },
+            position: position.map(roundCoordinateStateValue) as [number, number, number]
         };
         this.cameraViewDataState.next(viewIndex, view);
     }
 
-    /** Persists camera destination/orientation and updates the focused view marker. */
-    setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+    /** Persists a camera pose and applies the configured cross-view synchronization policy. */
+    setView(
+        viewIndex: number,
+        destination: Cartographic,
+        orientation?: { heading: number, pitch: number, roll: number },
+        position: readonly [number, number, number] = [0, 0, 0]
+    ) {
         const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
         const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
 
@@ -2441,7 +2469,7 @@ export class AppStateService implements OnDestroy {
 
             if (syncPosition) {
                 for (let i = 0; i < this.numViews; i++) {
-                    this._setView(i, destination, orientation);
+                    this._setView(i, destination, orientation, position);
                 }
                 return;
             }
@@ -2453,7 +2481,7 @@ export class AppStateService implements OnDestroy {
                 const deltaLon = destLon - previous.lon;
                 const deltaLat = destLat - previous.lat;
 
-                this._setView(viewIndex, destination, orientation);
+                this._setView(viewIndex, destination, orientation, position);
 
                 for (let i = 0; i < this.numViews; i++) {
                     if (i === viewIndex) {
@@ -2465,13 +2493,13 @@ export class AppStateService implements OnDestroy {
                         target.destination.lat + deltaLat,
                         target.destination.alt
                     );
-                    this._setView(i, newDestination);
+                    this._setView(i, newDestination, undefined, target.position);
                 }
                 return;
             }
         }
 
-        this._setView(viewIndex, destination, orientation);
+        this._setView(viewIndex, destination, orientation, position);
     }
 
     /** Switches one view between 2D and 3D projection mode. */

@@ -6,7 +6,11 @@ import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
 
-import { AppStateService } from './appstate.service';
+import {
+    AppStateService,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION
+} from './appstate.service';
 import {MapTreeNode} from "../mapdata/map.tree.model";
 
 // @ts-expect-error this is a mock router
@@ -1079,8 +1083,9 @@ describe('AppStateService', () => {
 
         const destination = Cartographic.fromDegrees(11.141985707869166, 48.002375728153766, 123.123456789123);
         const orientation = { heading: 1.123456789, pitch: -2.987654321, roll: 3.000000009 };
+        const position = [1.123456789, -2.987654321, 3.000000009] as const;
 
-        service.setView(0, destination, orientation);
+        service.setView(0, destination, orientation, position);
 
         const view = service.cameraViewDataState.getValue(0);
         expect(view.destination).toEqual({
@@ -1093,6 +1098,87 @@ describe('AppStateService', () => {
             pitch: -2.98765432,
             roll: 3.00000001,
         });
+        expect(view.position).toEqual([1.12345679, -2.98765432, 3.00000001]);
+
+        const urlState = service.cameraViewDataState.appState.serialize(true);
+        expect(urlState).toMatchObject({
+            px: '1.12345679',
+            py: '-2.98765432',
+            pz: '3.00000001'
+        });
+
+        const storageState = service.cameraViewDataState.appState.serialize(false);
+        const restoredService = new AppStateService(
+            createRouterStub() as unknown as Router,
+            infoServiceStub
+        );
+        restoredService.cameraViewDataState.appState.deserialize(storageState!['cameraView']!);
+        expect(restoredService.cameraViewDataState.getValue(0).position)
+            .toEqual([1.12345679, -2.98765432, 3.00000001]);
+
+        service.ngOnDestroy();
+        restoredService.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('defaults legacy camera state to a zero map-centre offset', async () => {
+        const routerStub = createRouterStub({
+            lon: '11.5',
+            lat: '48.25',
+            alt: '1000',
+            h: '0.5',
+            p: '-0.75',
+            r: '0'
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.cameraViewDataState.getValue(0).position).toEqual([0, 0, 0]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('synchronizes the complete target-relative camera position across views', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViews = 2;
+        service.focusedView = 0;
+        const orientation = {heading: 0.25, pitch: -0.5, roll: 0};
+
+        service.setView(
+            0,
+            Cartographic.fromDegrees(11, 48, 1000),
+            orientation,
+            [0, 0, 125]
+        );
+        service.setView(
+            1,
+            Cartographic.fromDegrees(12, 49, 2000),
+            orientation,
+            [0, 0, 250]
+        );
+
+        service.viewSync = [VIEW_SYNC_POSITION];
+        service.setView(
+            0,
+            Cartographic.fromDegrees(13, 50, 3000),
+            orientation,
+            [0, 0, 375]
+        );
+        expect(service.cameraViewDataState.getValue(1).position).toEqual([0, 0, 375]);
+
+        service.viewSync = [VIEW_SYNC_MOVEMENT];
+        service.setView(
+            0,
+            Cartographic.fromDegrees(14, 51, 4000),
+            orientation,
+            [0, 0, 500]
+        );
+        expect(service.cameraViewDataState.getValue(0).position).toEqual([0, 0, 500]);
+        expect(service.cameraViewDataState.getValue(1).position).toEqual([0, 0, 375]);
 
         service.ngOnDestroy();
         routerStub.events.complete();

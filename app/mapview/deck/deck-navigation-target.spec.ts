@@ -40,6 +40,22 @@ interface MarkerTestInternals extends DeckViewTestInternals {
     updateLocationMarkerOverlay(): void;
 }
 
+interface CameraPersistenceTestInternals {
+    viewState: {
+        longitude: number;
+        latitude: number;
+        zoom: number;
+        pitch: number;
+        bearing: number;
+        maxPitch: number;
+        position: [number, number, number];
+    };
+    stateService: {
+        setView: (...args: unknown[]) => void;
+    };
+    pushViewStateToAppState(): void;
+}
+
 /** Creates a 3D deck view with service collaborators outside the focused unit scope. */
 function createView(): DeckMapView3D {
     return new DeckMapView3D(
@@ -142,6 +158,22 @@ describe("Deck navigation target and layout", () => {
         }
     });
 
+    it("renders valid targets in the negative half of normalized device depth", () => {
+        const viewport = createDeckMapViewport({
+            longitude: 11,
+            latitude: 48,
+            zoom: 17,
+            pitch: 60,
+            bearing: 35
+        }, 1000, 700, false);
+        const position = viewport.unproject([500, 350, -0.5]) as NavigationAnchor;
+        const projection = projectNavigationTarget({position}, viewport);
+
+        expect(viewport.getTargetInfo(position)?.isValid).toBe(true);
+        expect(projection?.center[0]).toBeCloseTo(500, 3);
+        expect(projection?.center[1]).toBeCloseTo(350, 3);
+    });
+
     it("keeps the location marker camera-facing and fixed in CSS pixels", () => {
         const view = createView();
         const internals = view as unknown as MarkerTestInternals;
@@ -164,6 +196,31 @@ describe("Deck navigation target and layout", () => {
         expect(layer.props.billboard).toBe(true);
         expect(layer.props.sizeUnits).toBe("pixels");
         expect(layer.props.getSize(layer.props.data[0])).toBe(32);
+    });
+
+    it("round-trips deck.gl's target-relative map-centre offset through app state", () => {
+        const view = createView();
+        const internals = view as unknown as CameraPersistenceTestInternals;
+        const setView = vi.fn();
+        internals.stateService.setView = setView;
+        const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
+            .mockReturnValue(17);
+
+        try {
+            view.setViewFromState({
+                destination: {lon: 11, lat: 48, alt: 1250},
+                orientation: {heading: 0.25, pitch: -0.5, roll: 0},
+                position: [1.5, -2.5, 325.25]
+            });
+            expect(internals.viewState.position).toEqual([1.5, -2.5, 325.25]);
+
+            internals.pushViewStateToAppState();
+
+            expect(setView).toHaveBeenCalledOnce();
+            expect(setView.mock.calls[0][3]).toEqual([1.5, -2.5, 325.25]);
+        } finally {
+            requestAnimationFrame.mockRestore();
+        }
     });
 
     it("synchronizes the public Deck size and drawing buffer in one resize transaction", () => {

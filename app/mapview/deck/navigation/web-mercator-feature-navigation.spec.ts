@@ -1,5 +1,7 @@
+import type {MapInteractionTargetViewStateContext} from "@deck.gl/core";
 import {describe, expect, it} from "vitest";
 import {
+    constrainErdblickTargetNavigationViewState,
     createDeckMapViewport,
     DECK_MAP_DEFAULT_ALTITUDE,
     DECK_MAP_FAR_Z_MULTIPLIER,
@@ -7,12 +9,10 @@ import {
     DECK_MAP_NEAR_Z_MULTIPLIER,
     isNavigationAnchorUsable,
     longitudeInNearestWorld,
-    MIN_NAVIGATION_ANCHOR_DISTANCE_METERS,
-    navigationAnchorDistanceMeters,
+    NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON,
     type DeckMapCameraState,
     viewStateKeepingAnchor,
-    viewStateKeepingSafeNavigationAnchor,
-    viewStateOrbitingNavigationAnchor
+    viewStateKeepingSafeNavigationAnchor
 } from "./web-mercator-feature-navigation";
 import type {NavigationAnchor} from "./feature-navigation.types";
 
@@ -81,80 +81,6 @@ describe("Web Mercator feature navigation", () => {
         expect(nextState.maxPitch).toBe(85);
     });
 
-    it("keeps the OrbitView target distance while changing map bearing and pitch", () => {
-        const pixel: [number, number] = [420, 300];
-        const before = createDeckMapViewport(
-            BASE_CAMERA,
-            VIEWPORT_WIDTH,
-            VIEWPORT_HEIGHT,
-            false
-        );
-        const anchor = before.unproject(pixel, {targetZ: 120}) as NavigationAnchor;
-        const initialDistance = navigationAnchorDistanceMeters(before, anchor);
-
-        const nextState = viewStateOrbitingNavigationAnchor(
-            BASE_CAMERA,
-            {...BASE_CAMERA, pitch: 72, bearing: 115},
-            anchor,
-            pixel,
-            VIEWPORT_WIDTH,
-            VIEWPORT_HEIGHT,
-            false
-        );
-        const after = createDeckMapViewport(
-            nextState,
-            VIEWPORT_WIDTH,
-            VIEWPORT_HEIGHT,
-            false
-        );
-        const projected = after.project(anchor);
-
-        expect(navigationAnchorDistanceMeters(after, anchor)).toBeCloseTo(initialDistance, 5);
-        expect(Math.abs(projected[0] - pixel[0])).toBeLessThan(0.1);
-        expect(Math.abs(projected[1] - pixel[1])).toBeLessThan(0.1);
-    });
-
-    it("keeps a close off-centre feature fixed through a high-pitch orbit", () => {
-        const currentState = {
-            longitude: 11.625965550000046,
-            latitude: 48.23150152,
-            zoom: 15.206566216823559,
-            pitch: 68.44308175262151,
-            bearing: 350.39624489258654
-        };
-        const anchor: NavigationAnchor = [
-            11.629150001605632,
-            48.219418961344246,
-            536.3788352571614
-        ];
-        const pixel: [number, number] = [1054.6673221401506, 476.85862027499496];
-        const before = createDeckMapViewport(currentState, 1280, 720, false);
-        const next = viewStateOrbitingNavigationAnchor(
-            currentState,
-            {
-                ...currentState,
-                pitch: 70.80835578796129,
-                bearing: 4.458744892586537
-            },
-            anchor,
-            pixel,
-            1280,
-            720,
-            false
-        );
-        const after = createDeckMapViewport(next, 1280, 720, false);
-        const projected = after.project(anchor);
-
-        expect(Math.abs(
-            navigationAnchorDistanceMeters(after, anchor)
-            - navigationAnchorDistanceMeters(before, anchor)
-        )).toBeLessThan(0.01);
-        expect(projected[0]).toBeCloseTo(pixel[0], 4);
-        expect(projected[1]).toBeCloseTo(pixel[1], 4);
-        expect(projected[2]).toBeGreaterThan(0);
-        expect(projected[2]).toBeLessThan(1);
-    });
-
     it("retains an elevated anchor across the antimeridian world copy", () => {
         const camera = {...BASE_CAMERA, longitude: 179.9, latitude: 0, bearing: 0};
         const physicalAnchor: NavigationAnchor = [-179.95, 0.0003, 45];
@@ -213,7 +139,7 @@ describe("Web Mercator feature navigation", () => {
 
         const requestedState = viewStateKeepingSafeNavigationAnchor(
             currentState,
-            {...currentState, zoom: 16},
+            {...currentState, zoom: 100},
             anchor,
             pixel,
             VIEWPORT_WIDTH,
@@ -229,14 +155,65 @@ describe("Web Mercator feature navigation", () => {
         const projected = after.project(anchor);
 
         expect(requestedState.zoom).toBeGreaterThan(currentState.zoom);
-        expect(requestedState.zoom).toBeLessThan(16);
+        expect(requestedState.zoom).toBeLessThan(100);
         expect(isNavigationAnchorUsable(after, anchor)).toBe(true);
-        expect(navigationAnchorDistanceMeters(after, anchor))
-            .toBeGreaterThanOrEqual(MIN_NAVIGATION_ANCHOR_DISTANCE_METERS);
+        const targetInfo = after.getTargetInfo(anchor)!;
+        expect(targetInfo.cameraDepth).toBeGreaterThanOrEqual(
+            targetInfo.near * (1 + NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON)
+        );
         expect(Math.abs(projected[0] - pixel[0])).toBeLessThan(1);
-        // panByPosition3D loses a few CSS pixels of vertical precision only at
-        // the final close-clip boundary of the default deck.gl perspective lens.
-        expect(Math.abs(projected[1] - pixel[1])).toBeLessThan(4);
+        expect(Math.abs(projected[1] - pixel[1])).toBeLessThan(1);
+    });
+
+    it("applies the same maximal-safe zoom policy through deck.gl's controller hook", () => {
+        const currentState = {...BASE_CAMERA, zoom: 14, pitch: 55, position: [0, 0, 0] as [number, number, number]};
+        const sourceViewport = createDeckMapViewport(
+            currentState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const requestedPixel: [number, number] = [480, 310];
+        const target = sourceViewport.unproject(
+            requestedPixel,
+            {targetZ: 500}
+        ) as NavigationAnchor;
+        const info = sourceViewport.getTargetInfo(target)!;
+        const pixel: [number, number] = [
+            info.projectedPosition[0],
+            info.projectedPosition[1]
+        ];
+        const requestedViewState = sourceViewport.getTargetViewState({
+            target,
+            screenPosition: pixel,
+            zoom: 44
+        })!;
+        const context: MapInteractionTargetViewStateContext = {
+            viewId: "deck-view-0",
+            operation: "zoom",
+            source: "wheel",
+            target: {coordinate: target, screenPosition: pixel},
+            sourceViewport,
+            currentViewState: currentState,
+            requestedViewState
+        };
+
+        const constrained = constrainErdblickTargetNavigationViewState(context)!;
+        const viewport = createDeckMapViewport(
+            constrained,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const constrainedInfo = viewport.getTargetInfo(target)!;
+
+        expect(constrained.zoom).toBeGreaterThan(currentState.zoom);
+        expect(constrained.zoom).toBeLessThan(requestedViewState.zoom);
+        expect(isNavigationAnchorUsable(viewport, target)).toBe(true);
+        expect(Math.hypot(
+            constrainedInfo.projectedPosition[0] - pixel[0],
+            constrainedInfo.projectedPosition[1] - pixel[1]
+        )).toBeLessThanOrEqual(0.1);
     });
 
     it("does not reject a visible feature based on an arbitrary clip-depth fraction", () => {
@@ -269,6 +246,21 @@ describe("Web Mercator feature navigation", () => {
         expect(projected[2]).toBeCloseTo(0.2, 6);
         expect(isNavigationAnchorUsable(viewport, anchor)).toBe(true);
         expect(next.zoom).toBeGreaterThan(currentState.zoom);
+    });
+
+    it("accepts valid targets in the negative half of normalized device depth", () => {
+        const viewport = createDeckMapViewport(
+            BASE_CAMERA,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const anchor = viewport.unproject([640, 360, -0.5]) as NavigationAnchor;
+        const info = viewport.getTargetInfo(anchor)!;
+
+        expect(info.projectedPosition[2]).toBeCloseTo(-0.5, 6);
+        expect(info.isValid).toBe(true);
+        expect(isNavigationAnchorUsable(viewport, anchor, true)).toBe(true);
     });
 
     it("always allows feature-anchored zoom-out recovery", () => {

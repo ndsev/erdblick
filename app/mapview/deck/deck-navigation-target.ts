@@ -104,13 +104,11 @@ export function projectNavigationTarget(
         target.position[1],
         target.position[2]
     ];
-    const projectedCenter = viewport.project(position);
-    if (projectedCenter.length < 3
-        || !projectedCenter.every(Number.isFinite)
-        || projectedCenter[2] < 0
-        || projectedCenter[2] > 1) {
+    const targetInfo = viewport.getTargetInfo(position);
+    if (!targetInfo?.isValid) {
         return null;
     }
+    const projectedCenter = targetInfo.projectedPosition;
     const center: NavigationScreenPosition = [projectedCenter[0], projectedCenter[1]];
     const projectedBasis = target.surfaceNormal
         ? surfacePlaneScreenBasis(position, target.surfaceNormal, viewport)
