@@ -25,9 +25,11 @@ export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
 // module exists (notably by protocol tests). Runtime initialization verifies
 // them against mapget's authoritative compiled version.
 export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 3;
-export const MAP_TILE_STREAM_PROTOCOL_MINOR = 0;
+export const MAP_TILE_STREAM_PROTOCOL_MINOR = 1;
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
+const MAX_SPARSE_RENEWAL_TILES_PER_ENTRY = 512;
+const MAX_SPARSE_RENEWAL_TILES_PER_ENVELOPE = 2048;
 
 /** Fail fast if the TypeScript framing constants drift from mapget's ABI. */
 export function assertMapTileStreamProtocolVersion(): void {
@@ -560,6 +562,100 @@ export class MapTileStreamClient {
         return this;
     }
 
+    /** Sends sparse delivery-epoch advances without replacing full subscription state. */
+    async renewFilterTiles(
+        renewals: Record<string, unknown>[]
+    ): Promise<"sent" | "disconnected" | "failed"> {
+        if (!renewals.length) {
+            return "sent";
+        }
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            return "disconnected";
+        }
+        try {
+            for (const payload of this.buildRenewalPayloads(renewals)) {
+                this.socket.send(payload);
+            }
+            return "sent";
+        } catch (error) {
+            console.error("Failed to send expired-tile renewals.", error);
+            return this.socket?.readyState === WebSocket.OPEN
+                ? "failed"
+                : "disconnected";
+        }
+    }
+
+    /** Bounds sparse messages by encoded bytes and work units. */
+    private buildRenewalPayloads(
+        renewals: Record<string, unknown>[]
+    ): string[] {
+        const boundedRenewals = renewals.flatMap(renewal =>
+            this.splitRenewalGroupForTransport(renewal)
+        );
+        const payloads: string[] = [];
+        let current: Record<string, unknown>[] = [];
+        let currentTileCount = 0;
+        for (const renewal of boundedRenewals) {
+            const renewalTileCount = Array.isArray(renewal["tileIds"])
+                ? renewal["tileIds"].length
+                : 0;
+            const candidate = JSON.stringify({renewals: [...current, renewal]});
+            if (current.length && (
+                this.byteLength(candidate) > TARGET_TILE_REQUEST_CHUNK_BYTES ||
+                currentTileCount + renewalTileCount >
+                    MAX_SPARSE_RENEWAL_TILES_PER_ENVELOPE
+            )) {
+                payloads.push(JSON.stringify({renewals: current}));
+                current = [];
+                currentTileCount = 0;
+            }
+            current.push(renewal);
+            currentTileCount += renewalTileCount;
+            const single = JSON.stringify({renewals: current});
+            if (current.length === 1 &&
+                this.byteLength(single) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
+                throw new Error(
+                    `Single filter renewal exceeds ` +
+                    `${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`
+                );
+            }
+        }
+        if (current.length) {
+            payloads.push(JSON.stringify({renewals: current}));
+        }
+        return payloads;
+    }
+
+    /** Bisects one sparse renewal until both byte and work-unit limits are met. */
+    private splitRenewalGroupForTransport(
+        renewal: Record<string, unknown>
+    ): Record<string, unknown>[] {
+        const tileIds = Array.isArray(renewal["tileIds"])
+            ? renewal["tileIds"] as unknown[]
+            : [];
+        const encoded = JSON.stringify({renewals: [renewal]});
+        if (tileIds.length <= MAX_SPARSE_RENEWAL_TILES_PER_ENTRY &&
+            this.byteLength(encoded) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
+            return [renewal];
+        }
+        if (tileIds.length <= 1) {
+            return [renewal];
+        }
+        const midpoint = Math.ceil(tileIds.length / 2);
+        const left = this.sliceRequestGroup(
+            renewal,
+            tileIds.slice(0, midpoint)
+        );
+        const right = this.sliceRequestGroup(
+            renewal,
+            tileIds.slice(midpoint)
+        );
+        return [
+            ...this.splitRenewalGroupForTransport(left),
+            ...this.splitRenewalGroupForTransport(right)
+        ];
+    }
+
     /**
      * Sends the current logical interactive tile request if it differs from the last one.
      * Large requests are chunked across multiple websocket messages but still share one request id.
@@ -620,6 +716,18 @@ export class MapTileStreamClient {
             return [singlePayload];
         }
 
+        // A user-configured view can put hundreds of thousands of IDs into one
+        // map/layer/filter group. Split tile-indexed fields together so that a
+        // single logical group never becomes an unsendable all-or-nothing JSON
+        // object after per-tile delivery epochs accumulate.
+        const boundedRequests = tileLayerRequests.flatMap(request =>
+            this.splitRequestGroupForTransport(
+                request,
+                stringPoolOffsets,
+                requestId
+            )
+        );
+
         const chunks: TileRequestPayload[] = [];
         let currentRequests: any[] = [];
         let nextChunkIndex = 0;
@@ -639,7 +747,7 @@ export class MapTileStreamClient {
             currentRequests = [];
         };
 
-        for (const request of tileLayerRequests) {
+        for (const request of boundedRequests) {
             const candidateRequests = [...currentRequests, request];
             const currentChunkIndex = nextChunkIndex;
             const candidatePayload = JSON.stringify(makeChunk(candidateRequests, currentChunkIndex, false));
@@ -664,6 +772,79 @@ export class MapTileStreamClient {
 
         chunks[chunks.length - 1].chunk!.isLast = true;
         return chunks.map(chunk => JSON.stringify(chunk));
+    }
+
+    /** Bisects one request group while keeping every tile-indexed side array aligned. */
+    private splitRequestGroupForTransport(
+        request: any,
+        stringPoolOffsets: unknown,
+        requestId: number
+    ): any[] {
+        const encoded = JSON.stringify({
+            requests: [request],
+            requestId,
+            chunk: {index: 0, isLast: false},
+            stringPoolOffsets
+        } satisfies TileRequestPayload);
+        if (this.byteLength(encoded) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
+            return [request];
+        }
+        const tileIds = Array.isArray(request?.tileIds)
+            ? request.tileIds
+            : [];
+        if (tileIds.length <= 1) {
+            if (this.byteLength(encoded) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
+                throw new Error(
+                    `Single interactive request group exceeds ` +
+                    `${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`
+                );
+            }
+            return [request];
+        }
+
+        const midpoint = Math.ceil(tileIds.length / 2);
+        const left = this.sliceRequestGroup(request, tileIds.slice(0, midpoint));
+        const right = this.sliceRequestGroup(request, tileIds.slice(midpoint));
+        return [
+            ...this.splitRequestGroupForTransport(
+                left,
+                stringPoolOffsets,
+                requestId
+            ),
+            ...this.splitRequestGroupForTransport(
+                right,
+                stringPoolOffsets,
+                requestId
+            )
+        ];
+    }
+
+    /** Copies one request for a tile subset and filters all known per-tile fields. */
+    private sliceRequestGroup(request: any, tileIds: any[]): any {
+        const membership = new Set(tileIds.map(tileId => String(tileId)));
+        const containsTile = (value: unknown): boolean =>
+            membership.has(String(value));
+        const result: Record<string, any> = {
+            ...request,
+            tileIds
+        };
+        for (const field of [
+            "priorityTileIds",
+            "roots",
+            "featureIds",
+            "deliveryEpochs"
+        ]) {
+            const values = request?.[field];
+            if (!Array.isArray(values)) {
+                continue;
+            }
+            result[field] = values.filter((value: any) =>
+                field === "priorityTileIds"
+                    ? containsTile(value)
+                    : containsTile(value?.tileId)
+            );
+        }
+        return result;
     }
 
     /** Measures the UTF-8 payload size that matters for websocket message limits. */
@@ -800,6 +981,9 @@ export class MapTileStreamClient {
                 const isCurrent = this.socket === socket;
                 if (isCurrent) {
                     this.socket = null;
+                    // A new server-side session has no subscription registry;
+                    // force the next update to send the complete snapshot.
+                    this.lastTilesRequestBody = null;
                     this.pullClientId = null;
                     this.stopPullLoops();
                     this.onClose?.(event);

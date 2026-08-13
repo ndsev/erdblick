@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <regex>
@@ -1423,6 +1424,9 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     }
     const auto conversionTimestampMs = std::chrono::duration<double, std::milli>(
         tileLayer.timestamp().time_since_epoch()).count();
+    const auto ttlMs = tileLayer.ttl()
+        ? static_cast<double>(tileLayer.ttl()->count())
+        : std::numeric_limits<double>::quiet_NaN();
     return {
         tileLayer.id().toString(),
         tileLayer.stringPoolId(),
@@ -1433,6 +1437,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.error() ? *tileLayer.error() : "",
         numFeatures,
         conversionTimestampMs,
+        ttlMs,
         *allScalarFields
     };
 }
@@ -1472,6 +1477,7 @@ TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMet
         readTileLayerMetadata(buffer),
         std::move(metadata.identity_.filterId_),
         metadata.identity_.generation_,
+        metadata.identity_.deliveryEpoch_,
         *dependencies,
         *issues,
         metadata.glbAttachmentName_.value_or(std::string{}),

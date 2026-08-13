@@ -214,9 +214,6 @@ export class ViewLayerController {
                 continue;
             }
             this.clearOwnedVisualizations(owned);
-            for (const tileId of owned.layer.tileStates.keys()) {
-                owned.layer.releaseAttachment(tileId);
-            }
             owned.layer.refresh();
             refreshed = true;
         }

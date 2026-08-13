@@ -114,7 +114,7 @@ export class TileSubsetGltfPresentation {
         this.pendingAttachmentRefs.add(attachmentRef);
         const tilePosition = coreLib.getTilePosition(this.state.tileId);
         const source: DeckTileGltfAttachmentSource = {
-            cacheKey: `${this.state.mapTileKey}:${attachmentName}`,
+            cacheKey: `${this.state.mapTileKey}:${attachmentName}:${this.state.valueVersion}`,
             attachmentName,
             tilePosition: [
                 Number(tilePosition.x),

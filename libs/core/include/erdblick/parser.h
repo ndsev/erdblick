@@ -64,6 +64,8 @@ public:
         std::string error;
         int32_t numFeatures;
         double conversionTimestampMs;
+        /** Finite milliseconds when supplied by the datasource; NaN means no expiry. */
+        double ttlMs;
         NativeJsValue scalarFields;
     };
     /** Parse only cheap tile metadata without constructing the full feature/source-data model. */
@@ -74,6 +76,7 @@ public:
         TileLayerMetadata layer;
         std::string filterId;
         uint64_t generation;
+        uint64_t deliveryEpoch;
         NativeJsValue dependencies;
         NativeJsValue issues;
         std::string glbAttachmentName;

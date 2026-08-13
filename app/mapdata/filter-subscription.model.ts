@@ -52,12 +52,14 @@ export interface TileSubsetDelivery {
     readonly blob: Uint8Array;
     readonly filterId: string;
     readonly generation: number;
+    readonly deliveryEpoch: number;
     readonly mapId: string;
     readonly layerId: string;
     readonly tileId: number;
     readonly mapTileKey: string;
     readonly stringPoolId: string;
     readonly conversionTimestampMs: number | null;
+    readonly ttlMs: number | null;
     readonly dependencies: Array<{
         sourceTileKey: string;
         mapId: string;
@@ -91,6 +93,23 @@ export interface FilterSubscriptionCallbacks {
 export interface FilterSubscriptionOwner {
     updateFilterSubscription(ref: FilterSubscriptionRef, force: boolean): void;
     releaseFilterSubscription(ref: FilterSubscriptionRef): void;
+    updateFilterTileExpiry?(
+        ref: FilterSubscriptionRef,
+        tileId: number,
+        deliveryEpoch: number,
+        expiresAtMs: number | null
+    ): void;
+    cancelFilterTileExpiries?(ref: FilterSubscriptionRef, tileIds?: readonly number[]): void;
+    completeFilterTileRenewal?(
+        ref: FilterSubscriptionRef,
+        tileId: number,
+        deliveryEpoch: number
+    ): void;
+    renewFilterTiles?(
+        ref: FilterSubscriptionRef,
+        tileIds: readonly number[],
+        deliveryEpoch: number
+    ): void;
 }
 
 function cloneDefinition(definition: FilterSubscriptionDefinition): FilterSubscriptionDefinition {
@@ -200,9 +219,12 @@ export class FilterSubscriptionRef {
     private definitionValue: FilterSubscriptionDefinition;
     private coverageValue: FilterSubscriptionCoverage;
     private generationValue = 1;
+    private nextDeliveryEpochValue = 2;
     private releasedValue = false;
     private suspendedValue = false;
-    private coverageTileIds: Set<number>;
+    private readonly requestedEpochsByTile = new Map<number, number>();
+    private readonly deliveredEpochsByTile = new Map<number, number>();
+    private readonly expiredWhileSuspended = new Map<number, number>();
 
     constructor(
         private readonly owner: FilterSubscriptionOwner,
@@ -213,7 +235,7 @@ export class FilterSubscriptionRef {
     ) {
         this.definitionValue = cloneDefinition(definition);
         this.coverageValue = cloneCoverage(coverage);
-        this.coverageTileIds = new Set(this.coverageValue.tileIds);
+        this.resetDeliveryEpochs();
     }
 
     get generation(): number {
@@ -242,7 +264,6 @@ export class FilterSubscriptionRef {
         }
         this.definitionValue = nextDefinition;
         this.coverageValue = nextCoverage;
-        this.coverageTileIds = new Set(nextCoverage.tileIds);
         this.advanceGeneration();
     }
 
@@ -260,8 +281,23 @@ export class FilterSubscriptionRef {
             nextCoverage.roots,
             this.coverageValue.roots
         );
+        const nextTileIds = new Set(nextCoverage.tileIds);
+        const removedTileIds = [...this.requestedEpochsByTile.keys()]
+            .filter(tileId => !nextTileIds.has(tileId));
         this.coverageValue = nextCoverage;
-        this.coverageTileIds = new Set(nextCoverage.tileIds);
+        for (const tileId of removedTileIds) {
+            this.requestedEpochsByTile.delete(tileId);
+            this.deliveredEpochsByTile.delete(tileId);
+            this.expiredWhileSuspended.delete(tileId);
+        }
+        for (const tileId of nextCoverage.tileIds) {
+            if (!this.requestedEpochsByTile.has(tileId)) {
+                this.requestedEpochsByTile.set(tileId, 1);
+            }
+        }
+        if (removedTileIds.length) {
+            this.owner.cancelFilterTileExpiries?.(this, removedTileIds);
+        }
         if (rootsChanged) {
             this.advanceGeneration();
         } else {
@@ -301,28 +337,117 @@ export class FilterSubscriptionRef {
             return;
         }
         this.releasedValue = true;
+        this.owner.cancelFilterTileExpiries?.(this);
         this.owner.releaseFilterSubscription(this);
     }
 
     /** Internal canonical request object serialized into `/interactive`. */
     requestJson(): Record<string, unknown> {
+        const deliveryEpochs = [...this.requestedEpochsByTile]
+            .filter(([, epoch]) => epoch !== 1)
+            .map(([tileId, epoch]) => ({tileId, epoch}));
         return {
             ...cloneDefinition(this.definitionValue),
             ...cloneCoverage(this.coverageValue),
             filterId: this.filterId,
-            generation: this.generationValue
+            generation: this.generationValue,
+            deliveryEpoch: 1,
+            ...(deliveryEpochs.length ? {deliveryEpochs} : {})
+        };
+    }
+
+    /** Internal sparse request object for one scheduler batch. */
+    renewalJson(
+        tileIds: readonly number[],
+        deliveryEpoch: number
+    ): Record<string, unknown> | null {
+        const retainedTileIds = tileIds.filter(tileId =>
+            this.requestedEpochsByTile.get(tileId) === deliveryEpoch
+        );
+        if (this.releasedValue || this.suspendedValue || !retainedTileIds.length) {
+            return null;
+        }
+        const retained = new Set(retainedTileIds);
+        const priorityTileIds = (this.coverageValue.priorityTileIds ?? [])
+            .filter(tileId => retained.has(tileId));
+        const roots = (this.coverageValue.roots ?? [])
+            .filter(root => retained.has(root.tileId));
+        return {
+            ...cloneDefinition(this.definitionValue),
+            tileIds: retainedTileIds,
+            ...(priorityTileIds.length ? {priorityTileIds} : {}),
+            ...(roots.length ? {roots: structuredClone(roots)} : {}),
+            filterId: this.filterId,
+            generation: this.generationValue,
+            deliveryEpoch
         };
     }
 
     /** Internal stale-safe delivery boundary. */
     accept(delivery: TileSubsetDelivery): boolean {
+        const requestedEpoch = this.requestedEpochsByTile.get(delivery.tileId);
+        const deliveredEpoch = this.deliveredEpochsByTile.get(delivery.tileId);
         if (this.releasedValue || this.suspendedValue ||
             delivery.generation !== this.generationValue ||
-            !this.coverageTileIds.has(delivery.tileId)) {
+            requestedEpoch === undefined ||
+            delivery.deliveryEpoch > requestedEpoch ||
+            (deliveredEpoch !== undefined &&
+             delivery.deliveryEpoch < deliveredEpoch)) {
             return false;
         }
+        this.deliveredEpochsByTile.set(
+            delivery.tileId,
+            Math.max(deliveredEpoch ?? 0, delivery.deliveryEpoch)
+        );
         this.callbacks.onTile(delivery);
+        if (delivery.deliveryEpoch === requestedEpoch) {
+            const expiresAtMs = delivery.conversionTimestampMs !== null &&
+                delivery.ttlMs !== null
+                ? delivery.conversionTimestampMs + delivery.ttlMs
+                : null;
+            this.owner.updateFilterTileExpiry?.(
+                this,
+                delivery.tileId,
+                delivery.deliveryEpoch,
+                expiresAtMs !== null && Number.isFinite(expiresAtMs)
+                    ? expiresAtMs
+                    : null
+            );
+            this.owner.completeFilterTileRenewal?.(
+                this,
+                delivery.tileId,
+                delivery.deliveryEpoch
+            );
+        }
         return true;
+    }
+
+    /** Internal scheduler boundary; advances only tiles whose scheduled value is still current. */
+    expireTiles(tokens: ReadonlyArray<{tileId: number; deliveryEpoch: number}>): void {
+        if (this.releasedValue) {
+            return;
+        }
+        const tileIds = tokens
+            .filter(token =>
+                this.requestedEpochsByTile.get(token.tileId) === token.deliveryEpoch
+            )
+            .map(token => token.tileId);
+        if (!tileIds.length) {
+            return;
+        }
+        if (this.suspendedValue) {
+            for (const token of tokens) {
+                if (this.requestedEpochsByTile.get(token.tileId) === token.deliveryEpoch) {
+                    this.expiredWhileSuspended.set(token.tileId, token.deliveryEpoch);
+                }
+            }
+            return;
+        }
+        const deliveryEpoch = this.nextDeliveryEpochValue++;
+        for (const tileId of tileIds) {
+            this.requestedEpochsByTile.set(tileId, deliveryEpoch);
+        }
+        this.owner.renewFilterTiles?.(this, tileIds, deliveryEpoch);
     }
 
     /** Internal generation-aware status boundary. */
@@ -348,12 +473,30 @@ export class FilterSubscriptionRef {
     notifyRequestSynchronized(): void {
         if (!this.releasedValue && !this.suspendedValue) {
             this.callbacks.onRequestSynchronized?.();
+            if (this.expiredWhileSuspended.size) {
+                const expired = [...this.expiredWhileSuspended]
+                    .map(([tileId, deliveryEpoch]) => ({tileId, deliveryEpoch}));
+                this.expiredWhileSuspended.clear();
+                this.expireTiles(expired);
+            }
         }
     }
 
     private advanceGeneration(): void {
+        this.owner.cancelFilterTileExpiries?.(this);
         this.generationValue += 1;
+        this.resetDeliveryEpochs();
         this.owner.updateFilterSubscription(this, true);
+    }
+
+    private resetDeliveryEpochs(): void {
+        this.requestedEpochsByTile.clear();
+        this.deliveredEpochsByTile.clear();
+        this.expiredWhileSuspended.clear();
+        this.nextDeliveryEpochValue = 2;
+        for (const tileId of this.coverageValue.tileIds) {
+            this.requestedEpochsByTile.set(tileId, 1);
+        }
     }
 
     private assertLive(): void {

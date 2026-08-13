@@ -7,12 +7,14 @@ function delivery(): TileSubsetDelivery {
         blob: new Uint8Array([1, 2, 3]),
         filterId: "styled",
         generation: 2,
+        deliveryEpoch: 3,
         mapId: "Map",
         layerId: "Layer",
         tileId: 42,
         mapTileKey: "Features:Map:Layer:42",
         stringPoolId: "source",
         conversionTimestampMs: 1_725_000_123_456,
+        ttlMs: 60_000,
         dependencies: [{
             sourceTileKey: "Features:Map:Layer:42",
             mapId: "Map",
@@ -48,9 +50,12 @@ describe("FilterTileState", () => {
         expect(state.renderedEntryCount).toBe(7);
         expect(state.sourceFeatureCount).toBe(11);
         expect(state.conversionTimestampMs).toBe(1_725_000_123_456);
+        expect(state.ttlMs).toBe(60_000);
+        expect(state.deliveredEpoch).toBe(3);
 
         state.dispose();
         expect(state.geometryVertexCount).toBe(0);
         expect(state.conversionTimestampMs).toBeNull();
+        expect(state.ttlMs).toBeNull();
     });
 });

@@ -1313,7 +1313,7 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
     REQUIRE_FALSE(offsetsAfterReload.contains("ReloadedNode"));
 }
 
-TEST_CASE("TileLayerParser exposes the tile conversion timestamp in milliseconds", "[erdblick.parser]")
+TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblick.parser]")
 {
     using namespace std::chrono;
 
@@ -1321,12 +1321,60 @@ TEST_CASE("TileLayerParser exposes the tile conversion timestamp in milliseconds
     auto tile = TestDataProvider(parser).getTestLayer(42., 11., 13);
     constexpr int64_t expectedTimestampMs = 1'725'000'123'456;
     tile->setTimestamp(system_clock::time_point(milliseconds(expectedTimestampMs)));
+    tile->setTtl(milliseconds(4'500));
 
     std::ostringstream stream;
     REQUIRE(tile->write(stream));
 
     auto metadata = parser.readTileLayerMetadata(SharedUint8Array(stream.str()));
     REQUIRE(metadata.conversionTimestampMs == static_cast<double>(expectedTimestampMs));
+    REQUIRE(metadata.ttlMs == 4'500.0);
+
+    tile->setTtl(milliseconds::zero());
+    std::ostringstream zeroStream;
+    REQUIRE(tile->write(zeroStream));
+    REQUIRE(
+        parser.readTileLayerMetadata(
+            SharedUint8Array(zeroStream.str())).ttlMs == 0.0);
+
+    tile->setTtl(std::nullopt);
+    std::ostringstream absentStream;
+    REQUIRE(tile->write(absentStream));
+    REQUIRE(std::isnan(
+        parser.readTileLayerMetadata(
+            SharedUint8Array(absentStream.str())).ttlMs));
+}
+
+TEST_CASE("TileLayerParser exposes subset delivery identity and lifetime", "[erdblick.parser]")
+{
+    using namespace std::chrono;
+
+    TileLayerParser parser;
+    auto source = TestDataProvider(parser).getTestLayer(42., 11., 13);
+    source->setTimestamp(
+        system_clock::time_point{milliseconds{1'725'000'123'456}});
+    source->setTtl(milliseconds{875});
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        source->tileId(),
+        source->stringPoolId(),
+        source->mapId(),
+        source->layerInfo(),
+        source->strings(),
+        "styled:test",
+        17,
+        23);
+    subset->adoptSourceInfo(*source);
+
+    std::ostringstream stream;
+    REQUIRE(subset->write(stream));
+    auto metadata = parser.readTileSubsetLayerMetadata(
+        SharedUint8Array(stream.str()));
+
+    REQUIRE(metadata.filterId == "styled:test");
+    REQUIRE(metadata.generation == 17);
+    REQUIRE(metadata.deliveryEpoch == 23);
+    REQUIRE(metadata.layer.conversionTimestampMs == 1'725'000'123'456.0);
+    REQUIRE(metadata.layer.ttlMs == 875.0);
 }
 
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")

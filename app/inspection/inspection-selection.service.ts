@@ -1,6 +1,9 @@
 import {Injectable, NgZone} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {
+    MapTileStreamService,
+    RetainedTileExpiryOwner
+} from "../mapdata/map-tile-stream.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {
     featureSetsEqual,
@@ -33,6 +36,15 @@ export interface MultiInspectionResult {
     inspectedFeatureCount: number;
 }
 
+interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
+    key: string;
+    panelId: number;
+    mapTileKey: string;
+    tileId: number;
+    epoch: number;
+    featureIds: TileFeatureId[];
+}
+
 /**
  * Owns selected and hovered feature interaction state, including focus/zoom navigation.
  */
@@ -46,6 +58,8 @@ export class InspectionSelectionService {
     remoteHoverHighlightAllowed = false;
 
     private selectionConversionRevision = 0;
+    private readonly inspectionExpiryOwners =
+        new Map<string, InspectionExpiryOwner>();
 
     constructor(
         private readonly stateService: AppStateService,
@@ -127,7 +141,13 @@ export class InspectionSelectionService {
                 this.selectionTopic.next(convertedSelections);
             });
         });
-        this.selectionTopic.subscribe(() => {
+        this.selectionTopic.subscribe(selectedPanels => {
+            this.reconcileInspectionExpiries(
+                selectedPanels.flatMap(panel => panel.features.map(feature => ({
+                    panelId: panel.id,
+                    feature
+                })))
+            );
             const selectedTargets = this.selectionIdsTopic.getValue()
                 .flatMap(panel => panel.features);
             const hoverIds = this.hoverIdsTopic.getValue().filter(feature =>
@@ -257,6 +277,129 @@ export class InspectionSelectionService {
         this.remoteHoverHighlightAllowed =
             hoverTargets.length > 0 && allowRemoteHighlight;
         this.hoverIdsTopic.next(hoverTargets);
+    }
+
+    /** Reconciles one shared-heap handle per retained inspection tile value. */
+    private reconcileInspectionExpiries(
+        values: Array<{panelId: number; feature: FeatureWrapper}>
+    ): void {
+        const grouped = new Map<string, {
+            panelId: number;
+            mapTileKey: string;
+            tileId: number;
+            expiresAtMs: number | null;
+            featureIds: TileFeatureId[];
+        }>();
+        for (const {panelId, feature} of values) {
+            const tile = feature.featureTile;
+            const key = `${panelId}:${tile.mapTileKey}`;
+            const rawExpiry = Number(tile.expiresAtMs);
+            const expiresAtMs = Number.isFinite(rawExpiry)
+                ? rawExpiry
+                : null;
+            const rawTileId = Number(tile.tileId);
+            const tileId = Number.isFinite(rawTileId)
+                ? Math.trunc(rawTileId)
+                : 0;
+            let group = grouped.get(key);
+            if (!group) {
+                group = {
+                    panelId,
+                    mapTileKey: tile.mapTileKey,
+                    tileId,
+                    expiresAtMs,
+                    featureIds: []
+                };
+                grouped.set(key, group);
+            }
+            group.featureIds.push(feature.key());
+            if (expiresAtMs !== null &&
+                (group.expiresAtMs === null ||
+                 expiresAtMs < group.expiresAtMs)) {
+                group.expiresAtMs = expiresAtMs;
+            }
+        }
+
+        const retained = new Set(grouped.keys());
+        for (const [key, owner] of [...this.inspectionExpiryOwners]) {
+            if (!retained.has(key)) {
+                this.tileStream.cancelRetainedTileExpiries?.(owner);
+                this.inspectionExpiryOwners.delete(key);
+            }
+        }
+        for (const [key, group] of grouped) {
+            let owner = this.inspectionExpiryOwners.get(key);
+            if (!owner) {
+                owner = {
+                    key,
+                    panelId: group.panelId,
+                    mapTileKey: group.mapTileKey,
+                    tileId: group.tileId,
+                    epoch: 0,
+                    featureIds: [],
+                    expireTiles: tokens => {
+                        void this.renewInspectionOwner(owner!, tokens);
+                    }
+                };
+                this.inspectionExpiryOwners.set(key, owner);
+            }
+            owner.tileId = group.tileId;
+            owner.featureIds = group.featureIds;
+            owner.epoch += 1;
+            this.tileStream.updateRetainedTileExpiry?.(
+                owner,
+                owner.tileId,
+                owner.epoch,
+                group.expiresAtMs
+            );
+        }
+    }
+
+    /** Refreshes one still-retained tile and atomically replaces matching wrappers. */
+    private async renewInspectionOwner(
+        owner: InspectionExpiryOwner,
+        tokens: ReadonlyArray<{tileId: number; deliveryEpoch: number}>
+    ): Promise<void> {
+        if (this.inspectionExpiryOwners.get(owner.key) !== owner ||
+            !tokens.some(token =>
+                token.tileId === owner.tileId &&
+                token.deliveryEpoch === owner.epoch
+            )) {
+            return;
+        }
+        let replacements: FeatureWrapper[];
+        try {
+            replacements = await this.tileStream.loadFeatures(owner.featureIds);
+        } catch (error) {
+            console.error(
+                `Failed to renew retained selection tile '${owner.mapTileKey}'.`,
+                error
+            );
+            return;
+        }
+        if (this.inspectionExpiryOwners.get(owner.key) !== owner) {
+            return;
+        }
+        const replacementById = new Map(replacements.map(feature => [
+            feature.featureId,
+            feature
+        ]));
+        this.ngZone.run(() => {
+            const currentPanels = this.selectionTopic.getValue();
+            const nextPanels = currentPanels.map(panel =>
+                panel.id !== owner.panelId
+                    ? panel
+                    : {
+                        ...panel,
+                        features: panel.features.map(feature =>
+                            feature.featureTile.mapTileKey === owner.mapTileKey
+                                ? replacementById.get(feature.featureId) ?? feature
+                                : feature
+                        )
+                    }
+            );
+            this.selectionTopic.next(nextPanels);
+        });
     }
 
     /** Loads a feature and centers the target view on its reported center point. */

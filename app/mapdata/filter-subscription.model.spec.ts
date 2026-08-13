@@ -14,15 +14,18 @@ function definition() {
     };
 }
 
-function delivery(tileId: number, generation: number) {
+function delivery(tileId: number, generation: number, deliveryEpoch = 1) {
     return {
         blob: new Uint8Array(),
         filterId: "styled",
         generation,
+        deliveryEpoch,
         mapId: "Map",
         layerId: "Layer",
         tileId,
         mapTileKey: `Features:Map:Layer:${tileId}`,
+        conversionTimestampMs: 1_000,
+        ttlMs: 100,
         receivedAt: 0
     } as unknown as TileSubsetDelivery;
 }
@@ -167,6 +170,43 @@ describe("FilterSubscriptionRef", () => {
 
         expect(ref.accept(stale)).toBe(false);
         expect(onTile).not.toHaveBeenCalled();
+    });
+
+    it("accepts an older expired delivery while its newer epoch is only requested", () => {
+        const onTile = vi.fn();
+        const renewFilterTiles = vi.fn();
+        const updateFilterTileExpiry = vi.fn();
+        const completeFilterTileRenewal = vi.fn();
+        const ref = new FilterSubscriptionRef(
+            {
+                updateFilterSubscription: vi.fn(),
+                releaseFilterSubscription: vi.fn(),
+                renewFilterTiles,
+                updateFilterTileExpiry,
+                completeFilterTileRenewal
+            },
+            "styled",
+            definition(),
+            {tileIds: [1]},
+            {onTile}
+        );
+
+        ref.expireTiles([{tileId: 1, deliveryEpoch: 1}]);
+
+        expect(renewFilterTiles).toHaveBeenCalledWith(ref, [1], 2);
+        expect(ref.accept(delivery(1, ref.generation, 1))).toBe(true);
+        expect(updateFilterTileExpiry).not.toHaveBeenCalled();
+        expect(completeFilterTileRenewal).not.toHaveBeenCalled();
+        expect(ref.accept(delivery(1, ref.generation, 2))).toBe(true);
+        expect(updateFilterTileExpiry).toHaveBeenCalledWith(
+            ref,
+            1,
+            2,
+            1_100
+        );
+        expect(completeFilterTileRenewal).toHaveBeenCalledWith(ref, 1, 2);
+        expect(ref.accept(delivery(1, ref.generation, 1))).toBe(false);
+        expect(onTile).toHaveBeenCalledTimes(2);
     });
 
     it("notifies its consumer when transport state is synchronized", () => {

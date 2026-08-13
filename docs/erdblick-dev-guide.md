@@ -146,7 +146,9 @@ view/controller disposes them.
 `FilterSubscriptionRef` has explicit replace, refresh, suspend/resume, and
 release operations. Replacement increments generation. A delivered frame is
 accepted only when `filterId`, generation, map/layer, and output tile match the
-active subscription.
+active subscription. Within that semantic slot, `deliveryEpoch` orders TTL
+renewals: requesting a newer epoch does not invalidate an older in-flight
+delivery; only accepting a newer delivery makes an older one stale.
 
 `TileAttachmentRef` coalesces simultaneous requests and retains immutable bytes
 while referenced. Last release aborts/drops the value. There is no unpinned
@@ -215,6 +217,33 @@ Processing order follows request tile order; stream arrival order may differ.
 The transport supports bounded outgoing queues and adaptive payload batches.
 `/tiles` and `/tiles/next` remain fallback aliases for stale proxy
 deployments; new clients use `/interactive` and `/interactive/payload`.
+
+### TTL renewal
+
+Every retained `TileLayer` path reads the serialized conversion timestamp and
+optional TTL. Missing, zero, and negative TTL values are non-expiring. Positive
+TTLs use the same strict boundary as mapget: a value expires only when browser
+wall-clock time is greater than `timestamp + ttl`.
+
+One application-wide indexed min-heap owns finite deadlines for rendered
+subsets, inspection selection and hover tiles, comparison tiles, and the
+source-data panel. It uses one timer regardless of active tile count,
+`O(log A)` replacement/cancellation, and at most 512 expiry callbacks in one
+browser task for `A` finite-lifetime retained tiles.
+
+Due subset tiles advance their per-tile delivery epoch and enter a fair sparse
+renewal queue. At most 2,048 are in flight globally; each wire entry contains
+at most 512 tiles and each envelope at most 2,048. These are work-window bounds,
+not coverage limits: hundreds of thousands of active tiles remain queued and
+are drained without a whole-generation refresh or an `O(A)` TTL scan.
+Reconnect sends the authoritative full snapshot, including current per-tile
+epochs, before sparse renewals resume.
+
+There is deliberately no retry delay or backoff. An expired value remains
+visible while its renewal is pending or fails. A newly delivered value is
+installed even if its own deadline is already past, then scheduled at the
+strict expiry boundary. Late older values remain admissible until a newer
+delivery for the same output has been accepted; afterward they are discarded.
 
 ## Render pipeline
 
@@ -413,9 +442,12 @@ See [Style System](erdblick-stylesystem.md).
 - Mapget candidate failures become subset issues; request-level failures
   produce terminal error state.
 - Long loops check cancellation at feature boundaries and fixed batches.
-- There is initially no datasource snapshot/revision contract. Dynamic/TTL
-  sources may require later hardening; successful negative lookups are not a
-  durable frontend cache.
+- There is no datasource-wide snapshot/revision contract, so independently
+  renewed tiles need not form a transactionally consistent global snapshot.
+- TTL renewal has no backoff by design. A transport failure is reported and
+  the expired value remains visible; it does not start an unbounded retry loop.
+- Successful negative values with a positive TTL are renewable; values with
+  no positive TTL remain durable for the lifetime of their owner.
 
 ## Protocol migration
 

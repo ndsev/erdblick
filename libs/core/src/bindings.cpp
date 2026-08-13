@@ -822,12 +822,14 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("error", &TileLayerParser::TileLayerMetadata::error)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)
         .field("conversionTimestampMs", &TileLayerParser::TileLayerMetadata::conversionTimestampMs)
+        .field("ttlMs", &TileLayerParser::TileLayerMetadata::ttlMs)
         .field("scalarFields", &TileLayerParser::TileLayerMetadata::scalarFields);
 
     em::value_object<TileLayerParser::TileSubsetLayerMetadata>("TileSubsetLayerMetadata")
         .field("layer", &TileLayerParser::TileSubsetLayerMetadata::layer)
         .field("filterId", &TileLayerParser::TileSubsetLayerMetadata::filterId)
         .field("generation", &TileLayerParser::TileSubsetLayerMetadata::generation)
+        .field("deliveryEpoch", &TileLayerParser::TileSubsetLayerMetadata::deliveryEpoch)
         .field("dependencies", &TileLayerParser::TileSubsetLayerMetadata::dependencies)
         .field("issues", &TileLayerParser::TileSubsetLayerMetadata::issues)
         .field(

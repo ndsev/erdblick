@@ -61,7 +61,8 @@ describe("StyledMapgetLayer presentation refs", () => {
             mapId: "map",
             layerId: "layer",
             tileId: 42,
-            name: "mesh.glb"
+            name: "mesh.glb",
+            incarnation: 0
         });
     });
 });

@@ -36,7 +36,6 @@ describe("ViewLayerController", () => {
             const layer = {
                 identity: {mapId, presentationKind},
                 tileStates: new Map([[7, {}]]),
-                releaseAttachment: vi.fn(),
                 refresh: vi.fn(),
                 dispose: vi.fn()
             };
@@ -71,7 +70,6 @@ describe("ViewLayerController", () => {
         controller.refreshMap("MapA");
 
         expect(regular.visualization.destroy).toHaveBeenCalledOnce();
-        expect(regular.layer.releaseAttachment).toHaveBeenCalledWith(7);
         expect(regular.layer.refresh).toHaveBeenCalledOnce();
         expect(selection.layer.refresh).toHaveBeenCalledOnce();
         expect(search.layer.refresh).not.toHaveBeenCalled();

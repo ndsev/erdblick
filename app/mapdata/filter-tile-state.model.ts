@@ -30,9 +30,11 @@ export class FilterTileState {
     status: FilterTileStatus = "pending";
     pendingGeneration: number;
     deliveredGeneration = 0;
+    deliveredEpoch = 0;
     subsetBlob: Uint8Array | null = null;
     stringPoolId = "";
     conversionTimestampMs: number | null = null;
+    ttlMs: number | null = null;
     glbAttachmentName = "";
     valueVersion = 0;
     renderedValueVersion = 0;
@@ -88,6 +90,7 @@ export class FilterTileState {
 
         this.subsetBlob = delivery.blob;
         this.deliveredGeneration = delivery.generation;
+        this.deliveredEpoch = delivery.deliveryEpoch;
         this.pendingGeneration = delivery.generation;
         this.valueVersion += 1;
         this.status = "ready";
@@ -101,6 +104,7 @@ export class FilterTileState {
         this.geometryVertexCount = delivery.geometryVertexCount;
         this.stringPoolId = delivery.stringPoolId;
         this.conversionTimestampMs = delivery.conversionTimestampMs;
+        this.ttlMs = delivery.ttlMs;
         this.glbAttachmentName = delivery.glbAttachmentName;
         this.receivedAt = delivery.receivedAt;
     }
@@ -117,6 +121,7 @@ export class FilterTileState {
         this.subsetBlob = null;
         this.stringPoolId = "";
         this.conversionTimestampMs = null;
+        this.ttlMs = null;
         this.glbAttachmentName = "";
         this.dependencies = [];
         this.issues = [];

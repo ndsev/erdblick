@@ -41,6 +41,93 @@ function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
 }
 
 describe('MapTileStreamClient', () => {
+    it('chunks one very large filter group at tile boundaries with aligned epochs', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const tileIds = Array.from({length: 100_000}, (_, index) => index + 1);
+            const request = {
+                mapId: "Map",
+                layerId: "Layer",
+                filterId: "large",
+                generation: 1,
+                deliveryEpoch: 1,
+                channels: [{channelId: "all", scope: "feature"}],
+                tileIds,
+                priorityTileIds: tileIds.slice(0, 200),
+                deliveryEpochs: tileIds.map(tileId => ({tileId, epoch: 2}))
+            };
+
+            const payloads = tileStream.buildRequestPayloads([request], {}, 17);
+            const decoded = payloads.map((payload: string) => JSON.parse(payload));
+            const pieces = decoded.flatMap((payload: any) => payload.requests);
+
+            expect(payloads.length).toBeGreaterThan(1);
+            expect(payloads.every((payload: string) =>
+                new TextEncoder().encode(payload).byteLength <= 9 * 1024 * 1024
+            )).toBe(true);
+            expect(decoded.map((payload: any) => payload.chunk.index)).toEqual(
+                decoded.map((_: any, index: number) => index)
+            );
+            expect(decoded.at(-1).chunk.isLast).toBe(true);
+            expect(pieces.flatMap((piece: any) => piece.tileIds)).toEqual(tileIds);
+            for (const piece of pieces) {
+                const membership = new Set(piece.tileIds);
+                expect(piece.deliveryEpochs.every((item: any) =>
+                    membership.has(item.tileId)
+                )).toBe(true);
+                expect(piece.priorityTileIds.every((tileId: number) =>
+                    membership.has(tileId)
+                )).toBe(true);
+            }
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('bounds sparse renewal envelopes without losing tile ids', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const tileIds = Array.from({length: 250_000}, (_, index) => index + 1);
+            const renewal = {
+                mapId: "Map",
+                layerId: "Layer",
+                filterId: "large",
+                generation: 1,
+                deliveryEpoch: 2,
+                channels: [{
+                    channelId: "all",
+                    scope: "feature",
+                    featureFilter: "x".repeat(4_096)
+                }],
+                tileIds
+            };
+
+            const payloads = tileStream.buildRenewalPayloads([renewal]);
+            const renewed = payloads.flatMap((payload: string) =>
+                JSON.parse(payload).renewals
+            );
+
+            expect(payloads.length).toBeGreaterThan(1);
+            expect(payloads.every((payload: string) =>
+                new TextEncoder().encode(payload).byteLength <= 9 * 1024 * 1024
+            )).toBe(true);
+            expect(payloads.every((payload: string) =>
+                JSON.parse(payload).renewals.reduce(
+                    (count: number, item: any) => count + item.tileIds.length,
+                    0
+                ) <= 2_048
+            )).toBe(true);
+            expect(renewed.every((item: any) =>
+                item.tileIds.length <= 512
+            )).toBe(true);
+            expect(renewed.flatMap((item: any) => item.tileIds)).toEqual(tileIds);
+        } finally {
+            client.destroy();
+        }
+    });
+
     it('budgets packed payloads at ordered VTLV frame boundaries', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;

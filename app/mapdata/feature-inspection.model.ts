@@ -20,6 +20,9 @@ export class InspectionFeatureTile {
     readonly tileId: number;
     readonly legalInfo: string;
     readonly numFeatures: number;
+    readonly conversionTimestampMs: number | null;
+    readonly ttlMs: number | null;
+    readonly expiresAtMs: number | null;
 
     constructor(
         private readonly parser: TileLayerParser,
@@ -36,6 +39,8 @@ export class InspectionFeatureTile {
             tileId: number;
             legalInfo?: string;
             numFeatures: number;
+            conversionTimestampMs?: number;
+            ttlMs?: number;
         };
         this.mapTileKey = metadata.id;
         this.stringPoolId = metadata.stringPoolId;
@@ -44,6 +49,21 @@ export class InspectionFeatureTile {
         this.tileId = Number(metadata.tileId);
         this.legalInfo = metadata.legalInfo ?? "";
         this.numFeatures = Math.max(0, Math.floor(Number(metadata.numFeatures)));
+        const timestamp = Number(metadata.conversionTimestampMs);
+        const ttl = Number(metadata.ttlMs);
+        this.conversionTimestampMs = Number.isFinite(timestamp)
+            ? timestamp
+            : null;
+        this.ttlMs = Number.isFinite(ttl) && ttl > 0
+            ? ttl
+            : null;
+        const expiry = this.conversionTimestampMs !== null &&
+            this.ttlMs !== null
+            ? this.conversionTimestampMs + this.ttlMs
+            : null;
+        this.expiresAtMs = expiry !== null && Number.isFinite(expiry)
+            ? expiry
+            : null;
     }
 
     peek<T>(callback: (layer: TileFeatureLayer) => T): T | null {

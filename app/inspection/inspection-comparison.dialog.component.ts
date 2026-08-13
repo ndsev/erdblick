@@ -2,7 +2,10 @@ import {Component, effect, input, OnDestroy, QueryList, Renderer2, ViewChild, Vi
 import {ContextMenu} from 'primeng/contextmenu';
 import {MenuItem} from 'primeng/api';
 import {Subscription} from 'rxjs';
-import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
+import {
+    MapTileStreamService,
+    RetainedTileExpiryOwner
+} from '../mapdata/map-tile-stream.service';
 import {InspectionSelectionService} from './inspection-selection.service';
 import {
     AppStateService,
@@ -25,6 +28,16 @@ interface ComparisonColumn {
     loading: boolean;
     localId: number;
     selectionColor: string;
+}
+
+interface ComparisonExpiryOwner extends RetainedTileExpiryOwner {
+    key: string;
+    localId: number;
+    mapTileKey: string;
+    tileId: number;
+    epoch: number;
+    revision: number;
+    featureIds: Array<{mapTileKey: string; featureId: string}>;
 }
 
 @Component({
@@ -136,6 +149,9 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     private detachPointerUpListener?: () => void;
     private selectionTopicSubscription: Subscription;
+    private comparisonRevision = 0;
+    private readonly comparisonExpiryOwners =
+        new Map<string, ComparisonExpiryOwner>();
 
     constructor(private tileStream: MapTileStreamService,
                 private inspectionSelection: InspectionSelectionService,
@@ -156,6 +172,8 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Releases transient drag listeners and cached column state. */
     ngOnDestroy() {
+        ++this.comparisonRevision;
+        this.clearComparisonExpiries();
         this.endDrag();
         this.selectionTopicSubscription.unsubscribe();
         this.columns = [];
@@ -312,6 +330,8 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Materializes comparison entries into temporary panel models that reuse feature inspection rendering. */
     private buildColumns(model: InspectionComparisonModel) {
+        const revision = ++this.comparisonRevision;
+        this.clearComparisonExpiries();
         const entries = [model.base, ...model.others];
         const columns = entries.map((entry, index) => {
             const localId = this.localPanelId(index);
@@ -327,6 +347,9 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.queueHeightSync();
         entries.forEach((entry, index) => {
             this.resolveFeatures(entry).then(features => {
+                if (revision !== this.comparisonRevision) {
+                    return;
+                }
                 const localId = columns[index].localId;
                 const updated = {
                     ...columns[index],
@@ -336,8 +359,118 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 const nextColumns = this.columns.slice();
                 nextColumns[index] = updated;
                 this.columns = nextColumns;
+                this.reconcileComparisonExpiries(updated, revision);
             });
         });
+    }
+
+    private reconcileComparisonExpiries(
+        column: ComparisonColumn,
+        revision: number
+    ): void {
+        const grouped = new Map<string, FeatureWrapper[]>();
+        for (const feature of column.panel.features) {
+            const key = feature.featureTile.mapTileKey;
+            const values = grouped.get(key) ?? [];
+            values.push(feature);
+            grouped.set(key, values);
+        }
+        const prefix = `${column.localId}:`;
+        const retained = new Set([...grouped.keys()].map(key => prefix + key));
+        for (const [key, owner] of [...this.comparisonExpiryOwners]) {
+            if (key.startsWith(prefix) && !retained.has(key)) {
+                this.tileStream.cancelRetainedTileExpiries?.(owner);
+                this.comparisonExpiryOwners.delete(key);
+            }
+        }
+        for (const [mapTileKey, features] of grouped) {
+            const key = prefix + mapTileKey;
+            let owner = this.comparisonExpiryOwners.get(key);
+            if (!owner) {
+                owner = {
+                    key,
+                    localId: column.localId,
+                    mapTileKey,
+                    tileId: Number(features[0].featureTile.tileId),
+                    epoch: 0,
+                    revision,
+                    featureIds: [],
+                    expireTiles: tokens => {
+                        void this.renewComparisonOwner(owner!, tokens);
+                    }
+                };
+                this.comparisonExpiryOwners.set(key, owner);
+            }
+            owner.revision = revision;
+            owner.featureIds = features.map(feature => feature.key());
+            owner.epoch += 1;
+            const expiries = features
+                .map(feature => feature.featureTile.expiresAtMs)
+                .filter((value): value is number =>
+                    value !== null && Number.isFinite(value)
+                );
+            this.tileStream.updateRetainedTileExpiry?.(
+                owner,
+                Number.isFinite(owner.tileId) ? owner.tileId : 0,
+                owner.epoch,
+                expiries.length ? Math.min(...expiries) : null
+            );
+        }
+    }
+
+    private async renewComparisonOwner(
+        owner: ComparisonExpiryOwner,
+        tokens: ReadonlyArray<{tileId: number; deliveryEpoch: number}>
+    ): Promise<void> {
+        if (this.comparisonExpiryOwners.get(owner.key) !== owner ||
+            owner.revision !== this.comparisonRevision ||
+            !tokens.some(token => token.deliveryEpoch === owner.epoch)) {
+            return;
+        }
+        let replacements: FeatureWrapper[];
+        try {
+            replacements = await this.tileStream.loadFeatures(owner.featureIds);
+        } catch (error) {
+            console.error(`Failed to renew comparison tile '${owner.mapTileKey}'.`, error);
+            return;
+        }
+        if (this.comparisonExpiryOwners.get(owner.key) !== owner ||
+            owner.revision !== this.comparisonRevision) {
+            return;
+        }
+        const index = this.columns.findIndex(column =>
+            column.localId === owner.localId
+        );
+        if (index < 0) {
+            return;
+        }
+        const replacementById = new Map(replacements.map(feature => [
+            feature.featureId,
+            feature
+        ]));
+        const column = this.columns[index];
+        const updated: ComparisonColumn = {
+            ...column,
+            panel: this.buildPanel(
+                column.panel.features.map(feature =>
+                    feature.featureTile.mapTileKey === owner.mapTileKey
+                        ? replacementById.get(feature.featureId) ?? feature
+                        : feature
+                ),
+                column.localId
+            )
+        };
+        const next = this.columns.slice();
+        next[index] = updated;
+        this.columns = next;
+        this.reconcileComparisonExpiries(updated, owner.revision);
+    }
+
+    private clearComparisonExpiries(): void {
+        for (const owner of this.comparisonExpiryOwners.values()) {
+            this.tileStream.cancelRetainedTileExpiries?.(owner);
+        }
+        this.comparisonExpiryOwners.clear();
     }
 
     /** Defers height synchronization until PrimeNG has finished layout for the current frame. */

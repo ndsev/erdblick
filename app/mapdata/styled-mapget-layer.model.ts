@@ -259,7 +259,8 @@ export class StyledMapgetLayer {
             mapId: this.mapgetLayer.mapId,
             layerId: this.mapgetLayer.layerId,
             tileId: state.tileId,
-            name
+            name,
+            incarnation: state.valueVersion
         });
     }
 

@@ -1,4 +1,4 @@
-import {Component, output, input, effect, ViewChild} from "@angular/core";
+import {Component, output, input, effect, ViewChild, OnDestroy} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
@@ -15,6 +15,15 @@ import {
     sourceDataTreePresentation
 } from "./sourcedata-tree.presentation";
 import {waitForSourceDataRequest} from "./source-data-request";
+import {
+    MapTileStreamService,
+    RetainedTileExpiryOwner
+} from "../mapdata/map-tile-stream.service";
+
+interface LoadedSourceDataLayer {
+    layer: TileSourceDataLayer;
+    expiresAtMs: number | null;
+}
 
 @Component({
     selector: 'sourcedata-panel',
@@ -28,6 +37,11 @@ import {waitForSourceDataRequest} from "./source-data-request";
                 <strong>Error</strong><br>{{ errorMessage }}
             </div>
         } @else {
+            @if (staleErrorMessage) {
+                <div class="source-data-stale-error">
+                    <strong>Refresh failed:</strong> {{ staleErrorMessage }}
+                </div>
+            }
             @if (sqlQuery) {
                 <details class="source-data-sql-query" data-testid="source-data-sql-query">
                     <summary>SQL query</summary>
@@ -45,7 +59,7 @@ import {waitForSourceDataRequest} from "./source-data-request";
     standalone: false
 })
 /** Loads one source-data tile on demand and renders it through the shared inspection tree. */
-export class SourceDataPanelComponent {
+export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOwner {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     filterText = input<string | undefined>();
@@ -55,6 +69,7 @@ export class SourceDataPanelComponent {
 
     loading: boolean = true;
     errorMessage: string = "";
+    staleErrorMessage: string = "";
     sqlQuery: string | undefined;
 
     treeData: TreeTableNode[] = [];
@@ -84,45 +99,111 @@ export class SourceDataPanelComponent {
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
+    private loadRevision = 0;
+    private valueEpoch = 0;
+
     constructor(private mapService: MapInfoService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+                private tileStream: MapTileStreamService) {
         effect(() => {
-            if (!this.panel().sourceData) {
+            const sourceData = this.panel().sourceData;
+            const revision = ++this.loadRevision;
+            this.tileStream.cancelRetainedTileExpiries?.(this);
+            if (!sourceData) {
                 return;
             }
             this.loading = true;
             this.treeData = [];
             this.errorMessage = "";
+            this.staleErrorMessage = "";
             this.sqlQuery = undefined;
-
-            this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
-                .then(layer => {
-                    const root = layer.toObject();
-                    this.addressFormat = layer.addressFormat();
-
-                    layer.delete();
-
-                    const presentation = sourceDataTreePresentation(root);
-                    this.sqlQuery = presentation.sqlQuery;
-                    if (presentation.treeData.length) {
-                        this.treeData = presentation.treeData;
-                        this.selectItemWithAddress(this.panel().sourceData!.address);
-                    } else {
-                        this.treeData = [];
-                        this.setError(this.noSourceDataMessage(this.panel().sourceData!.mapTileKey));
-                    }
-                })
-                .catch(error => {
-                    this.setError(`${error}`);
-                })
-                .finally(() => {
-                    this.loading = false;
-                });
+            void this.refreshSourceData(
+                sourceData.mapTileKey,
+                sourceData.address,
+                revision,
+                false
+            );
         });
     }
 
+    ngOnDestroy(): void {
+        ++this.loadRevision;
+        this.tileStream.cancelRetainedTileExpiries?.(this);
+    }
+
+    expireTiles(tokens: ReadonlyArray<{
+        tileId: number;
+        deliveryEpoch: number;
+    }>): void {
+        if (!tokens.some(token => token.deliveryEpoch === this.valueEpoch)) {
+            return;
+        }
+        const sourceData = this.panel().sourceData;
+        if (!sourceData) {
+            return;
+        }
+        const revision = this.loadRevision;
+        void this.refreshSourceData(
+            sourceData.mapTileKey,
+            sourceData.address,
+            revision,
+            true
+        );
+    }
+
+    /** Keeps the current tree visible until a current replacement has parsed successfully. */
+    private async refreshSourceData(
+        mapTileKey: string,
+        address: bigint | undefined,
+        revision: number,
+        renewal: boolean
+    ): Promise<void> {
+        let loaded: LoadedSourceDataLayer | null = null;
+        try {
+            loaded = await this.loadSourceDataLayer(mapTileKey);
+            if (revision !== this.loadRevision) {
+                return;
+            }
+            const root = loaded.layer.toObject();
+            this.addressFormat = loaded.layer.addressFormat();
+            const presentation = sourceDataTreePresentation(root);
+            if (!presentation.treeData.length) {
+                throw new Error(this.noSourceDataMessage(mapTileKey));
+            }
+            this.sqlQuery = presentation.sqlQuery;
+            this.treeData = presentation.treeData;
+            this.errorMessage = "";
+            this.staleErrorMessage = "";
+            this.selectItemWithAddress(address);
+            const [, , tileId] = coreLib.parseMapTileKey(mapTileKey);
+            const epoch = ++this.valueEpoch;
+            this.tileStream.updateRetainedTileExpiry?.(
+                this,
+                Number(tileId),
+                epoch,
+                loaded.expiresAtMs
+            );
+        } catch (error) {
+            if (revision !== this.loadRevision) {
+                return;
+            }
+            const message = `${error}`;
+            if (renewal && this.treeData.length) {
+                this.staleErrorMessage = message;
+                this.error.emit(message);
+            } else {
+                this.setError(message);
+            }
+        } finally {
+            loaded?.layer.delete();
+            if (revision === this.loadRevision) {
+                this.loading = false;
+            }
+        }
+    }
+
     /** Fetches and parses one source-data layer over the WebSocket source-data endpoint. */
-    async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
+    async loadSourceDataLayer(mapTileKey: string) : Promise<LoadedSourceDataLayer> {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
         if (!this.mapService.isMapLayerReady(mapId, layerId)) {
             const map = this.mapService.maps.maps.get(mapId);
@@ -139,6 +220,7 @@ export class SourceDataPanelComponent {
         };
 
         let layer: TileSourceDataLayer | null = null;
+        let expiresAtMs: number | null = null;
         const socket = new MapTileStreamClient("/interactive");
         const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
         if (dataSourceInfoJson) {
@@ -148,6 +230,21 @@ export class SourceDataPanelComponent {
         const sourceDataReceived = new Promise<void>((resolve, reject) => {
             socket.withSourceDataCallback((payload) => {
                 try {
+                    const metadata = uint8ArrayToWasm((wasmBlob) =>
+                        socket.parser.readTileLayerMetadata(wasmBlob),
+                    payload) as unknown as {
+                        conversionTimestampMs?: number;
+                        ttlMs?: number;
+                    };
+                    const timestamp = Number(metadata.conversionTimestampMs);
+                    const ttl = Number(metadata.ttlMs);
+                    const expiry = Number.isFinite(timestamp) &&
+                        Number.isFinite(ttl) && ttl > 0
+                        ? timestamp + ttl
+                        : null;
+                    expiresAtMs = expiry !== null && Number.isFinite(expiry)
+                        ? expiry
+                        : null;
                     const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
                         return socket.parser.readTileSourceDataLayer(wasmBlob);
                     }, payload);
@@ -190,7 +287,7 @@ export class SourceDataPanelComponent {
             throw new Error(`Error while loading layer: ${error}`);
         }
 
-        return loadedLayer;
+        return {layer: loadedLayer, expiresAtMs};
     }
 
     /** Builds a user-facing empty-state message for a tile without source data. */

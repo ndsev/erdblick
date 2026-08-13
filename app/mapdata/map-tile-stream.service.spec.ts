@@ -62,3 +62,42 @@ describe("MapTileStreamService viewport timing", () => {
         now.mockRestore();
     });
 });
+
+describe("MapTileStreamService TTL renewal fairness", () => {
+    it("takes bounded round-robin owner slices without capping queued coverage", () => {
+        const service = Object.create(
+            MapTileStreamService.prototype
+        ) as MapTileStreamService;
+        const internal = service as any;
+        const firstRef = {filterId: "first"};
+        const secondRef = {filterId: "second"};
+        internal.lastDispatchedRenewalRef = null;
+        internal.maxRenewalTilesPerOwnerSlice = 512;
+        internal.pendingFilterRenewals = [
+            {
+                ref: firstRef,
+                tileIds: Array.from({length: 5_000}, (_, index) => index),
+                deliveryEpoch: 2
+            },
+            {
+                ref: secondRef,
+                tileIds: Array.from({length: 5_000}, (_, index) => index + 10_000),
+                deliveryEpoch: 2
+            }
+        ];
+
+        const selected = internal.takeFairRenewalBatch(1_024);
+
+        expect(selected.map((item: any) => item.ref)).toEqual([
+            firstRef,
+            secondRef
+        ]);
+        expect(selected.map((item: any) => item.tileIds.length)).toEqual([
+            512,
+            512
+        ]);
+        expect(internal.pendingFilterRenewals.map(
+            (item: any) => item.tileIds.length
+        )).toEqual([4_488, 4_488]);
+    });
+});
