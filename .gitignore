@@ -24,3 +24,4 @@ dev-screenshots/
 dev/
 .venv*/
 mapget-cache.db
+*/graphify-out/*
