@@ -215,7 +215,6 @@ export class ViewLayerController {
         }
 
         if (refreshed) {
-            this.changed.next();
             this.occupancyChanged.next();
             this.diagnostics.notifyChanged();
         }

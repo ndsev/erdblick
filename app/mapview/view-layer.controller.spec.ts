@@ -25,7 +25,6 @@ describe("ViewLayerController", () => {
         ) as any;
         controller.disposed = false;
         controller.sceneHandle = null;
-        controller.changed = {next: vi.fn()};
         controller.occupancyChanged = {next: vi.fn()};
         controller.diagnostics = {notifyChanged: vi.fn()};
         controller.pendingVisualizationRenders = new Set();
@@ -81,7 +80,6 @@ describe("ViewLayerController", () => {
         expect(fallback.subscription.unsubscribe).toHaveBeenCalledOnce();
         expect(fallback.layer.dispose).toHaveBeenCalledOnce();
         expect(controller.retiringRegularLayers.size).toBe(0);
-        expect(controller.changed.next).toHaveBeenCalledOnce();
         expect(controller.occupancyChanged.next).toHaveBeenCalledOnce();
         expect(controller.diagnostics.notifyChanged).toHaveBeenCalledOnce();
     });

@@ -58,8 +58,7 @@ import {
     IRenderView,
     RenderNavigationTarget,
     RenderedFeaturePickResult,
-    RenderScreenRectangle,
-    RenderViewDestroyOptions
+    RenderScreenRectangle
 } from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
